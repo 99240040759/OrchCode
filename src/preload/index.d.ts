@@ -29,6 +29,20 @@ export interface ThreadMessage {
   createdAt: string
 }
 
+export interface UpdateStatus {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+  version?: string
+  progress?: number
+  error?: string
+}
+
+export interface UserProfile {
+  uid: string
+  name: string
+  email: string
+  photoUrl: string
+}
+
 export interface AppAPI {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
 
@@ -71,6 +85,18 @@ export interface AppAPI {
   onBrowserUrlChanged: (callback: (url: string) => void) => () => void
 
   showConfirmDialog: (opts: { message: string; detail?: string; buttons?: string[]; defaultId?: number; cancelId?: number }) => Promise<number>
+
+  getUpdateStatus: () => Promise<UpdateStatus>
+  checkForUpdates: () => Promise<void>
+  installUpdate: () => Promise<void>
+  openMacRelease: () => Promise<void>
+  onUpdateStatusChanged: (callback: (status: UpdateStatus) => void) => () => void
+  getAppVersion: () => Promise<string>
+
+  startGoogleAuth: () => Promise<UserProfile | null>
+  logout: () => Promise<boolean>
+  getAuthUser: () => Promise<UserProfile | null>
+  onAuthStatusChanged: (callback: (user: UserProfile | null) => void) => () => void
 }
 
 declare global {

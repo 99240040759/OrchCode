@@ -35,7 +35,29 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const isRunning = runState !== 'idle' && runState !== 'error'
 
-  const inputEstimate = estimateTokens(inputValue)
+  const [inputEstimate, setInputEstimate] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    const delayDebounce = setTimeout(async () => {
+      if (!inputValue) {
+        setInputEstimate(0)
+        return
+      }
+      try {
+        const tokens = await estimateTokens(inputValue)
+        if (active) setInputEstimate(tokens)
+      } catch (err) {
+        console.error('[InputBar] Token estimation error:', err)
+      }
+    }, 60)
+
+    return () => {
+      active = false
+      clearTimeout(delayDebounce)
+    }
+  }, [inputValue])
+
   const displayTotal = sessionTokens + inputEstimate
   const fraction = Math.min(displayTotal / MAX_TOKENS, 1)
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction)

@@ -1,21 +1,21 @@
-import { getEncoding } from 'js-tiktoken'
+import * as Comlink from 'comlink'
+import BackgroundWorker from '../workers/background.worker?worker'
 
-let _enc: any = null
+let tokenWorkerApi: any = null
+try {
+  const worker = new BackgroundWorker()
+  tokenWorkerApi = Comlink.wrap(worker)
+} catch (err) {
+  console.error('[tokenizer] Failed to spawn Comlink token worker:', err)
+}
 
-setTimeout(() => {
-  try {
-    _enc = getEncoding('cl100k_base')
-  } catch (err) {
-    console.error('[tokenizer] Tiktoken load failed, using char approximation', err)
-  }
-}, 100)
-
-export function estimateTokens(text: string): number {
+export async function estimateTokens(text: string): Promise<number> {
   if (!text) return 0
-  if (!_enc) return Math.ceil(text.length / 4)
+  if (!tokenWorkerApi) return Math.ceil(text.length / 4)
   try {
-    return _enc.encode(text).length
-  } catch {
+    return await tokenWorkerApi.estimateTokens(text)
+  } catch (err) {
+    console.error('[tokenizer] Off-thread BPE estimation failed, falling back to char approximation:', err)
     return Math.ceil(text.length / 4)
   }
 }

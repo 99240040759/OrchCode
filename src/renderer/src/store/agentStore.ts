@@ -1,5 +1,5 @@
 import { atom } from 'jotai'
-import type { ThreadEntry, ArtifactEntry } from '../../../preload/index.d'
+import type { ThreadEntry, ArtifactEntry, UpdateStatus, UserProfile } from '../../../preload/index.d'
 
 export const conversationIdAtom = atom<string>('')
 
@@ -81,3 +81,7 @@ export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string } | 
 
 export const availableModelsAtom = atom<{ gemini?: string; gemma?: string }>({})
 export const selectedModelAtom = atom<'gemini' | 'gemma'>('gemini')
+
+export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
+
+export const authUserAtom = atom<UserProfile | null>(null)

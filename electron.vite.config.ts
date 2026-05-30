@@ -11,6 +11,12 @@ export default defineConfig({
           index: resolve(__dirname, 'src/main/index.ts')
         }
       }
+    },
+    define: {
+      'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN),
+      'process.env.FIREBASE_API_KEY': JSON.stringify(process.env.FIREBASE_API_KEY),
+      'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID),
+      'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID)
     }
   },
   preload: {},
@@ -26,6 +32,9 @@ export default defineConfig({
           plugins: [['babel-plugin-react-compiler', { target: '19' }]]
         }
       })
-    ]
+    ],
+    define: {
+      'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID)
+    }
   }
 })

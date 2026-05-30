@@ -85,7 +85,27 @@ const api = {
   },
 
   showConfirmDialog: (opts: { message: string; detail?: string; buttons?: string[]; defaultId?: number; cancelId?: number }) =>
-    ipcRenderer.invoke('dialog:confirm', opts)
+    ipcRenderer.invoke('dialog:confirm', opts),
+
+  getUpdateStatus: () => ipcRenderer.invoke('updater:get-status'),
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+  openMacRelease: () => ipcRenderer.invoke('updater:open-mac-release'),
+  onUpdateStatusChanged: (callback: (status: any) => void) => {
+    const listener = (_event: any, status: any) => callback(status)
+    ipcRenderer.on('updater:status-changed', listener)
+    return () => ipcRenderer.removeListener('updater:status-changed', listener)
+  },
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+
+  startGoogleAuth: () => ipcRenderer.invoke('auth:login'),
+  logout: () => ipcRenderer.invoke('auth:logout'),
+  getAuthUser: () => ipcRenderer.invoke('auth:get-user'),
+  onAuthStatusChanged: (callback: (user: any) => void) => {
+    const listener = (_event: any, user: any) => callback(user)
+    ipcRenderer.on('auth:status-changed', listener)
+    return () => ipcRenderer.removeListener('auth:status-changed', listener)
+  }
 }
 
 if (process.contextIsolated) {

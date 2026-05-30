@@ -1,10 +1,12 @@
 import 'dotenv/config'
+import { init as initSentry } from '@sentry/electron'
 import crypto from 'crypto'
 import { app, shell, BrowserWindow, WebContentsView, ipcMain, dialog } from 'electron'
 import { join, resolve, normalize, extname, dirname } from 'path'
 import { promises as fs, realpathSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { autoUpdater } from 'electron-updater'
+import { initUpdater } from './updater'
+import { initAuth } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
@@ -35,6 +37,12 @@ import {
 } from './db'
 
 import pty from 'node-pty'
+
+initSentry({
+  dsn: process.env.SENTRY_DSN,
+  enabled: !!process.env.SENTRY_DSN && (app.isPackaged || process.env.NODE_ENV === 'production'),
+  tracesSampleRate: 1.0
+})
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -787,9 +795,8 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  if (!is.dev) {
-    autoUpdater.checkForUpdatesAndNotify()
-  }
+  initUpdater(mainWindow!)
+  initAuth(mainWindow!)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

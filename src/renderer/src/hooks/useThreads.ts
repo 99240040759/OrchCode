@@ -79,12 +79,12 @@ export function useThreads() {
 
         let activeTokenEstimate = 0
         for (const m of activeMsgs) {
-          activeTokenEstimate += estimateTokens(m.content)
+          activeTokenEstimate += await estimateTokens(m.content)
           if (m.orderedBlocks) {
             for (const block of m.orderedBlocks) {
               if (block.type === 'tool') {
-                try { activeTokenEstimate += estimateTokens(JSON.stringify(block.args)) } catch {}
-                try { activeTokenEstimate += estimateTokens(JSON.stringify(block.result)) } catch {}
+                try { activeTokenEstimate += await estimateTokens(JSON.stringify(block.args)) } catch {}
+                try { activeTokenEstimate += await estimateTokens(JSON.stringify(block.result)) } catch {}
               }
             }
           }
