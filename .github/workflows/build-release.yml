@@ -1,0 +1,85 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Publish Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Application
+        run: npm run build
+
+      - name: Build and Publish Installer
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+
+  release-mac-intel:
+    name: Build & Publish macOS Intel (x64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Application
+        run: npm run build
+
+      - name: Build and Publish DMG
+        run: npx electron-builder --mac --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+  release-mac-silicon:
+    name: Build & Publish macOS Apple Silicon (arm64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Compile Application
+        run: npm run build
+
+      - name: Build and Publish DMG
+        run: npx electron-builder --mac --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
