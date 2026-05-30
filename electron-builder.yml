@@ -11,11 +11,13 @@ asarUnpack:
 win:
   executableName: orch-code
 nsis:
-  artifactName: ${productName}-setup.${ext}
+  artifactName: OrchCode-Setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  target:
+    - dmg
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -24,7 +26,8 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${productName}-mac-${arch}.${ext}
+  artifactName: OrchCode-${arch}.${ext}
+  writeUpdateInfo: false
 linux:
   target:
     - AppImage
