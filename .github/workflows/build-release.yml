@@ -49,11 +49,10 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
+      - name: Setup Node.js (x64)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Rosetta (for x64 emulation)
         if: runner.os == 'macOS'
@@ -62,18 +61,18 @@ jobs:
       - name: Cache npm (x64)
         uses: actions/cache@v4
         with:
-          path: ~/.npm
+          path: ~/.npm/_cacache
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}-x64
 
       - name: Install Dependencies (x64, Rosetta)
         run: |
-          arch -x86_64 /usr/local/bin/npm ci || arch -x86_64 npm ci
+          arch -x86_64 npm ci --ignore-scripts
         env:
           npm_config_arch: x64
 
       - name: Build (x64 under Rosetta)
         run: |
-          arch -x86_64 /usr/local/bin/npm run build || arch -x86_64 npm run build
+          arch -x86_64 npm run build
 
       - name: Verify out/main exists (x64)
         run: |
