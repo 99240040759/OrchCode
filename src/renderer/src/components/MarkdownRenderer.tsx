@@ -17,6 +17,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
   const conversationId = useAtomValue(conversationIdAtom)
+  type CodeChildProps = { className?: string; children?: React.ReactNode }
 
   return (
     <div className={`markdown-content ${isArtifact ? 'is-artifact' : 'is-chat'}`}>
@@ -64,11 +65,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
             )
           },
           pre: ({ children, ...props }) => {
-            const codeChild = React.Children.toArray(children)[0] as React.ReactElement
-            const className = codeChild?.props?.className || ''
+            const codeChild = React.Children.toArray(children)[0]
+            const codeElement = React.isValidElement(codeChild)
+              ? (codeChild as React.ReactElement<CodeChildProps>)
+              : null
+            const className = codeElement?.props?.className || ''
             const match = /language-(\w+)/.exec(className)
             const language = match ? match[1] : ''
-            const codeString = codeChild?.props?.children ? String(codeChild.props.children).replace(/\n$/, '') : ''
+            const codeString = codeElement?.props?.children
+              ? String(codeElement.props.children).replace(/\n$/, '')
+              : ''
 
             if (language) {
               return (
@@ -92,7 +98,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
 
             return <pre {...props}>{children}</pre>
           },
-          code: ({ inline, className, children, ...props }) => {
+          code: ({ className, children, ...props }) => {
             return (
               <code className={className} {...props}>
                 {children}
