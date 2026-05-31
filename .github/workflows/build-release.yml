@@ -52,7 +52,7 @@ jobs:
       - name: Setup Node.js (x64)
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
 
       - name: Install Rosetta (for x64 emulation)
         if: runner.os == 'macOS'
