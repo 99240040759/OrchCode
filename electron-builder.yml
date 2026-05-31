@@ -3,7 +3,7 @@ productName: orch-code
 directories:
   buildResources: build
 files:
-  - out/**/*
+  - dist/**/*
   - resources/**/*
   - package.json
 asarUnpack:
