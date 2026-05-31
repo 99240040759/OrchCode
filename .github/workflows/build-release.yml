@@ -110,13 +110,7 @@ jobs:
       - name: Compile Application
         run: npm run build
 
-      - name: Dump dist layout (arm64)
-        run: |
-          echo '--- package.json ---'
-          cat package.json
-          echo '--- dist tree ---'
-          ls -la dist || true
-          find dist -maxdepth 4 -type f -print || true
+      # Diagnostic dump removed: silicon build is known to produce `out`
 
       - name: Build and Publish DMG
         run: npx electron-builder --mac --arm64 --publish always
