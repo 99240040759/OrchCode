@@ -8,8 +8,8 @@ const api = {
   closeAndDeleteWorkspace: (workspacePath: string) =>
     ipcRenderer.invoke('workspace:close-and-delete', workspacePath),
 
-  streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string) =>
-    ipcRenderer.invoke('agent:stream-request', promptText, threadId, mode, modelType),
+  streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) =>
+    ipcRenderer.invoke('agent:stream-request', promptText, threadId, mode, modelType, attachments),
   stopAgentStream: (threadId?: string) =>
     ipcRenderer.invoke('agent:stream-stop', threadId),
   onAgentChunk: (callback: (chunk: any) => void) => {
@@ -45,7 +45,7 @@ const api = {
     return () => ipcRenderer.removeListener('artifacts:changed', listener)
   },
 
-  createTerminal: (opts: { cols: number; rows: number; cwd?: string }) =>
+  createTerminal: (opts: { cols: number; rows: number; cwd?: string; conversationId?: string }) =>
     ipcRenderer.invoke('terminal:create', opts),
   terminalInput: (opts: { id: string; data: string }) =>
     ipcRenderer.invoke('terminal:input', opts),
@@ -101,11 +101,13 @@ const api = {
   startGoogleAuth: () => ipcRenderer.invoke('auth:login'),
   logout: () => ipcRenderer.invoke('auth:logout'),
   getAuthUser: () => ipcRenderer.invoke('auth:get-user'),
+  openMainAndCloseOnboarding: () => ipcRenderer.invoke('auth:open-main-and-close-onboarding'),
   onAuthStatusChanged: (callback: (user: any) => void) => {
     const listener = (_event: any, user: any) => callback(user)
     ipcRenderer.on('auth:status-changed', listener)
     return () => ipcRenderer.removeListener('auth:status-changed', listener)
   },
+  setActiveSession: (threadId: string) => ipcRenderer.invoke('session:set-active', threadId),
 }
 
 if (process.contextIsolated) {

@@ -21,7 +21,6 @@ export interface AuthSession {
 
 const sessionFilePath = join(app.getPath('userData'), 'session.bin')
 let currentSession: AuthSession | null = null
-let mainWin: BrowserWindow | null = null
 let tempServer: http.Server | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
 
@@ -114,8 +113,12 @@ function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
   })
 }
 
+export function getCurrentSession(): AuthSession | null {
+  return currentSession
+}
+
 // Decrypt persistent session from disk
-async function loadSession(): Promise<AuthSession | null> {
+export async function loadSession(): Promise<AuthSession | null> {
   try {
     const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
     if (!exists) return null
@@ -123,9 +126,11 @@ async function loadSession(): Promise<AuthSession | null> {
     const encrypted = await fs.readFile(sessionFilePath)
     if (safeStorage.isEncryptionAvailable()) {
       const rawString = safeStorage.decryptString(encrypted)
-      return JSON.parse(rawString)
+      currentSession = JSON.parse(rawString)
+      return currentSession
     } else {
-      return JSON.parse(encrypted.toString('utf-8'))
+      currentSession = JSON.parse(encrypted.toString('utf-8'))
+      return currentSession
     }
   } catch (err) {
     log.error('[auth] Load session failed:', err)
@@ -155,14 +160,14 @@ async function saveSession(session: AuthSession | null) {
 
 // Trigger state updates inside Renderer
 function broadcastUserStatus(user: UserProfile | null) {
-  if (mainWin && !mainWin.isDestroyed()) {
-    mainWin.webContents.send('auth:status-changed', user)
-  }
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('auth:status-changed', user)
+    }
+  })
 }
 
-export async function initAuth(window: BrowserWindow) {
-  mainWin = window
-
+export async function initAuth() {
   // Load active session at startup
   currentSession = await loadSession()
   if (currentSession) {
@@ -260,9 +265,9 @@ export async function initAuth(window: BrowserWindow) {
           // 3. Compile session profile
           const user: UserProfile = {
             uid: firebaseSession.localId,
-            name: firebaseSession.displayName || 'Google User',
+            name: firebaseSession.displayName,
             email: firebaseSession.email,
-            photoUrl: firebaseSession.photoUrl || ''
+            photoUrl: firebaseSession.photoUrl
           }
 
           currentSession = {
@@ -325,6 +330,12 @@ export async function initAuth(window: BrowserWindow) {
     currentSession = null
     await saveSession(null)
     broadcastUserStatus(null)
+    app.emit('auth:logged-out')
+    return true
+  })
+
+  ipcMain.handle('auth:open-main-and-close-onboarding', () => {
+    app.emit('auth:open-main-and-close-onboarding')
     return true
   })
 }

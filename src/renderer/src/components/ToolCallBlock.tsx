@@ -1,5 +1,5 @@
 import React from 'react'
-import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, ClipboardCheck, BookOpen, MousePointerClick, Keyboard, Code2, Camera, Eye, ChevronsUpDown, CornerDownLeft, ArrowLeft, ArrowRight, RotateCw, MousePointer, Move } from 'lucide-react'
+import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, ClipboardCheck, BookOpen, MousePointerClick, Keyboard, Camera, ChevronsUpDown } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
@@ -68,7 +68,6 @@ function getToolDetails(toolCall: ToolCallEntry) {
       fullPath = (args.targetFile as string) ?? ''
       isFile = true
       if (args.startLine !== undefined && args.endLine !== undefined) {
-        lineRange = `#L${args.startLine}-${args.endLine}`
         deletions = (args.endLine as number) - (args.startLine as number) + 1
       }
       if (args.replacementContent) additions = (args.replacementContent as string).split('\n').length
@@ -98,59 +97,18 @@ function getToolDetails(toolCall: ToolCallEntry) {
       operation = 'Navigated browser to'
       target = (args.url as string) ?? ''
       break
-    case 'browserClick':
-      operation = 'Clicked browser element'
-      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${args.selector}` : ((args.selector as string) ?? '')
-      break
     case 'browserType':
       operation = 'Typed in browser'
       const typeLabel = args.selector && args.text ? `${args.selector} ➔ "${args.text}"` : (args.selector ?? '')
       target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${typeLabel}` : typeLabel
       break
-    case 'browserHover':
-      operation = 'Hovered browser element'
-      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${args.selector}` : ((args.selector as string) ?? '')
-      break
-    case 'browserWaitFor':
-      operation = 'Waited for'
-      const waitLabel = `${args.selector} (${args.state || 'visible'})`
-      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${waitLabel}` : waitLabel
-      break
     case 'browserScroll':
       operation = 'Scrolled browser'
       target = `${args.direction} by ${args.amount || 400}px`
       break
-    case 'browserPressKey':
-      operation = 'Pressed key'
-      target = `"${args.key}"`
-      break
-    case 'browserGoBack':
-      operation = 'Navigated'
-      target = 'backwards'
-      break
-    case 'browserGoForward':
-      operation = 'Navigated'
-      target = 'forward'
-      break
-    case 'browserReload':
-      operation = 'Reloaded'
-      target = 'active page'
-      break
-    case 'browserMouseMove':
-      operation = 'Moved cursor to'
-      target = `(${args.x}, ${args.y})`
-      break
     case 'browserMouseClickCoordinate':
       operation = 'Clicked coordinate'
       target = `(${args.x}, ${args.y}) using ${args.button || 'left'}`
-      break
-    case 'browserMouseDrag':
-      operation = 'Dragged mouse'
-      target = `from (${args.fromX}, ${args.fromY}) to (${args.toX}, ${args.toY})`
-      break
-    case 'browserGetHtml':
-      operation = 'Read HTML of'
-      target = 'active page'
       break
     case 'browserScreenshot':
       operation = 'Captured screenshot'
@@ -197,8 +155,8 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       return (
         <div
           style={{
-            width: 10,
-            height: 10,
+            width: 12,
+            height: 12,
             borderRadius: '50%',
             border: '1.5px solid var(--text-secondary)',
             borderTopColor: 'transparent',
@@ -209,7 +167,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       )
     }
     if (toolCall.status === 'error') {
-      return <AlertCircle size={12} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+      return <AlertCircle size={14} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
     }
     return null
   }
@@ -233,32 +191,12 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
     switch (toolCall.toolName) {
       case 'browserNavigate':
         return <Globe size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
-      case 'browserClick':
-        return <MousePointerClick size={15} style={{ color: '#a78bfa', flexShrink: 0 }} />
       case 'browserType':
         return <Keyboard size={15} style={{ color: '#34d399', flexShrink: 0 }} />
-      case 'browserHover':
-        return <MousePointerClick size={15} style={{ color: '#c084fc', flexShrink: 0 }} />
-      case 'browserWaitFor':
-        return <Eye size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
       case 'browserScroll':
         return <ChevronsUpDown size={15} style={{ color: '#94a3b8', flexShrink: 0 }} />
-      case 'browserPressKey':
-        return <CornerDownLeft size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
-      case 'browserMouseMove':
-        return <MousePointer size={15} style={{ color: '#a78bfa', flexShrink: 0 }} />
       case 'browserMouseClickCoordinate':
         return <MousePointerClick size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
-      case 'browserMouseDrag':
-        return <Move size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
-      case 'browserGoBack':
-        return <ArrowLeft size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
-      case 'browserGoForward':
-        return <ArrowRight size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
-      case 'browserReload':
-        return <RotateCw size={15} style={{ color: '#34d399', flexShrink: 0 }} />
-      case 'browserGetHtml':
-        return <Code2 size={15} style={{ color: '#fbbf24', flexShrink: 0 }} />
       case 'runCommand':
         return <Terminal size={15} style={{ color: '#4ade80', flexShrink: 0 }} />
       case 'listDir':
@@ -274,39 +212,48 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
     <div
       onClick={isFile ? handleClick : undefined}
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        fontSize: 12.5,
+        fontSize: 'var(--font-size-xs)',
         color: 'var(--text-secondary)',
-        marginBottom: 8,
-        paddingLeft: 2,
+        marginBottom: 0,
+        padding: '2px 6px',
         userSelect: 'none',
-        height: 20,
-        contain: 'layout paint',  // #35 fix: strict clips variable-height content; layout+paint is correct
+        height: 22,
+        contain: 'layout paint',
         cursor: isFile ? 'pointer' : 'default',
         borderRadius: 4,
-        transition: 'background 0.15s ease'
+        backgroundColor: 'transparent',
+        transition: 'all 0.15s ease',
+        maxWidth: '100%',
+        boxSizing: 'border-box'
       }}
       onMouseEnter={(e) => {
-        if (isFile) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
+        if (isFile) {
+          e.currentTarget.style.color = 'var(--text-primary)'
+          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)'
+        }
       }}
       onMouseLeave={(e) => {
-        if (isFile) e.currentTarget.style.background = 'transparent'
+        if (isFile) {
+          e.currentTarget.style.color = 'var(--text-secondary)'
+          e.currentTarget.style.backgroundColor = 'transparent'
+        }
       }}
       title={isFile ? `Open ${fullPath}` : undefined}
     >
-      <span style={{ color: '#9c9c9c', fontWeight: 400 }}>{operation}</span>
-
-      <span style={{ display: 'flex', alignItems: 'center' }}>{renderIcon()}</span>
-
+      <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>{operation}</span>
+ 
+      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>{renderIcon()}</span>
+ 
       <span
         style={{
-          color: 'var(--text-primary)',
+          color: 'var(--text-secondary)',
           fontWeight: 500,
           fontFamily: 'var(--font-mono)',
-          fontSize: 12,
-          maxWidth: 380,
+          fontSize: '11.5px',
+          maxWidth: 240,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -315,25 +262,26 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       >
         {target}
       </span>
-
+ 
       {lineRange && (
         <span
           style={{
-            color: 'var(--text-secondary)',
+            color: 'var(--text-muted)',
             fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            opacity: 0.6,
-            marginLeft: -2
+            fontSize: '10.5px',
+            opacity: 0.7,
+            marginLeft: -2,
+            whiteSpace: 'nowrap'
           }}
         >
           {lineRange}
         </span>
       )}
-
+ 
       {renderStatus()}
-
+ 
       {!isAgentArtifact(target) && (toolCall.toolName === 'writeToFile' || toolCall.toolName === 'replaceFileContent' || toolCall.toolName === 'multiReplaceFileContent') && (additions > 0 || deletions > 0) && (
-        <div style={{ display: 'flex', gap: 4, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, marginLeft: 2 }}>
+        <div style={{ display: 'flex', gap: 3, fontSize: '10px', fontFamily: 'var(--font-mono)', fontWeight: 600, marginLeft: 2, flexShrink: 0 }}>
           {additions > 0 && <span style={{ color: 'var(--accent-green)' }}>+{additions}</span>}
           {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
         </div>

@@ -10,11 +10,10 @@ import {
   type ChatMessage
 } from '../store/agentStore'
 import type { ThreadEntry } from '../../../preload/index.d'
-import { estimateTokens } from '../lib/tokenizer'
 
 export function useThreads() {
   const conversationId = useAtomValue(conversationIdAtom)
-  const [, setThreads] = useAtom(threadListAtom)
+  const [threads, setThreads] = useAtom(threadListAtom)
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
   const setConversationId = useSetAtom(conversationIdAtom)
@@ -42,6 +41,12 @@ export function useThreads() {
     setConversationId(threadId)
     setMessages([])
     setSessionTokens(0)
+
+    try {
+      await window.api.setActiveSession(threadId)
+    } catch (err) {
+      console.error('[useThreads] Failed to sync session to backend:', err)
+    }
 
     // #11 fix: fetch thread workspace from IPC instead of stale `threads` closure
     try {
@@ -72,27 +77,9 @@ export function useThreads() {
           }))
         setMessages(chatMsgs)
 
-        const compactionIdx = chatMsgs.findLastIndex((m) =>
-          m.orderedBlocks?.some((b: any) => b.type === 'compaction')
-        )
-        const activeMsgs = compactionIdx !== -1 ? chatMsgs.slice(compactionIdx + 1) : chatMsgs
-
-        // #23 fix: build all token texts first, then do a single Promise.all batch
-        const tokenTexts: string[] = []
-        for (const m of activeMsgs) {
-          tokenTexts.push(m.content)
-          if (m.orderedBlocks) {
-            for (const block of m.orderedBlocks) {
-              if (block.type === 'tool') {
-                if (block.args) tokenTexts.push(JSON.stringify(block.args))
-                if (block.result) tokenTexts.push(JSON.stringify(block.result))
-              }
-            }
-          }
-        }
-        const tokenResults = await Promise.all(tokenTexts.map((t) => estimateTokens(t).catch(() => 0)))
-        const activeTokenEstimate = tokenResults.reduce((sum, count) => sum + count, 0)
-        setSessionTokens(activeTokenEstimate)
+        const selectedThread = threads.find((t) => t.id === threadId)
+        const savedTokens = selectedThread?.accumulatedTokens ?? 0
+        setSessionTokens(savedTokens)
       }
     } catch (err) {
       console.error('[useThreads] Failed to load thread messages:', err)

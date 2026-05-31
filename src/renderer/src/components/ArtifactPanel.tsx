@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Editor } from '@monaco-editor/react'
+import { debounce } from 'lodash-es'
 import {
   Search,
   X,
@@ -21,6 +22,7 @@ import {
   artifactPanelModeAtom,
   activeWorkspaceAtom,
   globalPromptTriggerAtom,
+  conversationIdAtom,
   type ArtifactPanelMode
 } from '../store/agentStore'
 import { toast } from 'sonner'
@@ -41,6 +43,7 @@ interface TerminalViewHandle {
 }
 
 const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: string }>(({ workspacePath }, ref) => {
+  const conversationId = useAtomValue(conversationIdAtom)
   const termContainerRef = useRef<HTMLDivElement>(null)
 
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -107,7 +110,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
     fitAddonRef.current = fitAddon
 
     const { cols, rows } = term
-    window.api.createTerminal({ cols, rows, cwd: workspacePath }).then(({ id }) => {
+    window.api.createTerminal({ cols, rows, cwd: workspacePath, conversationId }).then(({ id }) => {
       if (!active) {
         window.api.closeTerminal({ id }).catch(console.error)
         return
@@ -132,13 +135,17 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
       if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
     })
 
-    const resizeObs = new ResizeObserver(() => {
+    const debouncedResize = debounce(() => {
       if (active) {
         try { fitAddon.fit() } catch {}
         if (ptyIdRef.current) {
           window.api.terminalResize({ id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
         }
       }
+    }, 100)
+
+    const resizeObs = new ResizeObserver(() => {
+      debouncedResize()
     })
     resizeObs.observe(termContainerRef.current)
 

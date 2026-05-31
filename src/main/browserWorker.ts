@@ -1,4 +1,4 @@
-import { parentPort } from 'worker_threads'
+import { parentPort, workerData } from 'worker_threads'
 import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 
@@ -55,22 +55,43 @@ const workerAPI = {
       context = browser.contexts()[0]
       const pages = context.pages()
 
-      if (url) {
-        // Select the page that matches the explicitly opened URL
-        intentionalPageUrl = url
-        page = pages.find(p => {
-          const u = p.url()
-          return u === url || u.startsWith(url.split('?')[0])
-        }) ?? pages[pages.length - 1] ?? pages[0]
-      } else if (intentionalPageUrl) {
-        // Re-select the stored intentional page URL after reconnect
-        page = pages.find(p => {
-          const u = p.url()
-          return u === intentionalPageUrl || u.startsWith((intentionalPageUrl as string).split('?')[0])
-        }) ?? pages[pages.length - 1] ?? pages[0]
+      // Exclude main Electron application files/dev server target to prevent hijacking
+      const mainWindowUrl = workerData?.mainWindowUrl
+      const mainAppKeywords = ['chrome-extension://', 'app.html', 'index.html']
+      if (mainWindowUrl) {
+        const lowerUrl = mainWindowUrl.toLowerCase()
+        mainAppKeywords.push(lowerUrl)
+        if (lowerUrl.includes('localhost')) {
+          mainAppKeywords.push(lowerUrl.replace('localhost', '127.0.0.1'))
+        } else if (lowerUrl.includes('127.0.0.1')) {
+          mainAppKeywords.push(lowerUrl.replace('127.0.0.1', 'localhost'))
+        }
+      }
+      const browserPages = pages.filter(p => {
+        const u = p.url().toLowerCase()
+        if (mainWindowUrl && (u === mainWindowUrl.toLowerCase() || u.startsWith(mainWindowUrl.toLowerCase()))) {
+          return false
+        }
+        return !mainAppKeywords.some(kw => u.startsWith(kw) || u.includes(kw))
+      })
+
+      if (browserPages.length > 0) {
+        if (url) {
+          intentionalPageUrl = url
+          page = browserPages.find(p => {
+            const u = p.url()
+            return u === url || u.startsWith(url.split('?')[0])
+          }) ?? browserPages[0]
+        } else if (intentionalPageUrl) {
+          page = browserPages.find(p => {
+            const u = p.url()
+            return u === intentionalPageUrl || u.startsWith((intentionalPageUrl as string).split('?')[0])
+          }) ?? browserPages[0]
+        } else {
+          page = browserPages[browserPages.length - 1] ?? browserPages[0]
+        }
       } else {
-        // Last resort: pick the newest non-renderer page
-        page = pages[pages.length - 1] ?? pages[0]
+        throw new Error('Playwright could not locate the active Browser View page. Please verify the Browser panel is open in your Artifact screen.')
       }
 
       return { success: true }
@@ -106,44 +127,11 @@ const workerAPI = {
     }
   },
 
-  async click(selector: string, frameSelector?: string) {
-    const ready = await this.ensurePage()
-    if (!ready.ok) return { success: false, error: ready.error }
-    try {
-      await getTargetLocator(page!, selector, frameSelector).click({ timeout: 15000 })
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
   async type(selector: string, text: string, frameSelector?: string) {
     const ready = await this.ensurePage()
     if (!ready.ok) return { success: false, error: ready.error }
     try {
       await getTargetLocator(page!, selector, frameSelector).fill(text, { timeout: 15000 })
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async hover(selector: string, frameSelector?: string) {
-    const ready = await this.ensurePage()
-    if (!ready.ok) return { success: false, error: ready.error }
-    try {
-      await getTargetLocator(page!, selector, frameSelector).hover({ timeout: 15000 })
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async waitForSelector(selector: string, state?: 'attached' | 'detached' | 'visible' | 'hidden', frameSelector?: string) {
-    const ready = await this.ensurePage()
-    if (!ready.ok) return { success: false, error: ready.error }
-    try {
-      await getTargetLocator(page!, selector, frameSelector).waitFor({ state: state || 'visible', timeout: 15000 })
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -170,70 +158,6 @@ const workerAPI = {
     }
   },
 
-  async pressKey(key: string) {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.keyboard.press(key)
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async goBack() {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 })
-      return { success: true, url: page!.url() }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async goForward() {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 })
-      return { success: true, url: page!.url() }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async reload() {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.reload({ waitUntil: 'domcontentloaded', timeout: 15000 })
-      return { success: true, url: page!.url() }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
-
-  async getHtml() {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      const html = await page!.content()
-      return { success: true, html: html.slice(0, 80000) }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
 
   async screenshot(filePath: string) {
     if (!page) {
@@ -248,18 +172,6 @@ const workerAPI = {
     }
   },
 
-  async mouseMove(x: number, y: number) {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.mouse.move(x, y)
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
 
   async mouseClickCoordinate(x: number, y: number, button?: 'left' | 'right' | 'middle') {
     if (!page) {
@@ -274,21 +186,6 @@ const workerAPI = {
     }
   },
 
-  async mouseDrag(fromX: number, fromY: number, toX: number, toY: number) {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
-    try {
-      await page!.mouse.move(fromX, fromY)
-      await page!.mouse.down()
-      await page!.mouse.move(toX, toY, { steps: 10 })
-      await page!.mouse.up()
-      return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
-    }
-  },
 
   async disconnect() {
     try {

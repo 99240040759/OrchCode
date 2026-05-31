@@ -10,14 +10,15 @@ export interface UpdateStatus {
 }
 
 let currentStatus: UpdateStatus = { status: 'idle' }
-let mainWin: BrowserWindow | null = null
 
 function sendStatus(status: UpdateStatus) {
   currentStatus = status
   log.info(`[updater] Status transition: ${status.status} (version: ${status.version || 'unknown'}, progress: ${status.progress ?? 'N/A'})`)
-  if (mainWin && !mainWin.isDestroyed()) {
-    mainWin.webContents.send('updater:status-changed', status)
-  }
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('updater:status-changed', status)
+    }
+  })
 }
 
 function checkWindowsUpdate() {
@@ -28,8 +29,7 @@ function checkWindowsUpdate() {
   })
 }
 
-export function initUpdater(window: BrowserWindow) {
-  mainWin = window
+export function initUpdater() {
 
   // Bind IPC listeners
   ipcMain.handle('updater:get-status', () => currentStatus)

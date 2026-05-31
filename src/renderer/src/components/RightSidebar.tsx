@@ -3,6 +3,8 @@ import { useSetAtom, useAtomValue } from 'jotai'
 import { PanelRight, PanelRightClose, Package, FileCode, Info, ListTodo, CheckCircle2, Circle, Clock, ClipboardList, ClipboardCheck, BookOpen } from 'lucide-react'
 import Skeleton from 'react-loading-skeleton'
 import 'react-loading-skeleton/dist/skeleton.css'
+import { remark } from 'remark'
+import remarkGfm from 'remark-gfm'
 import {
   artifactsAtom,
   conversationIdAtom,
@@ -32,10 +34,10 @@ const getArtifactIcon = (name: string) => {
   return <FileCode size={13} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
 }
 
+import prettyBytes from 'pretty-bytes'
+
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
+  return prettyBytes(bytes)
 }
 
 interface TaskItem {
@@ -78,23 +80,78 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
         const fileData = await window.api.readFile(taskArtifact.path, activeConvId)
         if (fileData && fileData.content) {
           const parsed: TaskItem[] = []
-          const lines = fileData.content.split('\n')
-          lines.forEach((line: string, index: number) => {
-            const match = line.match(/^(\s*)[-*+]\s+\[([ xX/])\]\s*(.*)$/)
-            if (match) {
-              const indent = match[1].length
-              const statusChar = match[2].toLowerCase()
-              const text = match[3].trim()
-              if (text) {
+          const ast = remark().use(remarkGfm).parse(fileData.content)
+
+          const walk = (node: any, depth = 0) => {
+            if (node.type === 'listItem') {
+              let isChecklist = false
+              let status: 'todo' | 'progress' | 'done' = 'todo'
+              let taskText = ''
+
+              const firstChild = node.children?.[0]
+              if (firstChild && firstChild.type === 'paragraph') {
+                let fullText = ''
+                const extractText = (n: any) => {
+                  if (n.type === 'text') fullText += n.value
+                  else if (n.children) n.children.forEach(extractText)
+                }
+                extractText(firstChild)
+
+                if (node.checked !== undefined && node.checked !== null) {
+                  isChecklist = true
+                  status = node.checked ? 'done' : 'todo'
+                  taskText = fullText.trim()
+                } else {
+                  const rawMatch = fullText.match(/^\[([/])\]\s*(.*)$/)
+                  if (rawMatch) {
+                    isChecklist = true
+                    status = 'progress'
+                    taskText = rawMatch[2].trim()
+                  }
+                }
+              }
+
+              if (node.position && node.position.start) {
+                const lineIndex = node.position.start.line - 1
+                const rawLines = fileData.content.split('\n')
+                const rawLine = rawLines[lineIndex] || ''
+                const match = rawLine.match(/^(\s*)[-*+]\s+\[([ xX/])\]\s*(.*)$/)
+                if (match) {
+                  isChecklist = true
+                  const indent = match[1].length
+                  const statusChar = match[2].toLowerCase()
+                  taskText = match[3].trim()
+                  status = statusChar === 'x' ? 'done' : statusChar === '/' ? 'progress' : 'todo'
+                  
+                  parsed.push({
+                    id: `task-${node.position.start.line}`,
+                    text: taskText,
+                    status,
+                    indent: Math.floor(indent / 2)
+                  })
+                  isChecklist = false
+                }
+              }
+
+              if (isChecklist && taskText) {
                 parsed.push({
-                  id: `task-${index}`,
-                  text,
-                  status: statusChar === 'x' ? 'done' : statusChar === '/' ? 'progress' : 'todo',
-                  indent
+                  id: `task-${parsed.length}`,
+                  text: taskText,
+                  status,
+                  indent: depth
                 })
               }
             }
-          })
+
+            if (node.children) {
+              node.children.forEach((child: any) => {
+                const nextDepth = node.type === 'list' ? depth + 1 : depth
+                walk(child, nextDepth)
+              })
+            }
+          }
+
+          walk(ast, 0)
           setTasksList(parsed)
         } else {
           setTasksList([])
@@ -187,28 +244,28 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
     <aside className="right-sidebar expanded">
       <div
         className="sidebar-top-section"
-        style={{ padding: '14px 16px', flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 0 }}
+        style={{ padding: '12px 12px', height: '56px', display: 'flex', flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 0 }}
       >
-        <div className="sidebar-collapse-btn" onClick={() => setIsExpanded(false)} title="Collapse Right Sidebar">
+        <div className="sidebar-collapse-btn" onClick={() => setIsExpanded(false)} title="Collapse Right Sidebar" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
           <PanelRightClose size={18} strokeWidth={1.5} color="var(--text-secondary)" />
         </div>
       </div>
       <div className="sidebar-divider" />
 
-      <div className="sidebar-section" style={{ padding: '16px 16px 8px 16px', gap: 10 }}>
-        <div className="sidebar-section-header" style={{ padding: 0 }}>
+      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
+        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ color: 'var(--text-secondary)' }}>Artifacts</span>
+            <span>Artifacts</span>
             <Info size={14} color="var(--text-secondary)" />
           </div>
         </div>
-
+ 
         {loading ? (
-          <div style={{ padding: '4px 0' }}>
+          <div style={{ padding: '4px 12px' }}>
             <Skeleton count={3} height={18} borderRadius={4} baseColor="#2c2c2e" highlightColor="#3a3a3e" style={{ marginBottom: 6 }} />
           </div>
         ) : artifacts.length === 0 ? (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
             No artifacts yet.
           </div>
         ) : (
@@ -218,10 +275,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
               className="right-sidebar-file-row"
               title={artifact.path}
               onClick={() => handleArtifactClick(artifact)}
+              style={{
+                margin: '0 8px',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: 'var(--font-size-md)'
+              }}
             >
               {getArtifactIcon(artifact.name)}
-              <span className="right-sidebar-file-name">{artifact.name}</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
+              <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>{artifact.name}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>
                 {formatBytes(artifact.size)}
               </span>
             </div>
@@ -231,18 +294,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
 
       <div className="sidebar-divider" />
 
-      <div className="sidebar-section" style={{ padding: '16px 16px', gap: 10 }}>
-        <div className="sidebar-section-header" style={{ padding: 0 }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Files Changed</span>
+      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
+        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+          <span>Files Changed</span>
           {userFiles.length > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
               {userFiles.length}
             </span>
           )}
         </div>
-
+ 
         {userFiles.length === 0 ? (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
             No file changes yet.
           </div>
         ) : (
@@ -252,24 +315,30 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
               className="right-sidebar-file-row"
               title={fc.path}
               onClick={() => handleFileChangeClick(fc)}
+              style={{
+                margin: '0 8px',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                fontSize: 'var(--font-size-md)'
+              }}
             >
               <FileIcon fileName={fc.name} size={13} />
-              <span className="right-sidebar-file-name">{fc.name}</span>
-
+              <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>{fc.name}</span>
+ 
               {fc.lineRange && (
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 10, flexShrink: 0 }}>
+                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>
                   {fc.lineRange}
                 </span>
               )}
-
+ 
               <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                 {fc.additions > 0 && (
-                  <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700 }}>
+                  <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
                     +{fc.additions}
                   </span>
                 )}
                 {fc.deletions > 0 && (
-                  <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700 }}>
+                  <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
                     -{fc.deletions}
                   </span>
                 )}
@@ -281,22 +350,22 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
 
       <div className="sidebar-divider" />
 
-      <div className="sidebar-section" style={{ padding: '16px 16px', gap: 10, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div className="sidebar-section-header" style={{ padding: 0 }}>
+      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <ListTodo size={14} style={{ color: 'var(--text-secondary)' }} />
             <span style={{ color: 'var(--text-secondary)' }}>Tasks & Progress</span>
           </div>
           {tasksList.length > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
               {tasksList.filter((t) => t.status === 'done').length}/{tasksList.length}
             </span>
           )}
         </div>
-
+ 
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4, maxHeight: '200px' }}>
           {tasksList.length === 0 ? (
-            <div style={{ color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, padding: '0 6px' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
               No active tasks yet.
             </div>
           ) : (
@@ -305,7 +374,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
                 key={task.id}
                 className="right-sidebar-file-row"
                 style={{
-                  paddingLeft: `${task.indent * 4 + 6}px`,
+                  paddingLeft: `${task.indent * 4 + 10}px`,
+                  margin: '0 8px',
+                  paddingTop: '6px',
+                  paddingBottom: '6px',
+                  borderRadius: '6px',
+                  fontSize: 'var(--font-size-md)',
                   opacity: task.status === 'done' ? 0.4 : 1,
                   cursor: 'default'
                 }}
@@ -323,6 +397,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
                   <span
                     className="right-sidebar-file-name"
                     style={{
+                      fontSize: 'var(--font-size-md)',
                       textDecoration: task.status === 'done' ? 'line-through' : 'none',
                       fontWeight: task.status === 'progress' ? 600 : undefined
                     }}

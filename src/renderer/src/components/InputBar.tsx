@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Plus, ChevronDown, ArrowRight, Square } from 'lucide-react'
+import { Plus, ChevronDown, ArrowRight, Square, Image, FileText } from 'lucide-react'
 import { useAtomValue, useAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom } from '../store/agentStore'
-import { estimateTokens } from '../lib/tokenizer'
+import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom } from '../store/agentStore'
 
 interface InputBarProps {
-  onSubmit?: (val: string, mode?: string) => void
+  onSubmit?: (val: string, mode?: string, attachments?: any[]) => void
   onStop?: () => void
 }
 
@@ -32,33 +31,49 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
 
   const sessionTokens = useAtomValue(sessionTokensAtom)
+  const availableModels = useAtomValue(availableModelsAtom)
+
+  const [attachments, setAttachments] = useState<Array<{ type: 'image' | 'document'; name: string; mimeType: string; base64: string }>>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isRunning = runState !== 'idle' && runState !== 'error'
 
-  const [inputEstimate, setInputEstimate] = useState(0)
 
-useEffect(() => {
-    let active = true
-    const delayDebounce = setTimeout(async () => {
-      if (!inputValue) {
-        setInputEstimate(0)
-        return
-      }
-      try {
-        const tokens = await estimateTokens(inputValue)
-        if (active) setInputEstimate(tokens)
-      } catch (err) {
-        console.error('[InputBar] Token estimation error:', err)
-      }
-    }, 60)
-
-    return () => {
-      active = false
-      clearTimeout(delayDebounce)
+  const triggerFileSelect = (type: 'image' | 'document') => {
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = type === 'image' ? 'image/*' : '.txt,.pdf,.json,.ts,.js,.tsx,.jsx,.html,.css,.md,.py,.rs,.go'
+      fileInputRef.current.setAttribute('data-upload-type', type)
+      fileInputRef.current.click()
     }
-  }, [inputValue])
+  }
 
-  const displayTotal = sessionTokens + inputEstimate
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const type = fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document' || 'document'
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const result = event.target?.result as string
+        const base64 = result.split(',')[1] || result
+        setAttachments((prev) => [
+          ...prev,
+          {
+            type,
+            name: file.name,
+            mimeType: file.type || (type === 'image' ? 'image/png' : 'text/plain'),
+            base64
+          }
+        ])
+      }
+      reader.readAsDataURL(file)
+    })
+
+    e.target.value = ''
+  }
+
+  const displayTotal = sessionTokens
   const fraction = Math.min(displayTotal / MAX_TOKENS, 1)
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction)
   const color = ringColor(fraction)
@@ -82,9 +97,10 @@ useEffect(() => {
 
   const handleSend = () => {
     const val = inputValue.trim()
-    if (!val || isRunning) return
-    onSubmit?.(val, planningMode)
+    if ((!val && attachments.length === 0) || isRunning) return
+    onSubmit?.(val, planningMode, attachments)
     setInputValue('')
+    setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -92,6 +108,45 @@ useEffect(() => {
 
   return (
     <div className="input-bar-container">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        multiple
+        style={{ display: 'none' }}
+      />
+      {attachments.length > 0 && (
+        <div className="input-attachments-container">
+          {attachments.map((att, idx) => (
+            <div key={idx} className="input-attachment-chip">
+              {att.type === 'image' ? (
+                <img
+                  src={`data:${att.mimeType};base64,${att.base64}`}
+                  alt={att.name}
+                />
+              ) : (
+                <span style={{ fontSize: 13 }}>📄</span>
+              )}
+              <span
+                style={{
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {att.name}
+              </span>
+              <button
+                onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                className="input-attachment-close"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         rows={1}
@@ -106,9 +161,78 @@ useEffect(() => {
 
       <div className="input-bar-toolbar">
         <div className="input-bar-toolbar-left">
-          <div className="toolbar-icon-btn" title="Add context or file">
-            <Plus size={16} style={{ color: 'var(--text-secondary)' }} />
-          </div>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <div className="toolbar-icon-btn" title="Add file or image" style={{ cursor: 'pointer' }}>
+                <Plus size={16} style={{ color: 'var(--text-secondary)' }} />
+              </div>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                style={{
+                  background: 'var(--bg-sidebar)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  padding: '4px 0',
+                  minWidth: 160,
+                  zIndex: 1000,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+                }}
+                sideOffset={6}
+              >
+                <DropdownMenu.Item
+                  onSelect={() => triggerFileSelect('image')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    fontSize: 13,
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    fontFamily: 'var(--font-display)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+                    e.currentTarget.style.color = 'var(--text-primary)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--text-secondary)'
+                  }}
+                >
+                  <Image size={14} />
+                  <span>Upload Image</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  onSelect={() => triggerFileSelect('document')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    fontSize: 13,
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    fontFamily: 'var(--font-display)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
+                    e.currentTarget.style.color = 'var(--text-primary)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent'
+                    e.currentTarget.style.color = 'var(--text-secondary)'
+                  }}
+                >
+                  <FileText size={14} />
+                  <span>Upload Document</span>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -161,8 +285,8 @@ useEffect(() => {
                 <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
                 <span>
                   {selectedModel === 'gemini' 
-                    ? 'Gemini 3.1 Flash Lite (FAST)' 
-                    : 'Gemma (Thinking)'
+                    ? availableModels.gemini?.name 
+                    : availableModels.gemma?.name
                   }
                 </span>
               </div>
@@ -196,7 +320,7 @@ useEffect(() => {
                     (e.currentTarget.style.background = selectedModel === 'gemini' ? 'rgba(255,255,255,0.05)' : 'transparent')
                   }
                 >
-                  <span style={{ fontWeight: 500 }}>Gemini 3.1 Flash Lite (FAST)</span>
+                  <span style={{ fontWeight: 500 }}>{availableModels.gemini?.name || 'Gemini 3.1 Flash Lite'}</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemma')}
@@ -214,7 +338,7 @@ useEffect(() => {
                     (e.currentTarget.style.background = selectedModel === 'gemma' ? 'rgba(255,255,255,0.05)' : 'transparent')
                   }
                 >
-                  <span style={{ fontWeight: 500 }}>Gemma (Thinking)</span>
+                  <span style={{ fontWeight: 500 }}>{availableModels.gemma?.name || 'Gemma 4'}</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -274,8 +398,8 @@ useEffect(() => {
               className="toolbar-submit-btn"
               onClick={handleSend}
               title="Submit"
-              disabled={!inputValue.trim()}
-              style={{ opacity: inputValue.trim() ? 1 : 0.4 }}
+              disabled={!inputValue.trim() && attachments.length === 0}
+              style={{ opacity: (inputValue.trim() || attachments.length > 0) ? 1 : 0.4 }}
             >
               <ArrowRight size={14} strokeWidth={2.5} style={{ color: 'var(--text-primary)' }} />
             </button>

@@ -87,13 +87,13 @@ export const LeftSidebar: React.FC<SidebarProps> = ({
           }}
         />
 
-        <div className="sidebar-top-section">
-          <div className="sidebar-header-row">
-            <div className="inbox-title">
-              <Inbox size={18} strokeWidth={1.5} color="var(--text-secondary)" style={{ marginRight: -2 }} />
+        <div className="sidebar-top-section" style={{ padding: '12px 12px', gap: 12 }}>
+          <div className="sidebar-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '32px' }}>
+            <div className="inbox-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-size-lg)', fontWeight: 500 }}>
+              <Inbox size={18} strokeWidth={1.5} color="var(--text-secondary)" />
               <span style={{ color: '#e5e5e5' }}>Inbox</span>
             </div>
-            <div className="sidebar-collapse-btn" onClick={handleToggle} title="Collapse Sidebar">
+            <div className="sidebar-collapse-btn" onClick={handleToggle} title="Collapse Sidebar" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
               <PanelLeftClose size={18} strokeWidth={1.5} color="var(--text-secondary)" />
             </div>
           </div>

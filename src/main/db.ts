@@ -69,6 +69,13 @@ function getDB(): Database.Database {
   } catch {
     // Column already exists — expected on subsequent launches
   }
+ 
+  // Migrate: add compactionSummary if upgrading from older schema
+  try {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN compactionSummary TEXT`)
+  } catch {
+    // Column already exists
+  }
 
   return dbInstance
 }
@@ -205,3 +212,25 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   })()
   return threadIds
 }
+ 
+export function getThreadCompactionSummary(threadId: string): string | null {
+  const db = getDB()
+  const row = db.prepare('SELECT compactionSummary FROM threads WHERE id = ?').get(threadId) as any
+  return row?.compactionSummary ?? null
+}
+ 
+export function updateThreadCompactionSummary(threadId: string, summary: string | null): void {
+  const db = getDB()
+  db.prepare('UPDATE threads SET compactionSummary = ? WHERE id = ?').run(summary, threadId)
+}
+ 
+export function getLastCompactedMessageId(threadId: string): string | null {
+  const db = getDB()
+  const row = db.prepare(`
+    SELECT id FROM messages 
+    WHERE threadId = ? AND data LIKE '%"type":"compaction"%' 
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(threadId) as any
+  return row?.id ?? null
+}
+ 

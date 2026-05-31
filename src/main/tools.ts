@@ -5,7 +5,7 @@ import { promises as fs } from 'fs'
 import { join, relative, extname, dirname } from 'path'
 import { execa } from 'execa'
 import log from 'electron-log'
-import { tavily } from '@tavily/core'
+import { tavilyLimiter } from './index'
 import {
   getWorkspaceContext,
   getOrCreateWorkspaceContext,
@@ -38,23 +38,12 @@ function isCommandBlocked(command: string): boolean {
 
 // ─── Web search ───────────────────────────────────────────────────────────
 
-const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY || '' })
+import mime from 'mime-types'
 
 // ─── MIME helpers ─────────────────────────────────────────────────────────
 
 const getMimeType = (filePath: string) => {
-  const ext = extname(filePath).toLowerCase()
-  const mimes: Record<string, string> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-    '.mp4': 'video/mp4',
-    '.webm': 'video/webm'
-  }
-  return mimes[ext] || 'application/octet-stream'
+  return mime.lookup(filePath) || 'application/octet-stream'
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────
@@ -168,17 +157,17 @@ export function createCoreTools(convId: string) {
         return { success: false, error: err.message }
       }
     },
-    toModelOutput: (result: any) => {
-      if (result.isBinary && result.mimeType?.startsWith('image/') && result.base64Content) {
+    toModelOutput: ({ output }: { output: any }) => {
+      if (output.isBinary && output.mimeType?.startsWith('image/') && output.base64Content) {
         return {
           type: 'content',
           value: [
-            { type: 'image-data', data: result.base64Content, mediaType: result.mimeType },
-            { type: 'text', text: `Successfully analyzed binary image: ${result.absolutePath}` }
+            { type: 'image-data', data: output.base64Content, mediaType: output.mimeType },
+            { type: 'text', text: `Successfully analyzed binary image: ${output.absolutePath}` }
           ]
         }
       }
-      return { type: 'content', value: [{ type: 'text', text: result.content || result.error || 'No content' }] }
+      return { type: 'content', value: [{ type: 'text', text: output.content || output.error || 'No content' }] }
     }
   })
 
@@ -377,24 +366,33 @@ export function createCoreTools(convId: string) {
       maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Max number of results (1–10, default 5).')
     }),
     execute: async ({ query, domain, maxResults }) => {
-      log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'}`)
-      try {
-        const response = await tavilyClient.search(query, {
-          maxResults: maxResults ?? 5,
-          includeDomains: domain ? [domain] : undefined,
-          includeAnswer: true
-        })
-        const results = (response.results ?? []).map((r: any) => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.content,
-          score: r.score
-        }))
-        return { query, answer: response.answer ?? null, results, totalResults: results.length }
-      } catch (err: any) {
-        log.error('[tool:searchWeb] Tavily error:', err)
-        return { success: false, error: `Web search failed: ${err.message}` }
-      }
+      return tavilyLimiter.schedule(async () => {
+        log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'}`)
+        try {
+          const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/tavily`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query, domain, maxResults })
+          })
+          if (!response.ok) {
+            throw new Error(`Proxy error: HTTP ${response.status}`)
+          }
+          const data = await response.json()
+          const results = (data.results ?? []).map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.content,
+            score: r.score
+          }))
+          return { query, answer: data.answer ?? null, results, totalResults: results.length }
+        } catch (err: any) {
+          log.error('[tool:searchWeb] Tavily error:', err)
+          return { success: false, error: `Web search failed: ${err.message}` }
+        }
+      })
     }
   })
 
@@ -429,11 +427,26 @@ function customNodeAdapter(port: any): any {
   }
 }
 
+function checkBrowserViewActive(): { success: boolean; error?: string } | null {
+  const browserView = (globalThis as any).browserView
+  if (!browserView) {
+    return {
+      success: false,
+      error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
+    }
+  }
+  return null
+}
+
 export function startBrowserAgentWorker() {
   if (workerInstance) return automatedBrowser
+  const mainWindow = (globalThis as any).mainWindow
+  const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const workerPath = join(__dirname, 'browserWorker.js')
-  log.info(`[tools] Spawning Playwright background worker at: ${workerPath}`)
-  workerInstance = new Worker(workerPath)
+  log.info(`[tools] Spawning Playwright background worker at: ${workerPath} with mainWindowUrl: ${mainWindowUrl}`)
+  workerInstance = new Worker(workerPath, {
+    workerData: { mainWindowUrl }
+  })
   automatedBrowser = wrap(customNodeAdapter(workerInstance))
   return automatedBrowser
 }
@@ -456,6 +469,8 @@ export const browserNavigate = tool({
   inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
   execute: async ({ url }) => {
     log.info(`[tool:browserNavigate] url="${url}"`)
+    const check = checkBrowserViewActive()
+    if (check) return check
     const agent = startBrowserAgentWorker()
     try { return await agent.navigate(url) }
     catch (err: any) { log.error('[tool:browserNavigate] worker error:', err); return { success: false, error: err.message } }
@@ -471,6 +486,8 @@ export const browserType = tool({
   }),
   execute: async ({ selector, text, frameSelector }) => {
     log.info(`[tool:browserType] selector="${selector}"`)
+    const check = checkBrowserViewActive()
+    if (check) return check
     const agent = startBrowserAgentWorker()
     try { return await agent.type(selector, text, frameSelector) }
     catch (err: any) { log.error('[tool:browserType] worker error:', err); return { success: false, error: err.message } }
@@ -485,6 +502,8 @@ export const browserScroll = tool({
   }),
   execute: async ({ direction, amount }) => {
     log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
+    const check = checkBrowserViewActive()
+    if (check) return check
     const agent = startBrowserAgentWorker()
     try { return await agent.scroll(direction, amount) }
     catch (err: any) { log.error('[tool:browserScroll] worker error:', err); return { success: false, error: err.message } }
@@ -496,6 +515,8 @@ export const browserScreenshot = tool({
   inputSchema: z.object({}),
   execute: async () => {
     log.info('[tool:browserScreenshot] executing...')
+    const check = checkBrowserViewActive()
+    if (check) return check
     const agent = startBrowserAgentWorker()
     try {
       const cid = getActiveConversationId()
@@ -523,23 +544,23 @@ export const browserScreenshot = tool({
       return { success: false, error: err.message }
     }
   },
-  toModelOutput: async (result: any) => {
-    if (result.success && result.filePath) {
+  toModelOutput: async ({ output }: { output: any }) => {
+    if (output.success && output.filePath) {
       try {
-        const cleanPath = result.filePath.replace('file://', '')
+        const cleanPath = output.filePath.replace('file://', '')
         const base64Image = (await fs.readFile(cleanPath)).toString('base64')
         return {
           type: 'content',
           value: [
             { type: 'image-data', data: base64Image, mediaType: 'image/png' },
-            { type: 'text', text: `Screenshot captured: ${result.filePath}` }
+            { type: 'text', text: `Screenshot captured: ${output.filePath}` }
           ]
         }
       } catch (err: any) {
         return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }] }
       }
     }
-    return { type: 'content', value: [{ type: 'text', text: result.error || 'Failed to capture screenshot' }] }
+    return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
   }
 })
 
@@ -552,6 +573,8 @@ export const browserMouseClickCoordinate = tool({
   }),
   execute: async ({ x, y, button }) => {
     log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
+    const check = checkBrowserViewActive()
+    if (check) return check
     const agent = startBrowserAgentWorker()
     try { return await agent.mouseClickCoordinate(x, y, button) }
     catch (err: any) { log.error('[tool:browserMouseClickCoordinate] worker error:', err); return { success: false, error: err.message } }

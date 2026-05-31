@@ -7,6 +7,7 @@ import InputBar from './components/InputBar'
 import ChatThread from './components/ChatThread'
 import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
+import { OnboardingView } from './components/OnboardingView'
 import { ChevronDown, Code, Inbox } from 'lucide-react'
 import { Toaster } from 'sonner'
 import {
@@ -63,7 +64,7 @@ function AppInner(): React.JSX.Element {
 
   const handleOpenWorkspace = () => { openWorkspace() }
   const handleStartConversation = () => { newConversation() }
-  const handlePromptSubmit = (prompt: string, mode?: string) => { run(prompt, mode) }
+  const handlePromptSubmit = (prompt: string, mode?: string, attachments?: any[]) => { run(prompt, mode, attachments) }
 
   const renderChatPane = (fullWidth: boolean) => {
     return (
@@ -237,6 +238,13 @@ function AppInner(): React.JSX.Element {
 }
 
 function App(): React.JSX.Element {
+  const params = new URLSearchParams(window.location.search)
+  const view = params.get('view')
+
+  if (view === 'onboarding') {
+    return <OnboardingView />
+  }
+
   return (
     <Provider>
       <AppInner />

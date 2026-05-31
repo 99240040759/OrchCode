@@ -5,16 +5,14 @@ import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom } from '../stor
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
 
+import { formatDistanceToNow } from 'date-fns'
+
 function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const diff = Date.now() - date.getTime()
-  const mins = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  if (hours < 24) return `${hours}h ago`
-  return `${days}d ago`
+  try {
+    return formatDistanceToNow(new Date(dateStr), { addSuffix: true })
+  } catch {
+    return 'unknown'
+  }
 }
 
 const ThreadList: React.FC = () => {
@@ -87,8 +85,8 @@ const ThreadList: React.FC = () => {
   }
 
   return (
-    <div className="sidebar-section" style={{ padding: '16px 0', gap: 14 }}>
-      <div className="sidebar-section-header" style={{ padding: '0 16px', color: '#8e8e93', fontSize: '13px', fontWeight: 600 }}>
+    <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
+      <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
         <span>Workspaces</span>
       </div>
 
@@ -112,10 +110,12 @@ const ThreadList: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '6px 16px',
+                    padding: '8px 12px',
+                    margin: '0 8px',
+                    borderRadius: '6px',
                     cursor: 'pointer',
-                    backgroundColor: isActive ? 'rgba(255, 255, 255, 0.03)' : 'transparent',
-                    transition: 'background-color 0.2s'
+                    backgroundColor: isActive ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
+                    transition: 'all 0.2s ease'
                   }}
                   onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)' }}
                   onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
@@ -133,7 +133,7 @@ const ThreadList: React.FC = () => {
                     </div>
                     <span
                       style={{
-                        fontSize: '13.5px',
+                        fontSize: 'var(--font-size-md)',
                         fontWeight: isActive ? 600 : 500,
                         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                         overflow: 'hidden',
@@ -167,9 +167,9 @@ const ThreadList: React.FC = () => {
                 </div>
 
                 {isExpanded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0 4px 28px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 8px 4px 20px' }}>
                     {workspaceThreads.length === 0 ? (
-                      <span style={{ padding: '6px 12px 6px 6px', color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>
+                      <span style={{ padding: '6px 12px 6px 12px', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', fontStyle: 'italic' }}>
                         No chats yet
                       </span>
                     ) : (
@@ -185,12 +185,13 @@ const ThreadList: React.FC = () => {
                             style={{
                               background: activeThreadId === thread.id ? 'rgba(255,255,255,0.05)' : 'transparent',
                               borderRadius: 6,
-                              padding: '6px 8px',
+                              padding: '6px 10px',
                               margin: '0',
                               justifyContent: 'space-between',
                               display: 'flex',
                               alignItems: 'center',
-                              width: '100%'
+                              width: '100%',
+                              transition: 'all 0.15s ease'
                             }}
                           >
                             <span
@@ -198,7 +199,7 @@ const ThreadList: React.FC = () => {
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
-                                fontSize: '13px',
+                                fontSize: 'var(--font-size-md)',
                                 color: activeThreadId === thread.id ? 'var(--text-primary)' : '#b0b0b5',
                                 fontWeight: activeThreadId === thread.id ? 500 : 400,
                                 flex: 1
@@ -237,16 +238,24 @@ const ThreadList: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '0 16px',
+          padding: '8px 12px',
+          margin: '0 8px',
+          borderRadius: '6px',
           cursor: 'pointer',
           color: 'var(--text-secondary)',
-          fontSize: '13.5px',
+          fontSize: 'var(--font-size-md)',
           fontWeight: 500,
-          transition: 'color 0.2s',
+          transition: 'all 0.2s ease',
           marginTop: 4
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--text-primary)'
+          e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--text-secondary)'
+          e.currentTarget.style.backgroundColor = 'transparent'
+        }}
       >
         <Plus size={16} strokeWidth={2} />
         <span>Open Workspace</span>

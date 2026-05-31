@@ -1,5 +1,4 @@
 import * as Comlink from 'comlink'
-import { getEncoding } from 'js-tiktoken'
 
 export interface WorkerUpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'error'
@@ -7,25 +6,14 @@ export interface WorkerUpdateStatus {
   error?: string
 }
 
-let _enc: any = null
-try {
-  _enc = getEncoding('cl100k_base')
-} catch (err) {
-  console.error('[background-worker] Tiktoken load failed inside worker', err)
-}
+import semverGt from 'semver/functions/gt'
 
 function isVersionGreater(latest: string, current: string): boolean {
-  const cleanLatest = latest.replace(/^v/, '')
-  const cleanCurrent = current.replace(/^v/, '')
-  const latestParts = cleanLatest.split('.').map(Number)
-  const currentParts = cleanCurrent.split('.').map(Number)
-  for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
-    const l = latestParts[i] || 0
-    const c = currentParts[i] || 0
-    if (l > c) return true
-    if (l < c) return false
+  try {
+    return semverGt(latest, current)
+  } catch {
+    return false
   }
-  return false
 }
 
 let cachedClientId = 'anonymous-user'
@@ -61,15 +49,6 @@ const backgroundWorker = {
     }
   },
 
-  estimateTokens(text: string): number {
-    if (!text) return 0
-    if (!_enc) return Math.ceil(text.length / 4)
-    try {
-      return _enc.encode(text).length
-    } catch {
-      return Math.ceil(text.length / 4)
-    }
-  },
 
   async checkMacUpdate(currentVersion: string): Promise<WorkerUpdateStatus> {
     try {

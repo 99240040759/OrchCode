@@ -19,6 +19,7 @@ export interface ThreadEntry {
   createdAt: string
   updatedAt: string
   workspacePath?: string | null
+  accumulatedTokens?: number
 }
 
 export interface ThreadMessage {
@@ -46,10 +47,10 @@ export interface UserProfile {
 export interface AppAPI {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
 
-  streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string) => Promise<void>
+  streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) => Promise<void>
   stopAgentStream: (threadId?: string) => Promise<void>
   onAgentChunk: (callback: (chunk: { type: string; payload: any }) => void) => () => void
-  getAvailableModels: () => Promise<{ gemini?: string; gemma?: string }>
+  getAvailableModels: () => Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }>
 
   getConversationId: () => Promise<string>
   newConversation: () => Promise<{ conversationId: string }>
@@ -67,7 +68,7 @@ export interface AppAPI {
   writeFile: (filePath: string, content: string, conversationId?: string) => Promise<boolean>
   onArtifactsChanged: (callback: (artifacts: ArtifactEntry[]) => void) => () => void
 
-  createTerminal: (opts: { cols: number; rows: number; cwd?: string }) => Promise<{ id: string }>
+  createTerminal: (opts: { cols: number; rows: number; cwd?: string; conversationId?: string }) => Promise<{ id: string }>
   terminalInput: (opts: { id: string; data: string }) => Promise<void>
   terminalResize: (opts: { id: string; cols: number; rows: number }) => Promise<void>
   closeTerminal: (opts: { id: string }) => Promise<void>
@@ -96,7 +97,9 @@ export interface AppAPI {
   startGoogleAuth: () => Promise<UserProfile | null>
   logout: () => Promise<boolean>
   getAuthUser: () => Promise<UserProfile | null>
+  openMainAndCloseOnboarding: () => Promise<void>
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void) => () => void
+  setActiveSession: (threadId: string) => Promise<boolean>
 }
 
 declare global {

@@ -15,11 +15,13 @@ export default defineConfig({
       }
     },
     define: {
-      'process.env.SENTRY_DSN': process.env.SENTRY_DSN ? JSON.stringify(process.env.SENTRY_DSN) : 'process.env.SENTRY_DSN',
-      'process.env.FIREBASE_API_KEY': process.env.FIREBASE_API_KEY ? JSON.stringify(process.env.FIREBASE_API_KEY) : 'process.env.FIREBASE_API_KEY',
-      'process.env.GA4_MEASUREMENT_ID': process.env.GA4_MEASUREMENT_ID ? JSON.stringify(process.env.GA4_MEASUREMENT_ID) : 'process.env.GA4_MEASUREMENT_ID',
-      'process.env.GOOGLE_CLIENT_ID': process.env.GOOGLE_CLIENT_ID ? JSON.stringify(process.env.GOOGLE_CLIENT_ID) : 'process.env.GOOGLE_CLIENT_ID',
-      'process.env.GOOGLE_CLIENT_SECRET': process.env.GOOGLE_CLIENT_SECRET ? JSON.stringify(process.env.GOOGLE_CLIENT_SECRET) : 'process.env.GOOGLE_CLIENT_SECRET'
+      'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN),
+      'process.env.FIREBASE_API_KEY': JSON.stringify(process.env.FIREBASE_API_KEY),
+      'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID),
+      'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID),
+      'process.env.GOOGLE_CLIENT_SECRET': JSON.stringify(process.env.GOOGLE_CLIENT_SECRET),
+      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY)
     }
   },
   preload: {},
@@ -37,7 +39,7 @@ export default defineConfig({
       })
     ],
     define: {
-      'process.env.GA4_MEASUREMENT_ID': process.env.GA4_MEASUREMENT_ID ? JSON.stringify(process.env.GA4_MEASUREMENT_ID) : 'process.env.GA4_MEASUREMENT_ID'
+      'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID)
     }
   }
 })

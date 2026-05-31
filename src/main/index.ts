@@ -3,10 +3,10 @@ import { init as initSentry } from '@sentry/electron'
 import crypto from 'crypto'
 import { app, shell, BrowserWindow, WebContentsView, ipcMain, dialog } from 'electron'
 import { join, extname } from 'path'
-import { promises as fs } from 'fs'
+import { promises as fs, readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
-import { initAuth } from './auth'
+import { initAuth, loadSession, getCurrentSession } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
@@ -35,8 +35,11 @@ import {
   deleteWorkspaceThreads,
   addOpenedWorkspace,
   deleteOpenedWorkspace,
-  getThreadAccumulatedTokens,
-  updateThreadAccumulatedTokens
+  getThreadCompactionSummary,
+  updateThreadCompactionSummary,
+  getLastCompactedMessageId,
+  updateThreadAccumulatedTokens,
+  getThreadAccumulatedTokens
 } from './db'
 
 import pty from 'node-pty'
@@ -68,16 +71,48 @@ export function invalidateWorkspaceCache(conversationId: string) {
   workspaceSerializationCache.delete(conversationId)
 }
 
-const google = createGoogleGenerativeAI({
-  apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || ''
+import Bottleneck from 'bottleneck'
+
+export const chatStreamLimiter = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: 1000
 })
-const TITLE_MODEL = process.env.GOOGLE_TITLE_MODEL_NAME as string
+
+export const tavilyLimiter = new Bottleneck({
+  maxConcurrent: 2,
+  minTime: 500
+})
+
+const google = createGoogleGenerativeAI({
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
+  headers: {
+    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+  },
+  apiKey: 'placeholder'
+})
+
+let cachedModels: { gemini?: { id: string; name: string }; gemma?: { id: string; name: string } } | null = null
+
+async function getAvailableModels(): Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }> {
+  if (cachedModels) return cachedModels
+  const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, {
+    headers: {
+      'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+    }
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to fetch models: HTTP ${response.status}`)
+  }
+  cachedModels = await response.json()
+  return cachedModels!
+}
 
 const activeAbortControllers = new Map<string, AbortController>()
 
 let mainWindow: BrowserWindow | null = null
 
 const activePtys = new Map<string, ReturnType<typeof pty.spawn>>()
+ 
 
 let browserView: WebContentsView | null = null
 
@@ -96,10 +131,54 @@ function cleanupAllPtys() {
   activePtys.clear()
 }
 
-function createWindow(): BrowserWindow {
+let onboardingWindow: BrowserWindow | null = null
+
+function createOnboardingWindow(): BrowserWindow {
+  onboardingWindow = new BrowserWindow({
+    width: 480,
+    height: 680,
+    minWidth: 480,
+    minHeight: 680,
+    maxWidth: 480,
+    maxHeight: 680,
+    resizable: false,
+    show: false,
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 16, y: 12 },
+    backgroundColor: '#1e1e1e',
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true
+    }
+  })
+
+  onboardingWindow.on('ready-to-show', () => {
+    onboardingWindow!.show()
+    log.info('[main] Onboarding Window ready to show')
+  })
+
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    onboardingWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '?view=onboarding')
+  } else {
+    onboardingWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { view: 'onboarding' } })
+  }
+
+  return onboardingWindow
+}
+
+function createMainWindow(): BrowserWindow {
   const mainWindowState = windowStateKeeper({
     defaultWidth: 1280,
-    defaultHeight: 820
+    defaultHeight: 800
   })
 
   mainWindow = new BrowserWindow({
@@ -128,6 +207,7 @@ function createWindow(): BrowserWindow {
       webSecurity: true
     }
   })
+  ;(globalThis as any).mainWindow = mainWindow
 
   mainWindowState.manage(mainWindow)
 
@@ -148,6 +228,7 @@ function createWindow(): BrowserWindow {
     }
     cleanupAllPtys()
     mainWindow = null
+    ;(globalThis as any).mainWindow = null
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -259,6 +340,11 @@ ipcMain.handle('file:write', async (_event, filePath: string, content: string, c
 
 ipcMain.handle('mastra:get-conversation-id', () => activeConversationId)
 
+ipcMain.handle('session:set-active', (_event, threadId: string) => {
+  setActiveSession(threadId)
+  return true
+})
+
 ipcMain.handle('mastra:new-conversation', async () => {
   const newId = `session-${Date.now()}`
   setActiveSession(newId)
@@ -341,17 +427,16 @@ ipcMain.handle('dialog:confirm', async (_event, opts: { message: string; detail?
   return result.response
 })
 
-ipcMain.handle('models:get-available', () => {
-  return {
-    gemini: process.env.GOOGLE_MODEL_NAME_GEMINI,
-    gemma: process.env.GOOGLE_MODEL_NAME_GEMMA
-  }
+ipcMain.handle('models:get-available', async () => {
+  return await getAvailableModels()
 })
 
 ipcMain.handle('mastra:generate-title', async (_event, { text, threadId }) => {
   try {
+    const models = await getAvailableModels()
+    if (!models.gemini) throw new Error('Gemini model name not configured on server.')
     const result = await generateText({
-      model: google(TITLE_MODEL),
+      model: google(models.gemini.id),
       prompt: `Generate a short 3-6 word title for this conversation. No quotes, no punctuation at end. Just the title.\n\n${text}`
     })
     const title = result.text?.trim() ?? null
@@ -363,8 +448,8 @@ ipcMain.handle('mastra:generate-title', async (_event, { text, threadId }) => {
   }
 })
 
-ipcMain.handle('agent:stream-request', async (event, promptText: string, threadId: string, mode?: string, modelType?: string) => {
-  log.info(`[main] Stream request: "${promptText.slice(0, 80)}" thread: "${threadId}"`)
+async function handleAgentStreamRequest(event: any, promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }>) {
+  log.info(`[main] Stream request: "${promptText.slice(0, 80)}" thread: "${threadId}" with ${attachments?.length || 0} attachments`)
 
   const existingController = activeAbortControllers.get(threadId)
   if (existingController) existingController.abort()
@@ -374,7 +459,9 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
 
   try {
     const history = await getThreadMessages(threadId)
-    await saveMessage(threadId, { id: `user-${Date.now()}`, role: 'user', content: promptText })
+    const userMsgId = `user-${Date.now()}`
+    const attachmentsData = attachments && attachments.length > 0 ? JSON.stringify({ attachments }) : undefined
+    await saveMessage(threadId, { id: userMsgId, role: 'user', content: promptText, data: attachmentsData })
 
     const convId = threadId
     const ctx = getWorkspaceContext(convId) || getOrCreateWorkspaceContext(convId)
@@ -389,27 +476,46 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
     }
 
     let activeHistory = history
-    const compactionIndex = history.map((m) => {
-      if (m.data) {
-        try {
-          const blocks = JSON.parse(m.data)
-          if (Array.isArray(blocks) && blocks.some((b: any) => b.type === 'compaction')) return true
-        } catch {}
+    const lastCompactedId = getLastCompactedMessageId(threadId)
+    let compactionIndex = -1
+    if (lastCompactedId) {
+      compactionIndex = history.findIndex((m) => m.id === lastCompactedId)
+      if (compactionIndex !== -1) {
+        activeHistory = history.slice(compactionIndex)
       }
-      return false
-    }).lastIndexOf(true)
-
-    if (compactionIndex !== -1) {
-      activeHistory = history.slice(compactionIndex + 1)
     }
-
+ 
     const messages: ModelMessage[] = []
 
     for (const m of activeHistory) {
       if (m.role === 'user') {
+        let userContent: any = m.content
+        if (m.data) {
+          try {
+            const dataObj = JSON.parse(m.data)
+            if (dataObj && Array.isArray(dataObj.attachments) && dataObj.attachments.length > 0) {
+              const parts: any[] = [{ type: 'text', text: m.content }]
+              for (const att of dataObj.attachments) {
+                if (att.type === 'image') {
+                  parts.push({
+                    type: 'image',
+                    image: Buffer.from(att.base64, 'base64'),
+                    mimeType: att.mimeType || 'image/png'
+                  })
+                } else if (att.type === 'document') {
+                  try {
+                    const fileContent = Buffer.from(att.base64, 'base64').toString('utf-8')
+                    parts[0].text += `\n\n--- Attached Document: ${att.name} ---\n${fileContent}\n--- End of Document ---`
+                  } catch {}
+                }
+              }
+              userContent = parts
+            }
+          } catch {}
+        }
         messages.push({
           role: 'user',
-          content: m.content
+          content: userContent
         })
       } else if (m.role === 'assistant') {
         // Derive text EXCLUSIVELY from blocks to avoid content-column duplication (#4 fix)
@@ -442,6 +548,44 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
                     ['text', 'json', 'execution-denied', 'error-text', 'error-json', 'content'].includes((outputVal as any).type)
                   ) {
                     formattedOutput = outputVal
+                  } else if (
+                    block.toolName === 'browserScreenshot' &&
+                    outputVal &&
+                    typeof outputVal === 'object' &&
+                    outputVal.success &&
+                    outputVal.filePath
+                  ) {
+                    try {
+                      const cleanPath = outputVal.filePath.replace('file://', '')
+                      const base64Image = readFileSync(cleanPath).toString('base64')
+                      formattedOutput = {
+                        type: 'content',
+                        value: [
+                          { type: 'image-data', data: base64Image, mediaType: 'image/png' },
+                          { type: 'text', text: `Screenshot captured: ${outputVal.filePath}` }
+                        ]
+                      }
+                    } catch (err: any) {
+                      formattedOutput = {
+                        type: 'content',
+                        value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }]
+                      }
+                    }
+                  } else if (
+                    block.toolName === 'viewFile' &&
+                    outputVal &&
+                    typeof outputVal === 'object' &&
+                    outputVal.isBinary &&
+                    outputVal.mimeType?.startsWith('image/') &&
+                    outputVal.base64Content
+                  ) {
+                    formattedOutput = {
+                      type: 'content',
+                      value: [
+                        { type: 'image-data', data: outputVal.base64Content, mediaType: outputVal.mimeType },
+                        { type: 'text', text: `Successfully analyzed binary image: ${outputVal.absolutePath}` }
+                      ]
+                    }
                   } else {
                     formattedOutput = isError
                       ? (typeof outputVal === 'string'
@@ -507,31 +651,25 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
       }
     }
 
-    // Attach latest screenshot ONLY when browser automation is active (#10 fix)
     let promptContent: any = promptText
-    if (browserView) {
-      try {
-        const screenshotDir = join(app.getPath('userData'), 'conversations', convId, 'screenshots')
-        const files = await fs.readdir(screenshotDir)
-        const pngFiles = files.filter(f => f.endsWith('.png'))
-        if (pngFiles.length > 0) {
-          const fileStats = await Promise.all(pngFiles.map(async (f) => {
-            const p = join(screenshotDir, f)
-            const stat = await fs.stat(p)
-            return { file: f, path: p, mtime: stat.mtimeMs }
-          }))
-          fileStats.sort((a, b) => b.mtime - a.mtime)
-          const latestScreenshot = fileStats[0]
-          const buffer = await fs.readFile(latestScreenshot.path)
-          promptContent = [
-            { type: 'text', text: promptText },
-            { type: 'image', image: buffer, mimeType: 'image/png' }
-          ]
-          log.info(`[main] Attached screenshot to prompt: ${latestScreenshot.file}`)
+    if (attachments && attachments.length > 0) {
+      const parts: any[] = [{ type: 'text', text: promptText }]
+      for (const att of attachments) {
+        if (att.type === 'image') {
+          parts.push({
+            type: 'image',
+            image: Buffer.from(att.base64, 'base64'),
+            mimeType: att.mimeType || 'image/png'
+          })
+        } else if (att.type === 'document') {
+          try {
+            const fileContent = Buffer.from(att.base64, 'base64').toString('utf-8')
+            parts[0].text += `\n\n--- Attached Document: ${att.name} ---\n${fileContent}\n--- End of Document ---`
+          } catch {}
         }
-      } catch {}
+      }
+      promptContent = parts
     }
-
     messages.push({ role: 'user', content: promptContent })
 
     let contextBlock = ''
@@ -561,12 +699,26 @@ You currently have active eyes and hands in the browser panel. Use the 5 core br
 5. 'browserScreenshot()': Visual feedback. ALWAYS capture a screenshot after significant navigation, typing, or scrolling to visually verify the page state.`
     }
 
+    let compactionInstruction = ''
+    if (compactionIndex !== -1) {
+      const compactionSummary = getThreadCompactionSummary(threadId)
+      if (compactionSummary) {
+        compactionInstruction = `\n── HISTORICAL CONVERSATION COMPACTION SUMMARY ──
+The conversation history prior to this point has been compacted to save context tokens. Here is a high-density semantic summary of what has been accomplished so far:
+
+${compactionSummary}
+
+Keep this historical context in mind when answering the user's immediate next request.`
+      }
+    }
+ 
     const systemInstruction = `You are Antigravity, a highly capable developer coding assistant. Active conversation ID: ${convId}.${modeSuffix}
 You have native access to the active workspace context below. Use it to answer questions accurately:
-
+ 
 ${contextBlock || 'No workspace files available. The user has not opened a workspace yet.'}
 ${browserInstruction}
-
+${compactionInstruction ? `\n${compactionInstruction}` : ''}
+ 
 ── ARTIFACT BOUNDARIES & WORKFLOW COMPLIANCE ──
 You must always structure your software development flow using the sandboxed Artifacts system inside the '.orch-artifacts/' folder of the active workspace.
 Use your existing file-writing tools ('writeToFile', 'replaceFileContent', etc.) to manage these artifact files:
@@ -588,12 +740,10 @@ Use your existing file-writing tools ('writeToFile', 'replaceFileContent', etc.)
 
 Follow these native planning boundaries strictly to manage your work professionally and transparently!`
 
-    const modelEnvKey = modelType === 'gemma' ? 'GOOGLE_MODEL_NAME_GEMMA' : 'GOOGLE_MODEL_NAME_GEMINI'
-    const selectedModel = process.env[modelEnvKey] as string
-
-    // Seed token accumulator from DB so compaction survives restarts (#5 fix)
-    const storedTokens = getThreadAccumulatedTokens(threadId)
-
+    const models = await getAvailableModels()
+    const rawModel = modelType === 'gemma' ? models.gemma : models.gemini
+    if (!rawModel) throw new Error(`${modelType} model name not configured on server.`)
+ 
     const coreTools = createCoreTools(convId)
     const activeTools = {
       ...coreTools,
@@ -601,7 +751,7 @@ Follow these native planning boundaries strictly to manage your work professiona
     }
 
     const result = streamText({
-      model: google(selectedModel),
+      model: google(rawModel.id),
       system: systemInstruction,
       messages,
       tools: activeTools,
@@ -678,33 +828,46 @@ Follow these native planning boundaries strictly to manage your work professiona
         const block = orderedBlocks.find((b) => b.type === 'tool' && b.status === 'pending')
         if (block) block.status = 'error'
         event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg })
-        await saveProgress()
-      } else if (part.type === 'finish') {
+       } else if (part.type === 'finish') {
         const usage = part.totalUsage || {}
         turnPromptTokens = usage.inputTokens || 0
         turnCompletionTokens = usage.outputTokens || 0
         const turnTotal = turnPromptTokens + turnCompletionTokens
 
-        const prevAccumulated = storedTokens
-        const newAccumulated = prevAccumulated + turnTotal
-
-        let compactionTriggered = false
-        // Dedup: only add compaction if none already exists in this turn's blocks (#6 fix)
-        if (newAccumulated >= 200_000 && !orderedBlocks.some((b: any) => b.type === 'compaction')) {
-          orderedBlocks.push({ type: 'compaction' })
-          updateThreadAccumulatedTokens(threadId, 0)
-          compactionTriggered = true
-          log.info(`[main] Compaction triggered at ${newAccumulated} tokens for thread ${threadId}`)
-        } else {
-          updateThreadAccumulatedTokens(threadId, newAccumulated)
+        let finalAccumulated = turnTotal
+        try {
+          const currentAcc = getThreadAccumulatedTokens(threadId)
+          finalAccumulated = currentAcc + turnTotal
+        } catch (dbErr) {
+          log.error('[main] Failed to read native accumulated tokens:', dbErr)
         }
 
-        log.info(`[main] Stream finish — turn: ${turnTotal} tokens, accumulated: ${newAccumulated}`)
+        let compactionTriggered = false
+        // Trigger compaction if the accumulated active tokens exceed 200,000 natively
+        if (finalAccumulated >= 200_000) {
+          compactionTriggered = true
+          log.info(`[main] Compaction triggered at ${finalAccumulated} tokens for thread ${threadId}`)
+
+          // Asynchronously compile semantic compaction summary using Gemini and write compaction marker
+          triggerSemanticCompaction(threadId, assistantMsgId).catch((err) => {
+            log.error('[main] Asynchronous semantic compaction summary failed:', err)
+          })
+        }
+
+        log.info(`[main] Stream finish — turn: ${turnTotal} tokens`)
+
+        try {
+          updateThreadAccumulatedTokens(threadId, compactionTriggered ? 0 : finalAccumulated)
+          log.info(`[main] Saved native token count (${compactionTriggered ? 0 : finalAccumulated}, added ${turnTotal}) to db for thread ${threadId}`)
+        } catch (dbErr) {
+          log.error('[main] Failed to save native accumulated tokens:', dbErr)
+        }
+
         event.sender.send('agent:stream-chunk', {
           type: 'finish',
           payload: {
             usage: { promptTokens: turnPromptTokens, completionTokens: turnCompletionTokens, totalTokens: turnTotal },
-            accumulatedTokens: compactionTriggered ? 0 : newAccumulated,
+            accumulatedTokens: compactionTriggered ? 0 : finalAccumulated,
             compactionTriggered
           }
         })
@@ -723,6 +886,16 @@ Follow these native planning boundaries strictly to manage your work professiona
   } finally {
     activeAbortControllers.delete(threadId)
   }
+}
+
+ipcMain.handle('agent:stream-request', async (event, promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) => {
+  const session = getCurrentSession()
+  if (!session) {
+    throw new Error('Unauthorized: Please sign in to use agents.')
+  }
+  return chatStreamLimiter.schedule(() =>
+    handleAgentStreamRequest(event, promptText, threadId, mode, modelType, attachments)
+  )
 })
 
 ipcMain.handle('agent:stream-stop', (_event, threadId?: string) => {
@@ -753,11 +926,12 @@ ipcMain.handle('artifacts:list', async (_event, conversationId: string) => {
   } catch { return [] }
 })
 
-ipcMain.handle('terminal:create', (event, { cols, rows, cwd }: { cols: number; rows: number; cwd?: string }) => {
+ipcMain.handle('terminal:create', (event, { cols, rows, cwd, conversationId }: { cols: number; rows: number; cwd?: string; conversationId?: string }) => {
   const id = `pty-${crypto.randomUUID()}`
   const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/zsh')
 
-  const convCtx = getWorkspaceContext(activeConversationId)
+  const convId = conversationId || activeConversationId
+  const convCtx = getWorkspaceContext(convId)
   const workingDir = cwd || (convCtx?.isUserWorkspace ? convCtx.rootPath : undefined) || process.env.HOME || '/'
 
   log.info(`[terminal] Spawning ${shell} in ${workingDir} (${cols}x${rows})`)
@@ -921,17 +1095,49 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  log.info('[main] App ready — creating main window')
+  log.info('[main] App ready — initializing modules')
 
   getOrCreateWorkspaceContext(activeConversationId)
 
-  createWindow()
+  initUpdater()
+  initAuth()
 
-  initUpdater(mainWindow!)
-  initAuth(mainWindow!)
+  // Asynchronously load active session
+  const session = await loadSession()
+  if (session) {
+    createMainWindow()
+  } else {
+    createOnboardingWindow()
+  }
+
+  // Handle onboarding to main window transition beautifully
+  ;(app as any).on('auth:open-main-and-close-onboarding', () => {
+    log.info('[main] Onboarding completed, transitioning to main window...')
+    const main = createMainWindow()
+    main.once('ready-to-show', () => {
+      main.show()
+      if (onboardingWindow) {
+        onboardingWindow.close()
+        onboardingWindow = null
+      }
+    })
+  })
+
+  // Handle logout transition
+  ;(app as any).on('auth:logged-out', () => {
+    log.info('[main] User logged out, showing onboarding window...')
+    createOnboardingWindow()
+    if (mainWindow) {
+      mainWindow.close()
+      mainWindow = null
+    }
+  })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (getCurrentSession()) createMainWindow()
+      else createOnboardingWindow()
+    }
   })
 })
 
@@ -946,3 +1152,98 @@ app.on('window-all-closed', async () => {
 app.on('before-quit', () => {
   cleanupAllPtys()
 })
+ 
+async function triggerSemanticCompaction(threadId: string, assistantMsgId: string): Promise<void> {
+  log.info(`[compaction] Starting semantic summary generation for thread: ${threadId} (anchor message: ${assistantMsgId})`)
+  try {
+    const fullHistory = getThreadMessages(threadId)
+    if (fullHistory.length === 0) return
+ 
+    // 1. Find the index of the prior compaction using our fast SQL helper
+    const lastCompactedId = getLastCompactedMessageId(threadId)
+    let lastCompactionIndex = -1
+    if (lastCompactedId) {
+      lastCompactionIndex = fullHistory.findIndex((m) => m.id === lastCompactedId)
+    }
+ 
+    // 2. Identify the active active turns since the last compaction point
+    const newTurns = lastCompactionIndex !== -1 
+      ? fullHistory.slice(lastCompactionIndex + 1)
+      : fullHistory
+ 
+    const formattedHistory = newTurns.map((m) => {
+      let text = `[${m.role.toUpperCase()}] ${m.content}`
+      if (m.data) {
+        try {
+          const blocks = JSON.parse(m.data)
+          if (Array.isArray(blocks)) {
+            const tools = blocks.filter(b => b.type === 'tool')
+            if (tools.length > 0) {
+              text += `\n(Executed Tools: ${tools.map(t => `${t.toolName} -> ${t.status}`).join(', ')})`
+            }
+          }
+        } catch {}
+      }
+      return text
+    }).join('\n\n')
+ 
+    // 3. Read the old compaction summary if it exists
+    const oldSummary = lastCompactionIndex !== -1 ? getThreadCompactionSummary(threadId) : null
+    const models = await getAvailableModels()
+    if (!models.gemini) throw new Error('Gemini model name not configured on server.')
+    const compactionModel = models.gemini.id
+    
+    log.info(`[compaction] Generating state summary using ${compactionModel}...`)
+ 
+    let prompt = ''
+    if (oldSummary) {
+      prompt = `Here is a high-density summary of all accomplishments, files, and architectural decisions made in the conversation PRIOR to this segment:\n${oldSummary}\n\nHere are the new active conversation turns that occurred since that summary:\n${formattedHistory}\n\nYour task is to merge the previous summary and the new conversation turns into a single, unified, high-density state summary. Keep all core completed task logs, modified file path lists, and technical decisions intact while compressing the overall context size.`
+    } else {
+      prompt = `Here are the active conversation turns to summarize:\n${formattedHistory}\n\nYour task is to compile a high-density state summary from these turns. Highlight the goals, technical decisions, completed files, and immediate next steps.`
+    }
+ 
+    const result = await generateText({
+      model: google(compactionModel),
+      system: `You are an expert compiler of software agent states.
+Analyze the provided conversation history segment and compile a high-density, structured semantic summary.
+ 
+Strict focus on extracting:
+1. PRIMARY GOAL: What core problem or features did the user request?
+2. ARCHITECTURAL DECISIONS: What specific files, databases, schemas, or styles were designed or modified?
+3. SUCCESSFUL MUTATIONS: What files/directories were viewed, created, or successfully edited?
+4. PLAN PROGRESS: What tasks in the plan were completed, and which are still outstanding?
+5. REMAINING TASK STATE: What is the exact technical state of the application right now, and what is the immediate next step?
+ 
+Format the output strictly as a highly compressed, bulleted Markdown summary. Do not include introductory chat, conversation snippets, or pleasantries.`,
+      prompt
+    })
+ 
+    const summaryText = result.text?.trim() ?? null
+    if (summaryText) {
+      updateThreadCompactionSummary(threadId, summaryText)
+      log.info(`[compaction] Semantic summary compiled successfully for thread: ${threadId} (${summaryText.length} chars)`)
+
+      // Mark the compaction point by appending a compaction block in database message metadata
+      const compactionMsg = fullHistory.find((m) => m.id === assistantMsgId)
+      if (compactionMsg) {
+        let blocks: any[] = []
+        if (compactionMsg.data) {
+          try { blocks = JSON.parse(compactionMsg.data) } catch {}
+        }
+        if (!blocks.some((b: any) => b.type === 'compaction')) {
+          blocks.push({ type: 'compaction' })
+          saveMessage(threadId, {
+            id: compactionMsg.id,
+            role: compactionMsg.role,
+            content: compactionMsg.content,
+            data: JSON.stringify(blocks),
+            createdAt: compactionMsg.createdAt
+          })
+          log.info(`[compaction] Successfully wrote compaction block marker for message ID ${assistantMsgId}`)
+        }
+      }
+    }
+  } catch (err) {
+    log.error('[compaction] Failed to generate semantic summary:', err)
+  }
+}

@@ -96,7 +96,7 @@ export function useAgentStream() {
 
   // #1 fix: run is stable with useCallback — deps are exactly the values it reads
   // #2 fix: capture isNewThread at call time before any async work or atom mutation
-  const run = useCallback(async (promptText: string, mode?: string) => {
+  const run = useCallback(async (promptText: string, mode?: string, attachments?: any[]) => {
     cleanupActiveStream()
 
     // #2 fix: capture current thread identity at invocation time — not from closure captures
@@ -112,6 +112,7 @@ export function useAgentStream() {
       id: `user-${Date.now()}`,
       role: 'user',
       content: promptText,
+      data: attachments && attachments.length > 0 ? JSON.stringify({ attachments }) : undefined,
       timestamp: Date.now()
     }
     setMessages((prev) => [...prev, userMsg])
@@ -298,6 +299,12 @@ export function useAgentStream() {
               }
             }
 
+            // Explicitly push a text block containing the error so ChatThread's block map renders it
+            orderedBlocks.push({
+              type: 'text',
+              content: `\n\n[System Error: ${chunkData ?? 'Unknown Error'}]`
+            })
+
             flushAssistant(true)
             setRunState('error')
             if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null }
@@ -338,7 +345,7 @@ export function useAgentStream() {
         }
       })
 
-      await window.api.streamAgent(promptText, resolvedThreadId, mode, selectedModel)
+      await window.api.streamAgent(promptText, resolvedThreadId, mode, selectedModel, attachments)
 
     } catch (err: any) {
       if (err.name === 'AbortError') {

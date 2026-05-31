@@ -94,7 +94,7 @@ export function assertWithinWorkspace(
   const wctx = getWorkspaceContext(cid) || getOrCreateWorkspaceContext(cid)
 
   const resolvedRoot = safeRealpathSync(resolve(rootPath))
-  const resolvedTarget = safeRealpathSync(resolve(targetPath))
+  const resolvedTarget = safeRealpathSync(resolve(rootPath, targetPath))
   const normalizedTarget = normalize(resolvedTarget)
 
   // Allow access into the conversations data dir (artifacts, screenshots, etc.)
@@ -158,12 +158,10 @@ export function isBinaryBuffer(buf: Buffer): boolean {
 }
 
 export async function serializeWorkspace(rootPath: string): Promise<string> {
-  const filesContent: string[] = []
-  let totalLength = 0
-  let truncated = false
+  const files: { relativePath: string; content: string }[] = []
 
   async function traverse(dir: string, depth: number): Promise<void> {
-    if (truncated || totalLength >= MAX_TOTAL_CHARACTERS || depth > MAX_DEPTH) return
+    if (depth > MAX_DEPTH) return
 
     let entries: any[] = []
     try {
@@ -172,11 +170,8 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
       return
     }
 
-    // Process all entries at this depth level concurrently (#8 fix)
     await Promise.all(
       entries.map(async (entry) => {
-        if (truncated || totalLength >= MAX_TOTAL_CHARACTERS) return
-
         const name = entry.name
         const fullPath = join(dir, name)
 
@@ -194,20 +189,7 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
             if (stat.size > MAX_SERIALIZE_FILE_SIZE) return
             const content = await fs.readFile(fullPath, 'utf-8')
             const relPath = relative(rootPath, fullPath)
-            const fileString = `=== FILE: ${relPath} ===\n${content}\n`
-
-            if (totalLength + fileString.length > MAX_TOTAL_CHARACTERS) {
-              const remaining = MAX_TOTAL_CHARACTERS - totalLength
-              if (remaining > 50) {
-                filesContent.push(`=== FILE: ${relPath} ===\n${content.slice(0, remaining)}... [TRUNCATED]\n`)
-                totalLength = MAX_TOTAL_CHARACTERS
-                truncated = true
-              }
-              return
-            }
-
-            filesContent.push(fileString)
-            totalLength += fileString.length
+            files.push({ relativePath: relPath, content })
           } catch {}
         }
       })
@@ -215,5 +197,27 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
   }
 
   await traverse(rootPath, 0)
+
+  // Sort files alphabetically by relative path to guarantee 100% determinism (Prompt Cache friendly)
+  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+
+  const filesContent: string[] = []
+  let totalLength = 0
+
+  for (const file of files) {
+    if (totalLength >= MAX_TOTAL_CHARACTERS) break
+
+    const fileString = `=== FILE: ${file.relativePath} ===\n${file.content}\n`
+    if (totalLength + fileString.length > MAX_TOTAL_CHARACTERS) {
+      const remaining = MAX_TOTAL_CHARACTERS - totalLength
+      if (remaining > 50) {
+        filesContent.push(`=== FILE: ${file.relativePath} ===\n${file.content.slice(0, remaining)}... [TRUNCATED]\n`)
+      }
+      break
+    }
+    filesContent.push(fileString)
+    totalLength += fileString.length
+  }
+
   return filesContent.join('\n')
 }

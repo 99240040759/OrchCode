@@ -1,0 +1,68 @@
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Verify Bearer Token is passed
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+  }
+
+  const url = new URL(req.url);
+
+  // Forward to official Google Gemini API endpoint
+  const subpath = url.pathname.replace(/^\/(functions\/v1\/)?gemini/, "");
+  const targetUrl = `https://generativelanguage.googleapis.com${subpath}${url.search}`;
+
+  const apiKey = Deno.env.get("GOOGLE_GENERATIVE_AI_API_KEY");
+  if (!apiKey) {
+    return new Response("Server Configuration Error: GOOGLE_GENERATIVE_AI_API_KEY is missing.", { status: 500, headers: corsHeaders });
+  }
+
+  const cleanHeaders = new Headers();
+  cleanHeaders.set("x-goog-api-key", apiKey);
+  
+  const contentType = req.headers.get("content-type") || req.headers.get("Content-Type");
+  if (contentType) {
+    cleanHeaders.set("Content-Type", contentType);
+  }
+  
+  const accept = req.headers.get("accept") || req.headers.get("Accept");
+  if (accept) {
+    cleanHeaders.set("Accept", accept);
+  }
+
+
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: req.method,
+      headers: cleanHeaders,
+      body: req.body,
+    });
+
+    const resHeaders = new Headers(res.headers);
+    Object.keys(corsHeaders).forEach((key) => {
+      resHeaders.set(key, corsHeaders[key]);
+    });
+
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: resHeaders,
+    });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

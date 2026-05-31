@@ -8,13 +8,50 @@ import MarkdownRenderer from './MarkdownRenderer'
 
 const renderMarkdown = (text: string) => <MarkdownRenderer content={text} />
 
-const UserMessage = ({ message }: { message: ChatMessage }) => (
-  <div className="chat-message-user-container">
-    <div className="chat-message-user">
-      {message.content}
+const UserMessage = ({ message }: { message: ChatMessage }) => {
+  let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
+  if (message.data) {
+    try {
+      const dataObj = JSON.parse(message.data)
+      if (dataObj && Array.isArray(dataObj.attachments)) {
+        attachments = dataObj.attachments
+      }
+    } catch {}
+  }
+
+  return (
+    <div className="chat-message-user-container">
+      <div className="chat-message-user" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {attachments.length > 0 && (
+          <div className="message-attachments">
+            {attachments.map((att, idx) => (
+              <div key={idx} className="message-attachment-chip">
+                {att.type === 'image' ? (
+                  <img
+                    src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
+                    alt={att.name}
+                    onClick={() => {
+                      const win = window.open()
+                      if (win) {
+                        win.document.write(`<img src="data:${att.mimeType || 'image/png'};base64,${att.base64}" style="max-width:100%; max-height:100%; display:block; margin:auto;" />`)
+                      }
+                    }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 13 }}>📄</span>
+                )}
+                <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {att.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {message.content && <div>{message.content}</div>}
+      </div>
     </div>
-  </div>
-)
+  )
+}
 
 const ReasoningBlock: React.FC<{ content: string; durationMs?: number; isStreaming?: boolean }> = ({ content, durationMs, isStreaming }) => {
   const [isOpen, setIsOpen] = useState(isStreaming ?? false)
@@ -82,7 +119,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => (
           status: block.status
         }
         return (
-          <div key={`tool-${i}`} className="chat-reasoning-details">
+          <div key={`tool-${i}`} style={{ marginBottom: '2px' }}>
             <ToolCallBlock toolCall={toolCall as any} />
           </div>
         )
