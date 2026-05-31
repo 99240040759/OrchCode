@@ -38,7 +38,9 @@ const backgroundWorker = {
   },
 
   async sendTelemetryEvent(eventName: string, params: Record<string, string> = {}) {
-    const tid = process.env.GA4_MEASUREMENT_ID || 'G-JSW00QYW8X'
+    const tid = (typeof process !== 'undefined' && process.env && process.env.GA4_MEASUREMENT_ID) 
+      ? process.env.GA4_MEASUREMENT_ID 
+      : 'G-JSW00QYW8X'
     const queryParams = new URLSearchParams({
       v: '2',
       tid: tid,
@@ -71,9 +73,7 @@ const backgroundWorker = {
 
   async checkMacUpdate(currentVersion: string): Promise<WorkerUpdateStatus> {
     try {
-      const response = await fetch('https://raw.githubusercontent.com/sameer786ss/OrchCode/main/latest.yml', {
-        headers: { 'Cache-Control': 'no-cache' }
-      })
+      const response = await fetch(`https://raw.githubusercontent.com/sameer786ss/OrchCode/main/latest.yml?t=${Date.now()}`)
       if (!response.ok) {
         throw new Error(`HTTP status ${response.status}`)
       }

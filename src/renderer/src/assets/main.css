@@ -383,7 +383,6 @@ a:hover {
   padding: 16px 0 24px;
   display: flex;
   flex-direction: column;
-  contain: layout;
 }
 
 .chat-thread-spacer-top {
@@ -1339,16 +1338,20 @@ details > summary {
   margin: 6px 0;
 }
 .profile-dropdown-item {
-  cursor: pointer;
-  outline: none;
-}
-.profile-dropdown-item.logout {
+  display: flex;
+  align-items: center;
   padding: 8px 12px;
   font-size: 12.5px;
-  color: var(--accent-red);
+  color: var(--text-primary);
   cursor: pointer;
   outline: none;
   transition: background 0.15s ease;
+}
+.profile-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.profile-dropdown-item.logout {
+  color: var(--accent-red);
 }
 .profile-dropdown-item.logout:hover {
   background: rgba(239, 68, 68, 0.08);

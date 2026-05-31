@@ -104,8 +104,7 @@ function AppInner(): React.JSX.Element {
             height: 'calc(100% - 38px)',
             minWidth: 0,
             margin: '0 auto',
-            flex: 1,
-            contain: 'layout'
+            flex: 1
           }}>
             <ChatThread />
             <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, ClipboardCheck, BookOpen } from 'lucide-react'
+import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, ClipboardCheck, BookOpen, MousePointerClick, Keyboard, Code2, Camera, Eye, ChevronsUpDown, CornerDownLeft, ArrowLeft, ArrowRight, RotateCw, MousePointer, Move } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
@@ -94,12 +94,78 @@ function getToolDetails(toolCall: ToolCallEntry) {
       operation = 'Listed'
       target = (args.directoryPath as string) || 'workspace root'
       break
+    case 'browserNavigate':
+      operation = 'Navigated browser to'
+      target = (args.url as string) ?? ''
+      break
+    case 'browserClick':
+      operation = 'Clicked browser element'
+      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${args.selector}` : ((args.selector as string) ?? '')
+      break
+    case 'browserType':
+      operation = 'Typed in browser'
+      const typeLabel = args.selector && args.text ? `${args.selector} ➔ "${args.text}"` : (args.selector ?? '')
+      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${typeLabel}` : typeLabel
+      break
+    case 'browserHover':
+      operation = 'Hovered browser element'
+      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${args.selector}` : ((args.selector as string) ?? '')
+      break
+    case 'browserWaitFor':
+      operation = 'Waited for'
+      const waitLabel = `${args.selector} (${args.state || 'visible'})`
+      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${waitLabel}` : waitLabel
+      break
+    case 'browserScroll':
+      operation = 'Scrolled browser'
+      target = `${args.direction} by ${args.amount || 400}px`
+      break
+    case 'browserPressKey':
+      operation = 'Pressed key'
+      target = `"${args.key}"`
+      break
+    case 'browserGoBack':
+      operation = 'Navigated'
+      target = 'backwards'
+      break
+    case 'browserGoForward':
+      operation = 'Navigated'
+      target = 'forward'
+      break
+    case 'browserReload':
+      operation = 'Reloaded'
+      target = 'active page'
+      break
+    case 'browserMouseMove':
+      operation = 'Moved cursor to'
+      target = `(${args.x}, ${args.y})`
+      break
+    case 'browserMouseClickCoordinate':
+      operation = 'Clicked coordinate'
+      target = `(${args.x}, ${args.y}) using ${args.button || 'left'}`
+      break
+    case 'browserMouseDrag':
+      operation = 'Dragged mouse'
+      target = `from (${args.fromX}, ${args.fromY}) to (${args.toX}, ${args.toY})`
+      break
+    case 'browserGetHtml':
+      operation = 'Read HTML of'
+      target = 'active page'
+      break
+    case 'browserScreenshot':
+      operation = 'Captured screenshot'
+      target = result.filename ?? 'viewport'
+      if (result.filePath) {
+        fullPath = result.filePath.replace('file://', '')
+        isFile = true
+      }
+      break
     default:
       operation = 'Ran'
       target = toolCall.toolName
   }
 
-  if (isFile) {
+  if (isFile && toolCall.toolName !== 'browserScreenshot') {
     target = fullPath.split(/[/\\]/).pop() ?? fullPath
   }
 
@@ -149,6 +215,9 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   }
 
   const renderIcon = () => {
+    if (toolCall.toolName === 'browserScreenshot') {
+      return <Camera size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
+    }
     if (isFile) {
       if (target === 'implementation_plan.md') {
         return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
@@ -162,6 +231,34 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       return <FileIcon fileName={target} size={16} />
     }
     switch (toolCall.toolName) {
+      case 'browserNavigate':
+        return <Globe size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
+      case 'browserClick':
+        return <MousePointerClick size={15} style={{ color: '#a78bfa', flexShrink: 0 }} />
+      case 'browserType':
+        return <Keyboard size={15} style={{ color: '#34d399', flexShrink: 0 }} />
+      case 'browserHover':
+        return <MousePointerClick size={15} style={{ color: '#c084fc', flexShrink: 0 }} />
+      case 'browserWaitFor':
+        return <Eye size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
+      case 'browserScroll':
+        return <ChevronsUpDown size={15} style={{ color: '#94a3b8', flexShrink: 0 }} />
+      case 'browserPressKey':
+        return <CornerDownLeft size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
+      case 'browserMouseMove':
+        return <MousePointer size={15} style={{ color: '#a78bfa', flexShrink: 0 }} />
+      case 'browserMouseClickCoordinate':
+        return <MousePointerClick size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
+      case 'browserMouseDrag':
+        return <Move size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
+      case 'browserGoBack':
+        return <ArrowLeft size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
+      case 'browserGoForward':
+        return <ArrowRight size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
+      case 'browserReload':
+        return <RotateCw size={15} style={{ color: '#34d399', flexShrink: 0 }} />
+      case 'browserGetHtml':
+        return <Code2 size={15} style={{ color: '#fbbf24', flexShrink: 0 }} />
       case 'runCommand':
         return <Terminal size={15} style={{ color: '#4ade80', flexShrink: 0 }} />
       case 'listDir':
@@ -186,7 +283,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
         paddingLeft: 2,
         userSelect: 'none',
         height: 20,
-        contain: 'strict',
+        contain: 'layout paint',  // #35 fix: strict clips variable-height content; layout+paint is correct
         cursor: isFile ? 'pointer' : 'default',
         borderRadius: 4,
         transition: 'background 0.15s ease'

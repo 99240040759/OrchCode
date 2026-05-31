@@ -26,7 +26,8 @@
     "@sentry/electron": "^4.19.0",
     "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.3.9",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "playwright": "^1.60.0"
   },
   "devDependencies": {
     "@ai-sdk/google": "^3.0.80",

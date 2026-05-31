@@ -105,7 +105,7 @@ const api = {
     const listener = (_event: any, user: any) => callback(user)
     ipcRenderer.on('auth:status-changed', listener)
     return () => ipcRenderer.removeListener('auth:status-changed', listener)
-  }
+  },
 }
 
 if (process.contextIsolated) {

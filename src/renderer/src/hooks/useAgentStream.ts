@@ -94,13 +94,17 @@ export function useAgentStream() {
     return () => { cleanupActiveStream() }
   }, [cleanupActiveStream])
 
-  const run = async (promptText: string, mode?: string) => {
+  // #1 fix: run is stable with useCallback — deps are exactly the values it reads
+  // #2 fix: capture isNewThread at call time before any async work or atom mutation
+  const run = useCallback(async (promptText: string, mode?: string) => {
     cleanupActiveStream()
 
-    const threadId = activeThreadId ?? conversationId
-    threadIdRef.current = threadId
+    // #2 fix: capture current thread identity at invocation time — not from closure captures
+    const resolvedThreadId = activeThreadId ?? conversationId
+    const isNewThread = !activeThreadId  // #3 fix: capture before setActiveThreadId
+    threadIdRef.current = resolvedThreadId
 
-    if (!activeThreadId) {
+    if (isNewThread) {
       setActiveThreadId(conversationId)
     }
 
@@ -128,12 +132,16 @@ export function useAgentStream() {
 
     try {
       let fullContent = ''
-      let orderedBlocks: StreamBlock[] = []
+      // #20 fix: orderedBlocks is mutated directly during streaming — it's a local
+      // variable committed to state only via flushAssistant(). No immutability needed here.
+      const orderedBlocks: StreamBlock[] = []
       let currentReasoningStartMs = 0
       let assistantIsStreaming = true
 
       const flushAssistant = (force = false) => {
         const update = () => {
+          // Take a snapshot of orderedBlocks at flush time
+          const snapshot = [...orderedBlocks]
           setMessages((prev) => {
             const hasMsg = prev.some((m) => m.id === assistantMsgId)
             if (!hasMsg) {
@@ -143,7 +151,7 @@ export function useAgentStream() {
                   id: assistantMsgId,
                   role: 'assistant' as const,
                   content: fullContent,
-                  orderedBlocks: [...orderedBlocks],
+                  orderedBlocks: snapshot,
                   timestamp: Date.now(),
                   isStreaming: assistantIsStreaming
                 }
@@ -151,7 +159,7 @@ export function useAgentStream() {
             }
             return prev.map((m) =>
               m.id === assistantMsgId
-                ? { ...m, content: fullContent, orderedBlocks: [...orderedBlocks], isStreaming: assistantIsStreaming }
+                ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming }
                 : m
             )
           })
@@ -181,96 +189,101 @@ export function useAgentStream() {
 
           if (chunkType === 'reasoning-start') {
             currentReasoningStartMs = Date.now()
-            orderedBlocks = [...orderedBlocks, { type: 'reasoning', content: '', durationMs: 0, isStreaming: true }]
+            // #20 fix: push directly (mutation is safe for local var)
+            orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0, isStreaming: true })
             flushAssistant()
           } else if (chunkType === 'reasoning-delta') {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
-            orderedBlocks = orderedBlocks.map((block) => {
-              if (block.type === 'reasoning' && block.isStreaming) {
-                return { ...block, content: block.content + textDelta, durationMs: Date.now() - currentReasoningStartMs }
-              }
-              return block
-            })
+            // #20 fix: find and mutate the streaming reasoning block directly
+            const streamingReasoning = [...orderedBlocks].reverse().find(
+              (b) => b.type === 'reasoning' && b.isStreaming
+            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            if (streamingReasoning) {
+              streamingReasoning.content += textDelta
+              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            }
             flushAssistant()
           } else if (chunkType === 'reasoning-end') {
-            orderedBlocks = orderedBlocks.map((block) => {
-              if (block.type === 'reasoning' && block.isStreaming) {
-                return { ...block, durationMs: Date.now() - currentReasoningStartMs, isStreaming: false }
-              }
-              return block
-            })
+            const streamingReasoning = [...orderedBlocks].reverse().find(
+              (b) => b.type === 'reasoning' && b.isStreaming
+            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            if (streamingReasoning) {
+              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+              streamingReasoning.isStreaming = false
+            }
             flushAssistant()
           } else if (chunkType === 'text-delta') {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
             fullContent += textDelta
 
-            orderedBlocks = orderedBlocks.map((block) => {
-              if (block.type === 'reasoning' && block.isStreaming) {
-                return { ...block, isStreaming: false, durationMs: Date.now() - currentReasoningStartMs }
-              }
-              return block
-            })
+            // Close any streaming reasoning block
+            const streamingReasoning = [...orderedBlocks].reverse().find(
+              (b) => b.type === 'reasoning' && b.isStreaming
+            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            if (streamingReasoning) {
+              streamingReasoning.isStreaming = false
+              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            }
 
+            // Mutate last text block or push new one
             const last = orderedBlocks[orderedBlocks.length - 1]
             if (!last || last.type !== 'text') {
-              orderedBlocks = [...orderedBlocks, { type: 'text', content: textDelta }]
+              orderedBlocks.push({ type: 'text', content: textDelta })
             } else {
-              orderedBlocks = orderedBlocks.map((block, idx) => {
-                if (idx === orderedBlocks.length - 1 && block.type === 'text') {
-                  return { ...block, content: block.content + textDelta }
-                }
-                return block
-              })
+              (last as Extract<StreamBlock, { type: 'text' }>).content += textDelta
             }
             flushAssistant()
           } else if (chunkType === 'tool-call') {
             setRunState('tool-calling')
 
-            orderedBlocks = orderedBlocks.map((block) => {
-              if (block.type === 'reasoning' && block.isStreaming) {
-                return { ...block, isStreaming: false, durationMs: Date.now() - currentReasoningStartMs }
-              }
-              return block
-            })
+            // Close streaming reasoning if open
+            const streamingReasoning = [...orderedBlocks].reverse().find(
+              (b) => b.type === 'reasoning' && b.isStreaming
+            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            if (streamingReasoning) {
+              streamingReasoning.isStreaming = false
+              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            }
 
             const tcId = chunkData?.toolCallId ?? `tc-${Date.now()}`
             const tcName = chunkData?.toolName ?? 'unknown'
             const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
-            orderedBlocks = [...orderedBlocks, { type: 'tool', toolCallId: tcId, toolName: tcName, args: tcArgs, status: 'pending' }]
+            orderedBlocks.push({ type: 'tool', toolCallId: tcId, toolName: tcName, args: tcArgs, status: 'pending' })
             flushAssistant()
           } else if (chunkType === 'tool-result') {
             const tcId = chunkData?.toolCallId
 
-            orderedBlocks = orderedBlocks.map((block) => {
-              if (block.type === 'tool' && block.toolCallId === tcId) {
-                const fileChange = extractFileChange(block.toolName, block.args)
-                if (fileChange) {
-                  setFilesChanged((prev) => {
-                    const existingIdx = prev.findIndex((fc) => fc.path === fileChange.path)
-                    if (existingIdx >= 0) {
-                      const updated = [...prev]
-                      const existing = prev[existingIdx]
-                      updated[existingIdx] = {
-                        ...fileChange,
-                        additions: existing.additions + fileChange.additions,
-                        deletions: existing.deletions + fileChange.deletions,
-                        lineRange: fileChange.lineRange || existing.lineRange
-                      }
-                      return updated
+            const toolBlock = orderedBlocks.find(
+              (b) => b.type === 'tool' && (b as any).toolCallId === tcId
+            ) as Extract<StreamBlock, { type: 'tool' }> | undefined
+
+            if (toolBlock) {
+              const fileChange = extractFileChange(toolBlock.toolName, toolBlock.args)
+              if (fileChange) {
+                setFilesChanged((prev) => {
+                  const existingIdx = prev.findIndex((fc) => fc.path === fileChange.path)
+                  if (existingIdx >= 0) {
+                    const updated = [...prev]
+                    const existing = prev[existingIdx]
+                    updated[existingIdx] = {
+                      ...fileChange,
+                      additions: existing.additions + fileChange.additions,
+                      deletions: existing.deletions + fileChange.deletions,
+                      lineRange: fileChange.lineRange || existing.lineRange
                     }
-                    return [...prev, fileChange]
-                  })
-                }
-                const res = chunkData?.result
-                const isErr = res && (
-                  (typeof res === 'string' && (res.toLowerCase().includes('error:') || res.toLowerCase().includes('failed:') || res.toLowerCase().includes('traversal blocked'))) ||
-                  (typeof res === 'object' && ('error' in res || (res as any).success === false))
-                )
-                const status = isErr ? ('error' as const) : ('complete' as const)
-                return { ...block, result: chunkData?.result, status }
+                    return updated
+                  }
+                  return [...prev, fileChange]
+                })
               }
-              return block
-            })
+              const res = chunkData?.result
+              const isErr = res && (
+                (typeof res === 'string' && (res.toLowerCase().includes('error:') || res.toLowerCase().includes('failed:') || res.toLowerCase().includes('traversal blocked'))) ||
+                (typeof res === 'object' && ('error' in res || (res as any).success === false))
+              )
+              toolBlock.result = chunkData?.result
+              toolBlock.status = isErr ? 'error' : 'complete'
+            }
 
             flushAssistant()
             setRunState('streaming')
@@ -279,12 +292,11 @@ export function useAgentStream() {
             fullContent += `\n\n[System Error: ${chunkData ?? 'Unknown Error'}]`
             assistantIsStreaming = false
 
-            orderedBlocks = orderedBlocks.map((block) => {
+            for (const block of orderedBlocks) {
               if (block.type === 'tool' && block.status === 'pending') {
-                return { ...block, status: 'error' as const }
+                block.status = 'error'
               }
-              return block
-            })
+            }
 
             flushAssistant(true)
             setRunState('error')
@@ -297,10 +309,8 @@ export function useAgentStream() {
 
             setSessionTokens(accumulatedTokens)
 
-            if (compactionTriggered) {
-              if (!orderedBlocks.some((b) => b.type === 'compaction')) {
-                orderedBlocks = [...orderedBlocks, { type: 'compaction' }]
-              }
+            if (compactionTriggered && !orderedBlocks.some((b) => b.type === 'compaction')) {
+              orderedBlocks.push({ type: 'compaction' })
             }
 
             flushAssistant(true)
@@ -308,7 +318,8 @@ export function useAgentStream() {
 
             if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null }
 
-            if (!activeThreadId && (fullContent || orderedBlocks.length > 0)) {
+            // #3 fix: use isNewThread captured at call-start, not the stale atom value
+            if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
               const titleText = promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200)
               window.api.generateTitle(titleText, threadIdRef.current)
                 .then(async () => {
@@ -327,17 +338,8 @@ export function useAgentStream() {
         }
       })
 
-      const abortHandler = () => {
-        cleanupActiveStream()
-        window.api.stopAgentStream(threadIdRef.current).catch(console.error)
-      }
-      abortRef.current.signal.addEventListener('abort', abortHandler)
+      await window.api.streamAgent(promptText, resolvedThreadId, mode, selectedModel)
 
-      await window.api.streamAgent(promptText, threadIdRef.current, mode, selectedModel)
-
-      if (abortRef.current) {
-        abortRef.current.signal.removeEventListener('abort', abortHandler)
-      }
     } catch (err: any) {
       if (err.name === 'AbortError') {
         setRunState('idle')
@@ -363,13 +365,17 @@ export function useAgentStream() {
       }
       cleanupActiveStream()
     }
-  }
+  }, [activeThreadId, conversationId, selectedModel, setActiveThreadId, setMessages, setRunState,
+      setThreads, setFilesChanged, setSessionTokens, cleanupActiveStream])
 
-  const stop = () => {
+  // #18 fix: stop() explicitly calls stopAgentStream — no reliance on abort event chain
+  const stop = useCallback(() => {
+    const tid = threadIdRef.current
     cleanupActiveStream()
     setRunState('idle')
     setMessages((prev) => prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)))
-  }
+    window.api.stopAgentStream(tid).catch(console.error)
+  }, [cleanupActiveStream, setRunState, setMessages])
 
   return { run, stop }
 }

@@ -35,6 +35,12 @@ export function initUpdater(window: BrowserWindow) {
   ipcMain.handle('updater:get-status', () => currentStatus)
   ipcMain.handle('app:get-version', () => app.getVersion())
 
+  // Bypasses update scheduling in development environment
+  if (!app.isPackaged) {
+    log.info('[updater] Dev environment detected. Skipping update checks.')
+    return
+  }
+
   ipcMain.handle('updater:check', () => {
     log.info('[updater] Manual check requested')
     if (process.platform === 'win32') {

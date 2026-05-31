@@ -2,8 +2,8 @@ import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
 import crypto from 'crypto'
 import { app, shell, BrowserWindow, WebContentsView, ipcMain, dialog } from 'electron'
-import { join, resolve, normalize, extname, dirname } from 'path'
-import { promises as fs, realpathSync } from 'fs'
+import { join, extname } from 'path'
+import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
 import { initAuth } from './auth'
@@ -15,12 +15,13 @@ import {
   updateWorkspacePath,
   getWorkspaceContext,
   setActiveConversationId,
-  serializeWorkspace
+  serializeWorkspace,
+  assertWithinWorkspace
 } from './workspace'
 
-import { streamText, type ModelMessage, stepCountIs, generateText } from 'ai'
+import { streamText, stepCountIs, generateText } from 'ai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { tools } from './tools'
+import { createCoreTools, browserTools, startBrowserAgentWorker, stopBrowserAgentWorker } from './tools'
 
 import {
   getThreads,
@@ -33,7 +34,9 @@ import {
   getUniqueWorkspaces,
   deleteWorkspaceThreads,
   addOpenedWorkspace,
-  deleteOpenedWorkspace
+  deleteOpenedWorkspace,
+  getThreadAccumulatedTokens,
+  updateThreadAccumulatedTokens
 } from './db'
 
 import pty from 'node-pty'
@@ -47,6 +50,9 @@ initSentry({
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
 log.info('[main] Orch-Code starting...')
+// CDP bound explicitly to loopback only — required for Playwright browser automation
+app.commandLine.appendSwitch('remote-debugging-port', '9222')
+app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
 let activeConversationId = `session-${Date.now()}`
 setActiveConversationId(activeConversationId)
@@ -55,9 +61,6 @@ function setActiveSession(id: string) {
   activeConversationId = id
   setActiveConversationId(id)
 }
-
-
-const threadTokenAccumulator = new Map<string, number>()
 
 const workspaceSerializationCache = new Map<string, { serialized: string; timestamp: number }>()
 
@@ -154,51 +157,6 @@ function createWindow(): BrowserWindow {
   }
 
   return mainWindow
-}
-
-function safeRealpathSync(filePath: string): string {
-  try {
-    return realpathSync(filePath)
-  } catch (err: any) {
-    if (err.code === 'ENOENT') {
-      const dir = dirname(filePath)
-      try {
-        const resolvedDir = realpathSync(dir)
-        return join(resolvedDir, filePath.split(/[/\\]/).pop() ?? '')
-      } catch {
-        return filePath
-      }
-    }
-    throw err
-  }
-}
-
-function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
-  const cid = conversationId || activeConversationId
-  const wctx = getWorkspaceContext(cid) || getOrCreateWorkspaceContext(cid)
-
-  const resolvedRoot = safeRealpathSync(resolve(rootPath))
-  const resolvedTarget = safeRealpathSync(resolve(targetPath))
-  const normalizedTarget = normalize(resolvedTarget)
-
-  const resolvedArtifactsRoot = safeRealpathSync(resolve(wctx.artifactsPath))
-  if (normalizedTarget.startsWith(resolvedArtifactsRoot + '/') || normalizedTarget === resolvedArtifactsRoot) {
-    return normalizedTarget
-  }
-
-  if (normalizedTarget.includes('/.orch-artifacts/') || normalizedTarget.endsWith('/.orch-artifacts')) {
-    const idx = normalizedTarget.indexOf('.orch-artifacts')
-    const relativePart = normalizedTarget.substring(idx + '.orch-artifacts'.length)
-    const secureRedirect = normalize(join(wctx.artifactsPath, relativePart))
-    return secureRedirect
-  }
-
-  if (!normalizedTarget.startsWith(resolvedRoot + '/') && normalizedTarget !== resolvedRoot) {
-    const errorMsg = `Path traversal blocked: "${targetPath}" resolves outside workspace root: "${resolvedRoot}"`
-    log.error(`[security] ${errorMsg}`)
-    throw new Error(errorMsg)
-  }
-  return normalizedTarget
 }
 
 async function pushArtifactsChanged(conversationId: string): Promise<void> {
@@ -331,7 +289,8 @@ ipcMain.handle('mastra:get-unique-workspaces', async () => {
 
 ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspacePath }) => {
   const convId = conversationId || activeConversationId
-  setActiveSession(convId)
+  // Do NOT call setActiveSession here — only the active stream-request should own the global session.
+  // This handler only registers the workspace binding for the given conversationId.
   const ctx = updateWorkspacePath(convId, workspacePath)
 
   addOpenedWorkspace(workspacePath)
@@ -342,7 +301,7 @@ ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspac
     log.warn('[main] Could not bind thread to workspace:', err)
   }
 
-  log.info(`[main] Active session switched to: ${convId}, workspace: ${workspacePath}`)
+  log.info(`[main] Workspace bound: conv=${convId} path=${workspacePath}`)
   return ctx
 })
 
@@ -444,18 +403,108 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
       activeHistory = history.slice(compactionIndex + 1)
     }
 
-    const messages: ModelMessage[] = [
-      ...activeHistory.map((m) => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content
-      })),
-      { role: 'user', content: promptText }
-    ]
+    const messages: any[] = []
+
+    for (const m of activeHistory) {
+      if (m.role === 'user') {
+        messages.push({
+          role: 'user',
+          content: m.content
+        })
+      } else if (m.role === 'assistant') {
+        // Derive text EXCLUSIVELY from blocks to avoid content-column duplication (#4 fix)
+        let textContent = ''
+        const toolCalls: any[] = []
+        const toolResults: any[] = []
+
+        if (m.data) {
+          try {
+            const blocks = JSON.parse(m.data)
+            if (Array.isArray(blocks)) {
+              for (const block of blocks) {
+                if (block.type === 'text') {
+                  textContent += block.content
+                } else if (block.type === 'tool') {
+                  toolCalls.push({
+                    type: 'tool-call',
+                    toolCallId: block.toolCallId,
+                    toolName: block.toolName,
+                    args: block.args
+                  })
+                  toolResults.push({
+                    type: 'tool-result',
+                    toolCallId: block.toolCallId,
+                    toolName: block.toolName,
+                    result: block.result
+                  })
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // If no blocks, fall back to the content column (legacy or bare text turns)
+        if (!textContent && m.content !== '[Action Taken]') {
+          textContent = m.content
+        }
+
+        // Pairing validation: only include calls that have a matching result (#25 fix)
+        const resultIds = new Set(toolResults.map((r) => r.toolCallId))
+        const pairedCalls = toolCalls.filter((c) => resultIds.has(c.toolCallId))
+        const pairedResults = toolResults.filter((r) => pairedCalls.some((c) => c.toolCallId === r.toolCallId))
+
+        const finalAssistantContent = textContent || (pairedCalls.length === 0 ? '[Action Taken]' : undefined)
+        messages.push({
+          role: 'assistant',
+          content: finalAssistantContent,
+          toolCalls: pairedCalls.length > 0 ? pairedCalls : undefined
+        })
+
+        if (pairedResults.length > 0) {
+          messages.push({
+            role: 'tool',
+            content: pairedResults
+          })
+        }
+      } else {
+        messages.push({
+          role: m.role,
+          content: m.content
+        })
+      }
+    }
+
+    // Attach latest screenshot ONLY when browser automation is active (#10 fix)
+    let promptContent: any = promptText
+    if (browserView) {
+      try {
+        const screenshotDir = join(app.getPath('userData'), 'conversations', convId, 'screenshots')
+        const files = await fs.readdir(screenshotDir)
+        const pngFiles = files.filter(f => f.endsWith('.png'))
+        if (pngFiles.length > 0) {
+          const fileStats = await Promise.all(pngFiles.map(async (f) => {
+            const p = join(screenshotDir, f)
+            const stat = await fs.stat(p)
+            return { file: f, path: p, mtime: stat.mtimeMs }
+          }))
+          fileStats.sort((a, b) => b.mtime - a.mtime)
+          const latestScreenshot = fileStats[0]
+          const buffer = await fs.readFile(latestScreenshot.path)
+          promptContent = [
+            { type: 'text', text: promptText },
+            { type: 'image', image: buffer, mimeType: 'image/png' }
+          ]
+          log.info(`[main] Attached screenshot to prompt: ${latestScreenshot.file}`)
+        }
+      } catch {}
+    }
+
+    messages.push({ role: 'user', content: promptContent })
 
     let contextBlock = ''
     if (ctx.rootPath) {
       const cached = workspaceSerializationCache.get(convId)
-      if (cached && Date.now() - cached.timestamp < 10000) {
+      if (cached && Date.now() - cached.timestamp < 30000) {
         contextBlock = cached.serialized
       } else {
         try {
@@ -467,11 +516,26 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
       }
     }
 
-    const modeSuffix = mode ? `\nMode: ${mode}.` : ''
+    const modeSuffix = mode && mode !== 'undefined' ? `\nMode: ${mode}.` : ''
+    let browserInstruction = ''
+    if (browserView) {
+      browserInstruction = `\n── BROWSER AUTOMATION ACTIVE ──
+You currently have active eyes and hands in the browser panel. Use the expanded browser tools to complete tasks:
+1. 'browserNavigate(url)': Open pages.
+2. 'browserClick(selector, frameSelector?)', 'browserType(selector, text, frameSelector?)', 'browserHover(selector, frameSelector?)': Pierce frames natively by providing optional frameSelector (e.g. 'iframe#payment-frame') to target nested content and pierce shadow DOMs. Hover targets drop-down menus.
+3. 'browserWaitFor(selector, state?, frameSelector?)': Robustly sync page states (wait for 'attached', 'detached', 'visible', 'hidden') in SPAs before acting.
+4. 'browserScroll(direction, amount?)': Scroll 'up', 'down', 'left', 'right' to load lazy elements or view hidden content.
+5. 'browserPressKey(key)': Press keyboard keys natively (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown').
+6. 'browserMouseMove(x, y)', 'browserMouseClickCoordinate(x, y, button?)', 'browserMouseDrag(fromX, fromY, toX, toY)': Control the cursor at absolute pixel coordinates. Use to click custom canvas structures, select elements, or drag map widgets.
+7. 'browserGoBack()', 'browserGoForward()', 'browserReload()': Control browser state.
+8. 'browserScreenshot()', 'browserGetHtml()': Visual and structural feedback. ALWAYS capture a screenshot after significant navigation, typing, or page actions to visually verify the page state.`
+    }
+
     const systemInstruction = `You are Antigravity, a highly capable developer coding assistant. Active conversation ID: ${convId}.${modeSuffix}
 You have native access to the active workspace context below. Use it to answer questions accurately:
 
 ${contextBlock || 'No workspace files available. The user has not opened a workspace yet.'}
+${browserInstruction}
 
 ── ARTIFACT BOUNDARIES & WORKFLOW COMPLIANCE ──
 You must always structure your software development flow using the sandboxed Artifacts system inside the '.orch-artifacts/' folder of the active workspace.
@@ -497,14 +561,40 @@ Follow these native planning boundaries strictly to manage your work professiona
     const modelEnvKey = modelType === 'gemma' ? 'GOOGLE_MODEL_NAME_GEMMA' : 'GOOGLE_MODEL_NAME_GEMINI'
     const selectedModel = process.env[modelEnvKey] as string
 
+    // Seed token accumulator from DB so compaction survives restarts (#5 fix)
+    const storedTokens = getThreadAccumulatedTokens(threadId)
+
+    const coreTools = createCoreTools(convId)
+    const activeTools = {
+      ...coreTools,
+      ...(browserView ? browserTools : {})
+    }
+
     const result = streamText({
       model: google(selectedModel),
       system: systemInstruction,
       messages,
-      tools,
+      tools: activeTools,
       stopWhen: stepCountIs(50),
       abortSignal: controller.signal
     })
+
+    const assistantMsgId = `assistant-${Date.now()}`
+
+    const saveProgress = async () => {
+      if (assistantContent || orderedBlocks.length > 0) {
+        try {
+          await saveMessage(threadId, {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: assistantContent || '[Action Taken]',
+            data: JSON.stringify(orderedBlocks)
+          })
+        } catch (saveErr) {
+          log.error('[main] Progressive save failed:', saveErr)
+        }
+      }
+    }
 
     let assistantContent = ''
     const orderedBlocks: any[] = []
@@ -527,6 +617,7 @@ Follow these native planning boundaries strictly to manage your work professiona
         event.sender.send('agent:stream-chunk', { type: 'reasoning-delta', payload: textDelta })
       } else if (part.type === 'reasoning-end') {
         event.sender.send('agent:stream-chunk', { type: 'reasoning-end' })
+        await saveProgress()
       } else if (part.type === 'text-delta') {
         const textDelta = (part as any).text || (part as any).textDelta || ''
         assistantContent += textDelta
@@ -538,6 +629,7 @@ Follow these native planning boundaries strictly to manage your work professiona
         log.info(`[main] Tool: ${part.toolName} (${part.toolCallId})`)
         orderedBlocks.push({ type: 'tool', toolCallId: part.toolCallId, toolName: part.toolName, args: part.input, status: 'pending' })
         event.sender.send('agent:stream-chunk', { type: 'tool-call', payload: { toolCallId: part.toolCallId, toolName: part.toolName, args: part.input } })
+        await saveProgress()
       } else if (part.type === 'tool-result') {
         log.info(`[main] Tool result: ${part.toolName}`)
         const block = orderedBlocks.find((b) => b.type === 'tool' && b.toolCallId === part.toolCallId)
@@ -549,29 +641,32 @@ Follow these native planning boundaries strictly to manage your work professiona
           invalidateWorkspaceCache(convId)
           pushArtifactsChanged(convId)
         }
+        await saveProgress()
       } else if (part.type === 'error') {
         const errorMsg = (part as any).error?.message || String((part as any).error || 'Unknown error')
         log.error(`[main] Stream error: "${errorMsg}"`)
         const block = orderedBlocks.find((b) => b.type === 'tool' && b.status === 'pending')
         if (block) block.status = 'error'
         event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg })
+        await saveProgress()
       } else if (part.type === 'finish') {
         const usage = (part as any).totalUsage || (part as any).usage || {}
         turnPromptTokens = usage.inputTokens || usage.promptTokens || 0
         turnCompletionTokens = usage.outputTokens || usage.completionTokens || 0
         const turnTotal = turnPromptTokens + turnCompletionTokens
 
-        const prevAccumulated = threadTokenAccumulator.get(threadId) || 0
+        const prevAccumulated = storedTokens
         const newAccumulated = prevAccumulated + turnTotal
 
         let compactionTriggered = false
+        // Dedup: only add compaction if none already exists in this turn's blocks (#6 fix)
         if (newAccumulated >= 200_000 && !orderedBlocks.some((b: any) => b.type === 'compaction')) {
           orderedBlocks.push({ type: 'compaction' })
-          threadTokenAccumulator.set(threadId, 0)
+          updateThreadAccumulatedTokens(threadId, 0)
           compactionTriggered = true
           log.info(`[main] Compaction triggered at ${newAccumulated} tokens for thread ${threadId}`)
         } else {
-          threadTokenAccumulator.set(threadId, newAccumulated)
+          updateThreadAccumulatedTokens(threadId, newAccumulated)
         }
 
         log.info(`[main] Stream finish — turn: ${turnTotal} tokens, accumulated: ${newAccumulated}`)
@@ -583,16 +678,12 @@ Follow these native planning boundaries strictly to manage your work professiona
             compactionTriggered
           }
         })
+        await saveProgress()
       }
     }
 
-    if ((assistantContent || orderedBlocks.length > 0) && !controller.signal.aborted) {
-      await saveMessage(threadId, {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: assistantContent || '[Action Taken]',
-        data: JSON.stringify(orderedBlocks)
-      })
+    if (!controller.signal.aborted) {
+      await saveProgress()
     }
   } catch (err: any) {
     log.error('[main] Stream error:', err)
@@ -641,13 +732,19 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd }: { cols: number; r
 
   log.info(`[terminal] Spawning ${shell} in ${workingDir} (${cols}x${rows})`)
 
-  const ptyProcess = pty.spawn(shell, [], {
-    name: 'xterm-256color',
-    cols: Math.max(cols, 10),
-    rows: Math.max(rows, 3),
-    cwd: workingDir,
-    env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
-  })
+  let ptyProcess: any
+  try {
+    ptyProcess = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: Math.max(cols, 10),
+      rows: Math.max(rows, 3),
+      cwd: workingDir,
+      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    })
+  } catch (err: any) {
+    log.error(`[terminal:create] Failed to spawn PTY shell:`, err)
+    throw new Error(`Failed to initialize shell process: ${err.message}`)
+  }
 
   activePtys.set(id, ptyProcess)
 
@@ -730,6 +827,7 @@ ipcMain.handle('browser:open', (event, { url, bounds }: { url: string; bounds: {
       sandbox: true
     }
   })
+  ;(globalThis as any).browserView = browserView
 
   mainWindow.contentView.addChildView(browserView)
   browserView.setBounds(bounds)
@@ -746,6 +844,7 @@ ipcMain.handle('browser:open', (event, { url, bounds }: { url: string; bounds: {
   })
 
   log.info(`[browser] Opened: ${url}`)
+  startBrowserAgentWorker()
 })
 
 ipcMain.handle('browser:navigate', (_event, url: string) => {
@@ -778,9 +877,12 @@ ipcMain.handle('browser:close', () => {
       browserView.webContents.close()
     } catch {}
     browserView = null
+    ;(globalThis as any).browserView = null
     log.info('[browser] Closed')
+    stopBrowserAgentWorker()
   }
 })
+
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.orch-code')

@@ -21,7 +21,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
         components={{
           a: ({ href, children, ...props }) => {
             if (href && href.startsWith('file://')) {
-              const filePath = decodeURIComponent(href.replace(/^file:\/\/\/?/, '/'))
+              let filePath = decodeURIComponent(href.replace(/^file:\/\/\/?/, ''))
+              // If it's a Unix absolute path, prepend leading slash back
+              if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) {
+                filePath = '/' + filePath
+              }
 
               const handleFileClick = async (e: React.MouseEvent) => {
                 e.preventDefault()

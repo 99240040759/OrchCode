@@ -1,10 +1,9 @@
 import React, { useEffect } from 'react'
-import { Settings } from 'lucide-react'
+
 import { useAtom } from 'jotai'
 import { updateStatusAtom, authUserAtom } from '../store/agentStore'
-import * as Comlink from 'comlink'
-import BackgroundWorker from '../workers/background.worker?worker'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { getSharedWorker } from '../lib/workerManager'
 
 interface TitleBarProps {
   title?: string
@@ -15,19 +14,6 @@ interface TitleBarProps {
 
 const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
-// Instantiate background Comlink Web Worker unconditionally to offload UI thread
-let backgroundWorkerApi: any = null
-try {
-  const worker = new BackgroundWorker()
-  backgroundWorkerApi = Comlink.wrap(worker)
-  // Sync client ID for telemetry
-  const clientId = localStorage.getItem('orchcode_client_id')
-  if (clientId) {
-    backgroundWorkerApi.init(clientId)
-  }
-} catch (err) {
-  console.error('[TitleBar] Failed to spawn Comlink Web Worker thread:', err)
-}
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" style={{ marginRight: '4px' }} xmlns="http://www.w3.org/2000/svg">
@@ -59,27 +45,38 @@ const TitleBar: React.FC<TitleBarProps> = ({
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
   const [authUser, setAuthUser] = useAtom(authUserAtom)
 
-  // Asynchronous off-thread version check
-  const runMacWorkerCheck = async () => {
+  // #38 fix: wrap in useCallback so useEffect dependency array is stable
+  // #30 fix: get worker inside callback (called from useEffect), not at module level
+  const runMacWorkerCheck = React.useCallback(async () => {
+    if (import.meta.env.DEV) {
+      setUpdateStatus({ status: 'idle' })
+      return
+    }
+    const backgroundWorkerApi = getSharedWorker()
     if (!backgroundWorkerApi) return
     setUpdateStatus({ status: 'checking' })
     try {
       const currentVersion = await window.api.getAppVersion()
       const result = await backgroundWorkerApi.checkMacUpdate(currentVersion)
       setUpdateStatus(result)
-      
+
       if (result.status === 'available') {
-        backgroundWorkerApi.sendTelemetryEvent('update_available', { 
-          platform: 'macos', 
-          version: result.version || 'unknown' 
+        backgroundWorkerApi.sendTelemetryEvent('update_available', {
+          platform: 'macos',
+          version: result.version || 'unknown'
         })
       }
     } catch (err: any) {
       setUpdateStatus({ status: 'error', error: err.message })
     }
-  }
+  }, [setUpdateStatus])
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      setUpdateStatus({ status: 'idle' })
+      return
+    }
+
     // Initial status fetch
     window.api.getUpdateStatus().then((status) => {
       if (status) {
@@ -92,23 +89,24 @@ const TitleBar: React.FC<TitleBarProps> = ({
     })
 
     // Listen for background state transitions (for Windows autoUpdater)
+    const backgroundWorkerApi = getSharedWorker()
     const unsubscribe = window.api.onUpdateStatusChanged((status) => {
       if (!isMac) {
         setUpdateStatus(status)
         if (status.status === 'available') {
-          backgroundWorkerApi?.sendTelemetryEvent('update_available', { 
-            platform: 'windows', 
-            version: status.version || 'unknown' 
+          backgroundWorkerApi?.sendTelemetryEvent('update_available', {
+            platform: 'windows',
+            version: status.version || 'unknown'
           })
         } else if (status.status === 'downloaded') {
-          backgroundWorkerApi?.sendTelemetryEvent('update_downloaded', { 
-            platform: 'windows', 
-            version: status.version || 'unknown' 
+          backgroundWorkerApi?.sendTelemetryEvent('update_downloaded', {
+            platform: 'windows',
+            version: status.version || 'unknown'
           })
         } else if (status.status === 'error') {
-          backgroundWorkerApi?.sendTelemetryEvent('update_error', { 
-            platform: 'windows', 
-            error: status.error || 'unknown' 
+          backgroundWorkerApi?.sendTelemetryEvent('update_error', {
+            platform: 'windows',
+            error: status.error || 'unknown'
           })
         }
       }
@@ -126,7 +124,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
       unsubscribe()
       if (intervalId) clearInterval(intervalId)
     }
-  }, [setUpdateStatus])
+  }, [setUpdateStatus, runMacWorkerCheck])
 
   useEffect(() => {
     // Initial fetch of active user
@@ -161,14 +159,15 @@ const TitleBar: React.FC<TitleBarProps> = ({
   }
 
   const handleUpdateClick = () => {
+    const workerApi = getSharedWorker()
     if (updateStatus.status === 'downloaded') {
-      backgroundWorkerApi?.sendTelemetryEvent('update_install_click', { platform: 'windows' })
+      workerApi?.sendTelemetryEvent('update_install_click', { platform: 'windows' })
       window.api.installUpdate()
     } else if (updateStatus.status === 'available' && isMac) {
-      backgroundWorkerApi?.sendTelemetryEvent('update_download_click', { platform: 'macos' })
+      workerApi?.sendTelemetryEvent('update_download_click', { platform: 'macos' })
       window.api.openMacRelease()
     } else if (updateStatus.status === 'error') {
-      backgroundWorkerApi?.sendTelemetryEvent('update_retry_click')
+      workerApi?.sendTelemetryEvent('update_retry_click')
       if (isMac) {
         runMacWorkerCheck()
       } else {
@@ -243,6 +242,10 @@ const TitleBar: React.FC<TitleBarProps> = ({
       <div className="titlebar-right" style={{ paddingRight: isMac ? 8 : 140, display: 'flex', alignItems: 'center', gap: '12px' }}>
         {renderUpdateIndicator()}
 
+        <div className="titlebar-action" onClick={onOpenEditor} style={{ fontSize: 13, fontWeight: 500, padding: '4px 8px' }}>
+          <span>Open Editor</span>
+        </div>
+
         {authUser ? (
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -264,6 +267,9 @@ const TitleBar: React.FC<TitleBarProps> = ({
                   <div className="profile-email">{authUser.email}</div>
                 </div>
                 <DropdownMenu.Separator className="profile-dropdown-separator" />
+                <DropdownMenu.Item className="profile-dropdown-item" onSelect={onSettingsClick}>
+                  Settings
+                </DropdownMenu.Item>
                 <DropdownMenu.Item className="profile-dropdown-item logout" onSelect={handleLogout}>
                   Log Out
                 </DropdownMenu.Item>
@@ -276,12 +282,6 @@ const TitleBar: React.FC<TitleBarProps> = ({
             <span>Sign In</span>
           </button>
         )}
-
-        <div className="titlebar-action" onClick={onOpenEditor} style={{ fontSize: 13, fontWeight: 500, padding: '4px 8px' }}>
-          <span>Open Editor</span>
-        </div>
-
-        <Settings size={15} strokeWidth={1.5} className="settings-btn" onClick={onSettingsClick} />
       </div>
     </header>
   )

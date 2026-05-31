@@ -1,6 +1,5 @@
 import { init as initSentry } from '@sentry/electron/renderer'
-import * as Comlink from 'comlink'
-import BackgroundWorker from './workers/background.worker?worker'
+import { getSharedWorker } from './lib/workerManager'
 
 // Initialize Sentry Renderer SDK (inherits DSN and enabled settings from Main)
 initSentry()
@@ -14,12 +13,12 @@ if (!clientId) {
 
 // Bootstrap consolidated worker off-thread telemetry
 try {
-  const worker = new BackgroundWorker()
-  const workerApi = Comlink.wrap<any>(worker)
-  workerApi.init(clientId)
-  workerApi.sendTelemetryEvent('app_launch', { 
-    platform: navigator.userAgent.includes('Mac') ? 'macos' : 'windows' 
-  })
+  const workerApi = getSharedWorker()
+  if (workerApi) {
+    workerApi.sendTelemetryEvent('app_launch', { 
+      platform: navigator.userAgent.includes('Mac') ? 'macos' : 'windows' 
+    })
+  }
 } catch (err) {
   console.error('[main] Telemetry bootstrap failed:', err)
 }

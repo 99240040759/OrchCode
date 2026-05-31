@@ -23,6 +23,7 @@ const sessionFilePath = join(app.getPath('userData'), 'session.bin')
 let currentSession: AuthSession | null = null
 let mainWin: BrowserWindow | null = null
 let tempServer: http.Server | null = null
+let pendingLoginReject: ((reason: Error) => void) | null = null
 
 // Helper for PKCE encoding
 function base64URLEncode(buffer: Buffer): string {
@@ -175,10 +176,15 @@ export async function initAuth(window: BrowserWindow) {
 
   ipcMain.handle('auth:login', async () => {
     log.info('[auth] Triggering Google Sign-in flow...')
-    
-    // Close existing redirect server if running
+
+    // Cancel any in-flight login and close its server (#31 fix)
+    if (pendingLoginReject) {
+      pendingLoginReject(new Error('Login cancelled: new login initiated'))
+      pendingLoginReject = null
+    }
     if (tempServer) {
       try { tempServer.close() } catch {}
+      tempServer = null
     }
 
     const { verifier, challenge } = generatePKCE()
@@ -192,6 +198,7 @@ export async function initAuth(window: BrowserWindow) {
     }
 
     return new Promise((resolve, reject) => {
+      pendingLoginReject = reject
       tempServer = http.createServer(async (req, res) => {
         try {
           const reqUrl = req.url || ''
@@ -220,13 +227,19 @@ export async function initAuth(window: BrowserWindow) {
           log.info('[auth] Received Google auth code, exchanging for tokens...')
 
           // 1. Exchange Auth Code for Google Tokens
-          const googleTokens = await postFormRequest('https://oauth2.googleapis.com/token', {
+          const googleTokenParams: Record<string, string> = {
             client_id: clientId,
             code: authCode,
             code_verifier: verifier,
             grant_type: 'authorization_code',
             redirect_uri: `http://localhost:${port}/callback`
-          })
+          }
+
+          if (process.env.GOOGLE_CLIENT_SECRET) {
+            googleTokenParams.client_secret = process.env.GOOGLE_CLIENT_SECRET
+          }
+
+          const googleTokens = await postFormRequest('https://oauth2.googleapis.com/token', googleTokenParams)
 
           const googleIdToken = googleTokens.id_token
           if (!googleIdToken) {
@@ -262,6 +275,7 @@ export async function initAuth(window: BrowserWindow) {
           await saveSession(currentSession)
           log.info('[auth] Login completed. Authenticated user:', user.email)
           
+          pendingLoginReject = null
           broadcastUserStatus(user)
           resolve(user)
 
@@ -271,10 +285,23 @@ export async function initAuth(window: BrowserWindow) {
             tempServer.close()
             tempServer = null
           }
-          res.writeHead(500, { 'Content-Type': 'text/html' })
-          res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' + err.message + '</p></div></body></html>')
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'text/html' })
+            res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' + err.message + '</p></div></body></html>')
+          }
+          pendingLoginReject = null
           reject(err)
         }
+      })
+
+      tempServer.on('error', (err: any) => {
+        log.error('[auth] Redirect server socket error:', err)
+        if (tempServer) {
+          try { tempServer.close() } catch {}
+          tempServer = null
+        }
+        pendingLoginReject = null
+        reject(new Error(`Local authentication server error: ${err.message}`))
       })
 
       tempServer.listen(port, '127.0.0.1', () => {

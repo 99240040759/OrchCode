@@ -14,7 +14,7 @@ import { estimateTokens } from '../lib/tokenizer'
 
 export function useThreads() {
   const conversationId = useAtomValue(conversationIdAtom)
-  const [threads, setThreads] = useAtom(threadListAtom)
+  const [, setThreads] = useAtom(threadListAtom)
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
   const setConversationId = useSetAtom(conversationIdAtom)
@@ -43,14 +43,17 @@ export function useThreads() {
     setMessages([])
     setSessionTokens(0)
 
-    const thread = threads.find((t) => t.id === threadId)
-    if (thread && thread.workspacePath) {
-      setActiveWorkspace({
-        name: thread.workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
-        path: thread.workspacePath
-      })
-      window.api.setActiveWorkspace(threadId, thread.workspacePath).catch(() => {})
-    }
+    // #11 fix: fetch thread workspace from IPC instead of stale `threads` closure
+    try {
+      const workspacePath = await window.api.getThreadWorkspace(threadId)
+      if (workspacePath) {
+        setActiveWorkspace({
+          name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
+          path: workspacePath
+        })
+        window.api.setActiveWorkspace(threadId, workspacePath).catch(() => {})
+      }
+    } catch {}
 
     try {
       const rawMessages = await window.api.getThreadMessages(threadId)
@@ -72,23 +75,23 @@ export function useThreads() {
         const compactionIdx = chatMsgs.findLastIndex((m) =>
           m.orderedBlocks?.some((b: any) => b.type === 'compaction')
         )
-        let activeMsgs = chatMsgs
-        if (compactionIdx !== -1) {
-          activeMsgs = chatMsgs.slice(compactionIdx + 1)
-        }
+        const activeMsgs = compactionIdx !== -1 ? chatMsgs.slice(compactionIdx + 1) : chatMsgs
 
-        let activeTokenEstimate = 0
+        // #23 fix: build all token texts first, then do a single Promise.all batch
+        const tokenTexts: string[] = []
         for (const m of activeMsgs) {
-          activeTokenEstimate += await estimateTokens(m.content)
+          tokenTexts.push(m.content)
           if (m.orderedBlocks) {
             for (const block of m.orderedBlocks) {
               if (block.type === 'tool') {
-                try { activeTokenEstimate += await estimateTokens(JSON.stringify(block.args)) } catch {}
-                try { activeTokenEstimate += await estimateTokens(JSON.stringify(block.result)) } catch {}
+                if (block.args) tokenTexts.push(JSON.stringify(block.args))
+                if (block.result) tokenTexts.push(JSON.stringify(block.result))
               }
             }
           }
         }
+        const tokenResults = await Promise.all(tokenTexts.map((t) => estimateTokens(t).catch(() => 0)))
+        const activeTokenEstimate = tokenResults.reduce((sum, count) => sum + count, 0)
         setSessionTokens(activeTokenEstimate)
       }
     } catch (err) {
@@ -106,6 +109,8 @@ export function useThreads() {
       setActiveThreadId(newId)
       setMessages([])
       setSessionTokens(0)
+      // #12 fix: reload thread list so the new thread appears immediately
+      await loadThreads()
       return newId
     } catch (err) {
       console.error('[useThreads] New conversation error:', err)

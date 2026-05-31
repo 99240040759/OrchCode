@@ -37,7 +37,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const [inputEstimate, setInputEstimate] = useState(0)
 
-  useEffect(() => {
+useEffect(() => {
     let active = true
     const delayDebounce = setTimeout(async () => {
       if (!inputValue) {

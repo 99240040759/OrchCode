@@ -38,7 +38,8 @@ function getDB(): Database.Database {
       title TEXT,
       resourceId TEXT NOT NULL,
       createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
+      updatedAt TEXT NOT NULL,
+      accumulatedTokens INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -49,6 +50,8 @@ function getDB(): Database.Database {
       createdAt TEXT NOT NULL,
       FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_messages_thread_created
+      ON messages(threadId, createdAt);
     CREATE TABLE IF NOT EXISTS thread_workspaces (
       threadId TEXT PRIMARY KEY,
       workspacePath TEXT NOT NULL,
@@ -60,29 +63,36 @@ function getDB(): Database.Database {
     );
   `)
 
+  // Migrate: add accumulatedTokens if upgrading from older schema
+  try {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
+  } catch {
+    // Column already exists — expected on subsequent launches
+  }
+
   return dbInstance
 }
 
-export async function getThreads(): Promise<(ThreadEntry & { workspacePath?: string | null })[]> {
+export function getThreads(): (ThreadEntry & { workspacePath?: string | null })[] {
   const db = getDB()
-  const stmt = db.prepare(`
+  return db.prepare(`
     SELECT t.*, tw.workspacePath FROM threads t
     LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
     ORDER BY t.updatedAt DESC
-  `)
-  return stmt.all() as (ThreadEntry & { workspacePath?: string | null })[]
+  `).all() as (ThreadEntry & { workspacePath?: string | null })[]
 }
 
-export async function getThreadMessages(threadId: string): Promise<ThreadMessage[]> {
+export function getThreadMessages(threadId: string): ThreadMessage[] {
   const db = getDB()
-  const stmt = db.prepare('SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC')
-  return stmt.all(threadId) as ThreadMessage[]
+  return db.prepare(
+    'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC'
+  ).all(threadId) as ThreadMessage[]
 }
 
-export async function saveMessage(
+export function saveMessage(
   threadId: string,
   message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }
-): Promise<ThreadMessage> {
+): ThreadMessage {
   const db = getDB()
   const now = new Date().toISOString()
   const msg = {
@@ -94,22 +104,25 @@ export async function saveMessage(
     createdAt: message.createdAt || now
   }
 
-  const runTransaction = db.transaction(() => {
+  db.transaction(() => {
     const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
     if (!threadExists) {
       db.prepare(`
-        INSERT OR IGNORE INTO threads (id, title, resourceId, createdAt, updatedAt)
-        VALUES (?, 'New Chat', 'local-user', ?, ?)
+        INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
+        VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
       `).run(threadId, now, now)
+    } else {
+      db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
     }
-    db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
+    // Proper upsert — updates in-place without delete+reinsert
     db.prepare(`
-      INSERT OR REPLACE INTO messages (id, threadId, role, content, data, createdAt)
+      INSERT INTO messages (id, threadId, role, content, data, createdAt)
       VALUES (@id, @threadId, @role, @content, @data, @createdAt)
+      ON CONFLICT(id) DO UPDATE SET
+        content = excluded.content,
+        data = excluded.data
     `).run(msg)
-  })
-
-  runTransaction()
+  })()
 
   return {
     id: msg.id,
@@ -120,31 +133,39 @@ export async function saveMessage(
   }
 }
 
-export async function deleteThread(threadId: string): Promise<boolean> {
+export function deleteThread(threadId: string): boolean {
   const db = getDB()
-  const result = db.prepare('DELETE FROM threads WHERE id = ?').run(threadId)
-  return result.changes > 0
+  return db.prepare('DELETE FROM threads WHERE id = ?').run(threadId).changes > 0
 }
 
-export async function updateThreadTitle(threadId: string, title: string): Promise<boolean> {
+export function updateThreadTitle(threadId: string, title: string): boolean {
   const db = getDB()
   const now = new Date().toISOString()
-  const result = db.prepare('UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId)
-  return result.changes > 0
+  return db.prepare('UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?')
+    .run(title, now, threadId).changes > 0
+}
+
+export function getThreadAccumulatedTokens(threadId: string): number {
+  const db = getDB()
+  const row = db.prepare('SELECT accumulatedTokens FROM threads WHERE id = ?').get(threadId) as any
+  return row?.accumulatedTokens ?? 0
+}
+
+export function updateThreadAccumulatedTokens(threadId: string, tokens: number): void {
+  const db = getDB()
+  db.prepare('UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
 }
 
 export function setThreadWorkspace(threadId: string, workspacePath: string): void {
   const db = getDB()
-
+  const now = new Date().toISOString()
   const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
   if (!threadExists) {
-    const now = new Date().toISOString()
     db.prepare(`
-      INSERT OR IGNORE INTO threads (id, title, resourceId, createdAt, updatedAt)
-      VALUES (?, ?, 'local-user', ?, ?)
-    `).run(threadId, 'New Chat', now, now)
+      INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
+      VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
+    `).run(threadId, now, now)
   }
-
   db.prepare(`
     INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath)
     VALUES (?, ?)
@@ -157,16 +178,15 @@ export function getThreadWorkspace(threadId: string): string | null {
   return row?.workspacePath ?? null
 }
 
-export async function getUniqueWorkspaces(): Promise<string[]> {
+export function getUniqueWorkspaces(): string[] {
   const db = getDB()
-  const rows = db.prepare('SELECT path FROM opened_workspaces ORDER BY lastOpenedAt DESC').all() as { path: string }[]
-  return rows.map((r) => r.path)
+  return (db.prepare('SELECT path FROM opened_workspaces ORDER BY lastOpenedAt DESC').all() as { path: string }[])
+    .map(r => r.path)
 }
 
 export function addOpenedWorkspace(path: string): void {
   const db = getDB()
-  const now = new Date().toISOString()
-  db.prepare('INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, now)
+  db.prepare('INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, new Date().toISOString())
 }
 
 export function deleteOpenedWorkspace(path: string): void {
@@ -174,19 +194,14 @@ export function deleteOpenedWorkspace(path: string): void {
   db.prepare('DELETE FROM opened_workspaces WHERE path = ?').run(path)
 }
 
-export async function deleteWorkspaceThreads(workspacePath: string): Promise<string[]> {
+export function deleteWorkspaceThreads(workspacePath: string): string[] {
   const db = getDB()
-
   let threadIds: string[] = []
-
   db.transaction(() => {
     const rows = db.prepare('SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as { threadId: string }[]
-    threadIds = rows.map((r) => r.threadId)
+    threadIds = rows.map(r => r.threadId)
     const stmtDel = db.prepare('DELETE FROM threads WHERE id = ?')
-    for (const id of threadIds) {
-      stmtDel.run(id)
-    }
+    for (const id of threadIds) stmtDel.run(id)
   })()
-
   return threadIds
 }

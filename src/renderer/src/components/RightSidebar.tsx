@@ -57,6 +57,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
   const convId = useAtomValue(conversationIdAtom)
   const filesChanged = useAtomValue(filesChangedAtom)
 
+  // #21 fix: compute once at component scope
+  const userFiles = filesChanged.filter(fc => !isAgentArtifact(fc.name))
+
   const activeConvId = conversationId || convId
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
@@ -231,19 +234,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
       <div className="sidebar-section" style={{ padding: '16px 16px', gap: 10 }}>
         <div className="sidebar-section-header" style={{ padding: 0 }}>
           <span style={{ color: 'var(--text-secondary)' }}>Files Changed</span>
-          {filesChanged.filter(fc => !isAgentArtifact(fc.name)).length > 0 && (
+          {userFiles.length > 0 && (
             <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
-              {filesChanged.filter(fc => !isAgentArtifact(fc.name)).length}
+              {userFiles.length}
             </span>
           )}
         </div>
 
-        {filesChanged.filter(fc => !isAgentArtifact(fc.name)).length === 0 ? (
+        {userFiles.length === 0 ? (
           <div style={{ color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500 }}>
             No file changes yet.
           </div>
         ) : (
-          filesChanged.filter(fc => !isAgentArtifact(fc.name)).map((fc, idx) => (
+          userFiles.map((fc, idx) => (
             <div
               key={`${fc.path}-${idx}`}
               className="right-sidebar-file-row"

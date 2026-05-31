@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Editor } from '@monaco-editor/react'
 import {
-  Edit2,
   Search,
   X,
   Globe,
@@ -22,8 +21,7 @@ import {
   artifactPanelModeAtom,
   activeWorkspaceAtom,
   globalPromptTriggerAtom,
-  type ArtifactPanelMode,
-  type EditorFile
+  type ArtifactPanelMode
 } from '../store/agentStore'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
@@ -332,82 +330,20 @@ const ArtifactPanel: React.FC = () => {
   const [panelMode, setPanelMode] = useAtom(artifactPanelModeAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const setGlobalPrompt = useSetAtom(globalPromptTriggerAtom)
-  const [isReadOnly, setIsReadOnly] = useState(true)
-  const [editedContent, setEditedContent] = useState('')
 
   const terminalRef = useRef<{ fit: () => void } | null>(null)
+  // #17 fix: only call closeBrowser when it was actually opened — track with ref
+  const browserWasOpenedRef = useRef(false)
 
   const displayFile = activeFile
   const isMarkdown = displayFile?.name.endsWith('.md') ?? false
 
-  const lastFileRef = useRef<EditorFile | null>(null)
-  const dirtyContentRef = useRef<string>('')
-  const isReadOnlyRef = useRef<boolean>(isReadOnly)
-
   useEffect(() => {
-    dirtyContentRef.current = editedContent
-  }, [editedContent])
-
-  useEffect(() => {
-    isReadOnlyRef.current = isReadOnly
-  }, [isReadOnly])
-
-  const handleSaveDirect = async (fileToSave: EditorFile, contentToSave: string) => {
-    if (!fileToSave || !fileToSave.path) return
-    try {
-      const success = await window.api.writeFile(fileToSave.path, contentToSave)
-      if (success) {
-        toast.success(`Saved ${fileToSave.name}`)
-        setActiveFile({ ...fileToSave, content: contentToSave })
-      } else {
-        toast.error(`Failed to save ${fileToSave.name}`)
-      }
-    } catch (err: any) {
-      toast.error(`Save error: ${err.message}`)
-    }
-  }
-
-  useEffect(() => {
-    const checkAndPrompt = async () => {
-      const prevFile = lastFileRef.current
-      const wasDirty = prevFile && !isReadOnlyRef.current && dirtyContentRef.current !== prevFile.content
-
-      if (wasDirty && activeFile?.path !== prevFile.path) {
-        setActiveFile(prevFile)
-
-        const response = await window.api.showConfirmDialog({
-          message: `Save changes to ${prevFile.name}?`,
-          detail: "Your changes will be lost if you don't save them.",
-          buttons: ['Save', "Don't Save", 'Cancel'],
-          defaultId: 0,
-          cancelId: 2
-        })
-
-        if (response === 0) {
-          await handleSaveDirect(prevFile, dirtyContentRef.current)
-          lastFileRef.current = activeFile
-          setActiveFile(activeFile)
-          setIsReadOnly(true)
-          setEditedContent(activeFile?.content ?? '')
-        } else if (response === 1) {
-          lastFileRef.current = activeFile
-          setActiveFile(activeFile)
-          setIsReadOnly(true)
-          setEditedContent(activeFile?.content ?? '')
-        }
-      } else {
-        lastFileRef.current = activeFile
-        setIsReadOnly(true)
-        setEditedContent(activeFile?.content ?? '')
-      }
-    }
-
-    checkAndPrompt()
-  }, [activeFile])
-
-  useEffect(() => {
-    if (panelMode !== 'browser') {
+    if (panelMode === 'browser') {
+      browserWasOpenedRef.current = true
+    } else if (browserWasOpenedRef.current) {
       window.api.closeBrowser().catch(() => {})
+      browserWasOpenedRef.current = false
     }
     if (panelMode === 'terminal') {
       requestAnimationFrame(() => {
@@ -417,47 +353,13 @@ const ArtifactPanel: React.FC = () => {
   }, [panelMode])
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen && browserWasOpenedRef.current) {
       window.api.closeBrowser().catch(() => {})
+      browserWasOpenedRef.current = false
     }
   }, [isOpen])
 
-  const handleSave = async (contentToSave: string) => {
-    if (!displayFile) return
-    await handleSaveDirect(displayFile, contentToSave)
-  }
-
-  const handleSaveRef = useRef<((val: string) => Promise<void>) | null>(null)
-  useEffect(() => {
-    handleSaveRef.current = handleSave
-  }, [handleSave])
-
-  const handleEditorDidMount = (editor: any, monaco: any) => {
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      const model = editor.getModel()
-      if (model && handleSaveRef.current) {
-        handleSaveRef.current(model.getValue())
-      }
-    })
-  }
-
-  const handleClose = async () => {
-    const isDirty = displayFile && !isReadOnly && editedContent !== displayFile.content
-    if (isDirty) {
-      const response = await window.api.showConfirmDialog({
-        message: `Save changes to ${displayFile.name}?`,
-        detail: "Your changes will be lost if you don't save them.",
-        buttons: ['Save', "Don't Save", 'Cancel'],
-        defaultId: 0,
-        cancelId: 2
-      })
-
-      if (response === 0) {
-        await handleSave(editedContent)
-      } else if (response === 2) {
-        return
-      }
-    }
+  const handleClose = () => {
     setIsOpen(false)
     setPanelMode('editor')
     setActiveFile(null)
@@ -599,34 +501,12 @@ const ArtifactPanel: React.FC = () => {
                 </div>
               ) : !isAgentArtifact(displayFile.name) ? (
                 <>
-                  {!isMarkdown && (
-                    <div
-                      className="panel-header-action"
-                      style={{
-                        padding: '2px',
-                        color: !isReadOnly ? 'var(--accent-green)' : '#9c9c9c',
-                        cursor: displayFile.isBinary ? 'default' : 'pointer',
-                        opacity: displayFile.isBinary ? 0.4 : 1,
-                        transition: 'color 0.2s ease'
-                      }}
-                      onClick={() => {
-                        if (displayFile.isBinary) return
-                        setIsReadOnly(!isReadOnly)
-                        if (isReadOnly) {
-                          toast.info('Edit Mode. Cmd+S to save.', { duration: 2500 })
-                        }
-                      }}
-                      title={displayFile.isBinary ? 'Binary File' : isReadOnly ? 'Edit File' : 'Lock (Read-Only)'}
-                    >
-                      <Edit2 size={14} />
-                    </div>
-                  )}
                   <div className="panel-header-action" style={{ padding: '2px', color: '#9c9c9c' }}>
                     <Search size={14} />
                   </div>
                   <div
                     className="panel-header-action"
-                    style={{ padding: '2px', color: '#9c9c9c' }}
+                    style={{ padding: '2px', color: '#9c9c9c', cursor: 'pointer' }}
                     onClick={handleClose}
                   >
                     <X size={14} />
@@ -657,7 +537,7 @@ const ArtifactPanel: React.FC = () => {
               {activeWorkspace?.name ? `${activeWorkspace.name} — zsh` : 'Terminal'}
             </span>
           </div>
-          <div className="panel-header-action" style={{ padding: '2px', color: '#9c9c9c' }} onClick={handleClose}>
+          <div className="panel-header-action" style={{ padding: '2px', color: '#9c9c9c', cursor: 'pointer' }} onClick={handleClose}>
             <X size={14} />
           </div>
         </div>
@@ -727,9 +607,7 @@ const ArtifactPanel: React.FC = () => {
               height="100%"
               language={displayFile.language}
               theme="vs-dark"
-              value={isReadOnly ? (displayFile.content ?? '') : editedContent}
-              onChange={(val) => { if (!isReadOnly) setEditedContent(val || '') }}
-              onMount={handleEditorDidMount}
+              value={displayFile.content ?? ''}
               options={{
                 minimap: { enabled: true, showSlider: 'mouseover' },
                 fontSize: 13,
@@ -737,7 +615,7 @@ const ArtifactPanel: React.FC = () => {
                 padding: { top: 16 },
                 scrollBeyondLastLine: false,
                 wordWrap: 'on',
-                readOnly: isReadOnly,
+                readOnly: true,
                 lineNumbersMinChars: 4,
                 automaticLayout: true,
                 cursorBlinking: 'blink',

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { chatMessagesAtom } from '../store/agentStore'
+import { chatMessagesAtom, agentRunStateAtom } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage } from '../store/agentStore'
 import { ChevronDown } from 'lucide-react'
@@ -121,13 +121,6 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => (
 
     {!message.orderedBlocks && (
       <>
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="chat-reasoning-details">
-            {message.toolCalls.map((tc) => (
-              <ToolCallBlock key={tc.id} toolCall={tc} />
-            ))}
-          </div>
-        )}
         {message.content && (
           <div
             className="assistant-content chat-message-assistant"
@@ -148,28 +141,40 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => (
 
 const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)
+  const runState = useAtomValue(agentRunStateAtom)
   const containerRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
+  const prevLengthRef = useRef(messages.length)
 
   const handleScroll = () => {
     if (!containerRef.current) return
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 120
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 80  // #39 fix: tighter threshold
     isAtBottomRef.current = isAtBottom
   }
 
   useEffect(() => {
     if (!containerRef.current) return
     const { scrollHeight, clientHeight } = containerRef.current
-    const isStreaming = messages.some((m) => m.isStreaming)
+    // #19 fix: derive isStreaming from runState atom — O(1) vs O(n) message scan
+    const isStreaming = runState !== 'idle' && runState !== 'error'
+    const hasNewMessage = messages.length > prevLengthRef.current
+    prevLengthRef.current = messages.length
 
-    if (isAtBottomRef.current || !isStreaming) {
+    if (isStreaming) {
+      if (isAtBottomRef.current) {
+        containerRef.current.scrollTo({
+          top: scrollHeight - clientHeight,
+          behavior: 'auto'
+        })
+      }
+    } else if (hasNewMessage) {
       containerRef.current.scrollTo({
         top: scrollHeight - clientHeight,
-        behavior: isStreaming ? 'auto' : 'smooth'
+        behavior: 'smooth'
       })
     }
-  }, [messages])
+  }, [messages, runState])
 
   if (messages.length === 0) return null
 
