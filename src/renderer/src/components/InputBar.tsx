@@ -125,7 +125,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   alt={att.name}
                 />
               ) : (
-                <span style={{ fontSize: 13 }}>📄</span>
+                <span style={{ fontSize: 'var(--font-size-sm)' }}>📄</span>
               )}
               <span
                 style={{
@@ -168,68 +168,37 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                style={{
-                  background: 'var(--bg-sidebar)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 6,
-                  padding: '4px 0',
-                  minWidth: 160,
-                  zIndex: 1000,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
-                }}
-                sideOffset={6}
-              >
+              <DropdownMenu.Content asChild sideOffset={6}>
+                <div
+                  className="native-dropdown-content"
+                  style={{
+                    background: 'var(--bg-sidebar)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    padding: '4px 0',
+                    minWidth: 160,
+                    zIndex: 1000,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                    transformOrigin: 'top left'
+                  }}
+                >
                 <DropdownMenu.Item
                   onSelect={() => triggerFileSelect('image')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    fontSize: 13,
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    fontFamily: 'var(--font-display)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-                    e.currentTarget.style.color = 'var(--text-primary)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent'
-                    e.currentTarget.style.color = 'var(--text-secondary)'
-                  }}
+                  className="profile-dropdown-item"
+                  style={{ color: 'var(--text-secondary)' }}
                 >
                   <Image size={14} />
                   <span>Upload Image</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   onSelect={() => triggerFileSelect('document')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    fontSize: 13,
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    fontFamily: 'var(--font-display)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-                    e.currentTarget.style.color = 'var(--text-primary)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent'
-                    e.currentTarget.style.color = 'var(--text-secondary)'
-                  }}
+                  className="profile-dropdown-item"
+                  style={{ color: 'var(--text-secondary)' }}
                 >
                   <FileText size={14} />
                   <span>Upload Document</span>
                 </DropdownMenu.Item>
+                </div>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
@@ -242,39 +211,34 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                style={{
-                  background: 'var(--bg-sidebar)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 6,
-                  padding: '4px 0',
-                  minWidth: 140,
-                  zIndex: 1000,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
-                }}
-                sideOffset={6}
-              >
+              <DropdownMenu.Content asChild sideOffset={6}>
+                <div
+                  className="native-dropdown-content"
+                  style={{
+                    background: 'var(--bg-sidebar)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    padding: '4px 0',
+                    minWidth: 140,
+                    zIndex: 1000,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                    transformOrigin: 'top left'
+                  }}
+                >
                 {PLANNING_MODES.map((mode) => (
                   <DropdownMenu.Item
                     key={mode}
                     onSelect={() => setPlanningMode(mode)}
+                    className="profile-dropdown-item"
                     style={{
-                      padding: '6px 12px',
-                      fontSize: 13,
-                      color: mode === planningMode ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      outline: 'none',
-                      fontFamily: 'var(--font-display)',
-                      background: mode === planningMode ? 'rgba(255,255,255,0.05)' : 'transparent'
+                      background: mode === planningMode ? 'rgba(255,255,255,0.05)' : 'transparent',
+                      color: mode === planningMode ? 'var(--text-primary)' : 'var(--text-secondary)'
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.background = mode === planningMode ? 'rgba(255,255,255,0.05)' : 'transparent')
-                    }
                   >
                     {mode}
                   </DropdownMenu.Item>
                 ))}
+                </div>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
@@ -292,54 +256,41 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                style={{
-                  background: 'var(--bg-sidebar)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 6,
-                  padding: '4px 0',
-                  minWidth: 200,
-                  zIndex: 1000,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
-                }}
-                sideOffset={6}
-              >
+              <DropdownMenu.Content asChild sideOffset={6}>
+                <div
+                  className="native-dropdown-content"
+                  style={{
+                    background: 'var(--bg-sidebar)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    padding: '4px 0',
+                    minWidth: 200,
+                    zIndex: 1000,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                    transformOrigin: 'top left'
+                  }}
+                >
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemini')}
+                  className="profile-dropdown-item"
                   style={{
-                    padding: '8px 12px',
-                    fontSize: 13,
-                    color: selectedModel === 'gemini' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    fontFamily: 'var(--font-display)',
-                    background: selectedModel === 'gemini' ? 'rgba(255,255,255,0.05)' : 'transparent'
+                    background: selectedModel === 'gemini' ? 'rgba(255,255,255,0.05)' : 'transparent',
+                    color: selectedModel === 'gemini' ? 'var(--text-primary)' : 'var(--text-secondary)'
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = selectedModel === 'gemini' ? 'rgba(255,255,255,0.05)' : 'transparent')
-                  }
                 >
                   <span style={{ fontWeight: 500 }}>{availableModels.gemini?.name || 'Gemini 3.1 Flash Lite'}</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemma')}
+                  className="profile-dropdown-item"
                   style={{
-                    padding: '8px 12px',
-                    fontSize: 13,
-                    color: selectedModel === 'gemma' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    fontFamily: 'var(--font-display)',
-                    background: selectedModel === 'gemma' ? 'rgba(255,255,255,0.05)' : 'transparent'
+                    background: selectedModel === 'gemma' ? 'rgba(255,255,255,0.05)' : 'transparent',
+                    color: selectedModel === 'gemma' ? 'var(--text-primary)' : 'var(--text-secondary)'
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.background = selectedModel === 'gemma' ? 'rgba(255,255,255,0.05)' : 'transparent')
-                  }
                 >
                   <span style={{ fontWeight: 500 }}>{availableModels.gemma?.name || 'Gemma 4'}</span>
                 </DropdownMenu.Item>
+                </div>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>

@@ -214,202 +214,225 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
     return unsub
   }, [setArtifacts])
 
-  if (!isExpanded) {
-    return (
-      <aside className="right-sidebar collapsed">
-        <div className="collapsed-sidebar-top" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-          <div
-            className="collapsed-icon-wrapper"
-            onClick={() => setIsExpanded(true)}
-            title="Expand Right Sidebar"
-            style={{ padding: '14px 0', display: 'flex', justifyContent: 'center' }}
-          >
-            <PanelRight size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-          </div>
-          <div className="sidebar-divider" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 0', alignItems: 'center' }}>
-            <div className="collapsed-icon-wrapper" title="Artifacts" style={{ padding: 0 }}>
-              <Package size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-            <div className="collapsed-icon-wrapper" title="Files Changed" style={{ padding: 0 }}>
-              <FileCode size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-          </div>
-        </div>
-      </aside>
-    )
-  }
-
   return (
-    <aside className="right-sidebar expanded">
-      <div
-        className="sidebar-top-section"
-        style={{ padding: '12px 12px', height: '56px', display: 'flex', flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 0 }}
-      >
-        <div className="sidebar-collapse-btn" onClick={() => setIsExpanded(false)} title="Collapse Right Sidebar" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
-          <PanelRightClose size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-        </div>
-      </div>
-      <div className="sidebar-divider" />
-
-      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
-        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>Artifacts</span>
-            <Info size={14} color="var(--text-secondary)" />
-          </div>
-        </div>
- 
-        {loading ? (
-          <div style={{ padding: '4px 12px' }}>
-            <Skeleton count={3} height={18} borderRadius={4} baseColor="#2c2c2e" highlightColor="#3a3a3e" style={{ marginBottom: 6 }} />
-          </div>
-        ) : artifacts.length === 0 ? (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
-            No artifacts yet.
-          </div>
-        ) : (
-          artifacts.map((artifact: ArtifactEntry) => (
+    <aside
+      className={`right-sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        width: isExpanded ? 280 : 68,
+        transition: 'width 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+        willChange: 'width'
+      }}
+    >
+      {!isExpanded ? (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: 68 }}>
+          <div className="collapsed-sidebar-top" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
             <div
-              key={artifact.name}
-              className="right-sidebar-file-row"
-              title={artifact.path}
-              onClick={() => handleArtifactClick(artifact)}
-              style={{
-                margin: '0 8px',
-                padding: '6px 10px',
-                borderRadius: '6px',
-                fontSize: 'var(--font-size-md)'
-              }}
+              className="collapsed-icon-wrapper"
+              onClick={() => setIsExpanded(true)}
+              title="Expand Right Sidebar"
+              style={{ padding: '14px 0', display: 'flex', justifyContent: 'center' }}
             >
-              {getArtifactIcon(artifact.name)}
-              <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>{artifact.name}</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>
-                {formatBytes(artifact.size)}
-              </span>
+              <PanelRight size={18} strokeWidth={1.5} color="var(--text-secondary)" />
             </div>
-          ))
-        )}
-      </div>
-
-      <div className="sidebar-divider" />
-
-      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
-        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-          <span>Files Changed</span>
-          {userFiles.length > 0 && (
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
-              {userFiles.length}
-            </span>
-          )}
-        </div>
- 
-        {userFiles.length === 0 ? (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
-            No file changes yet.
-          </div>
-        ) : (
-          userFiles.map((fc, idx) => (
-            <div
-              key={`${fc.path}-${idx}`}
-              className="right-sidebar-file-row"
-              title={fc.path}
-              onClick={() => handleFileChangeClick(fc)}
-              style={{
-                margin: '0 8px',
-                padding: '6px 10px',
-                borderRadius: '6px',
-                fontSize: 'var(--font-size-md)'
-              }}
-            >
-              <FileIcon fileName={fc.name} size={13} />
-              <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>{fc.name}</span>
- 
-              {fc.lineRange && (
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>
-                  {fc.lineRange}
-                </span>
-              )}
- 
-              <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                {fc.additions > 0 && (
-                  <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
-                    +{fc.additions}
-                  </span>
-                )}
-                {fc.deletions > 0 && (
-                  <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
-                    -{fc.deletions}
-                  </span>
-                )}
+            <div className="sidebar-divider" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 0', alignItems: 'center' }}>
+              <div className="collapsed-icon-wrapper" title="Artifacts" style={{ padding: 0 }}>
+                <Package size={18} strokeWidth={1.5} color="var(--text-secondary)" />
+              </div>
+              <div className="collapsed-icon-wrapper" title="Files Changed" style={{ padding: 0 }}>
+                <FileCode size={18} strokeWidth={1.5} color="var(--text-secondary)" />
               </div>
             </div>
-          ))
-        )}
-      </div>
-
-      <div className="sidebar-divider" />
-
-      <div className="sidebar-section" style={{ padding: '12px 0', gap: 8, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ListTodo size={14} style={{ color: 'var(--text-secondary)' }} />
-            <span style={{ color: 'var(--text-secondary)' }}>Tasks & Progress</span>
           </div>
-          {tasksList.length > 0 && (
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
-              {tasksList.filter((t) => t.status === 'done').length}/{tasksList.length}
-            </span>
-          )}
         </div>
- 
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4, maxHeight: '200px' }}>
-          {tasksList.length === 0 ? (
-            <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
-              No active tasks yet.
-            </div>
-          ) : (
-            tasksList.map((task) => (
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: 280 }}>
+          <div className="sidebar-top-section" style={{ display: 'flex', flexDirection: 'column', padding: '12px 12px', gap: 12, flexShrink: 0 }}>
+            <div className="sidebar-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '32px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-size-lg)', fontWeight: 500 }}>
+                <Info size={18} strokeWidth={1.5} color="var(--text-secondary)" />
+                <span style={{ color: '#e5e5e5' }}>Session Info</span>
+              </div>
               <div
-                key={task.id}
-                className="right-sidebar-file-row"
-                style={{
-                  paddingLeft: `${task.indent * 4 + 10}px`,
-                  margin: '0 8px',
-                  paddingTop: '6px',
-                  paddingBottom: '6px',
-                  borderRadius: '6px',
-                  fontSize: 'var(--font-size-md)',
-                  opacity: task.status === 'done' ? 0.4 : 1,
-                  cursor: 'default'
-                }}
+                className="sidebar-collapse-btn"
+                onClick={() => setIsExpanded(false)}
+                title="Collapse Sidebar"
+                style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    {task.status === 'done' ? (
-                      <CheckCircle2 size={13} style={{ color: 'var(--accent-green)' }} />
-                    ) : task.status === 'progress' ? (
-                      <Clock size={13} style={{ color: 'var(--accent-orange)' }} />
-                    ) : (
-                      <Circle size={13} style={{ color: 'var(--text-secondary)' }} />
-                    )}
-                  </div>
-                  <span
-                    className="right-sidebar-file-name"
-                    style={{
-                      fontSize: 'var(--font-size-md)',
-                      textDecoration: task.status === 'done' ? 'line-through' : 'none',
-                      fontWeight: task.status === 'progress' ? 600 : undefined
-                    }}
-                  >
-                    {task.text}
-                  </span>
-                </div>
+                <PanelRightClose size={18} strokeWidth={1.5} color="var(--text-secondary)" />
               </div>
-            ))
-          )}
+            </div>
+          </div>
+
+          <div className="sidebar-divider" />
+
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '12px 0', gap: 8, flex: 1, minHeight: 0 }}>
+            <div className="sidebar-section" style={{ padding: '12px 0', gap: 8, display: 'flex', flexDirection: 'column', maxHeight: '180px' }}>
+              <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+                <Package size={14} style={{ color: 'var(--text-secondary)' }} />
+                <span>Artifacts</span>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 4 }}>
+                {loading ? (
+                  <div style={{ padding: '0 12px' }}>
+                    <Skeleton count={3} height={28} baseColor="#262626" highlightColor="#333333" style={{ marginBottom: 6, borderRadius: 4 }} />
+                  </div>
+                ) : artifacts.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
+                    No artifacts created yet.
+                  </div>
+                ) : (
+                  artifacts.map((art) => (
+                    <div
+                      key={art.name}
+                      onClick={() => {
+                        setActiveEditorFile({
+                          path: art.path,
+                          name: art.name,
+                          content: '',
+                          isArtifact: true
+                        })
+                        setArtifactPanelMode('editor')
+                        setArtifactPanelOpen(true)
+                      }}
+                      className="right-sidebar-file-row"
+                      style={{ margin: '0 8px', borderRadius: '6px' }}
+                    >
+                      {getArtifactIcon(art.name)}
+                      <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>
+                        {art.name === 'implementation_plan.md' ? 'Implementation Plan' : art.name === 'task.md' ? 'Task List' : art.name === 'walkthrough.md' ? 'Walkthrough' : art.name}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="sidebar-divider" />
+
+            <div className="sidebar-section" style={{ padding: '12px 0', gap: 8, display: 'flex', flexDirection: 'column', maxHeight: '180px' }}>
+              <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', gap: 6, alignItems: 'center', width: '100%' }}>
+                <FileCode size={14} style={{ color: 'var(--text-secondary)' }} />
+                <span>Files Changed</span>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 4 }}>
+                {userFiles.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
+                    No workspace files modified.
+                  </div>
+                ) : (
+                  userFiles.map((fc) => (
+                    <div
+                      key={fc.path}
+                      onClick={async () => {
+                        try {
+                          const fileData = await window.api.readFile(fc.path)
+                          if (fileData) {
+                            setActiveEditorFile(fileData)
+                            setArtifactPanelMode('editor')
+                            setArtifactPanelOpen(true)
+                          }
+                        } catch (err) {
+                          console.error('[RightSidebar] Failed to open file:', err)
+                        }
+                      }}
+                      className="right-sidebar-file-row"
+                      style={{ margin: '0 8px', borderRadius: '6px' }}
+                    >
+                      <FileIcon fileName={fc.name} size={13} />
+                      <span className="right-sidebar-file-name" style={{ fontSize: 'var(--font-size-md)' }}>{fc.name}</span>
+         
+                      {fc.lineRange && (
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', flexShrink: 0 }}>
+                          {fc.lineRange}
+                        </span>
+                      )}
+         
+                      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                        {fc.additions > 0 && (
+                          <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                            +{fc.additions}
+                          </span>
+                        )}
+                        {fc.deletions > 0 && (
+                          <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                            -{fc.deletions}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="sidebar-divider" />
+
+            <div className="sidebar-section" style={{ padding: '12px 0', gap: 8, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ListTodo size={14} style={{ color: 'var(--text-secondary)' }} />
+                  <span style={{ color: 'var(--text-secondary)' }}>Tasks & Progress</span>
+                </div>
+                {tasksList.length > 0 && (
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    {tasksList.filter((t) => t.status === 'done').length}/{tasksList.length}
+                  </span>
+                )}
+              </div>
+         
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4, maxHeight: '200px' }}>
+                {tasksList.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontWeight: 500, padding: '0 12px' }}>
+                    No active tasks yet.
+                  </div>
+                ) : (
+                  tasksList.map((task) => (
+                    <div
+                      key={task.id}
+                      className="right-sidebar-file-row"
+                      style={{
+                        paddingLeft: `${task.indent * 4 + 10}px`,
+                        margin: '0 8px',
+                        paddingTop: '6px',
+                        paddingBottom: '6px',
+                        borderRadius: '6px',
+                        fontSize: 'var(--font-size-md)',
+                        opacity: task.status === 'done' ? 0.4 : 1,
+                        cursor: 'default'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          {task.status === 'done' ? (
+                            <CheckCircle2 size={13} style={{ color: 'var(--accent-green)' }} />
+                          ) : task.status === 'progress' ? (
+                            <Clock size={13} style={{ color: 'var(--accent-orange)' }} />
+                          ) : (
+                            <Circle size={13} style={{ color: 'var(--text-secondary)' }} />
+                          )}
+                        </div>
+                        <span
+                          className="right-sidebar-file-name"
+                          style={{
+                            fontSize: 'var(--font-size-md)',
+                            textDecoration: task.status === 'done' ? 'line-through' : 'none',
+                            fontWeight: task.status === 'progress' ? 600 : undefined
+                          }}
+                        >
+                          {task.text}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </aside>
   )
 }

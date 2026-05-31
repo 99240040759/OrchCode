@@ -88,7 +88,7 @@ function AppInner(): React.JSX.Element {
             backgroundColor: '#1e1e1e',
             borderBottom: '1px solid var(--border-color)',
             color: 'var(--text-secondary)',
-            fontSize: '13px',
+            fontSize: 'var(--font-size-sm)',
             fontWeight: 500,
             flexShrink: 0
           }}
@@ -129,11 +129,11 @@ function AppInner(): React.JSX.Element {
                   <h2
                     className="home-prompt-title"
                     onClick={handleOpenWorkspace}
-                    style={{ fontSize: 16, margin: 0, gap: 6, fontWeight: 500 }}
+                    style={{ margin: 0, gap: 6 }}
                   >
                     <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
                     <ChevronDown size={14} style={{ color: 'var(--text-secondary)', marginTop: 2 }} />
-                    <span style={{ color: '#e5e5e5', fontWeight: 600 }}>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                       {activeWorkspace ? activeWorkspace.name : 'Select Workspace'}
                     </span>
                   </h2>
@@ -143,7 +143,7 @@ function AppInner(): React.JSX.Element {
                       alignItems: 'center',
                       gap: 6,
                       color: 'var(--text-secondary)',
-                      fontSize: 13,
+                      fontSize: 'var(--font-size-sm)',
                       cursor: 'pointer',
                       fontWeight: 500
                     }}
@@ -165,7 +165,6 @@ function AppInner(): React.JSX.Element {
                       e.preventDefault()
                       setArtifactPanelOpen(true)
                     }}
-                    style={{ fontSize: 12.5, fontWeight: 500 }}
                   >
                     <Code size={14} strokeWidth={2} />
                     <span>Open editor</span>

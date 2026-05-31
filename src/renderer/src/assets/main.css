@@ -1,44 +1,58 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Outfit:wght@100..900&display=swap');
 
+/* ==========================================================================
+   SECTION 1: Design Tokens & Custom Properties (:root)
+   ========================================================================== */
 :root {
   --font-display: 'Outfit', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Exact Grey #1e1e1e theme matching reference screenshots */
+  /* Color Palette - Grey Native Design */
   --bg-app: #1e1e1e;
   --bg-sidebar: #161616;
   --bg-editor: #1e1e1e;
 
-  /* Premium Translucent borders matching reference look-and-feel */
+  /* Translucent & Premium Borders */
   --border-color: rgba(255, 255, 255, 0.06);
   --border-focus: rgba(255, 255, 255, 0.12);
 
+  /* Typography Colors */
   --text-primary: #f3f3f3;
   --text-secondary: #9c9c9c;
   --text-muted: #5e5e5e;
   --text-dim: #3e3e3e;
 
-  /* Interactive States */
+  /* Accent Colors */
   --accent-blue: #3b82f6;
   --accent-purple: #8b5cf6;
   --accent-green: #10b981;
   --accent-orange: #f59e0b;
   --accent-red: #ef4444;
 
+  /* Layout Spacing & Sizing */
   --sidebar-width-expanded: 250px;
   --sidebar-width-collapsed: 50px;
   --titlebar-height: 36px;
 
-  /* Typography Scale */
+  /* Typographic Scale - Strict Uniformity */
+  --font-size-micro: 9px;
+  --font-size-xxs: 11px;
   --font-size-xs: 12px;
+  --font-size-xs-plus: 12.5px;
   --font-size-sm: 13px;
+  --font-size-sm-plus: 13.5px;
   --font-size-md: 14px;
+  --font-size-md-plus: 14.5px;
   --font-size-lg: 15px;
   --font-size-xl: 17px;
   --font-size-2xl: 20px;
   --font-size-3xl: 24px;
 }
 
+
+/* ==========================================================================
+   SECTION 2: Base Reset, Scrollbars & Default Styling
+   ========================================================================== */
 *,
 *::before,
 *::after {
@@ -60,6 +74,10 @@ pre,
   user-select: text !important;
 }
 
+.assistant-content * {
+  user-select: text;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -67,17 +85,36 @@ body {
   color: var(--text-primary);
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: 14px;
+  font-size: var(--font-size-md);
   line-height: 1.5;
   overflow: hidden;
   height: 100vh;
   width: 100vw;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
 }
 
-/* Universal Native-style Scrollbars */
+a {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+
+a:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary {
+  list-style: none;
+}
+
+/* Scrollbar Defaults & Consolidations */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -96,21 +133,64 @@ body {
   background: rgba(255, 255, 255, 0.16);
 }
 
-a {
-  color: var(--accent-blue);
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.15s ease, text-decoration 0.15s ease;
+/* ==========================================================================
+   SECTION 3: Main Window & Split-View Layout Containers
+   ========================================================================== */
+.app-container {
+  display: flex;
+  height: calc(100vh - var(--titlebar-height));
+  width: 100vw;
+  position: relative;
 }
 
-a:hover {
-  color: #60a5fa;
-  text-decoration: underline;
+.app-glow-border {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid var(--border-color);
+  pointer-events: none;
+  z-index: 999;
 }
 
+.split-view-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
 
+.chat-pane {
+  flex: 1;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  contain: layout paint;
+}
 
-/* Frameless Titlebar Styling */
+.artifact-pane {
+  width: 100%;
+  height: 100%;
+  background-color: #1e1e1e; /* matches Monaco vs-dark background */
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  contain: layout paint;
+}
+
+.panel-resize-handle {
+  width: 4px;
+  background-color: var(--border-color);
+  cursor: col-resize;
+  transition: background-color 0.2s;
+  z-index: 10;
+}
+
+/* ==========================================================================
+   SECTION 4: Frameless Window Titlebar, Authentication & Profile Trigger
+   ========================================================================== */
 .titlebar {
   height: var(--titlebar-height);
   background-color: var(--bg-sidebar);
@@ -131,7 +211,7 @@ a:hover {
 }
 
 .titlebar-center {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--text-secondary);
   letter-spacing: 0.02em;
@@ -145,7 +225,7 @@ a:hover {
 }
 
 .titlebar-action {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
@@ -268,32 +348,142 @@ a:hover {
   cursor: pointer;
 }
 
-@keyframes pulse-opacity {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.9; }
-}
-
-/* Layout Wrapper */
-.app-container {
+/* Google Sign-In Button */
+.titlebar-action.google-btn {
   display: flex;
-  height: calc(100vh - var(--titlebar-height));
-  width: 100vw;
-  position: relative;
-}
-
-/* Solid non-glowing window border matching reference design */
-.app-glow-border {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-color);
-  pointer-events: none;
-  z-index: 999;
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  transition: all 0.2s ease;
+  cursor: pointer;
 }
 
-/* Sidebar Styling */
+.titlebar-action.google-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+/* Profile Avatar & Dropdown Trigger */
+.titlebar-avatar-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.titlebar-avatar-btn:hover {
+  transform: scale(1.05);
+}
+
+.titlebar-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+}
+
+.titlebar-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  background-color: var(--border-color);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+  border-radius: 50%;
+}
+
+/* Radix Profile Dropdown */
+.titlebar-profile-dropdown {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  padding: 6px 0;
+  z-index: 1000;
+  font-family: var(--font-display);
+}
+
+@keyframes dropdown-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.native-dropdown-content {
+  animation: dropdown-fade-in 0.08s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.profile-dropdown-info {
+  padding: 8px 12px;
+}
+
+.profile-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.profile-email {
+  font-size: var(--font-size-xxs);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.profile-dropdown-separator {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 6px 0;
+}
+
+.profile-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: var(--font-size-xs-plus);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: background 0.15s ease;
+}
+
+.profile-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.profile-dropdown-item.logout {
+  color: var(--accent-red);
+}
+
+.profile-dropdown-item.logout:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* ==========================================================================
+   SECTION 5: Left Sidebar Component & Tree Nodes
+   ========================================================================== */
 .sidebar {
   background-color: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
@@ -303,21 +493,8 @@ a:hover {
   transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   overflow: hidden;
   position: relative;
-}
-
-.right-sidebar {
-  width: var(--sidebar-width-expanded);
-  background-color: var(--bg-sidebar);
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.right-sidebar.collapsed {
-  width: var(--sidebar-width-collapsed);
+  contain: layout paint;
+  will-change: width, transform;
 }
 
 .sidebar.expanded {
@@ -331,7 +508,7 @@ a:hover {
 .sidebar-top-section {
   display: flex;
   flex-direction: column;
-  padding: 16px 16px 16px 16px;
+  padding: 16px;
   gap: 16px;
 }
 
@@ -347,7 +524,7 @@ a:hover {
   gap: 10px;
   font-weight: 500;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: var(--font-size-lg);
 }
 
 .sidebar-collapse-btn {
@@ -407,40 +584,6 @@ a:hover {
   border-radius: 2px;
 }
 
-/* Hide scrollbar in chat thread container */
-.chat-thread-container::-webkit-scrollbar {
-  display: none !important;
-}
-
-.chat-thread-container {
-  scrollbar-width: none !important; /* Firefox */
-  -ms-overflow-style: none !important;  /* IE and Edge */
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overflow-anchor: auto;
-  padding: 16px 0 24px;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-thread-spacer-top {
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.chat-thread-message-wrapper {
-  padding: 0 24px;
-}
-
-.chat-thread-spacer-bottom {
-  height: 24px;
-  flex-shrink: 0;
-}
-
-
 .sidebar-section {
   display: flex;
   flex-direction: column;
@@ -453,7 +596,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -480,12 +623,12 @@ a:hover {
   gap: 8px;
   font-weight: 600;
   color: #e5e5e5;
-  font-size: 14.5px;
+  font-size: var(--font-size-md-plus);
   cursor: pointer;
 }
 
 .sidebar-action-text {
-  font-size: 14.5px;
+  font-size: var(--font-size-md-plus);
   color: var(--text-secondary);
   cursor: pointer;
   padding: 0 16px;
@@ -499,8 +642,6 @@ a:hover {
 .sidebar-action-text:hover {
   color: var(--text-primary);
 }
-
-
 
 .collapsed-icon-wrapper {
   color: var(--text-secondary);
@@ -517,7 +658,6 @@ a:hover {
   color: var(--text-primary);
   background-color: rgba(255, 255, 255, 0.05);
 }
-
 
 /* Sidebar Footer Panel */
 .sidebar-footer {
@@ -546,7 +686,57 @@ a:hover {
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* Main Workspace Panel */
+/* ==========================================================================
+   SECTION 6: Right Sidebar Component (File Viewer / History List)
+   ========================================================================== */
+.right-sidebar {
+  width: var(--sidebar-width-expanded);
+  background-color: var(--bg-sidebar);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  contain: layout paint;
+  will-change: width, transform;
+}
+
+.right-sidebar.collapsed {
+  width: var(--sidebar-width-collapsed);
+}
+
+.right-sidebar.expanded {
+  width: var(--sidebar-width-expanded);
+}
+
+.right-sidebar-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.right-sidebar-file-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.right-sidebar-file-name {
+  flex: 1;
+  font-size: var(--font-size-xs-plus);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   SECTION 7: Input Bar & Control Center Component
+   ========================================================================== */
 .workspace-main {
   flex: 1;
   min-width: 0; /* Prevents child items from pushing sidebars out of the viewport */
@@ -574,7 +764,7 @@ a:hover {
 }
 
 .home-prompt-title {
-  font-size: 24px;
+  font-size: var(--font-size-3xl);
   font-weight: 600;
   color: var(--text-primary);
   display: flex;
@@ -586,7 +776,7 @@ a:hover {
 
 .home-prompt-title-selector {
   color: var(--text-secondary);
-  font-size: 24px;
+  font-size: var(--font-size-3xl);
   display: inline-flex;
   align-items: center;
   cursor: pointer;
@@ -616,7 +806,7 @@ a:hover {
   border-radius: 4px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-primary);
   font-family: var(--font-display);
 }
@@ -636,7 +826,7 @@ a:hover {
   display: flex;
   align-items: center;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--font-size-xxs);
   transition: color 0.15s ease;
 }
 
@@ -659,7 +849,7 @@ a:hover {
   border-radius: 4px;
   background-color: #1e1e1e;
   border: 1px solid #333333;
-  font-size: 11px;
+  font-size: var(--font-size-xxs);
   color: var(--text-primary);
   font-family: var(--font-display);
 }
@@ -675,7 +865,7 @@ a:hover {
 /* Custom Curved Input Bar */
 .input-bar-container {
   width: 100%;
-  max-width: 680px;
+  max-width: 685px;
   background-color: #222222;
   border: 1px solid #2d2d2d;
   border-radius: 8px;
@@ -699,7 +889,7 @@ a:hover {
   outline: none;
   resize: none;
   font-family: var(--font-display);
-  font-size: 14.5px;
+  font-size: var(--font-size-md-plus);
   color: var(--text-primary);
   padding: 14px 16px 6px 16px;
   line-height: 1.5;
@@ -739,7 +929,7 @@ a:hover {
   border: none;
   border-radius: 4px;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: var(--font-size-xs-plus);
   font-weight: 500;
   padding: 2px 4px;
   cursor: pointer;
@@ -800,12 +990,11 @@ a:hover {
   align-items: center;
   gap: 16px;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   width: 100%;
-  max-width: 680px;
+  max-width: 685px;
   justify-content: flex-start;
 }
-
 
 .prompt-sub-link {
   color: var(--text-secondary);
@@ -821,216 +1010,7 @@ a:hover {
   color: var(--text-primary);
 }
 
-/* General Button Styles */
-.btn {
-  background-color: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 13.5px;
-  font-weight: 500;
-  padding: 8px 16px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.btn:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-.btn:active {
-  transform: scale(0.98);
-}
-
-.btn.primary {
-  background-color: var(--text-primary);
-  color: var(--bg-app);
-  border-color: transparent;
-}
-
-.btn.primary:hover {
-  background-color: #ffffff;
-}
-
-/* ── Animation keyframes (new components only) ───────────────────────────── */
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Markdown content selectable */
-.assistant-content * {
-  user-select: text;
-}
-
-@keyframes textShimmer {
-  0% {
-    background-position: -150% 0;
-  }
-  100% {
-    background-position: 150% 0;
-  }
-}
-
-.shimmer-text {
-  background: linear-gradient(
-    90deg,
-    rgba(156, 156, 156, 0.4) 0%,
-    rgba(243, 243, 243, 0.95) 50%,
-    rgba(156, 156, 156, 0.4) 100%
-  );
-  background-size: 150% auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: textShimmer 2.2s infinite linear;
-  font-weight: 500;
-  display: inline-block;
-}
-/* Split View Layout */
-.split-view-container {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.chat-pane {
-  flex: 1;
-  min-width: 300px;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.artifact-pane {
-  width: 100%;
-  height: 100%;
-  background-color: #1e1e1e; /* matches Monaco vs-dark background */
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-}
-
-/* Panel Headers */
-.panel-header {
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-color);
-  background-color: var(--bg-app);
-  flex-shrink: 0;
-}
-
-.panel-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.panel-header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.panel-header-action {
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  padding: 4px;
-  border-radius: 4px;
-}
-
-.panel-header-action:hover {
-  color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* Custom TS Badge */
-.ts-badge {
-  background-color: rgba(49, 120, 198, 0.15); /* TypeScript blue with opacity */
-  color: #3178c6;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 4px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Review Changes Button */
-.review-changes-btn {
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.review-changes-btn:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* Media Preview Layouts inside Artifact Panel */
-.media-preview-container {
-  scrollbar-width: thin;
-}
-
-.media-preview-container::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.media-preview-container::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-.media-image-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #1a1a1a;
-  background-image: 
-    linear-gradient(45deg, #161616 25%, transparent 25%), 
-    linear-gradient(-45deg, #161616 25%, transparent 25%), 
-    linear-gradient(45deg, transparent 75%, #161616 75%), 
-    linear-gradient(-45deg, transparent 75%, #161616 75%);
-  background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* ── Token Ring (InputBar) ────────────────────────────────────────────────── */
+/* ── Token Ring (InputBar Context Indicators) ── */
 .token-ring-wrapper {
   position: relative;
   display: flex;
@@ -1042,7 +1022,7 @@ a:hover {
 
 .token-ring-label {
   position: absolute;
-  font-size: 9px;
+  font-size: var(--font-size-micro);
   font-weight: 700;
   font-family: var(--font-mono);
   top: 50%;
@@ -1059,89 +1039,42 @@ a:hover {
   opacity: 1;
 }
 
-/* ── Browser View ─────────────────────────────────────────────────────────── */
-.browser-nav-btn {
+/* ==========================================================================
+   SECTION 8: Chat Thread & Bubble Messages Component
+   ========================================================================== */
+.chat-thread-container {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: auto;
+  padding: 16px 0 24px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
+  flex-direction: column;
+  contain: layout paint;
+}
+
+/* Hide scrollbar in chat thread container */
+.chat-thread-container::-webkit-scrollbar {
+  display: none !important;
+}
+
+.chat-thread-spacer-top {
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.chat-thread-message-wrapper {
+  padding: 0 24px;
+}
+
+.chat-thread-spacer-bottom {
   height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  padding: 0;
+  flex-shrink: 0;
 }
-
-.browser-nav-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-primary);
-}
-
-.browser-url-bar {
-  flex: 1;
-  height: 26px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  padding: 0 10px;
-  font-size: 12.5px;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  outline: none;
-  transition: border-color 0.2s ease;
-  user-select: text;
-}
-
-.browser-url-bar:focus {
-  border-color: var(--border-focus);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.browser-url-bar::placeholder {
-  color: var(--text-muted);
-}
-
-/* ── Right Sidebar Expanded ──────────────────────────────────────────────── */
-.right-sidebar.expanded {
-  width: var(--sidebar-width-expanded);
-}
-
-.right-sidebar-file-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 6px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.right-sidebar-file-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.right-sidebar-file-name {
-  flex: 1;
-  font-size: 12.5px;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Details summary marker resets */
-details > summary::-webkit-details-marker {
-  display: none;
-}
-details > summary {
-  list-style: none;
-}
-
-/* ── Chat Messages and Markdown Typography ───────────────────────────────── */
 
 .chat-message-user-container {
   display: flex;
@@ -1164,6 +1097,9 @@ details > summary {
 .chat-message-assistant-container {
   margin-bottom: 24px;
   padding-right: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px; /* Premium spacing gap between thoughts, tool calls, and text paragraphs */
 }
 
 .chat-message-assistant {
@@ -1171,11 +1107,11 @@ details > summary {
   color: var(--text-primary);
   line-height: 1.6;
   user-select: text;
-  margin-bottom: 12px;
+  margin-bottom: 0; /* Handled by parent flex gap */
 }
 
 .chat-message-generating-container {
-  margin-top: 8px;
+  margin-top: 0; /* Handled by parent flex gap */
   padding: 4px 0;
   margin-left: 2px;
 }
@@ -1185,7 +1121,7 @@ details > summary {
 }
 
 .chat-reasoning-details {
-  margin-bottom: 12px;
+  margin-bottom: 0; /* Handled by parent flex gap */
 }
 
 .chat-reasoning-summary {
@@ -1235,6 +1171,223 @@ details > summary {
   font-family: var(--font-display);
 }
 
+/* ==========================================================================
+   SECTION 9: Artifact Panel Component
+   ========================================================================== */
+.panel-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-app);
+  flex-shrink: 0;
+}
+
+.panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel-header-action {
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.panel-header-action:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Custom TS Badge */
+.ts-badge {
+  background-color: rgba(49, 120, 198, 0.15); /* TypeScript blue with opacity */
+  color: #3178c6;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Media Preview Layouts inside Artifact Panel */
+.media-preview-container {
+  scrollbar-width: thin;
+}
+
+.media-preview-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.media-preview-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.media-image-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1a1a1a;
+  background-image: 
+    linear-gradient(45deg, #161616 25%, transparent 25%), 
+    linear-gradient(-45deg, #161616 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #161616 75%), 
+    linear-gradient(-45deg, transparent 75%, #161616 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* ── Panel Browser Component ── */
+.browser-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.browser-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.browser-url-bar {
+  flex: 1;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 0 10px;
+  font-size: var(--font-size-xs-plus);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s ease;
+  user-select: text;
+}
+
+.browser-url-bar:focus {
+  border-color: var(--border-focus);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.browser-url-bar::placeholder {
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   SECTION 10: General Buttons & Reusable Interaction Elements
+   ========================================================================== */
+.btn {
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: var(--font-size-sm-plus);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn.primary {
+  background-color: var(--text-primary);
+  color: var(--bg-app);
+  border-color: transparent;
+}
+
+.btn.primary:hover {
+  background-color: #ffffff;
+}
+
+/* Review Changes Button */
+.review-changes-btn {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.review-changes-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgba(156, 156, 156, 0.4) 0%,
+    rgba(243, 243, 243, 0.95) 50%,
+    rgba(156, 156, 156, 0.4) 100%
+  );
+  background-size: 150% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2.2s infinite linear;
+  font-weight: 500;
+  display: inline-block;
+}
+
+/* ==========================================================================
+   SECTION 11: Markdown Typography & Media Rendering Styles
+   ========================================================================== */
 .markdown-content {
   line-height: 1.6;
 }
@@ -1259,33 +1412,6 @@ details > summary {
 
 .markdown-content li {
   margin-bottom: 2px;
-  line-height: 1.5;
-}
-
-.markdown-content code {
-  font-family: var(--font-mono);
-}
-
-.markdown-content code:not([class]) {
-  font-size: 0.85em;
-  background: #2c2c2e;
-  padding: 1px 5px;
-  border-radius: 4px;
-  color: #e5e5e5;
-}
-
-.markdown-content code[class] {
-  font-size: var(--font-size-sm);
-}
-
-.markdown-content pre {
-  background: #1a1a1a;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 10px 12px;
-  overflow: auto;
-  margin: 8px 0;
-  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -1318,170 +1444,12 @@ details > summary {
   color: var(--text-primary);
 }
 
-/* Artifact Panel overrides for markdown content */
-.markdown-content.is-artifact p {
-  margin: 6px 0 12px 0;
-}
-
-.markdown-content.is-artifact ul,
-.markdown-content.is-artifact ol {
-  margin: 6px 0 12px 20px;
-}
-
-.markdown-content.is-artifact li {
-  margin-bottom: 4px;
-  line-height: 1.5;
-}
-
-.markdown-content.is-artifact pre {
-  background: #161616;
-  padding: 12px 14px;
-  margin: 12px 0;
-  font-size: var(--font-size-md);
-  line-height: 1.55;
-}
-
-.markdown-content.is-artifact blockquote {
-  border-left: 3px solid var(--text-dim);
-  padding-left: 12px;
-  margin: 10px 0;
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-.markdown-content.is-artifact h1 {
-  font-size: var(--font-size-2xl);
-  margin: 20px 0 10px;
-}
-
-.markdown-content.is-artifact h2 {
-  font-size: var(--font-size-xl);
-  margin: 16px 0 8px;
-}
-
-.markdown-content.is-artifact h3 {
-  font-size: var(--font-size-lg);
-  margin: 12px 0 6px;
-}
-
-.panel-resize-handle {
-  width: 4px;
-  background-color: var(--border-color);
-  cursor: col-resize;
-  transition: background-color 0.2s;
-  z-index: 10;
-}
-
-/* Google Sign-In Button */
-.titlebar-action.google-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-.titlebar-action.google-btn:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateY(-1px);
-}
-
-/* Profile Avatar Trigger */
-.titlebar-avatar-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  cursor: pointer;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-.titlebar-avatar-btn:hover {
-  transform: scale(1.05);
-}
-.titlebar-avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border: 1px solid var(--border-color);
-  border-radius: 50%;
-}
-.titlebar-avatar-fallback {
-  width: 100%;
-  height: 100%;
-  background-color: var(--border-color);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 50%;
-}
-
-/* Radix Profile Dropdown */
-.titlebar-profile-dropdown {
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  min-width: 180px;
-  padding: 6px 0;
-  z-index: 1000;
-  font-family: var(--font-display);
-}
-.profile-dropdown-info {
-  padding: 8px 12px;
-}
-.profile-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.profile-email {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-.profile-dropdown-separator {
-  height: 1px;
-  background-color: var(--border-color);
-  margin: 6px 0;
-}
-.profile-dropdown-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  color: var(--text-primary);
-  cursor: pointer;
-  outline: none;
-  transition: background 0.15s ease;
-}
-.profile-dropdown-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.profile-dropdown-item.logout {
-  color: var(--accent-red);
-}
-.profile-dropdown-item.logout:hover {
-  background: rgba(239, 68, 68, 0.08);
-}
-
-/* Premium Markdown Table & Code Block Styling */
+/* Tables inside Markdown Content */
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
   margin: 16px 0;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1510,15 +1478,43 @@ details > summary {
   background-color: rgba(255, 255, 255, 0.01);
 }
 
-/* Premium Native Code Block - Single pre element with absolutely positioned indicators */
+/* ── Inline Code Elements ── */
+.markdown-content :not(pre) > code {
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: #e2b473; /* soft warm gold-amber contrast */
+}
+
+/* fallback / other classes of inline code */
+.markdown-content code {
+  font-family: var(--font-mono);
+}
+
+.markdown-content code:not([class]) {
+  font-size: 0.85em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #e2b473;
+}
+
+.markdown-content code[class] {
+  font-size: var(--font-size-sm);
+}
+
+/* ── Premium Block Code Elements ── */
 .markdown-content pre {
   background-color: #141414;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 34px 16px 14px 16px; /* space at top for absolute language/copy triggers */
+  padding: 34px 16px 14px 16px; /* space at top for absolute indicators */
   margin: 16px 0;
   overflow-x: auto;
-  position: relative; /* essential coordinate anchor */
+  position: relative; /* coordinate anchor */
 }
 
 .markdown-content pre code {
@@ -1526,7 +1522,7 @@ details > summary {
   padding: 0;
   border-radius: 0;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--font-size-xs-plus);
   line-height: 1.6;
   color: #e5e5e5;
 }
@@ -1535,7 +1531,7 @@ details > summary {
   position: absolute;
   top: 8px;
   left: 16px;
-  font-size: 11px;
+  font-size: var(--font-size-xxs);
   font-family: var(--font-mono);
   color: var(--text-secondary);
   opacity: 0.5;
@@ -1565,17 +1561,7 @@ details > summary {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
-.markdown-content :not(pre) > code {
-  background-color: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: #ef4444; /* nice soft warm contrast red-orange */
-}
-
-/* High-Fidelity Modern Dark Syntax Highlighting (matching highlight.js classes) */
+/* ── High-Fidelity Modern Dark Syntax Highlighting (Highlight.js) ── */
 .hljs-comment,
 .hljs-quote {
   color: #6a9955; /* modern soft green comments */
@@ -1631,4 +1617,71 @@ details > summary {
 
 .hljs-strong {
   font-weight: bold;
+}
+
+/* ── Artifact Panel overrides for markdown content ── */
+.markdown-content.is-artifact p {
+  margin: 6px 0 12px 0;
+}
+
+.markdown-content.is-artifact ul,
+.markdown-content.is-artifact ol {
+  margin: 6px 0 12px 20px;
+}
+
+.markdown-content.is-artifact li {
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.markdown-content.is-artifact pre {
+  background: #161616;
+  padding: 12px 14px;
+  margin: 12px 0;
+  font-size: var(--font-size-md);
+  line-height: 1.55;
+}
+
+.markdown-content.is-artifact blockquote {
+  border-left: 3px solid var(--text-dim);
+  padding-left: 12px;
+  margin: 10px 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.markdown-content.is-artifact h1 {
+  font-size: var(--font-size-2xl);
+  margin: 20px 0 10px;
+}
+
+.markdown-content.is-artifact h2 {
+  font-size: var(--font-size-xl);
+  margin: 16px 0 8px;
+}
+
+.markdown-content.is-artifact h3 {
+  font-size: var(--font-size-lg);
+  margin: 12px 0 6px;
+}
+
+/* ==========================================================================
+   SECTION 12: CSS Keyframes & Animations
+   ========================================================================== */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes textShimmer {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 150% 0;
+  }
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
 }

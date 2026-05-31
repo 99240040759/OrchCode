@@ -261,18 +261,23 @@ const TitleBar: React.FC<TitleBarProps> = ({
             </DropdownMenu.Trigger>
 
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="titlebar-profile-dropdown" align="end" sideOffset={5}>
-                <div className="profile-dropdown-info">
-                  <div className="profile-name">{authUser.name || 'Google User'}</div>
-                  <div className="profile-email">{authUser.email}</div>
+              <DropdownMenu.Content asChild align="end" sideOffset={5}>
+                <div
+                  className="titlebar-profile-dropdown native-dropdown-content"
+                  style={{ transformOrigin: 'top right' }}
+                >
+                  <div className="profile-dropdown-info">
+                    <div className="profile-name">{authUser.name || 'Google User'}</div>
+                    <div className="profile-email">{authUser.email}</div>
+                  </div>
+                  <DropdownMenu.Separator className="profile-dropdown-separator" />
+                  <DropdownMenu.Item className="profile-dropdown-item" onSelect={onSettingsClick}>
+                    Settings
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="profile-dropdown-item logout" onSelect={handleLogout}>
+                    Log Out
+                  </DropdownMenu.Item>
                 </div>
-                <DropdownMenu.Separator className="profile-dropdown-separator" />
-                <DropdownMenu.Item className="profile-dropdown-item" onSelect={onSettingsClick}>
-                  Settings
-                </DropdownMenu.Item>
-                <DropdownMenu.Item className="profile-dropdown-item logout" onSelect={handleLogout}>
-                  Log Out
-                </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>

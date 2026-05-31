@@ -8,7 +8,7 @@ import MarkdownRenderer from './MarkdownRenderer'
 
 const renderMarkdown = (text: string) => <MarkdownRenderer content={text} />
 
-const UserMessage = ({ message }: { message: ChatMessage }) => {
+const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
   if (message.data) {
     try {
@@ -38,7 +38,7 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                     }}
                   />
                 ) : (
-                  <span style={{ fontSize: 13 }}>📄</span>
+                  <span style={{ fontSize: 'var(--font-size-sm)' }}>📄</span>
                 )}
                 <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {att.name}
@@ -51,9 +51,15 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
       </div>
     </div>
   )
-}
+}, (prev, next) => {
+  return (
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.message.data === next.message.data
+  )
+})
 
-const ReasoningBlock: React.FC<{ content: string; durationMs?: number; isStreaming?: boolean }> = ({ content, durationMs, isStreaming }) => {
+const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { content: string; durationMs?: number; isStreaming?: boolean }) => {
   const [isOpen, setIsOpen] = useState(isStreaming ?? false)
   const [userToggled, setUserToggled] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -76,20 +82,32 @@ const ReasoningBlock: React.FC<{ content: string; durationMs?: number; isStreami
     <details
       open={isOpen}
       onToggle={(e) => {
-        setIsOpen((e.target as HTMLDetailsElement).open)
+        const targetOpen = (e.target as HTMLDetailsElement).open
+        if (targetOpen !== isOpen) {
+          setUserToggled(true)
+          setIsOpen(targetOpen)
+        }
       }}
       className="chat-reasoning-details"
     >
       <summary
-        onClick={() => setUserToggled(true)}
         className="chat-reasoning-summary"
+        style={{
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          listStyle: 'none'
+        }}
       >
-        {title}
+        <span>{title}</span>
         <ChevronDown
           size={14}
           className="chat-reasoning-chevron"
           style={{
-            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)'
+            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 0.12s ease',
+            flexShrink: 0
           }}
         />
       </summary>
@@ -97,14 +115,21 @@ const ReasoningBlock: React.FC<{ content: string; durationMs?: number; isStreami
       <div
         ref={scrollRef}
         className="assistant-content chat-reasoning-body"
+        style={{ paddingBottom: '8px' }}
       >
         {renderMarkdown(content || 'Thinking...')}
       </div>
     </details>
   )
-}
+}, (prev, next) => {
+  return (
+    prev.content === next.content &&
+    prev.durationMs === next.durationMs &&
+    prev.isStreaming === next.isStreaming
+  )
+})
 
-const AssistantMessage = ({ message }: { message: ChatMessage }) => (
+const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
   <div className="chat-message-assistant-container">
     {message.orderedBlocks?.map((block: any, i: number) => {
       if (block.type === 'reasoning') {
@@ -119,7 +144,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => (
           status: block.status
         }
         return (
-          <div key={`tool-${i}`} style={{ marginBottom: '2px' }}>
+          <div key={`tool-${i}`}>
             <ToolCallBlock toolCall={toolCall as any} />
           </div>
         )
@@ -174,7 +199,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => (
       </div>
     )}
   </div>
-)
+))
 
 const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)

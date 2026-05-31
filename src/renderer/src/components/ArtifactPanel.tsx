@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Editor } from '@monaco-editor/react'
 import { debounce } from 'lodash-es'
+import * as Tabs from '@radix-ui/react-tabs'
 import {
   Search,
   X,
@@ -297,7 +298,7 @@ const BrowserView: React.FC = () => {
         {title && (
           <div
             style={{
-              fontSize: 11,
+              fontSize: 'var(--font-size-xxs)',
               color: 'var(--text-secondary)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -322,7 +323,7 @@ const BrowserView: React.FC = () => {
         }}
       >
         {!isLoaded && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: 13 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
             Loading browser...
           </div>
         )}
@@ -375,7 +376,12 @@ const ArtifactPanel: React.FC = () => {
   if (!isOpen) return null
 
   return (
-    <div className="artifact-pane">
+    <Tabs.Root
+      value={panelMode}
+      onValueChange={(val) => setPanelMode(val as ArtifactPanelMode)}
+      className="artifact-pane"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
+    >
       <div
         style={{
           display: 'flex',
@@ -391,15 +397,15 @@ const ArtifactPanel: React.FC = () => {
           flexShrink: 0
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Tabs.List style={{ display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}>
           {[
             { mode: 'editor', icon: <FileText size={15} />, title: 'Editor' },
             { mode: 'terminal', icon: <TerminalSquare size={15} />, title: 'Terminal' },
             { mode: 'browser', icon: <Globe size={15} />, title: 'Browser' }
           ].map(({ mode, icon, title }) => (
-            <button
+            <Tabs.Trigger
               key={mode}
-              onClick={() => setPanelMode(mode as ArtifactPanelMode)}
+              value={mode}
               title={title}
               style={{
                 width: 26,
@@ -410,17 +416,18 @@ const ArtifactPanel: React.FC = () => {
                 borderRadius: 4,
                 border: 'none',
                 cursor: 'pointer',
-                backgroundColor: panelMode === mode ? 'rgba(255,255,255,0.10)' : 'transparent',
+                backgroundColor: panelMode === mode ? 'rgba(255, 255, 255, 0.10)' : 'transparent',
                 color: panelMode === mode 
                   ? (mode === 'browser' ? 'var(--accent-blue)' : mode === 'terminal' ? 'var(--accent-green)' : 'var(--text-primary)')
                   : '#9c9c9c',
-                transition: 'all 0.15s ease'
+                transition: 'color 0.15s ease, background-color 0.15s ease',
+                position: 'relative'
               }}
             >
               {icon}
-            </button>
+            </Tabs.Trigger>
           ))}
-        </div>
+        </Tabs.List>
       </div>
 
       {panelMode === 'editor' && displayFile && (
@@ -469,7 +476,7 @@ const ArtifactPanel: React.FC = () => {
                   style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
                 />
               )}
-              <span style={{ color: '#f3f3f3', fontWeight: 500, fontSize: '13px', whiteSpace: 'nowrap' }}>
+              <span style={{ color: '#f3f3f3', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
                 {displayFile.name === 'implementation_plan.md'
                   ? 'Implementation Plan'
                   : displayFile.name === 'task.md'
@@ -479,7 +486,7 @@ const ArtifactPanel: React.FC = () => {
                   : displayFile.name}
               </span>
               {!isAgentArtifact(displayFile.name) && (
-                <span style={{ color: '#9c9c9c', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayFile.path}</span>
+                <span style={{ color: '#9c9c9c', fontSize: 'var(--font-size-xxs)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayFile.path}</span>
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
@@ -487,7 +494,7 @@ const ArtifactPanel: React.FC = () => {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     className="btn"
-                    style={{ padding: '2px 8px', fontSize: '11px', height: '22px', border: '1px solid rgba(255,255,255,0.12)' }}
+                    style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px', border: '1px solid rgba(255,255,255,0.12)' }}
                     onClick={() => {
                       setGlobalPrompt({ prompt: 'I reject the implementation plan. Please make modifications based on my requirements.' })
                       toast.info('Rejected implementation plan. Agent notified.')
@@ -497,7 +504,7 @@ const ArtifactPanel: React.FC = () => {
                   </button>
                   <button
                     className="btn primary"
-                    style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }}
+                    style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px' }}
                     onClick={() => {
                       setGlobalPrompt({ prompt: 'I approve the implementation plan. Please proceed with execution.' })
                       toast.success('Approved plan. Proceeding with execution.')
@@ -540,7 +547,7 @@ const ArtifactPanel: React.FC = () => {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <TerminalSquare size={14} style={{ color: 'var(--accent-green)' }} />
-            <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+            <span style={{ fontSize: 'var(--font-size-xs-plus)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
               {activeWorkspace?.name ? `${activeWorkspace.name} — zsh` : 'Terminal'}
             </span>
           </div>
@@ -551,20 +558,20 @@ const ArtifactPanel: React.FC = () => {
       )}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ display: panelMode === 'terminal' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
+        <Tabs.Content value="terminal" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
           <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
-        </div>
+        </Tabs.Content>
 
-        {panelMode === 'browser' && (
+        <Tabs.Content value="browser" style={{ height: '100%', width: '100%' }}>
           <BrowserView />
-        )}
+        </Tabs.Content>
 
-        {panelMode === 'editor' && (
-          !displayFile ? (
+        <Tabs.Content value="editor" style={{ height: '100%', width: '100%' }}>
+          {!displayFile ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px', color: 'var(--text-secondary)', textAlign: 'center', backgroundColor: '#161616' }}>
               <div style={{ fontSize: '40px', marginBottom: '16px', filter: 'grayscale(0.3) contrast(1.2)' }}>📂</div>
-              <h3 style={{ fontSize: '15px', color: 'var(--text-primary)', fontWeight: 500, marginBottom: '6px', fontFamily: 'var(--font-display)' }}>No File Open</h3>
-              <p style={{ fontSize: '12.5px', maxWidth: '300px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0 }}>Select a file from the sidebar or ask the agent to edit or create a code file.</p>
+              <h3 style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', fontWeight: 500, marginBottom: '6px', fontFamily: 'var(--font-display)' }}>No File Open</h3>
+              <p style={{ fontSize: 'var(--font-size-xs-plus)', maxWidth: '300px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0 }}>Select a file from the sidebar or ask the agent to edit or create a code file.</p>
             </div>
           ) : displayFile.isBinary ? (
             <div
@@ -590,12 +597,12 @@ const ArtifactPanel: React.FC = () => {
               )}
               {displayFile.mimeType?.startsWith('audio/') && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: '#1e1e1e', border: '1px solid var(--border-color)' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
                   <audio controls autoPlay src={`data:${displayFile.mimeType};base64,${displayFile.base64}`} style={{ width: '320px' }} />
                 </div>
               )}
               {!displayFile.mimeType?.startsWith('image/') && !displayFile.mimeType?.startsWith('video/') && !displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
                   Unsupported preview format ({displayFile.mimeType})
                 </div>
               )}
@@ -603,7 +610,7 @@ const ArtifactPanel: React.FC = () => {
           ) : isMarkdown ? (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
               <div
-                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: '#1e1e1e', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 14.5, userSelect: 'text' }}
+                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: '#1e1e1e', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
                 className="assistant-content markdown-body"
               >
                 <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />
@@ -638,10 +645,10 @@ const ArtifactPanel: React.FC = () => {
                 parameterHints: { enabled: true }
               }}
             />
-          )
-        )}
+          )}
+        </Tabs.Content>
       </div>
-    </div>
+    </Tabs.Root>
   )
 }
 

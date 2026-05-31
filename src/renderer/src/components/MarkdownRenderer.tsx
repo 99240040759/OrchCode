@@ -113,4 +113,6 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
   )
 }
 
-export default MarkdownRenderer
+export default React.memo(MarkdownRenderer, (prev, next) => {
+  return prev.content === next.content && prev.isArtifact === next.isArtifact
+})

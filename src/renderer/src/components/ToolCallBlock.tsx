@@ -4,6 +4,8 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
+import { Primitive } from '@radix-ui/react-primitive'
+import * as styles from './ToolCallBlock.css'
 
 const isAgentArtifact = (fileName: string) => {
   return fileName === 'implementation_plan.md' || fileName === 'task.md' || fileName === 'walkthrough.md'
@@ -209,38 +211,10 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   }
 
   return (
-    <div
+    <Primitive.button
+      asChild={false}
       onClick={isFile ? handleClick : undefined}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: 'var(--font-size-xs)',
-        color: 'var(--text-secondary)',
-        marginBottom: 0,
-        padding: '2px 6px',
-        userSelect: 'none',
-        height: 22,
-        contain: 'layout paint',
-        cursor: isFile ? 'pointer' : 'default',
-        borderRadius: 4,
-        backgroundColor: 'transparent',
-        transition: 'all 0.15s ease',
-        maxWidth: '100%',
-        boxSizing: 'border-box'
-      }}
-      onMouseEnter={(e) => {
-        if (isFile) {
-          e.currentTarget.style.color = 'var(--text-primary)'
-          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)'
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (isFile) {
-          e.currentTarget.style.color = 'var(--text-secondary)'
-          e.currentTarget.style.backgroundColor = 'transparent'
-        }
-      }}
+      className={`${styles.toolCallWrapper} ${isFile ? styles.interactive : styles.nonInteractive}`}
       title={isFile ? `Open ${fullPath}` : undefined}
     >
       <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>{operation}</span>
@@ -286,8 +260,14 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
           {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
         </div>
       )}
-    </div>
+    </Primitive.button>
   )
 }
 
-export default ToolCallBlock
+export default React.memo(ToolCallBlock, (prev, next) => {
+  return (
+    prev.toolCall.id === next.toolCall.id &&
+    prev.toolCall.status === next.toolCall.status &&
+    prev.toolCall.result === next.toolCall.result
+  )
+})
