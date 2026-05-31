@@ -173,7 +173,7 @@ export function createCoreTools(convId: string) {
         return {
           type: 'content',
           value: [
-            { type: 'media', data: result.base64Content, mediaType: result.mimeType },
+            { type: 'image-data', data: result.base64Content, mediaType: result.mimeType },
             { type: 'text', text: `Successfully analyzed binary image: ${result.absolutePath}` }
           ]
         }
@@ -462,20 +462,6 @@ export const browserNavigate = tool({
   }
 })
 
-export const browserClick = tool({
-  description: 'Clicks an element on the active webpage using a CSS selector. Supports piercing iframes via frameSelector.',
-  inputSchema: z.object({
-    selector: z.string().describe('CSS selector of the element to click.'),
-    frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
-  }),
-  execute: async ({ selector, frameSelector }) => {
-    log.info(`[tool:browserClick] selector="${selector}"`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.click(selector, frameSelector) }
-    catch (err: any) { log.error('[tool:browserClick] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
 export const browserType = tool({
   description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
   inputSchema: z.object({
@@ -491,35 +477,6 @@ export const browserType = tool({
   }
 })
 
-export const browserHover = tool({
-  description: 'Hovers over an element to trigger dropdowns or hover styles. Supports piercing iframes via frameSelector.',
-  inputSchema: z.object({
-    selector: z.string().describe('CSS selector of the element to hover.'),
-    frameSelector: z.string().optional().describe('Optional iframe CSS selector.')
-  }),
-  execute: async ({ selector, frameSelector }) => {
-    log.info(`[tool:browserHover] selector="${selector}"`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.hover(selector, frameSelector) }
-    catch (err: any) { log.error('[tool:browserHover] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserWaitFor = tool({
-  description: 'Waits for a specific element state on the active webpage.',
-  inputSchema: z.object({
-    selector: z.string().describe('CSS selector to wait for.'),
-    state: z.enum(['attached', 'detached', 'visible', 'hidden']).default('visible').describe('State to wait for.'),
-    frameSelector: z.string().optional().describe('Optional iframe CSS selector.')
-  }),
-  execute: async ({ selector, state, frameSelector }) => {
-    log.info(`[tool:browserWaitFor] selector="${selector}" state="${state}"`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.waitForSelector(selector, state, frameSelector) }
-    catch (err: any) { log.error('[tool:browserWaitFor] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
 export const browserScroll = tool({
   description: 'Scrolls the active webpage viewport.',
   inputSchema: z.object({
@@ -531,57 +488,6 @@ export const browserScroll = tool({
     const agent = startBrowserAgentWorker()
     try { return await agent.scroll(direction, amount) }
     catch (err: any) { log.error('[tool:browserScroll] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserPressKey = tool({
-  description: 'Simulates a native keyboard keypress inside the active browser window.',
-  inputSchema: z.object({ key: z.string().describe('Key to press (e.g. "Enter", "Tab", "Escape").') }),
-  execute: async ({ key }) => {
-    log.info(`[tool:browserPressKey] key="${key}"`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.pressKey(key) }
-    catch (err: any) { log.error('[tool:browserPressKey] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserGoBack = tool({
-  description: 'Navigates the browser history back.',
-  inputSchema: z.object({}),
-  execute: async () => {
-    const agent = startBrowserAgentWorker()
-    try { return await agent.goBack() }
-    catch (err: any) { log.error('[tool:browserGoBack] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserGoForward = tool({
-  description: 'Navigates the browser history forward.',
-  inputSchema: z.object({}),
-  execute: async () => {
-    const agent = startBrowserAgentWorker()
-    try { return await agent.goForward() }
-    catch (err: any) { log.error('[tool:browserGoForward] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserReload = tool({
-  description: 'Reloads the active webpage.',
-  inputSchema: z.object({}),
-  execute: async () => {
-    const agent = startBrowserAgentWorker()
-    try { return await agent.reload() }
-    catch (err: any) { log.error('[tool:browserReload] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-export const browserGetHtml = tool({
-  description: 'Retrieves the HTML content of the active webpage.',
-  inputSchema: z.object({}),
-  execute: async () => {
-    const agent = startBrowserAgentWorker()
-    try { return await agent.getHtml() }
-    catch (err: any) { log.error('[tool:browserGetHtml] worker error:', err); return { success: false, error: err.message } }
   }
 })
 
@@ -625,7 +531,7 @@ export const browserScreenshot = tool({
         return {
           type: 'content',
           value: [
-            { type: 'media', data: base64Image, mediaType: 'image/png' },
+            { type: 'image-data', data: base64Image, mediaType: 'image/png' },
             { type: 'text', text: `Screenshot captured: ${result.filePath}` }
           ]
         }
@@ -634,20 +540,6 @@ export const browserScreenshot = tool({
       }
     }
     return { type: 'content', value: [{ type: 'text', text: result.error || 'Failed to capture screenshot' }] }
-  }
-})
-
-export const browserMouseMove = tool({
-  description: 'Moves the mouse cursor to a specific pixel coordinate.',
-  inputSchema: z.object({
-    x: z.number().int().describe('X coordinate.'),
-    y: z.number().int().describe('Y coordinate.')
-  }),
-  execute: async ({ x, y }) => {
-    log.info(`[tool:browserMouseMove] x=${x} y=${y}`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.mouseMove(x, y) }
-    catch (err: any) { log.error('[tool:browserMouseMove] worker error:', err); return { success: false, error: err.message } }
   }
 })
 
@@ -666,36 +558,10 @@ export const browserMouseClickCoordinate = tool({
   }
 })
 
-export const browserMouseDrag = tool({
-  description: 'Performs a native drag-and-drop gesture.',
-  inputSchema: z.object({
-    fromX: z.number().int().describe('Starting X.'),
-    fromY: z.number().int().describe('Starting Y.'),
-    toX: z.number().int().describe('Ending X.'),
-    toY: z.number().int().describe('Ending Y.')
-  }),
-  execute: async ({ fromX, fromY, toX, toY }) => {
-    log.info(`[tool:browserMouseDrag] from=(${fromX},${fromY}) to=(${toX},${toY})`)
-    const agent = startBrowserAgentWorker()
-    try { return await agent.mouseDrag(fromX, fromY, toX, toY) }
-    catch (err: any) { log.error('[tool:browserMouseDrag] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
 export const browserTools = {
   browserNavigate,
-  browserClick,
   browserType,
-  browserHover,
-  browserWaitFor,
   browserScroll,
-  browserPressKey,
-  browserMouseMove,
-  browserMouseClickCoordinate,
-  browserMouseDrag,
-  browserGoBack,
-  browserGoForward,
-  browserReload,
-  browserGetHtml,
-  browserScreenshot
+  browserScreenshot,
+  browserMouseClickCoordinate
 }

@@ -19,7 +19,7 @@ import {
   assertWithinWorkspace
 } from './workspace'
 
-import { streamText, stepCountIs, generateText } from 'ai'
+import { streamText, generateText, ModelMessage, ToolCallPart, ToolResultPart, stepCountIs } from 'ai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createCoreTools, browserTools, startBrowserAgentWorker, stopBrowserAgentWorker } from './tools'
 
@@ -403,7 +403,7 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
       activeHistory = history.slice(compactionIndex + 1)
     }
 
-    const messages: any[] = []
+    const messages: ModelMessage[] = []
 
     for (const m of activeHistory) {
       if (m.role === 'user') {
@@ -414,8 +414,8 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
       } else if (m.role === 'assistant') {
         // Derive text EXCLUSIVELY from blocks to avoid content-column duplication (#4 fix)
         let textContent = ''
-        const toolCalls: any[] = []
-        const toolResults: any[] = []
+        const toolCalls: ToolCallPart[] = []
+        const toolResults: ToolResultPart[] = []
 
         if (m.data) {
           try {
@@ -429,13 +429,34 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
                     type: 'tool-call',
                     toolCallId: block.toolCallId,
                     toolName: block.toolName,
-                    args: block.args
+                    input: block.args
                   })
+                  const isError = block.status === 'error'
+                  const outputVal = block.result
+                  let formattedOutput: any
+
+                  if (
+                    outputVal &&
+                    typeof outputVal === 'object' &&
+                    'type' in outputVal &&
+                    ['text', 'json', 'execution-denied', 'error-text', 'error-json', 'content'].includes((outputVal as any).type)
+                  ) {
+                    formattedOutput = outputVal
+                  } else {
+                    formattedOutput = isError
+                      ? (typeof outputVal === 'string'
+                          ? { type: 'error-text' as const, value: outputVal }
+                          : { type: 'error-json' as const, value: outputVal === undefined ? null : outputVal })
+                      : (typeof outputVal === 'string'
+                          ? { type: 'text' as const, value: outputVal }
+                          : { type: 'json' as const, value: outputVal === undefined ? null : outputVal })
+                  }
+
                   toolResults.push({
                     type: 'tool-result',
                     toolCallId: block.toolCallId,
                     toolName: block.toolName,
-                    result: block.result
+                    output: formattedOutput
                   })
                 }
               }
@@ -453,11 +474,23 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
         const pairedCalls = toolCalls.filter((c) => resultIds.has(c.toolCallId))
         const pairedResults = toolResults.filter((r) => pairedCalls.some((c) => c.toolCallId === r.toolCallId))
 
-        const finalAssistantContent = textContent || (pairedCalls.length === 0 ? '[Action Taken]' : undefined)
+        let finalAssistantContent: string | Array<any>
+        if (pairedCalls.length > 0) {
+          const parts: Array<any> = []
+          if (textContent) {
+            parts.push({ type: 'text', text: textContent })
+          }
+          for (const call of pairedCalls) {
+            parts.push(call)
+          }
+          finalAssistantContent = parts
+        } else {
+          finalAssistantContent = textContent || '[Action Taken]'
+        }
+
         messages.push({
           role: 'assistant',
-          content: finalAssistantContent,
-          toolCalls: pairedCalls.length > 0 ? pairedCalls : undefined
+          content: finalAssistantContent
         })
 
         if (pairedResults.length > 0) {
@@ -520,15 +553,12 @@ ipcMain.handle('agent:stream-request', async (event, promptText: string, threadI
     let browserInstruction = ''
     if (browserView) {
       browserInstruction = `\n── BROWSER AUTOMATION ACTIVE ──
-You currently have active eyes and hands in the browser panel. Use the expanded browser tools to complete tasks:
+You currently have active eyes and hands in the browser panel. Use the 5 core browser tools to complete tasks:
 1. 'browserNavigate(url)': Open pages.
-2. 'browserClick(selector, frameSelector?)', 'browserType(selector, text, frameSelector?)', 'browserHover(selector, frameSelector?)': Pierce frames natively by providing optional frameSelector (e.g. 'iframe#payment-frame') to target nested content and pierce shadow DOMs. Hover targets drop-down menus.
-3. 'browserWaitFor(selector, state?, frameSelector?)': Robustly sync page states (wait for 'attached', 'detached', 'visible', 'hidden') in SPAs before acting.
-4. 'browserScroll(direction, amount?)': Scroll 'up', 'down', 'left', 'right' to load lazy elements or view hidden content.
-5. 'browserPressKey(key)': Press keyboard keys natively (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown').
-6. 'browserMouseMove(x, y)', 'browserMouseClickCoordinate(x, y, button?)', 'browserMouseDrag(fromX, fromY, toX, toY)': Control the cursor at absolute pixel coordinates. Use to click custom canvas structures, select elements, or drag map widgets.
-7. 'browserGoBack()', 'browserGoForward()', 'browserReload()': Control browser state.
-8. 'browserScreenshot()', 'browserGetHtml()': Visual and structural feedback. ALWAYS capture a screenshot after significant navigation, typing, or page actions to visually verify the page state.`
+2. 'browserType(selector, text, frameSelector?)': Pierce frames natively by providing optional frameSelector (e.g. 'iframe#payment-frame') to target nested input elements and pierce shadow DOMs.
+3. 'browserScroll(direction, amount?)': Scroll 'up', 'down', 'left', 'right' to load lazy elements or view hidden content.
+4. 'browserMouseClickCoordinate(x, y, button?)': Click absolute pixel coordinates with left/right/middle click buttons. Use to click elements, buttons, links, or canvas structures visualised on your screenshot.
+5. 'browserScreenshot()': Visual feedback. ALWAYS capture a screenshot after significant navigation, typing, or scrolling to visually verify the page state.`
     }
 
     const systemInstruction = `You are Antigravity, a highly capable developer coding assistant. Active conversation ID: ${convId}.${modeSuffix}
@@ -611,7 +641,7 @@ Follow these native planning boundaries strictly to manage your work professiona
         orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
         event.sender.send('agent:stream-chunk', { type: 'reasoning-start' })
       } else if (part.type === 'reasoning-delta') {
-        const textDelta = (part as any).text || (part as any).textDelta || (part as any).delta || ''
+        const textDelta = part.text || ''
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') { last.content += textDelta; last.durationMs = Date.now() - currentReasoningStartMs }
         event.sender.send('agent:stream-chunk', { type: 'reasoning-delta', payload: textDelta })
@@ -619,7 +649,7 @@ Follow these native planning boundaries strictly to manage your work professiona
         event.sender.send('agent:stream-chunk', { type: 'reasoning-end' })
         await saveProgress()
       } else if (part.type === 'text-delta') {
-        const textDelta = (part as any).text || (part as any).textDelta || ''
+        const textDelta = part.text || ''
         assistantContent += textDelta
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: textDelta })
@@ -643,16 +673,16 @@ Follow these native planning boundaries strictly to manage your work professiona
         }
         await saveProgress()
       } else if (part.type === 'error') {
-        const errorMsg = (part as any).error?.message || String((part as any).error || 'Unknown error')
+        const errorMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
         log.error(`[main] Stream error: "${errorMsg}"`)
         const block = orderedBlocks.find((b) => b.type === 'tool' && b.status === 'pending')
         if (block) block.status = 'error'
         event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg })
         await saveProgress()
       } else if (part.type === 'finish') {
-        const usage = (part as any).totalUsage || (part as any).usage || {}
-        turnPromptTokens = usage.inputTokens || usage.promptTokens || 0
-        turnCompletionTokens = usage.outputTokens || usage.completionTokens || 0
+        const usage = part.totalUsage || {}
+        turnPromptTokens = usage.inputTokens || 0
+        turnCompletionTokens = usage.outputTokens || 0
         const turnTotal = turnPromptTokens + turnCompletionTokens
 
         const prevAccumulated = storedTokens
