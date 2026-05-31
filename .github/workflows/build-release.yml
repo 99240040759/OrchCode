@@ -54,17 +54,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install Rosetta (for x64 emulation)
         if: runner.os == 'macOS'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
-      - name: Install Dependencies for x64 (Rosetta)
+      - name: Cache npm (x64)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}-x64
+
+      - name: Install Dependencies (x64, Rosetta)
         run: |
           arch -x86_64 /usr/local/bin/npm ci || arch -x86_64 npm ci
         env:
           npm_config_arch: x64
+
+      - name: Build (x64 under Rosetta)
+        run: |
+          arch -x86_64 /usr/local/bin/npm run build || arch -x86_64 npm run build
+
+      - name: Verify out/main exists (x64)
+        run: |
+          echo 'Checking for out/main/index.js'
+          if [ -f out/main/index.js ]; then echo 'found out/main/index.js'; ls -la out/main; else echo 'out/main/index.js missing'; ls -la out || true; echo 'Showing dist as fallback'; ls -la dist || true; exit 1; fi
 
       - name: Rebuild native deps for x64
         run: |
@@ -95,6 +109,14 @@ jobs:
 
       - name: Compile Application
         run: npm run build
+
+      - name: Dump dist layout (arm64)
+        run: |
+          echo '--- package.json ---'
+          cat package.json
+          echo '--- dist tree ---'
+          ls -la dist || true
+          find dist -maxdepth 4 -type f -print || true
 
       - name: Build and Publish DMG
         run: npx electron-builder --mac --arm64 --publish always
