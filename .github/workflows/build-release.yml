@@ -60,27 +60,6 @@ jobs:
         if: runner.os == 'macOS'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install Dependencies (arm64)
-        run: npm ci
-
-      - name: Compile Application (arm64)
-        run: npm run build
-
-      - name: Build and Publish DMG (arm64)
-        run: npx electron-builder --mac --arm64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-
       - name: Install Dependencies for x64 (Rosetta)
         run: |
           arch -x86_64 /usr/local/bin/npm ci || arch -x86_64 npm ci
