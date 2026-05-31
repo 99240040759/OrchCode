@@ -45,7 +45,7 @@ jobs:
 
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -56,14 +56,44 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Rosetta (for x64 emulation)
+        if: runner.os == 'macOS'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies (arm64)
         run: npm ci
 
-      - name: Compile Application
+      - name: Compile Application (arm64)
         run: npm run build
 
-      - name: Build and Publish DMG
-        run: npx electron-builder --mac --x64 --publish always
+      - name: Build and Publish DMG (arm64)
+        run: npx electron-builder --mac --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Install Dependencies for x64 (Rosetta)
+        run: |
+          arch -x86_64 /usr/local/bin/npm ci || arch -x86_64 npm ci
+        env:
+          npm_config_arch: x64
+
+      - name: Rebuild native deps for x64
+        run: |
+          arch -x86_64 npx electron-builder install-app-deps --arch x64
+
+      - name: Build and Publish DMG (x64 via Rosetta)
+        run: |
+          arch -x86_64 npx electron-builder --mac --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false

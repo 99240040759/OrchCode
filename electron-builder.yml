@@ -37,7 +37,10 @@ linux:
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
-npmRebuild: false
+# Allow electron-builder to rebuild native dependencies per-target arch.
+# Previously set to false which prevented rebuilding for x64 when running on arm64.
+# Remove or set to true so `install-app-deps` can rebuild native modules.
+npmRebuild: true
 publish:
   provider: github
   owner: sameer786ss
