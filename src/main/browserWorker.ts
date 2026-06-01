@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'worker_threads'
 import { expose } from 'comlink'
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
