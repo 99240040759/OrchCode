@@ -129,6 +129,7 @@ export async function loadSession(): Promise<AuthSession | null> {
       currentSession = JSON.parse(rawString)
       return currentSession
     } else {
+      log.warn('[auth] SECURITY WARNING: OS encryption is unavailable. Session tokens are stored as plaintext on disk.')
       currentSession = JSON.parse(encrypted.toString('utf-8'))
       return currentSession
     }
@@ -151,6 +152,7 @@ async function saveSession(session: AuthSession | null) {
       const encrypted = safeStorage.encryptString(rawString)
       await fs.writeFile(sessionFilePath, encrypted)
     } else {
+      log.warn('[auth] SECURITY WARNING: OS encryption is unavailable. Storing session tokens as plaintext. This is insecure on shared/compromised machines.')
       await fs.writeFile(sessionFilePath, rawString, 'utf-8')
     }
   } catch (err) {

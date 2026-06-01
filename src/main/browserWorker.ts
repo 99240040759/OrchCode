@@ -139,10 +139,8 @@ const workerAPI = {
   },
 
   async scroll(direction: 'up' | 'down' | 'left' | 'right', amount?: number) {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
+    const ready = await this.ensurePage()
+    if (!ready.ok) return { success: false, error: ready.error }
     try {
       const dist = amount || 400
       let x = 0, y = 0
@@ -160,10 +158,8 @@ const workerAPI = {
 
 
   async screenshot(filePath: string) {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
+    const ready = await this.ensurePage()
+    if (!ready.ok) return { success: false, error: ready.error }
     try {
       await page!.screenshot({ path: filePath })
       return { success: true }
@@ -174,10 +170,8 @@ const workerAPI = {
 
 
   async mouseClickCoordinate(x: number, y: number, button?: 'left' | 'right' | 'middle') {
-    if (!page) {
-      const res = await this.connect()
-      if (!res.success) return res
-    }
+    const ready = await this.ensurePage()
+    if (!ready.ok) return { success: false, error: ready.error }
     try {
       await page!.mouse.click(x, y, { button: button || 'left' })
       return { success: true }

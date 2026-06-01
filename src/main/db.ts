@@ -48,10 +48,13 @@ function getDB(): Database.Database {
       content TEXT NOT NULL,
       data TEXT,
       createdAt TEXT NOT NULL,
+      isCompactionAnchor INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_messages_thread_created
       ON messages(threadId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_messages_compaction
+      ON messages(threadId, isCompactionAnchor);
     CREATE TABLE IF NOT EXISTS thread_workspaces (
       threadId TEXT PRIMARY KEY,
       workspacePath TEXT NOT NULL,
@@ -63,19 +66,22 @@ function getDB(): Database.Database {
     );
   `)
 
-  // Migrate: add accumulatedTokens if upgrading from older schema
-  try {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
-  } catch {
-    // Column already exists — expected on subsequent launches
+  // Migrate using PRAGMA table_info to safely check for columns
+  const checkColumn = (table: string, column: string) => {
+    const cols = dbInstance!.pragma(`table_info(${table})`) as any[]
+    return cols.some(c => c.name === column)
   }
- 
-  // Migrate: add compactionSummary if upgrading from older schema
-  try {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN compactionSummary TEXT`)
-  } catch {
-    // Column already exists
+
+  if (!checkColumn('threads', 'accumulatedTokens')) {
+    dbInstance!.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
   }
+  if (!checkColumn('threads', 'compactionSummary')) {
+    dbInstance!.exec(`ALTER TABLE threads ADD COLUMN compactionSummary TEXT`)
+  }
+  if (!checkColumn('messages', 'isCompactionAnchor')) {
+    dbInstance!.exec(`ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`)
+  }
+  dbInstance!.exec(`CREATE INDEX IF NOT EXISTS idx_messages_compaction ON messages(threadId, isCompactionAnchor)`)
 
   return dbInstance
 }
@@ -98,7 +104,7 @@ export function getThreadMessages(threadId: string): ThreadMessage[] {
 
 export function saveMessage(
   threadId: string,
-  message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }
+  message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string; isCompactionAnchor?: boolean }
 ): ThreadMessage {
   const db = getDB()
   const now = new Date().toISOString()
@@ -108,7 +114,8 @@ export function saveMessage(
     role: message.role,
     content: message.content,
     data: message.data || null,
-    createdAt: message.createdAt || now
+    createdAt: message.createdAt || now,
+    isCompactionAnchor: message.isCompactionAnchor ? 1 : 0
   }
 
   db.transaction(() => {
@@ -121,13 +128,13 @@ export function saveMessage(
     } else {
       db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
     }
-    // Proper upsert — updates in-place without delete+reinsert
     db.prepare(`
-      INSERT INTO messages (id, threadId, role, content, data, createdAt)
-      VALUES (@id, @threadId, @role, @content, @data, @createdAt)
+      INSERT INTO messages (id, threadId, role, content, data, createdAt, isCompactionAnchor)
+      VALUES (@id, @threadId, @role, @content, @data, @createdAt, @isCompactionAnchor)
       ON CONFLICT(id) DO UPDATE SET
         content = excluded.content,
-        data = excluded.data
+        data = excluded.data,
+        isCompactionAnchor = excluded.isCompactionAnchor
     `).run(msg)
   })()
 
@@ -228,7 +235,7 @@ export function getLastCompactedMessageId(threadId: string): string | null {
   const db = getDB()
   const row = db.prepare(`
     SELECT id FROM messages 
-    WHERE threadId = ? AND data LIKE '%"type":"compaction"%' 
+    WHERE threadId = ? AND isCompactionAnchor = 1
     ORDER BY createdAt DESC LIMIT 1
   `).get(threadId) as any
   return row?.id ?? null

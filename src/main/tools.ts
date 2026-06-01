@@ -5,7 +5,7 @@ import { promises as fs } from 'fs'
 import { join, relative, extname, dirname } from 'path'
 import { execa } from 'execa'
 import log from 'electron-log'
-import { tavilyLimiter } from './index'
+import { tavilyLimiter } from './limiters'
 import {
   getWorkspaceContext,
   getOrCreateWorkspaceContext,
@@ -373,6 +373,7 @@ export function createCoreTools(convId: string) {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+              'apikey': process.env.SUPABASE_ANON_KEY || '',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ query, domain, maxResults })

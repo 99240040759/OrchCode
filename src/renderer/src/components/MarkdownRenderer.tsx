@@ -16,7 +16,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  // Store a mutable ref so click handlers always use the LIVE conversationId,
+  // not a stale value captured by a past render inside the memoized component.
+  const conversationIdRef = React.useRef<string>('')
   const conversationId = useAtomValue(conversationIdAtom)
+  conversationIdRef.current = conversationId
   type CodeChildProps = { className?: string; children?: React.ReactNode }
 
   return (
@@ -36,7 +40,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
               const handleFileClick = async (e: React.MouseEvent) => {
                 e.preventDefault()
                 try {
-                  const fileData = await window.api.readFile(filePath, conversationId)
+                  // Always read the LIVE conversationId at click time via ref — avoids stale memo closure
+                  const fileData = await window.api.readFile(filePath, conversationIdRef.current)
                   if (fileData) {
                     setActiveEditorFile(fileData)
                     setArtifactPanelMode('editor')
@@ -72,8 +77,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
             const className = codeElement?.props?.className || ''
             const match = /language-(\w+)/.exec(className)
             const language = match ? match[1] : ''
+            
+            const extractText = (node: any): string => {
+              if (typeof node === 'string' || typeof node === 'number') return String(node)
+              if (Array.isArray(node)) return node.map(extractText).join('')
+              if (React.isValidElement<{ children?: any }>(node)) return extractText(node.props.children)
+              return ''
+            }
+            
             const codeString = codeElement?.props?.children
-              ? String(codeElement.props.children).replace(/\n$/, '')
+              ? extractText(codeElement.props.children).replace(/\n$/, '')
               : ''
 
             if (language) {

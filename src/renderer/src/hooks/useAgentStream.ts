@@ -44,13 +44,22 @@ function extractFileChange(toolName: string, args: Record<string, unknown>): Fil
   } else if (toolName === 'multiReplaceFileContent') {
     const chunks = args.replacementChunks
     if (Array.isArray(chunks)) {
+      let minLine = Infinity
+      let maxLine = -Infinity
       for (const c of chunks) {
         if (c && typeof c === 'object') {
           if ('replacementContent' in c) additions += countLines(c.replacementContent)
           const s = (c as any).startLine
           const e = (c as any).endLine
-          if (typeof s === 'number' && typeof e === 'number') deletions += e - s + 1
+          if (typeof s === 'number' && typeof e === 'number') {
+            deletions += e - s + 1
+            if (s < minLine) minLine = s
+            if (e > maxLine) maxLine = e
+          }
         }
+      }
+      if (minLine !== Infinity && maxLine !== -Infinity) {
+        lineRange = `L${minLine}-${maxLine}`
       }
     }
   }
@@ -190,24 +199,27 @@ export function useAgentStream() {
 
           if (chunkType === 'reasoning-start') {
             currentReasoningStartMs = Date.now()
-            // #20 fix: push directly (mutation is safe for local var)
             orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0, isStreaming: true })
             flushAssistant()
           } else if (chunkType === 'reasoning-delta') {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
-            // #20 fix: find and mutate the streaming reasoning block directly
-            const streamingReasoning = [...orderedBlocks].reverse().find(
-              (b) => b.type === 'reasoning' && b.isStreaming
-            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            // Find the last streaming reasoning block using a backward loop — O(1), no array allocation
+            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
+              const b = orderedBlocks[i]
+              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
+            }
             if (streamingReasoning) {
               streamingReasoning.content += textDelta
               streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
             }
             flushAssistant()
           } else if (chunkType === 'reasoning-end') {
-            const streamingReasoning = [...orderedBlocks].reverse().find(
-              (b) => b.type === 'reasoning' && b.isStreaming
-            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
+              const b = orderedBlocks[i]
+              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
+            }
             if (streamingReasoning) {
               streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
               streamingReasoning.isStreaming = false
@@ -218,9 +230,11 @@ export function useAgentStream() {
             fullContent += textDelta
 
             // Close any streaming reasoning block
-            const streamingReasoning = [...orderedBlocks].reverse().find(
-              (b) => b.type === 'reasoning' && b.isStreaming
-            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
+              const b = orderedBlocks[i]
+              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
+            }
             if (streamingReasoning) {
               streamingReasoning.isStreaming = false
               streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
@@ -238,9 +252,11 @@ export function useAgentStream() {
             setRunState('tool-calling')
 
             // Close streaming reasoning if open
-            const streamingReasoning = [...orderedBlocks].reverse().find(
-              (b) => b.type === 'reasoning' && b.isStreaming
-            ) as Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
+            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
+              const b = orderedBlocks[i]
+              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
+            }
             if (streamingReasoning) {
               streamingReasoning.isStreaming = false
               streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
@@ -251,6 +267,7 @@ export function useAgentStream() {
             const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
             orderedBlocks.push({ type: 'tool', toolCallId: tcId, toolName: tcName, args: tcArgs, status: 'pending' })
             flushAssistant()
+
           } else if (chunkType === 'tool-result') {
             const tcId = chunkData?.toolCallId
 

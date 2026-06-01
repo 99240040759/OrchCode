@@ -63,6 +63,14 @@ setActiveConversationId(activeConversationId)
 function setActiveSession(id: string) {
   activeConversationId = id
   setActiveConversationId(id)
+  try {
+    const wsPath = getThreadWorkspace(id)
+    if (wsPath) {
+      updateWorkspacePath(id, wsPath)
+    }
+  } catch (err) {
+    log.warn(`[main] Failed to auto-bind workspace for session ${id}:`, err)
+  }
 }
 
 const workspaceSerializationCache = new Map<string, { serialized: string; timestamp: number }>()
@@ -71,30 +79,26 @@ export function invalidateWorkspaceCache(conversationId: string) {
   workspaceSerializationCache.delete(conversationId)
 }
 
-import Bottleneck from 'bottleneck'
-
-export const chatStreamLimiter = new Bottleneck({
-  maxConcurrent: 1,
-  minTime: 1000
-})
-
-export const tavilyLimiter = new Bottleneck({
-  maxConcurrent: 2,
-  minTime: 500
-})
+import { chatStreamLimiter, tavilyLimiter } from './limiters'
+export { tavilyLimiter }
 
 const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
-  headers: {
-    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
-  },
-  apiKey: 'placeholder'
+  apiKey: 'placeholder',
+  fetch: (url, options) => {
+    const headers = new Headers(options?.headers || {})
+    headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+    return fetch(url, { ...options, headers })
+  }
 })
 
 let cachedModels: { gemini?: { id: string; name: string }; gemma?: { id: string; name: string } } | null = null
+let cachedModelsAt = 0
+const MODELS_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 async function getAvailableModels(): Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }> {
-  if (cachedModels) return cachedModels
+  if (cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
   const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, {
     headers: {
       'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
@@ -104,6 +108,7 @@ async function getAvailableModels(): Promise<{ gemini?: { id: string; name: stri
     throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   }
   cachedModels = await response.json()
+  cachedModelsAt = Date.now()
   return cachedModels!
 }
 
@@ -457,6 +462,10 @@ async function handleAgentStreamRequest(event: any, promptText: string, threadId
   const controller = new AbortController()
   activeAbortControllers.set(threadId, controller)
 
+  // Sync the workspace module's global activeConversationId to this thread
+  // so tools like browserScreenshot save to the correct conversation directory
+  setActiveSession(threadId)
+
   try {
     const history = await getThreadMessages(threadId)
     const userMsgId = `user-${Date.now()}`
@@ -481,7 +490,9 @@ async function handleAgentStreamRequest(event: any, promptText: string, threadId
     if (lastCompactedId) {
       compactionIndex = history.findIndex((m) => m.id === lastCompactedId)
       if (compactionIndex !== -1) {
-        activeHistory = history.slice(compactionIndex)
+        // Slice EXCLUSIVE of the compaction anchor message itself
+        // to avoid sending it twice (once in systemInstruction summary, once in history)
+        activeHistory = history.slice(compactionIndex + 1)
       }
     }
  
@@ -522,11 +533,13 @@ async function handleAgentStreamRequest(event: any, promptText: string, threadId
         let textContent = ''
         const toolCalls: ToolCallPart[] = []
         const toolResults: ToolResultPart[] = []
+        let parsedBlocks: any[] | null = null
 
         if (m.data) {
           try {
             const blocks = JSON.parse(m.data)
             if (Array.isArray(blocks)) {
+              parsedBlocks = blocks
               for (const block of blocks) {
                 if (block.type === 'text') {
                   textContent += block.content
@@ -608,8 +621,11 @@ async function handleAgentStreamRequest(event: any, promptText: string, threadId
           } catch {}
         }
 
-        // If no blocks, fall back to the content column (legacy or bare text turns)
-        if (!textContent && m.content !== '[Action Taken]') {
+        // If no text blocks were found in the stored blocks, use the raw content column
+        // (legacy messages or turns that had only tool calls with no accompanying text).
+        // Do NOT use a magic string sentinel — check the blocks array directly.
+        const hasTextBlock = parsedBlocks && parsedBlocks.some((b: any) => b.type === 'text')
+        if (!textContent && !hasTextBlock) {
           textContent = m.content
         }
 
@@ -825,10 +841,13 @@ Follow these native planning boundaries strictly to manage your work professiona
       } else if (part.type === 'error') {
         const errorMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
         log.error(`[main] Stream error: "${errorMsg}"`)
-        const block = orderedBlocks.find((b) => b.type === 'tool' && b.status === 'pending')
-        if (block) block.status = 'error'
+        for (const block of orderedBlocks) {
+          if (block.type === 'tool' && block.status === 'pending') {
+            block.status = 'error'
+          }
+        }
         event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg })
-       } else if (part.type === 'finish') {
+      } else if (part.type === 'finish') {
         const usage = part.totalUsage || {}
         turnPromptTokens = usage.inputTokens || 0
         turnCompletionTokens = usage.outputTokens || 0
@@ -1223,24 +1242,18 @@ Format the output strictly as a highly compressed, bulleted Markdown summary. Do
       updateThreadCompactionSummary(threadId, summaryText)
       log.info(`[compaction] Semantic summary compiled successfully for thread: ${threadId} (${summaryText.length} chars)`)
 
-      // Mark the compaction point by appending a compaction block in database message metadata
+      // Mark the compaction boundary directly using the dedicated isCompactionAnchor column
       const compactionMsg = fullHistory.find((m) => m.id === assistantMsgId)
       if (compactionMsg) {
-        let blocks: any[] = []
-        if (compactionMsg.data) {
-          try { blocks = JSON.parse(compactionMsg.data) } catch {}
-        }
-        if (!blocks.some((b: any) => b.type === 'compaction')) {
-          blocks.push({ type: 'compaction' })
-          saveMessage(threadId, {
-            id: compactionMsg.id,
-            role: compactionMsg.role,
-            content: compactionMsg.content,
-            data: JSON.stringify(blocks),
-            createdAt: compactionMsg.createdAt
-          })
-          log.info(`[compaction] Successfully wrote compaction block marker for message ID ${assistantMsgId}`)
-        }
+        saveMessage(threadId, {
+          id: compactionMsg.id,
+          role: compactionMsg.role,
+          content: compactionMsg.content,
+          data: compactionMsg.data,
+          createdAt: compactionMsg.createdAt,
+          isCompactionAnchor: true
+        })
+        log.info(`[compaction] Marked message ${assistantMsgId} as compaction anchor`)
       }
     }
   } catch (err) {

@@ -7,10 +7,10 @@
   --font-display: 'Outfit', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Color Palette - Grey Native Design */
-  --bg-app: #1e1e1e;
-  --bg-sidebar: #161616;
-  --bg-editor: #1e1e1e;
+  /* Color Palette - Premium Neutral Dark Design */
+  --bg-app: #090909;
+  --bg-sidebar: #090909;
+  --bg-editor: #090909;
 
   /* Translucent & Premium Borders */
   --border-color: rgba(255, 255, 255, 0.06);
@@ -60,7 +60,6 @@
   margin: 0;
   padding: 0;
   user-select: none;
-  -webkit-user-select: none;
 }
 
 img {
@@ -176,25 +175,43 @@ details > summary {
   display: flex;
   flex-direction: column;
   position: relative;
-  contain: layout paint;
+  background-color: var(--bg-app);
 }
 
 .artifact-pane {
   width: 100%;
   height: 100%;
-  background-color: #1e1e1e; /* matches Monaco vs-dark background */
-  border-left: 1px solid var(--border-color);
+  background-color: var(--bg-editor);
+  border-left: none; /* panel resize handle centered line acts as the visual divider */
   display: flex;
   flex-direction: column;
   contain: layout paint;
 }
 
 .panel-resize-handle {
-  width: 4px;
-  background-color: var(--border-color);
+  width: 6px;
+  background-color: transparent;
   cursor: col-resize;
+  position: relative;
   transition: background-color 0.2s;
   z-index: 10;
+}
+
+.panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background-color: var(--border-color);
+  transition: background-color 0.15s ease;
+}
+
+.panel-resize-handle:hover::after,
+.panel-resize-handle[data-resize-handle-active]::after {
+  background-color: var(--border-focus);
 }
 
 /* ==========================================================================
@@ -1063,7 +1080,6 @@ details > summary {
   padding: 16px 0 24px;
   display: flex;
   flex-direction: column;
-  contain: layout paint;
 }
 
 /* Hide scrollbar in chat thread container */

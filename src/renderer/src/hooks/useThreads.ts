@@ -42,13 +42,15 @@ export function useThreads() {
     setMessages([])
     setSessionTokens(0)
 
+    // Set session first, then immediately bind workspace BEFORE returning control.
+    // This prevents any IPC fired between the two calls from getting a default workspace context.
     try {
       await window.api.setActiveSession(threadId)
     } catch (err) {
       console.error('[useThreads] Failed to sync session to backend:', err)
     }
 
-    // #11 fix: fetch thread workspace from IPC instead of stale `threads` closure
+    // Fetch and bind workspace atomically right after session
     try {
       const workspacePath = await window.api.getThreadWorkspace(threadId)
       if (workspacePath) {
@@ -56,9 +58,11 @@ export function useThreads() {
           name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
           path: workspacePath
         })
-        window.api.setActiveWorkspace(threadId, workspacePath).catch(() => {})
+        await window.api.setActiveWorkspace(threadId, workspacePath)
       }
-    } catch {}
+    } catch (err) {
+      console.error('[useThreads] Failed to bind workspace for thread:', err)
+    }
 
     try {
       const rawMessages = await window.api.getThreadMessages(threadId)
@@ -85,6 +89,7 @@ export function useThreads() {
       console.error('[useThreads] Failed to load thread messages:', err)
     }
   }
+
 
   const newConversation = async () => {
     try {

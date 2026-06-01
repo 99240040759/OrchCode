@@ -2,8 +2,8 @@ import { createGlobalTheme } from '@vanilla-extract/css'
 
 export const vars = createGlobalTheme(':root', {
   colors: {
-    bgSidebar: '#161616',
-    bgMain: '#1e1e1e',
+    bgSidebar: '#090909',
+    bgMain: '#090909',
     border: 'rgba(255, 255, 255, 0.06)',
     borderFocus: 'rgba(255, 255, 255, 0.12)',
     textPrimary: '#f3f3f3',

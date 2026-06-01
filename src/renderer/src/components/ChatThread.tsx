@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useAtomValue } from 'jotai'
-import { chatMessagesAtom, agentRunStateAtom } from '../store/agentStore'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { chatMessagesAtom, agentRunStateAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage } from '../store/agentStore'
 import { ChevronDown } from 'lucide-react'
@@ -19,6 +19,10 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
     } catch {}
   }
 
+  const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
+  const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
+  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+
   return (
     <div className="chat-message-user-container">
       <div className="chat-message-user" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -31,11 +35,17 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
                     src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
                     alt={att.name}
                     onClick={() => {
-                      const win = window.open()
-                      if (win) {
-                        win.document.write(`<img src="data:${att.mimeType || 'image/png'};base64,${att.base64}" style="max-width:100%; max-height:100%; display:block; margin:auto;" />`)
-                      }
+                      setActiveEditorFile({
+                        name: att.name,
+                        path: att.name,
+                        isBinary: true,
+                        mimeType: att.mimeType || 'image/png',
+                        base64: att.base64
+                      })
+                      setArtifactPanelMode('editor')
+                      setArtifactPanelOpen(true)
                     }}
+                    style={{ cursor: 'pointer' }}
                   />
                 ) : (
                   <span style={{ fontSize: 'var(--font-size-sm)' }}>📄</span>
@@ -58,6 +68,7 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
     prev.message.data === next.message.data
   )
 })
+
 
 const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { content: string; durationMs?: number; isStreaming?: boolean }) => {
   const [isOpen, setIsOpen] = useState(isStreaming ?? false)
@@ -244,7 +255,7 @@ const ChatThread: React.FC = () => {
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="sidebar-body chat-thread-container"
+      className="chat-thread-container"
     >
       <div className="chat-thread-spacer-top" />
       {messages.map((message) => (

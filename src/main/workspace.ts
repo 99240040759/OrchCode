@@ -2,6 +2,33 @@ import { app } from 'electron'
 import { join, extname, relative, resolve, normalize, dirname } from 'path'
 import { mkdirSync, promises as fs, realpathSync } from 'fs'
 import log from 'electron-log'
+function pLimit(concurrency: number) {
+  const queue: (() => void)[] = []
+  let activeCount = 0
+
+  const next = () => {
+    activeCount--
+    if (queue.length > 0) {
+      const nextFn = queue.shift()
+      if (nextFn) nextFn()
+    }
+  }
+
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const run = () => {
+        activeCount++
+        fn().then(resolve, reject).finally(next)
+      }
+
+      if (activeCount < concurrency) {
+        run()
+      } else {
+        queue.push(run)
+      }
+    })
+  }
+}
 
 let activeConversationId: string = ''
 
@@ -73,7 +100,10 @@ function safeRealpathSync(filePath: string): string {
         const resolvedDir = realpathSync(dir)
         return join(resolvedDir, filePath.split(/[/\\]/).pop() ?? '')
       } catch {
-        return filePath
+        // Both the file and its parent don't exist — cannot safely resolve.
+        // Throw so the caller (assertWithinWorkspace) rejects the path rather
+        // than accepting an unresolved string that could bypass traversal checks.
+        throw new Error(`Cannot resolve path (parent directory does not exist): "${filePath}"`)
       }
     }
     throw err
@@ -170,8 +200,9 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
       return
     }
 
+    const limit = pLimit(20)
     await Promise.all(
-      entries.map(async (entry) => {
+      entries.map((entry) => limit(async () => {
         const name = entry.name
         const fullPath = join(dir, name)
 
@@ -192,7 +223,7 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
             files.push({ relativePath: relPath, content })
           } catch {}
         }
-      })
+      }))
     )
   }
 

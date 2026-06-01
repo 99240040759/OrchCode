@@ -153,6 +153,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
     return () => {
       active = false
       if (fitTimeout) clearTimeout(fitTimeout)
+      debouncedResize.cancel()
       resizeObs.disconnect()
       if (unsubDataRef.current) unsubDataRef.current()
       if (unsubExitRef.current) unsubExitRef.current()
@@ -162,7 +163,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
       }
       term.dispose()
     }
-  }, [workspacePath])
+  }, [workspacePath, conversationId])
 
   return (
     <div
@@ -170,7 +171,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: '#1e1e1e',
+        backgroundColor: 'var(--bg-editor)',
         padding: '16px 20px'
       }}
     />
@@ -389,7 +390,7 @@ const ArtifactPanel: React.FC = () => {
           justifyContent: 'flex-end',
           height: '38px',
           padding: '0 16px',
-          backgroundColor: '#1e1e1e',
+          backgroundColor: 'var(--bg-editor)',
           borderBottom: '1px solid var(--border-color)',
           marginLeft: '-1px',
           position: 'relative',
@@ -438,7 +439,7 @@ const ArtifactPanel: React.FC = () => {
             height: '38px',
             padding: '0 16px',
             gap: '12px',
-            backgroundColor: '#1e1e1e',
+            backgroundColor: 'var(--bg-editor)',
             borderBottom: '1px solid var(--border-color)',
             flexShrink: 0
           }}
@@ -449,7 +450,7 @@ const ArtifactPanel: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              backgroundColor: '#161616',
+              backgroundColor: 'var(--bg-app)',
               border: '1px solid var(--border-color)',
               borderRadius: '4px',
               height: '28px',
@@ -540,7 +541,7 @@ const ArtifactPanel: React.FC = () => {
             justifyContent: 'space-between',
             height: '38px',
             padding: '0 16px',
-            backgroundColor: '#1e1e1e',
+            backgroundColor: 'var(--bg-editor)',
             borderBottom: '1px solid var(--border-color)',
             flexShrink: 0
           }}
@@ -568,14 +569,14 @@ const ArtifactPanel: React.FC = () => {
 
         <Tabs.Content value="editor" style={{ height: '100%', width: '100%' }}>
           {!displayFile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px', color: 'var(--text-secondary)', textAlign: 'center', backgroundColor: '#161616' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px', color: 'var(--text-secondary)', textAlign: 'center', backgroundColor: 'var(--bg-app)' }}>
               <div style={{ fontSize: '40px', marginBottom: '16px', filter: 'grayscale(0.3) contrast(1.2)' }}>📂</div>
               <h3 style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', fontWeight: 500, marginBottom: '6px', fontFamily: 'var(--font-display)' }}>No File Open</h3>
               <p style={{ fontSize: 'var(--font-size-xs-plus)', maxWidth: '300px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0 }}>Select a file from the sidebar or ask the agent to edit or create a code file.</p>
             </div>
           ) : displayFile.isBinary ? (
             <div
-              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', backgroundColor: '#161616', padding: '24px' }}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', backgroundColor: 'var(--bg-app)', padding: '24px' }}
               className="media-preview-container"
             >
               {displayFile.mimeType?.startsWith('image/') && (
@@ -610,7 +611,7 @@ const ArtifactPanel: React.FC = () => {
           ) : isMarkdown ? (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
               <div
-                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: '#1e1e1e', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
+                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-editor)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
                 className="assistant-content markdown-body"
               >
                 <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />

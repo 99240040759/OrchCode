@@ -30,7 +30,6 @@ function AppInner(): React.JSX.Element {
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const hasMessages = useAtomValue(hasMessagesAtom)
-  const conversationId = useAtomValue(conversationIdAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
   const activeThreadTitle = activeThread ? (activeThread.title || 'New Chat') : 'New Chat'
@@ -85,7 +84,7 @@ function AppInner(): React.JSX.Element {
             alignItems: 'center',
             height: '38px',
             padding: '0 16px',
-            backgroundColor: '#1e1e1e',
+            backgroundColor: 'var(--bg-app)',
             borderBottom: '1px solid var(--border-color)',
             color: 'var(--text-secondary)',
             fontSize: 'var(--font-size-sm)',
@@ -230,7 +229,7 @@ function AppInner(): React.JSX.Element {
           )}
         </main>
 
-        <RightSidebar conversationId={conversationId} />
+        <RightSidebar />
       </div>
     </div>
   )

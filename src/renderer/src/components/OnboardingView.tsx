@@ -25,6 +25,36 @@ export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
 
+  React.useEffect(() => {
+    const styleEl = document.createElement('style')
+    styleEl.id = 'onboarding-styles'
+    styleEl.innerHTML = `
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes pulse-ring {
+        0%, 100% { opacity: 0.6; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.02); }
+      }
+      .onboarding-btn {
+        transition: all 0.2s ease-in-out;
+      }
+      .onboarding-btn:hover {
+        background-color: rgba(255, 255, 255, 0.07) !important;
+        border-color: rgba(255, 255, 255, 0.15) !important;
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.05) !important;
+        transform: translateY(-1px);
+      }
+      .onboarding-btn:active {
+        transform: translateY(0);
+      }
+    `
+    document.head.appendChild(styleEl)
+    return () => {
+      styleEl.remove()
+    }
+  }, [])
+
   const handleSignIn = async () => {
     setLoading(true)
     try {
@@ -65,7 +95,7 @@ export const OnboardingView: React.FC = () => {
                 <span style={styles.loadingText}>Connecting to Google Auth...</span>
               </div>
             ) : (
-              <button style={styles.signInButton} onClick={handleSignIn}>
+              <button className="onboarding-btn" style={styles.signInButton} onClick={handleSignIn}>
                 <GoogleIcon />
                 <span style={styles.buttonText}>Sign In with Google</span>
               </button>
@@ -273,26 +303,4 @@ const styles: Record<string, React.CSSProperties> = {
   },
 }
 
-// Inject standard keyframe animations into the page
-if (typeof document !== 'undefined') {
-  const styleEl = document.createElement('style')
-  styleEl.innerHTML = `
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    @keyframes pulse-ring {
-      0%, 100% { opacity: 0.6; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.02); }
-    }
-    button:hover {
-      background-color: rgba(255, 255, 255, 0.07) !important;
-      border-color: rgba(255, 255, 255, 0.15) !important;
-      box-shadow: 0 0 15px rgba(255, 255, 255, 0.05) !important;
-      transform: translateY(-1px);
-    }
-    button:active {
-      transform: translateY(0);
-    }
-  `
-  document.head.appendChild(styleEl)
-}
+

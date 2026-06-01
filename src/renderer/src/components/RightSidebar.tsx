@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { PanelRight, PanelRightClose, Package, FileCode, Info, ListTodo, CheckCircle2, Circle, Clock, ClipboardList, ClipboardCheck, BookOpen } from 'lucide-react'
 import Skeleton from 'react-loading-skeleton'
@@ -34,11 +34,7 @@ const getArtifactIcon = (name: string) => {
   return <FileCode size={13} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
 }
 
-import prettyBytes from 'pretty-bytes'
 
-function formatBytes(bytes: number): string {
-  return prettyBytes(bytes)
-}
 
 interface TaskItem {
   id: string
@@ -47,11 +43,7 @@ interface TaskItem {
   indent: number
 }
 
-interface RightSidebarProps {
-  conversationId?: string
-}
-
-export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) => {
+export const RightSidebar: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(true)
   const [loading, setLoading] = useState(false)
   const artifacts = useAtomValue(artifactsAtom)
@@ -62,7 +54,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
   // #21 fix: compute once at component scope
   const userFiles = filesChanged.filter(fc => !isAgentArtifact(fc.name))
 
-  const activeConvId = conversationId || convId
+  const activeConvId = convId
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -70,12 +62,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
   const [tasksList, setTasksList] = useState<TaskItem[]>([])
   const taskArtifact = artifacts.find((a) => a.name === 'task.md')
 
+  const loadTasksTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    const loadTasks = async () => {
-      if (!taskArtifact) {
-        setTasksList([])
-        return
-      }
+    if (!taskArtifact) {
+      setTasksList([])
+      return
+    }
+
+    // Debounce: rapid artifact-changed events during agent runs fire this effect
+    // repeatedly — wait 500ms of silence before parsing the AST.
+    if (loadTasksTimeoutRef.current) clearTimeout(loadTasksTimeoutRef.current)
+    loadTasksTimeoutRef.current = setTimeout(async () => {
       try {
         const fileData = await window.api.readFile(taskArtifact.path, activeConvId)
         if (fileData && fileData.content) {
@@ -122,7 +120,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
                   const statusChar = match[2].toLowerCase()
                   taskText = match[3].trim()
                   status = statusChar === 'x' ? 'done' : statusChar === '/' ? 'progress' : 'todo'
-                  
+
                   parsed.push({
                     id: `task-${node.position.start.line}`,
                     text: taskText,
@@ -160,9 +158,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
         console.error('[RightSidebar] Failed to load tasks:', err)
         setTasksList([])
       }
-    }
+    }, 500)
 
-    loadTasks()
+    return () => {
+      if (loadTasksTimeoutRef.current) clearTimeout(loadTasksTimeoutRef.current)
+    }
   }, [taskArtifact?.path, taskArtifact?.modified, activeConvId])
 
   const handleArtifactClick = async (artifact: ArtifactEntry) => {
@@ -287,16 +287,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
                   artifacts.map((art) => (
                     <div
                       key={art.name}
-                      onClick={() => {
-                        setActiveEditorFile({
-                          path: art.path,
-                          name: art.name,
-                          content: '',
-                          isArtifact: true
-                        })
-                        setArtifactPanelMode('editor')
-                        setArtifactPanelOpen(true)
-                      }}
+                      onClick={() => handleArtifactClick(art)}
                       className="right-sidebar-file-row"
                       style={{ margin: '0 8px', borderRadius: '6px' }}
                     >
@@ -326,18 +317,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ conversationId }) =>
                   userFiles.map((fc) => (
                     <div
                       key={fc.path}
-                      onClick={async () => {
-                        try {
-                          const fileData = await window.api.readFile(fc.path)
-                          if (fileData) {
-                            setActiveEditorFile(fileData)
-                            setArtifactPanelMode('editor')
-                            setArtifactPanelOpen(true)
-                          }
-                        } catch (err) {
-                          console.error('[RightSidebar] Failed to open file:', err)
-                        }
-                      }}
+                      onClick={() => handleFileChangeClick(fc)}
                       className="right-sidebar-file-row"
                       style={{ margin: '0 8px', borderRadius: '6px' }}
                     >
