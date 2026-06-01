@@ -26,8 +26,8 @@ export const interactive = style({
   cursor: 'pointer',
   selectors: {
     '&:hover': {
-      color: `${vars.colors.textPrimary} !important`,
-      backgroundColor: 'rgba(255, 255, 255, 0.04) !important'
+      color: vars.colors.textPrimary,
+      backgroundColor: 'rgba(255, 255, 255, 0.04)'
     }
   }
 })

@@ -82,7 +82,9 @@ export function useAgentStream() {
   const abortRef = useRef<AbortController | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const rafIdRef = useRef<number | null>(null)
-  const threadIdRef = useRef<string>(conversationId)
+  // Tracks the threadId of the currently active stream — immutable once set per invocation.
+  // Used inside the chunk listener closure to reject chunks from prior streams.
+  const activeStreamThreadIdRef = useRef<string>('')
 
   // O(1) direct pointer to the current streaming reasoning block — avoids O(n) backward scan per chunk
   const currentReasoningBlockRef = useRef<Extract<StreamBlock, { type: 'reasoning' }> | null>(null)
@@ -101,6 +103,7 @@ export function useAgentStream() {
       rafIdRef.current = null
     }
     currentReasoningBlockRef.current = null
+    activeStreamThreadIdRef.current = ''
   }, [])
 
   useEffect(() => {
@@ -112,7 +115,9 @@ export function useAgentStream() {
 
     const resolvedThreadId = activeThreadId ?? conversationId
     const isNewThread = !activeThreadId
-    threadIdRef.current = resolvedThreadId
+    // Stamp this invocation's stream ID — the closure below captures this exact value.
+    // Any chunk whose threadId does not match is from a prior stale stream and is discarded.
+    activeStreamThreadIdRef.current = resolvedThreadId
 
     if (isNewThread) {
       setActiveThreadId(conversationId)
@@ -189,10 +194,15 @@ export function useAgentStream() {
 
       setRunState('streaming')
 
+      // Capture the stream's threadId at subscription time — the closure holds this
+      // immutable value. Chunks from any prior or future stream are rejected.
+      const streamThreadId = resolvedThreadId
+
       unsubscribeRef.current = window.api.onAgentChunk((chunk) => {
         try {
           if (!chunk) return
-          if (chunk.threadId && chunk.threadId !== threadIdRef.current) return
+          // Reject chunks that don't belong to this specific stream invocation
+          if (chunk.threadId && chunk.threadId !== streamThreadId) return
           const chunkType = chunk.type
           const chunkData = chunk.payload
 
@@ -202,7 +212,6 @@ export function useAgentStream() {
               type: 'reasoning', content: '', durationMs: 0, isStreaming: true
             }
             orderedBlocks.push(block)
-            // Store direct pointer — O(1) access for all subsequent deltas
             currentReasoningBlockRef.current = block
             flushAssistant()
           } else if (chunkType === 'reasoning-delta') {
@@ -225,7 +234,6 @@ export function useAgentStream() {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
             fullContent += textDelta
 
-            // Close any open reasoning block
             const rb = currentReasoningBlockRef.current
             if (rb) {
               rb.isStreaming = false
@@ -243,7 +251,6 @@ export function useAgentStream() {
           } else if (chunkType === 'tool-call') {
             setRunState('tool-calling')
 
-            // Close any open reasoning block
             const rb = currentReasoningBlockRef.current
             if (rb) {
               rb.isStreaming = false
@@ -260,7 +267,6 @@ export function useAgentStream() {
           } else if (chunkType === 'tool-result') {
             const tcId = chunkData?.toolCallId
 
-            // Typed discriminated union — no cast needed
             const toolBlock = orderedBlocks.find(
               (b): b is Extract<StreamBlock, { type: 'tool' }> =>
                 b.type === 'tool' && b.toolCallId === tcId
@@ -334,7 +340,7 @@ export function useAgentStream() {
 
             if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
               const titleText = promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200)
-              window.api.generateTitle(titleText, threadIdRef.current)
+              window.api.generateTitle(titleText, streamThreadId)
                 .then(async () => {
                   try {
                     const threads = await window.api.getThreads()
@@ -382,7 +388,7 @@ export function useAgentStream() {
       setThreads, setFilesChanged, setSessionTokens, cleanupActiveStream])
 
   const stop = useCallback(() => {
-    const tid = threadIdRef.current
+    const tid = activeStreamThreadIdRef.current
     cleanupActiveStream()
     setRunState('idle')
     setMessages((prev) => prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)))

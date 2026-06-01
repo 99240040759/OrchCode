@@ -222,7 +222,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: 'var(--bg-editor)',
+        backgroundColor: 'var(--bg-sidebar)',
         padding: '16px 20px'
       }}
     />
@@ -236,6 +236,7 @@ const BrowserView: React.FC = () => {
   const [displayUrl, setDisplayUrl] = useState('')
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)
+  const isLoadedRef = useRef(false)
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
 
@@ -274,8 +275,12 @@ const BrowserView: React.FC = () => {
     const rafId = requestAnimationFrame(() => {
       if (!active) return
       const bounds = getBounds()
-      window.api.openBrowser({ url: urlInput, bounds })
-      setIsLoaded(true)
+      window.api.openBrowser({ url: urlInput, bounds }).then(() => {
+        if (active) {
+          setIsLoaded(true)
+          isLoadedRef.current = true
+        }
+      }).catch(console.error)
     })
 
     const unsubTitle = window.api.onBrowserTitleUpdated((t) => {
@@ -289,7 +294,7 @@ const BrowserView: React.FC = () => {
     })
 
     const resizeObs = new ResizeObserver(() => {
-      if (active) {
+      if (active && isLoadedRef.current) {
         window.api.resizeBrowser(getBounds()).catch(() => {})
       }
     })
@@ -302,12 +307,16 @@ const BrowserView: React.FC = () => {
       unsubTitle()
       unsubUrl()
       window.api.closeBrowser().catch(() => {})
+      setIsLoaded(false)
+      isLoadedRef.current = false
     }
   }, [getBounds])
 
   useEffect(() => {
-    const bounds = getBounds()
-    window.api.resizeBrowser(bounds).catch(() => {})
+    if (isLoadedRef.current) {
+      const bounds = getBounds()
+      window.api.resizeBrowser(bounds).catch(() => {})
+    }
   }, [panelMode, isOpen, getBounds])
 
   return (
@@ -418,8 +427,6 @@ const OverviewPanel: React.FC<{
   handleArtifactClick,
   handleFileChangeClick
 }) => {
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null)
-
   return (
     <ScrollArea.Root className="ScrollAreaRoot">
       <ScrollArea.Viewport className="ScrollAreaViewport">
@@ -429,7 +436,7 @@ const OverviewPanel: React.FC<{
             flexDirection: 'column',
             gap: '24px',
             padding: '24px 32px',
-            backgroundColor: 'var(--bg-app)',
+            backgroundColor: 'var(--bg-sidebar)',
             minHeight: '100%'
           }}
         >
@@ -451,7 +458,7 @@ const OverviewPanel: React.FC<{
               style={{
                 borderRadius: '8px',
                 border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-editor)',
+                backgroundColor: 'var(--bg-app)',
                 display: 'flex',
                 flexDirection: 'column',
                 padding: '16px',
@@ -490,8 +497,7 @@ const OverviewPanel: React.FC<{
                     <div
                       key={art.name}
                       onClick={() => handleArtifactClick(art)}
-                      onMouseEnter={() => setHoveredItem(art.name)}
-                      onMouseLeave={() => setHoveredItem(null)}
+                      className="overview-item"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -501,7 +507,6 @@ const OverviewPanel: React.FC<{
                         cursor: 'pointer',
                         fontSize: 'var(--font-size-sm)',
                         color: 'var(--text-primary)',
-                        backgroundColor: hoveredItem === art.name ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
                         transition: 'background-color 0.15s ease'
                       }}
                     >
@@ -520,7 +525,7 @@ const OverviewPanel: React.FC<{
               style={{
                 borderRadius: '8px',
                 border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-editor)',
+                backgroundColor: 'var(--bg-app)',
                 display: 'flex',
                 flexDirection: 'column',
                 padding: '16px',
@@ -557,8 +562,7 @@ const OverviewPanel: React.FC<{
                     <div
                       key={fc.path}
                       onClick={() => handleFileChangeClick(fc)}
-                      onMouseEnter={() => setHoveredItem(fc.path)}
-                      onMouseLeave={() => setHoveredItem(null)}
+                      className="overview-item"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -568,7 +572,6 @@ const OverviewPanel: React.FC<{
                         cursor: 'pointer',
                         fontSize: 'var(--font-size-sm)',
                         color: 'var(--text-primary)',
-                        backgroundColor: hoveredItem === fc.path ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
                         transition: 'background-color 0.15s ease'
                       }}
                     >
@@ -609,6 +612,8 @@ const OverviewPanel: React.FC<{
 
 
 
+let monacoInitialized = false
+
 const ArtifactPanel: React.FC = () => {
   const [isOpen, setIsOpen] = useAtom(isArtifactPanelOpenAtom)
   const [activeFile, setActiveFile] = useAtom(activeEditorFileAtom)
@@ -642,13 +647,13 @@ const ArtifactPanel: React.FC = () => {
   const editorRef = useRef<any>(null)
   const diffEditorRef = useRef<any>(null)
 
-  const handleEditorMount = (editor: any) => {
+  const handleEditorMount = useCallback((editor: any) => {
     editorRef.current = editor
-  }
+  }, [])
 
-  const handleDiffEditorMount = (editor: any) => {
+  const handleDiffEditorMount = useCallback((editor: any) => {
     diffEditorRef.current = editor
-  }
+  }, [])
 
   const handleSearchClick = () => {
     if (isDiffMode) {
@@ -669,9 +674,20 @@ const ArtifactPanel: React.FC = () => {
   const isMarkdown = displayFile?.name.endsWith('.md') ?? false
 
   useEffect(() => {
+    if (monacoInitialized) {
+      setThemeLoaded(true)
+      return
+    }
+
     const rootStyle = getComputedStyle(document.documentElement)
-    const bgEditor = rootStyle.getPropertyValue('--bg-editor').trim() || '#1e1e1e'
     const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
+    const accentBlue = (rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6').replace('#', '')
+    const accentGreen = (rootStyle.getPropertyValue('--accent-green').trim() || '#10b981').replace('#', '')
+    const accentOrange = (rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b').replace('#', '')
+    const accentPurple = (rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6').replace('#', '')
+    const accentRed = (rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444').replace('#', '')
+    const textSecondary = (rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa').replace('#', '')
+    const textMuted = (rootStyle.getPropertyValue('--text-muted').trim() || '#71717a').replace('#', '')
 
     import('@monaco-editor/react').then(({ loader }) => {
       loader.init().then((monaco) => {
@@ -739,45 +755,45 @@ const ArtifactPanel: React.FC = () => {
           base: 'vs-dark',
           inherit: true,
           rules: [
-            { token: 'keyword', foreground: '56b6c2' }, // import, from, const, export, function, etc.
-            { token: 'keyword.js', foreground: '56b6c2' },
-            { token: 'keyword.ts', foreground: '56b6c2' },
-            { token: 'keyword.tsx', foreground: '56b6c2' },
-            { token: 'string', foreground: '98c379' }, // strings
-            { token: 'string.js', foreground: '98c379' },
-            { token: 'string.ts', foreground: '98c379' },
-            { token: 'string.tsx', foreground: '98c379' },
-            { token: 'comment', foreground: '5c6370', fontStyle: 'italic' }, // comments
-            { token: 'number', foreground: 'd19a66' }, // numbers
-            { token: 'regexp', foreground: 'e06c75' },
-            { token: 'type', foreground: 'e5c07b' },
-            { token: 'class', foreground: 'e5c07b' },
-            { token: 'function', foreground: '61afef' }, // functions
-            { token: 'function.js', foreground: '61afef' },
-            { token: 'function.ts', foreground: '61afef' },
-            { token: 'function.tsx', foreground: '61afef' },
-            { token: 'variable', foreground: 'abb2bf' },
-            { token: 'variable.predefined', foreground: 'e06c75' },
-            { token: 'identifier', foreground: 'abb2bf' }
+            { token: 'keyword', foreground: accentPurple }, // import, from, const, export, function, etc.
+            { token: 'keyword.js', foreground: accentPurple },
+            { token: 'keyword.ts', foreground: accentPurple },
+            { token: 'keyword.tsx', foreground: accentPurple },
+            { token: 'string', foreground: accentGreen }, // strings
+            { token: 'string.js', foreground: accentGreen },
+            { token: 'string.ts', foreground: accentGreen },
+            { token: 'string.tsx', foreground: accentGreen },
+            { token: 'comment', foreground: textMuted, fontStyle: 'italic' }, // comments
+            { token: 'number', foreground: accentOrange }, // numbers
+            { token: 'regexp', foreground: accentRed },
+            { token: 'type', foreground: accentOrange },
+            { token: 'class', foreground: accentOrange },
+            { token: 'function', foreground: accentBlue }, // functions
+            { token: 'function.js', foreground: accentBlue },
+            { token: 'function.ts', foreground: accentBlue },
+            { token: 'function.tsx', foreground: accentBlue },
+            { token: 'variable', foreground: textSecondary },
+            { token: 'variable.predefined', foreground: accentRed },
+            { token: 'identifier', foreground: textSecondary }
           ],
           colors: {
-            'editor.background': bgEditor,
+            'editor.background': '#0f0f11',
             'editor.foreground': textPrimary,
             'editorLineNumber.foreground': '#4b5263',
             'editorLineNumber.activeForeground': '#c8ccd4',
             'editor.lineHighlightBackground': '#ffffff08',
             'editor.selectionBackground': '#ffffff1a',
             'editor.inactiveSelectionBackground': '#ffffff0d',
-            'editorWidget.background': bgEditor,
+            'editorWidget.background': '#0f0f11',
             'editorWidget.border': '#ffffff0f',
-            'editorHoverWidget.background': bgEditor,
+            'editorHoverWidget.background': '#0f0f11',
             'editorHoverWidget.border': '#ffffff0f',
             'scrollbarSlider.background': '#ffffff0f',
             'scrollbarSlider.hoverBackground': '#ffffff1a',
             'scrollbarSlider.activeBackground': '#ffffff26',
             // Hide overview ruler border and decorations (errors, warnings)
             'editorOverviewRuler.border': '#00000000',
-            'editorOverviewRuler.background': bgEditor,
+            'editorOverviewRuler.background': '#0f0f11',
             'editorOverviewRuler.addedForeground': '#00000000',
             'editorOverviewRuler.modifiedForeground': '#00000000',
             'editorOverviewRuler.deletedForeground': '#00000000',
@@ -796,6 +812,7 @@ const ArtifactPanel: React.FC = () => {
             'editorInfo.border': '#00000000'
           }
         })
+        monacoInitialized = true
         setThemeLoaded(true)
       })
     })
@@ -841,7 +858,17 @@ const ArtifactPanel: React.FC = () => {
     return unsub
   }, [setArtifacts])
 
-  const handleArtifactClick = async (artifact: ArtifactEntry) => {
+  const handleOpenFile = useCallback((fileData: EditorFile) => {
+    setOpenFiles((prev) => {
+      const exists = prev.find((f) => f.path === fileData.path)
+      if (!exists) return [...prev, fileData]
+      return prev
+    })
+    setActiveFile(fileData)
+    setPanelMode('editor')
+  }, [setOpenFiles, setActiveFile, setPanelMode])
+
+  const handleArtifactClick = useCallback(async (artifact: ArtifactEntry) => {
     try {
       const fileData = await window.api.readFile(artifact.path, convId)
       if (fileData) {
@@ -851,9 +878,9 @@ const ArtifactPanel: React.FC = () => {
     } catch (err) {
       console.error('[ArtifactPanel] Failed to open artifact:', err)
     }
-  }
+  }, [convId, handleOpenFile])
 
-  const handleFileChangeClick = async (fc: FileChangeEntry) => {
+  const handleFileChangeClick = useCallback(async (fc: FileChangeEntry) => {
     try {
       const fileData = await window.api.readFile(fc.path, convId)
       if (fileData) {
@@ -863,19 +890,9 @@ const ArtifactPanel: React.FC = () => {
     } catch (err) {
       console.error('[ArtifactPanel] Failed to open changed file:', err)
     }
-  }
+  }, [convId, handleOpenFile])
 
-  const handleOpenFile = (fileData: EditorFile) => {
-    setOpenFiles((prev) => {
-      const exists = prev.find((f) => f.path === fileData.path)
-      if (!exists) return [...prev, fileData]
-      return prev
-    })
-    setActiveFile(fileData)
-    setPanelMode('editor')
-  }
-
-  const handleCloseFile = (fileToClose: EditorFile, e: React.MouseEvent) => {
+  const handleCloseFile = useCallback((fileToClose: EditorFile, e: React.MouseEvent) => {
     e.stopPropagation()
     const updatedFiles = openFiles.filter((f) => f.path !== fileToClose.path)
     setOpenFiles(updatedFiles)
@@ -890,7 +907,7 @@ const ArtifactPanel: React.FC = () => {
         setPanelMode('overview')
       }
     }
-  }
+  }, [openFiles, activeFile, setOpenFiles, setActiveFile, setPanelMode])
 
 
   useEffect(() => {
@@ -912,15 +929,15 @@ const ArtifactPanel: React.FC = () => {
     }
   }, [isOpen])
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setIsOpen(false)
-  }
+  }, [setIsOpen])
 
   if (!isOpen) return null
 
   const activeTabValue = panelMode === 'editor' ? (activeFile?.path ?? '') : panelMode
 
-  const handleTabChange = (val: string) => {
+  const handleTabChange = useCallback((val: string) => {
     if (val === 'overview') {
       setPanelMode('overview')
       setActiveFile(null)
@@ -938,14 +955,14 @@ const ArtifactPanel: React.FC = () => {
         setPanelMode('editor')
       }
     }
-  }
+  }, [openFiles, setPanelMode, setActiveFile])
 
   return (
     <Tabs.Root
       value={activeTabValue}
       onValueChange={handleTabChange}
       className="artifact-pane"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', borderLeft: 'none' }}
     >
       {/* Custom Tabs Bar */}
       <div
@@ -1111,7 +1128,7 @@ const ArtifactPanel: React.FC = () => {
                 />
               )}
               {displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-editor)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border-color)' }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
                   <audio controls autoPlay src={`data:${displayFile.mimeType};base64,${displayFile.base64}`} style={{ width: '320px' }} />
                 </div>
@@ -1196,7 +1213,7 @@ const ArtifactPanel: React.FC = () => {
               </div>
 
               <div
-                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-editor)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
+                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-sidebar)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
                 className="assistant-content markdown-body"
               >
                 <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />
@@ -1225,7 +1242,7 @@ const ArtifactPanel: React.FC = () => {
                     style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
                   />
                   <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
-                    {displayFile.name}
+                    {getDisplayName(displayFile.name)}
                   </span>
                   <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginLeft: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
@@ -1259,7 +1276,7 @@ const ArtifactPanel: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-editor)' }}>
+              <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-sidebar)' }}>
                 {themeLoaded ? (
                   isDiffMode ? (
                     <DiffEditor
@@ -1308,11 +1325,6 @@ const ArtifactPanel: React.FC = () => {
                         cursorSmoothCaretAnimation: 'on',
                         smoothScrolling: true,
                         contextmenu: true,
-                        suggestOnTriggerCharacters: true,
-                        quickSuggestions: { other: true, comments: true, strings: true },
-                        formatOnType: true,
-                        formatOnPaste: true,
-                        parameterHints: { enabled: true },
                         overviewRulerBorder: false,
                         overviewRulerLanes: 0,
                         scrollbar: {
@@ -1326,7 +1338,7 @@ const ArtifactPanel: React.FC = () => {
                     />
                   )
                 ) : (
-                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-editor)' }} />
+                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-sidebar)' }} />
                 )}
               </div>
             </div>

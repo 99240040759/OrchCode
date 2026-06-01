@@ -26,12 +26,12 @@ const backgroundWorker = {
   },
 
   async sendTelemetryEvent(eventName: string, params: Record<string, string> = {}) {
-    const tid = (typeof process !== 'undefined' && process.env && process.env.GA4_MEASUREMENT_ID) 
-      ? process.env.GA4_MEASUREMENT_ID 
-      : 'G-JSW00QYW8X'
+    // Vite inlines VITE_-prefixed env vars at build time into the worker bundle.
+    // Falls back to the hardcoded measurement ID if not set.
+    const tid = (import.meta as any).env?.VITE_GA4_MEASUREMENT_ID ?? 'G-JSW00QYW8X'
     const queryParams = new URLSearchParams({
       v: '2',
-      tid: tid,
+      tid,
       cid: cachedClientId,
       en: eventName
     })
@@ -48,7 +48,6 @@ const backgroundWorker = {
       console.error('[background-worker] Telemetry event log failed:', err)
     }
   },
-
 
   async checkMacUpdate(currentVersion: string): Promise<WorkerUpdateStatus> {
     try {

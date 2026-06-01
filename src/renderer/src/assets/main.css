@@ -8,19 +8,19 @@
   --font-mono: 'JetBrains Mono', monospace;
 
   /* Color Palette - Premium Neutral Dark Design */
-  --bg-app: #090909;
-  --bg-sidebar: #090909;
-  --bg-editor: #090909;
+  --bg-app: #121214;
+  --bg-sidebar: #0f0f11;
+  --bg-editor: #0f0f11;
 
   /* Translucent & Premium Borders */
-  --border-color: rgba(255, 255, 255, 0.06);
-  --border-focus: rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.15);
 
   /* Typography Colors */
-  --text-primary: #f3f3f3;
-  --text-secondary: #9c9c9c;
-  --text-muted: #5e5e5e;
-  --text-dim: #3e3e3e;
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-dim: #52525b;
 
   /* Accent Colors */
   --accent-blue: #3b82f6;
@@ -31,7 +31,6 @@
 
   /* Layout Spacing & Sizing */
   --sidebar-width-expanded: 250px;
-  --sidebar-width-collapsed: 50px;
   --titlebar-height: 38px;
 
   /* Typographic Scale - Strict Uniformity */
@@ -182,41 +181,40 @@ details > summary {
 .artifact-pane {
   width: 100%;
   height: 100%;
-  background-color: var(--bg-editor);
-  border-left: none; /* panel resize handle centered line acts as the visual divider */
+  background-color: var(--bg-sidebar);
+  border-left: none;
   display: flex;
   flex-direction: column;
   contain: layout paint;
 }
 
 .panel-resize-handle {
-  width: 6px;
-  background-color: transparent;
+  width: 1px;
+  background-color: var(--border-color);
   cursor: col-resize;
   position: relative;
-  transition: background-color 0.2s;
+  transition: background-color 0.15s ease;
   z-index: 10;
 }
 
-.panel-resize-handle::after {
+/* Create a wider invisible hit target for easier resizing */
+.panel-resize-handle::before {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background-color: var(--border-color);
-  transition: background-color 0.15s ease;
+  left: -4px;
+  right: -4px;
+  background-color: transparent;
 }
 
-.panel-resize-handle:hover::after,
-.panel-resize-handle[data-resize-handle-active]::after {
+.panel-resize-handle:hover,
+.panel-resize-handle[data-resize-handle-active] {
   background-color: var(--border-focus);
 }
 
 /* ==========================================================================
-   SECTION 4: Frameless Window Titlebar, Authentication & Profile Trigger
+   SECTION 4: Frameless Window Titlebar
    ========================================================================== */
 .titlebar {
   height: var(--titlebar-height);
@@ -266,16 +264,6 @@ details > summary {
 .titlebar-action:hover {
   color: var(--text-primary);
   background-color: rgba(255, 255, 255, 0.05);
-}
-
-.settings-btn {
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.settings-btn:hover {
-  color: var(--text-primary);
 }
 
 /* Titlebar Update Badges */
@@ -397,44 +385,6 @@ details > summary {
   transform: translateY(-1px);
 }
 
-/* Profile Avatar & Dropdown Trigger */
-.titlebar-avatar-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  cursor: pointer;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.titlebar-avatar-btn:hover {
-  transform: scale(1.05);
-}
-
-.titlebar-avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border: 1px solid var(--border-color);
-  border-radius: 50%;
-}
-
-.titlebar-avatar-fallback {
-  width: 100%;
-  height: 100%;
-  background-color: var(--border-color);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-xxs);
-  font-weight: 600;
-  border-radius: 50%;
-}
-
 /* Radix Profile Dropdown */
 .titlebar-profile-dropdown {
   background: var(--bg-sidebar);
@@ -513,23 +463,18 @@ details > summary {
    ========================================================================== */
 .sidebar {
   background-color: var(--bg-sidebar);
-  border-right: none;
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   height: 100%;
-  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   overflow: hidden;
   position: relative;
   contain: layout paint;
-  will-change: width, transform;
 }
 
+/* sidebar width is controlled by inline style (250px hardcoded) — no .collapsed variant needed */
 .sidebar.expanded {
   width: var(--sidebar-width-expanded);
-}
-
-.sidebar.collapsed {
-  width: var(--sidebar-width-collapsed);
 }
 
 .sidebar-divider {
@@ -554,14 +499,12 @@ details > summary {
   border-radius: 2px;
 }
 
-
-
 /* ==========================================================================
-   SECTION 7: Input Bar & Control Center Component
+   SECTION 6: Input Bar & Control Center Component
    ========================================================================== */
 .workspace-main {
   flex: 1;
-  min-width: 0; /* Prevents child items from pushing sidebars out of the viewport */
+  min-width: 0;
   background-color: var(--bg-editor);
   display: flex;
   flex-direction: column;
@@ -608,7 +551,7 @@ details > summary {
   color: var(--text-primary);
 }
 
-/* Attachments UI styling matching original UI/UX theme */
+/* Attachments UI */
 .input-attachments-container {
   display: flex;
   flex-wrap: wrap;
@@ -684,7 +627,7 @@ details > summary {
   cursor: zoom-in;
 }
 
-/* Custom Curved Input Bar */
+/* Input Bar */
 .input-bar-container {
   width: 100%;
   max-width: 685px;
@@ -694,8 +637,7 @@ details > summary {
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25), 0 0 1px rgba(255, 255, 255, 0.05);
-  transition: all 0.2s ease;
-  will-change: transform;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .input-bar-container:focus-within {
@@ -703,9 +645,10 @@ details > summary {
   box-shadow: 0 12px 38px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
+/* textarea padding is set inline in InputBar.tsx to allow dynamic resizing;
+   no conflicting rule here. */
 .input-bar-text-area {
   width: 100%;
-  min-height: 48px;
   background: transparent;
   border: none;
   outline: none;
@@ -713,7 +656,6 @@ details > summary {
   font-family: var(--font-display);
   font-size: var(--font-size-md-plus);
   color: var(--text-primary);
-  padding: 14px 16px 6px 16px;
   line-height: 1.5;
 }
 
@@ -727,7 +669,6 @@ details > summary {
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px 12px 12px;
-  border-top: none;
 }
 
 .input-bar-toolbar-left {
@@ -742,7 +683,7 @@ details > summary {
   gap: 8px;
 }
 
-/* Tool Buttons & Selectors inside Toolbar - Minimalist text matching screenshot */
+/* Tool Buttons & Selectors inside Toolbar */
 .toolbar-selector {
   display: flex;
   align-items: center;
@@ -755,7 +696,7 @@ details > summary {
   font-weight: 500;
   padding: 2px 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 .toolbar-selector:hover {
@@ -778,7 +719,7 @@ details > summary {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 .toolbar-icon-btn:hover {
@@ -796,7 +737,7 @@ details > summary {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .toolbar-submit-btn:hover {
@@ -832,7 +773,7 @@ details > summary {
   color: var(--text-primary);
 }
 
-/* ── Token Ring (InputBar Context Indicators) ── */
+/* Token Ring (InputBar Context Indicators) */
 .token-ring-wrapper {
   position: relative;
   display: flex;
@@ -862,11 +803,11 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 8: Chat Thread & Bubble Messages Component
+   SECTION 7: Chat Thread & Bubble Messages Component
    ========================================================================== */
 .chat-thread-container {
-  scrollbar-width: none !important; /* Firefox */
-  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
   flex: 1;
   width: 100%;
   height: 100%;
@@ -878,7 +819,6 @@ details > summary {
   flex-direction: column;
 }
 
-/* Hide scrollbar in chat thread container */
 .chat-thread-container::-webkit-scrollbar {
   display: none !important;
 }
@@ -904,7 +844,7 @@ details > summary {
 }
 
 .chat-message-user {
-  background: #2c2c2e;
+  background: var(--bg-sidebar);
   border-radius: 8px;
   padding: 6px 16px;
   max-width: 100%;
@@ -920,7 +860,7 @@ details > summary {
   padding-right: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px; /* Premium spacing gap between thoughts, tool calls, and text paragraphs */
+  gap: 12px;
 }
 
 .chat-message-assistant {
@@ -928,11 +868,11 @@ details > summary {
   color: var(--text-primary);
   line-height: 1.6;
   user-select: text;
-  margin-bottom: 0; /* Handled by parent flex gap */
+  margin-bottom: 0;
 }
 
 .chat-message-generating-container {
-  margin-top: 0; /* Handled by parent flex gap */
+  margin-top: 0;
   padding: 4px 0;
   margin-left: 2px;
 }
@@ -942,7 +882,7 @@ details > summary {
 }
 
 .chat-reasoning-details {
-  margin-bottom: 0; /* Handled by parent flex gap */
+  margin-bottom: 0;
 }
 
 .chat-reasoning-summary {
@@ -963,7 +903,7 @@ details > summary {
 
 .chat-reasoning-body {
   margin-top: 6px;
-  color: #a1a1aa;
+  color: var(--text-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.6;
   max-height: 120px;
@@ -993,7 +933,7 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 9: Artifact Panel Component
+   SECTION 8: Artifact Panel Component
    ========================================================================== */
 
 /* Media Preview Layouts inside Artifact Panel */
@@ -1017,10 +957,10 @@ details > summary {
   align-items: center;
   justify-content: center;
   background-color: var(--bg-editor);
-  background-image: 
-    linear-gradient(45deg, var(--bg-sidebar) 25%, transparent 25%), 
-    linear-gradient(-45deg, var(--bg-sidebar) 25%, transparent 25%), 
-    linear-gradient(45deg, transparent 75%, var(--bg-sidebar) 75%), 
+  background-image:
+    linear-gradient(45deg, var(--bg-sidebar) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-sidebar) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-sidebar) 75%),
     linear-gradient(-45deg, transparent 75%, var(--bg-sidebar) 75%);
   background-size: 20px 20px;
   background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
@@ -1031,7 +971,7 @@ details > summary {
   max-height: 100%;
 }
 
-/* ── Panel Browser Component ── */
+/* Panel Browser Component */
 .browser-nav-btn {
   display: flex;
   align-items: center;
@@ -1043,7 +983,7 @@ details > summary {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   padding: 0;
 }
 
@@ -1077,7 +1017,7 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 10: General Buttons & Reusable Interaction Elements
+   SECTION 9: General Buttons & Reusable Interaction Elements
    ========================================================================== */
 .btn {
   background-color: rgba(255, 255, 255, 0.04);
@@ -1114,27 +1054,6 @@ details > summary {
   background-color: #ffffff;
 }
 
-/* Review Changes Button */
-.review-changes-btn {
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.review-changes-btn:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
 .shimmer-text {
   background: linear-gradient(
     90deg,
@@ -1152,7 +1071,7 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 11: Markdown Typography & Media Rendering Styles
+   SECTION 10: Markdown Typography & Media Rendering Styles
    ========================================================================== */
 .markdown-content {
   line-height: 1.6;
@@ -1250,7 +1169,7 @@ details > summary {
   background-color: rgba(255, 255, 255, 0.01);
 }
 
-/* ── Inline Code Elements ── */
+/* Inline Code Elements */
 .markdown-content :not(pre) > code {
   background-color: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.03);
@@ -1258,10 +1177,9 @@ details > summary {
   padding: 2px 6px;
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
-  color: #e2b473; /* soft warm gold-amber contrast */
+  color: #e2b473;
 }
 
-/* fallback / other classes of inline code */
 .markdown-content code {
   font-family: var(--font-mono);
 }
@@ -1278,15 +1196,15 @@ details > summary {
   font-size: var(--font-size-sm);
 }
 
-/* ── Premium Block Code Elements ── */
+/* Premium Block Code Elements */
 .markdown-content pre {
   background-color: var(--bg-sidebar);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 34px 16px 14px 16px; /* space at top for absolute indicators */
+  padding: 34px 16px 14px 16px;
   margin: 16px 0;
   overflow-x: auto;
-  position: relative; /* coordinate anchor */
+  position: relative;
 }
 
 .markdown-content pre code {
@@ -1324,7 +1242,7 @@ details > summary {
   justify-content: center;
   padding: 4px;
   border-radius: 4px;
-  transition: all 0.15s ease;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .code-block-copy-btn:hover {
@@ -1333,17 +1251,17 @@ details > summary {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
-/* ── High-Fidelity Modern Dark Syntax Highlighting (Highlight.js) ── */
+/* High-Fidelity Modern Dark Syntax Highlighting (Highlight.js) */
 .hljs-comment,
 .hljs-quote {
-  color: #6a9955; /* modern soft green comments */
+  color: #6a9955;
   font-style: italic;
 }
 
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-addition {
-  color: #569cd6; /* modern VS Code blue for imports/keywords */
+  color: #569cd6;
   font-weight: 500;
 }
 
@@ -1352,7 +1270,7 @@ details > summary {
 .hljs-meta,
 .hljs-regexp,
 .hljs-attribute {
-  color: #ce9178; /* warm peach-orange for strings & values */
+  color: #ce9178;
 }
 
 .hljs-title,
@@ -1360,7 +1278,7 @@ details > summary {
 .hljs-name,
 .hljs-selector-id,
 .hljs-selector-class {
-  color: #dcdcaa; /* soft warm gold for functions & components */
+  color: #dcdcaa;
 }
 
 .hljs-variable,
@@ -1370,13 +1288,13 @@ details > summary {
 .hljs-bullet,
 .hljs-params,
 .hljs-link {
-  color: #9cdcfe; /* light modern blue-cyan for variables */
+  color: #9cdcfe;
 }
 
 .hljs-symbol,
 .hljs-subst,
 .hljs-meta-keyword {
-  color: #c586c0; /* warm purple for operators & markers */
+  color: #c586c0;
 }
 
 .hljs-deletion {
@@ -1391,7 +1309,7 @@ details > summary {
   font-weight: bold;
 }
 
-/* ── Artifact Panel overrides for markdown content ── */
+/* Artifact Panel overrides for markdown content */
 .markdown-content.is-artifact p {
   margin: 6px 0 12px 0;
 }
@@ -1447,7 +1365,7 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 12: CSS Keyframes & Animations
+   SECTION 11: CSS Keyframes & Animations
    ========================================================================== */
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -1468,8 +1386,8 @@ details > summary {
 }
 
 /* ==========================================================================
-   SECTION 13: Sidebar Interactive Elements
-   All hover/active states via CSS — NO inline onMouseEnter/Leave
+   SECTION 12: Sidebar Interactive Elements
+   All hover/active states via CSS — NO React onMouseEnter/Leave
    ========================================================================== */
 
 /* Titlebar toggle buttons (sidebar expand/collapse, artifact panel expand) */
@@ -1527,7 +1445,7 @@ details > summary {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Sidebar generic menu items (non-functional navigational items) */
+/* Sidebar generic menu items */
 .sidebar-menu-item {
   display: flex;
   align-items: center;
@@ -1682,7 +1600,7 @@ details > summary {
   color: var(--text-primary);
 }
 
-/* ArtifactPanel editor toolbar action icons (diff, search, copy) */
+/* ArtifactPanel editor toolbar action icons */
 .editor-toolbar-action {
   cursor: pointer;
   color: var(--text-muted);
@@ -1699,8 +1617,18 @@ details > summary {
   color: var(--accent-blue);
 }
 
+/* OverviewPanel artifact/file card items — pure CSS hover, no React state */
+.overview-item {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.overview-item:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
 /* ==========================================================================
-   SECTION 14: Radix UI Tabs & ScrollArea Custom Themes
+   SECTION 13: Radix UI Tabs & ScrollArea Custom Themes
    ========================================================================== */
 
 /* Headless tab triggers */
@@ -1771,5 +1699,3 @@ details > summary {
 .ScrollAreaCorner {
   background: rgba(0, 0, 0, 0.2);
 }
-
-

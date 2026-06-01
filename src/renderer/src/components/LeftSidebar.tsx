@@ -9,7 +9,6 @@ interface SidebarProps {
   expanded?: boolean
   onToggle?: (expanded: boolean) => void
   onStartConversation?: () => void
-  onFooterItemClick?: (item: 'knowledge' | 'browser' | 'settings' | 'feedback') => void
   threadListContent?: React.ReactNode
 }
 
@@ -19,7 +18,6 @@ const LeftSidebar: React.FC<SidebarProps> = ({
   expanded: controlledExpanded,
   onToggle,
   onStartConversation,
-  onFooterItemClick,
   threadListContent
 }) => {
   const [localExpanded, setLocalExpanded] = useState(true)
@@ -71,7 +69,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
       style={{
         position: 'relative',
         overflow: 'hidden',
-        width: '100%',
+        width: '250px',
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
@@ -159,9 +157,6 @@ const LeftSidebar: React.FC<SidebarProps> = ({
                       <div className="profile-email">{authUser.email}</div>
                     </div>
                     <DropdownMenu.Separator className="profile-dropdown-separator" />
-                    <DropdownMenu.Item className="profile-dropdown-item" onSelect={() => onFooterItemClick?.('settings')}>
-                      Settings
-                    </DropdownMenu.Item>
                     <DropdownMenu.Item className="profile-dropdown-item logout" onSelect={handleLogout}>
                       Log Out
                     </DropdownMenu.Item>

@@ -23,6 +23,113 @@ import { useAgentStream } from './hooks/useAgentStream'
 import { useThreads } from './hooks/useThreads'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
 
+// ─── ChatPane ──────────────────────────────────────────────────────────────────
+// A proper React component (not a render function) so React can correctly diff,
+// reconcile, and memoize the subtree. Previously this was an inline function call
+// which caused TitleBar, ChatThread and InputBar to remount on every parent render.
+interface ChatPaneProps {
+  fullWidth: boolean
+  onSubmit: (prompt: string, mode?: string, attachments?: any[]) => void
+  onStop: () => void
+  onOpenArtifacts: () => void
+  onOpenWorkspace: () => void
+  workspaceName: string
+  hasMessages: boolean
+}
+
+const ChatPane = React.memo<ChatPaneProps>(({
+  fullWidth,
+  onSubmit,
+  onStop,
+  onOpenArtifacts,
+  onOpenWorkspace,
+  workspaceName,
+  hasMessages
+}) => {
+  return (
+    <div
+      className="chat-pane"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        contain: 'layout'
+      }}
+    >
+      <TitleBar title="Orch Code" workspaceName={workspaceName} />
+
+      {hasMessages ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          maxWidth: fullWidth ? '720px' : '100%',
+          height: 'calc(100% - var(--titlebar-height))',
+          minWidth: 0,
+          margin: '0 auto',
+          flex: 1
+        }}>
+          <ChatThread />
+          <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>
+            <InputBar onSubmit={onSubmit} onStop={onStop} />
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: 'calc(100% - var(--titlebar-height))', overflowY: 'auto' }}>
+          <div className="home-prompt-view" style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}>
+            {fullWidth && (
+              <div
+                className="home-prompt-header"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-end',
+                  marginBottom: 12
+                }}
+              >
+                <h2
+                  className="home-prompt-title"
+                  onClick={onOpenWorkspace}
+                  style={{ margin: 0, gap: 6 }}
+                >
+                  <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
+                  <ChevronDown size={14} style={{ color: 'var(--text-secondary)', marginTop: 2 }} />
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                    {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
+                  </span>
+                </h2>
+              </div>
+            )}
+
+            <InputBar onSubmit={onSubmit} onStop={onStop} />
+
+            {fullWidth && (
+              <div className="prompt-sub-links" style={{ marginTop: 16, gap: 16 }}>
+                <a
+                  href="#"
+                  className="prompt-sub-link"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onOpenArtifacts()
+                  }}
+                >
+                  <Code size={14} strokeWidth={2} />
+                  <span>Open editor</span>
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})
+ChatPane.displayName = 'ChatPane'
+
+// ─── AppInner ──────────────────────────────────────────────────────────────────
 function AppInner(): React.JSX.Element {
   const setConversationId = useSetAtom(conversationIdAtom)
   const setAvailableModels = useSetAtom(availableModelsAtom)
@@ -34,7 +141,6 @@ function AppInner(): React.JSX.Element {
   const activeThreadTitle = activeThread ? (activeThread.title || 'New Chat') : 'New Chat'
 
   const { run, stop } = useAgentStream()
-
   const { openWorkspace, newConversation, loadThreads } = useThreads()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
 
@@ -60,92 +166,12 @@ function AppInner(): React.JSX.Element {
     init()
   }, [setConversationId, loadThreads, setAvailableModels])
 
-  const handlePromptSubmit = (prompt: string, mode?: string, attachments?: any[]) => { run(prompt, mode, attachments) }
+  const workspaceName = activeWorkspace
+    ? `${activeWorkspace.name} / ${activeThreadTitle}`
+    : activeThreadTitle
 
-  const renderChatPane = (fullWidth: boolean) => {
-    return (
-      <div
-        className="chat-pane"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '100%',
-          height: '100%',
-          position: 'relative',
-          contain: 'layout'
-        }}
-      >
-        <TitleBar
-          title="Orch Code"
-          workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle}
-        />
-
-        {hasMessages ? (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            width: '100%',
-            maxWidth: fullWidth ? '720px' : '100%',
-            height: 'calc(100% - var(--titlebar-height))',
-            minWidth: 0,
-            margin: '0 auto',
-            flex: 1
-          }}>
-            <ChatThread />
-            <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>
-              <InputBar onSubmit={handlePromptSubmit} onStop={stop} />
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: 'calc(100% - var(--titlebar-height))', overflowY: 'auto' }}>
-            <div className="home-prompt-view" style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}>
-              {fullWidth && (
-                <div
-                  className="home-prompt-header"
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-end',
-                    marginBottom: 12
-                  }}
-                >
-                  <h2
-                    className="home-prompt-title"
-                    onClick={openWorkspace}
-                    style={{ margin: 0, gap: 6 }}
-                  >
-                    <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
-                    <ChevronDown size={14} style={{ color: 'var(--text-secondary)', marginTop: 2 }} />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {activeWorkspace ? activeWorkspace.name : 'Select Workspace'}
-                    </span>
-                  </h2>
-                </div>
-              )}
-
-              <InputBar onSubmit={handlePromptSubmit} onStop={stop} />
-
-              {fullWidth && (
-                <div className="prompt-sub-links" style={{ marginTop: 16, gap: 16 }}>
-                  <a
-                    href="#"
-                    className="prompt-sub-link"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      setArtifactPanelOpen(true)
-                    }}
-                  >
-                    <Code size={14} strokeWidth={2} />
-                    <span>Open editor</span>
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    )
+  const handlePromptSubmit = (prompt: string, mode?: string, attachments?: any[]) => {
+    run(prompt, mode, attachments)
   }
 
   return (
@@ -165,56 +191,58 @@ function AppInner(): React.JSX.Element {
         }}
       />
 
-      <PanelGroup direction="horizontal" style={{ width: '100%', height: '100%' }}>
-        {sidebarExpanded && (
-          <>
-            <Panel
-              id="sidebar-panel"
-              defaultSize={20}
-              minSize={15}
-              maxSize={30}
-            >
-              <LeftSidebar
-                expanded={sidebarExpanded}
-                onToggle={(val) => setSidebarExpanded(val)}
-                onStartConversation={newConversation}
-                onFooterItemClick={() => {}}
-                threadListContent={<ThreadList />}
+      {sidebarExpanded && (
+        <LeftSidebar
+          expanded={sidebarExpanded}
+          onToggle={(val) => setSidebarExpanded(val)}
+          onStartConversation={newConversation}
+          threadListContent={<ThreadList />}
+        />
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', minWidth: 0, flex: 1 }}>
+        <div className="app-container" style={{ height: '100%', width: '100%', flex: 1 }}>
+          <main className="workspace-main" style={{ width: '100%', height: '100%' }}>
+
+            <div className="app-glow-border" />
+
+            {isArtifactPanelOpen ? (
+              <PanelGroup direction="horizontal" className="split-view-container" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+                <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
+                  <ChatPane
+                    fullWidth={false}
+                    onSubmit={handlePromptSubmit}
+                    onStop={stop}
+                    onOpenArtifacts={() => setArtifactPanelOpen(true)}
+                    onOpenWorkspace={openWorkspace}
+                    workspaceName={workspaceName}
+                    hasMessages={hasMessages}
+                  />
+                </Panel>
+                <PanelResizeHandle className="panel-resize-handle" />
+                <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
+                  <ArtifactPanel />
+                </Panel>
+              </PanelGroup>
+            ) : (
+              <ChatPane
+                fullWidth={true}
+                onSubmit={handlePromptSubmit}
+                onStop={stop}
+                onOpenArtifacts={() => setArtifactPanelOpen(true)}
+                onOpenWorkspace={openWorkspace}
+                workspaceName={workspaceName}
+                hasMessages={hasMessages}
               />
-            </Panel>
-            <PanelResizeHandle className="panel-resize-handle" />
-          </>
-        )}
-
-        <Panel id="main-content-panel">
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', minWidth: 0 }}>
-            <div className="app-container" style={{ height: '100%', width: '100%', flex: 1 }}>
-              <main className="workspace-main" style={{ width: '100%', height: '100%' }}>
-
-                <div className="app-glow-border" />
-
-                {isArtifactPanelOpen ? (
-                  <PanelGroup direction="horizontal" className="split-view-container" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
-                    <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
-                      {renderChatPane(false)}
-                    </Panel>
-                    <PanelResizeHandle className="panel-resize-handle" />
-                    <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
-                      <ArtifactPanel />
-                    </Panel>
-                  </PanelGroup>
-                ) : (
-                  renderChatPane(true)
-                )}
-              </main>
-            </div>
-          </div>
-        </Panel>
-      </PanelGroup>
+            )}
+          </main>
+        </div>
+      </div>
     </div>
   )
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 function App(): React.JSX.Element {
   const params = new URLSearchParams(window.location.search)
   const view = params.get('view')

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2 } from 'lucide-react'
 import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
@@ -25,7 +25,8 @@ const ThreadList: React.FC = () => {
   const [workspacePaths, setWorkspacePaths] = useState<string[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
 
-  useEffect(() => {
+  // Expand the active workspace automatically
+  React.useEffect(() => {
     if (activeWorkspace?.path) {
       setExpandedPaths((prev) => ({
         ...prev,
@@ -43,22 +44,23 @@ const ThreadList: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
+  React.useEffect(() => {
     loadWorkspacesList()
   }, [activeWorkspace?.path, loadWorkspacesList])
 
-  const allWorkspacePaths = Array.from(
-    new Set([
+  // Deduplicated, stable workspace path list — memoized to avoid Array.from+Set on every render
+  const allWorkspacePaths = useMemo(() => {
+    return Array.from(new Set([
       ...(activeWorkspace?.path ? [activeWorkspace.path] : []),
       ...workspacePaths
-    ])
-  )
+    ]))
+  }, [activeWorkspace?.path, workspacePaths])
 
-  const toggleExpand = (path: string) => {
+  const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => ({ ...prev, [path]: !prev[path] }))
-  }
+  }, [])
 
-  const handleDeleteThread = async (e: React.MouseEvent, threadId: string) => {
+  const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
     const confirmed = await window.api.showConfirmDialog({
       message: 'Delete this conversation?',
@@ -70,9 +72,9 @@ const ThreadList: React.FC = () => {
     if (confirmed === 1) {
       await deleteThread(threadId)
     }
-  }
+  }, [deleteThread])
 
-  const handleCloseWorkspace = async (e: React.MouseEvent, path: string) => {
+  const handleCloseWorkspace = useCallback(async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
     const name = path.split(/[/\\]/).pop() ?? 'Workspace'
 
@@ -90,11 +92,11 @@ const ThreadList: React.FC = () => {
         await loadWorkspacesList()
       }
     }
-  }
+  }, [closeAndDeleteWorkspace, loadWorkspacesList])
 
   return (
     <div className="sidebar-section" style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}>
-      {/* Projects Header with Add Folder Icon only */}
+      {/* Projects Header */}
       <div
         className="sidebar-section-header"
         style={{

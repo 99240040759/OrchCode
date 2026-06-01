@@ -4,7 +4,6 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
-import { Primitive } from '@radix-ui/react-primitive'
 import * as styles from './ToolCallBlock.css'
 import { isAgentArtifact } from '../lib/uiUtils'
 
@@ -179,7 +178,6 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       if (target === 'implementation_plan.md') {
         return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
       }
-
       if (target === 'walkthrough.md') {
         return <BookOpen size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
       }
@@ -206,16 +204,15 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   }
 
   return (
-    <Primitive.button
-      asChild={false}
+    <button
       onClick={isFile ? handleClick : undefined}
       className={`${styles.toolCallWrapper} ${isFile ? styles.interactive : styles.nonInteractive}`}
       title={isFile ? `Open ${fullPath}` : undefined}
     >
       <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>{operation}</span>
- 
+
       <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>{renderIcon()}</span>
- 
+
       <span
         style={{
           color: 'var(--text-secondary)',
@@ -231,7 +228,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       >
         {target}
       </span>
- 
+
       {lineRange && (
         <span
           style={{
@@ -246,16 +243,16 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
           {lineRange}
         </span>
       )}
- 
+
       {renderStatus()}
- 
+
       {!isAgentArtifact(target) && (toolCall.toolName === 'writeToFile' || toolCall.toolName === 'replaceFileContent' || toolCall.toolName === 'multiReplaceFileContent') && (additions > 0 || deletions > 0) && (
         <div style={{ display: 'flex', gap: 3, fontSize: '10px', fontFamily: 'var(--font-mono)', fontWeight: 600, marginLeft: 2, flexShrink: 0 }}>
           {additions > 0 && <span style={{ color: 'var(--accent-green)' }}>+{additions}</span>}
           {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
         </div>
       )}
-    </Primitive.button>
+    </button>
   )
 }
 

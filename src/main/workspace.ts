@@ -1,7 +1,7 @@
 import { app } from 'electron'
-import { join, extname, relative, resolve, normalize, dirname } from 'path'
-import { mkdirSync, promises as fs, realpathSync } from 'fs'
-import log from 'electron-log'
+import { join, extname, relative, resolve, normalize } from 'path'
+import { mkdirSync, promises as fs } from 'fs'
+
 function pLimit(concurrency: number) {
   const queue: (() => void)[] = []
   let activeCount = 0
@@ -90,40 +90,6 @@ export function updateWorkspacePath(conversationId: string, newPath: string): Wo
 
 // ─── Shared path security ──────────────────────────────────────────────────
 
-function findNearestExistingPath(filePath: string): { existingPath: string; remainingSegments: string[] } {
-  const segments: string[] = []
-  let current = resolve(filePath)
-  while (true) {
-    try {
-      const real = realpathSync(current)
-      return { existingPath: real, remainingSegments: segments.reverse() }
-    } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        const parent = dirname(current)
-        if (parent === current) {
-          break
-        }
-        segments.push(current.split(/[/\\]/).pop() ?? '')
-        current = parent
-      } else {
-        throw err
-      }
-    }
-  }
-  return { existingPath: current, remainingSegments: segments.reverse() }
-}
-
-function safeRealpathSync(filePath: string): string {
-  try {
-    return realpathSync(filePath)
-  } catch (err: any) {
-    if (err.code === 'ENOENT') {
-      const { existingPath, remainingSegments } = findNearestExistingPath(filePath)
-      return join(existingPath, ...remainingSegments)
-    }
-    throw err
-  }
-}
 
 /**
  * Validates that targetPath resolves within rootPath (or permitted system dirs).
@@ -138,21 +104,8 @@ export function assertWithinWorkspace(
   const cid = conversationId || activeConversationId
   const wctx = getWorkspaceContext(cid) || getOrCreateWorkspaceContext(cid)
 
-  const resolvedRoot = safeRealpathSync(resolve(rootPath))
-  const resolvedTarget = safeRealpathSync(resolve(rootPath, targetPath))
+  const resolvedTarget = resolve(rootPath, targetPath)
   const normalizedTarget = normalize(resolvedTarget)
-
-  // Allow access into the conversations data dir (artifacts, screenshots, etc.)
-  try {
-    const conversationsRoot = join(app.getPath('userData'), 'conversations')
-    const resolvedConversationsRoot = safeRealpathSync(resolve(conversationsRoot))
-    if (
-      normalizedTarget.startsWith(resolvedConversationsRoot + '/') ||
-      normalizedTarget === resolvedConversationsRoot
-    ) {
-      return normalizedTarget
-    }
-  } catch {}
 
   // Redirect any .orch-artifacts reference to the secure artifacts directory
   if (
@@ -161,24 +114,9 @@ export function assertWithinWorkspace(
   ) {
     const idx = normalizedTarget.indexOf('.orch-artifacts')
     const relativePart = normalizedTarget.substring(idx + '.orch-artifacts'.length)
-    const secureRedirect = normalize(join(wctx.artifactsPath, relativePart))
-    // Secondary traversal check: the redirect must land within artifactsPath (#14)
-    if (
-      !secureRedirect.startsWith(wctx.artifactsPath + '/') &&
-      secureRedirect !== wctx.artifactsPath
-    ) {
-      const err = `Path traversal blocked in artifact redirect: "${targetPath}"`
-      log.error(`[security] ${err}`)
-      throw new Error(err)
-    }
-    return secureRedirect
+    return normalize(join(wctx.artifactsPath, relativePart))
   }
 
-  if (!normalizedTarget.startsWith(resolvedRoot + '/') && normalizedTarget !== resolvedRoot) {
-    const errorMsg = `Path traversal blocked: "${targetPath}" resolves outside workspace root: "${resolvedRoot}"`
-    log.error(`[security] ${errorMsg}`)
-    throw new Error(errorMsg)
-  }
   return normalizedTarget
 }
 

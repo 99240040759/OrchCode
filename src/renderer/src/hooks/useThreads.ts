@@ -36,7 +36,7 @@ export function useThreads() {
     }
   }, [setThreads])
 
-  const selectThread = async (threadId: string) => {
+  const selectThread = useCallback(async (threadId: string) => {
     setActiveThreadId(threadId)
     setConversationId(threadId)
     setMessages([])
@@ -67,6 +67,7 @@ export function useThreads() {
 
     try {
       const rawMessages = await window.api.getThreadMessages(threadId)
+      // Guard: if the user switched away before messages loaded, discard
       if (activeRef.current !== threadId) return
 
       if (rawMessages && rawMessages.length > 0) {
@@ -89,10 +90,9 @@ export function useThreads() {
     } catch (err) {
       console.error('[useThreads] Failed to load thread messages:', err)
     }
-  }
+  }, [setActiveThreadId, setConversationId, setMessages, setSessionTokens, setActiveWorkspace, threads])
 
-
-  const newConversation = async () => {
+  const newConversation = useCallback(async () => {
     try {
       const { conversationId: newId } = await window.api.newConversation()
       if (activeWorkspace?.path) {
@@ -100,11 +100,6 @@ export function useThreads() {
       }
       setConversationId(newId)
       setActiveThreadId(newId)
-      // Keep the activeWorkspace atom in sync — it stays the same workspace
-      // but the new thread needs to reflect it immediately in the UI
-      if (activeWorkspace) {
-        setActiveWorkspace({ name: activeWorkspace.name, path: activeWorkspace.path })
-      }
       setMessages([])
       setSessionTokens(0)
       await loadThreads()
@@ -113,9 +108,9 @@ export function useThreads() {
       console.error('[useThreads] New conversation error:', err)
       return null
     }
-  }
+  }, [activeWorkspace, setConversationId, setActiveThreadId, setMessages, setSessionTokens, loadThreads])
 
-  const deleteThread = async (threadId: string) => {
+  const deleteThread = useCallback(async (threadId: string) => {
     try {
       await window.api.deleteThread(threadId)
       setThreads((prev: ThreadEntry[]) => prev.filter((t) => t.id !== threadId))
@@ -127,9 +122,9 @@ export function useThreads() {
     } catch (err) {
       console.error('[useThreads] Delete thread error:', err)
     }
-  }
+  }, [activeThreadId, setThreads, setActiveThreadId, setMessages, setSessionTokens])
 
-  const switchWorkspace = async (path: string) => {
+  const switchWorkspace = useCallback(async (path: string) => {
     try {
       const ctx = await window.api.setActiveWorkspace(conversationId, path)
       if (ctx) {
@@ -144,9 +139,9 @@ export function useThreads() {
       console.error('[useThreads] Switch workspace error:', err)
       return null
     }
-  }
+  }, [conversationId, setActiveWorkspace])
 
-  const closeAndDeleteWorkspace = async (path: string) => {
+  const closeAndDeleteWorkspace = useCallback(async (path: string) => {
     try {
       const success = await window.api.closeAndDeleteWorkspace(path)
       if (success) {
@@ -160,13 +155,12 @@ export function useThreads() {
       console.error('[useThreads] Close and delete workspace error:', err)
       return false
     }
-  }
+  }, [activeWorkspace, setActiveWorkspace, loadThreads])
 
-  const openWorkspace = async () => {
+  const openWorkspace = useCallback(async () => {
     try {
       const ctx = await window.api.selectWorkspace(conversationId)
       if (ctx) {
-        // Persist the workspace binding to the current thread in the backend
         await window.api.setActiveWorkspace(conversationId, ctx.rootPath)
         setActiveWorkspace({
           name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
@@ -180,7 +174,7 @@ export function useThreads() {
       console.error('[useThreads] Open workspace error:', err)
       return null
     }
-  }
+  }, [conversationId, setActiveWorkspace, loadThreads])
 
   return {
     loadThreads,

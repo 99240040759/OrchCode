@@ -2,9 +2,7 @@
    OnboardingView — Standalone window styles
    ========================================================================== */
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+/* @keyframes spin is defined globally in main.css — no duplicate needed here */
 
 @keyframes pulse-ring {
   0%, 100% { opacity: 0.6; transform: scale(1); }

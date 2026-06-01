@@ -88,15 +88,18 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     f.toLowerCase().includes(searchQuery.toLowerCase())
   ).slice(0, 15)
 
-  const selectFileSuggestion = (selectedFile: string) => {
+  const selectFileSuggestion = useCallback((selectedFile: string) => {
     if (!textareaRef.current) return
     const selectionStart = textareaRef.current.selectionStart || 0
-    setInputValue(inputValue.slice(0, triggerIndex) + inputValue.slice(selectionStart))
+    setInputValue((prev) => prev.slice(0, triggerIndex) + prev.slice(selectionStart))
     setShowFileSuggestions(false)
 
-    const wsPath = activeWorkspace?.path || ''
-    const absolutePath = `${wsPath.startsWith('/') ? wsPath : '/' + wsPath}/${selectedFile}`
-    const name = selectedFile.split('/').pop() || selectedFile
+    const wsPath = activeWorkspace?.path ?? ''
+    // Cross-platform safe: join workspace root with the relative file path
+    // using the platform separator detected from the workspace path itself.
+    const sep = wsPath.includes('\\') ? '\\' : '/'
+    const absolutePath = wsPath ? `${wsPath}${sep}${selectedFile}` : `/${selectedFile}`
+    const name = selectedFile.split(/[/\\]/).pop() || selectedFile
 
     setFileReferences((prev) =>
       prev.some((p) => p.path === absolutePath) ? prev : [...prev, { name, path: absolutePath }]
@@ -106,9 +109,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       textareaRef.current?.focus()
       textareaRef.current?.setSelectionRange(triggerIndex, triggerIndex)
     }, 0)
-  }
+  }, [triggerIndex, activeWorkspace])
 
-  const checkSuggestions = (val: string, selectionStart: number | null) => {
+  const checkSuggestions = useCallback((val: string, selectionStart: number | null) => {
     if (selectionStart === null) return setShowFileSuggestions(false)
     const textBeforeCursor = val.slice(0, selectionStart)
     const lastAtIdx = textBeforeCursor.lastIndexOf('@')
@@ -125,17 +128,17 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       }
     }
     setShowFileSuggestions(false)
-  }
+  }, [showFileSuggestions, fetchWorkspaceFiles])
 
-  const triggerFileSelect = (type: 'image' | 'document') => {
+  const triggerFileSelect = useCallback((type: 'image' | 'document') => {
     if (fileInputRef.current) {
       fileInputRef.current.accept = type === 'image' ? 'image/*' : '.txt,.pdf,.json,.ts,.js,.tsx,.jsx,.html,.css,.md,.py,.rs,.go'
       fileInputRef.current.setAttribute('data-upload-type', type)
       fileInputRef.current.click()
     }
-  }
+  }, [])
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
     const type = fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document' || 'document'
@@ -159,7 +162,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     })
 
     e.target.value = ''
-  }
+  }, [])
 
   const displayTotal = sessionTokens
   const fraction = Math.min(displayTotal / MAX_TOKENS, 1)
@@ -169,9 +172,26 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     ? `${(displayTotal / 1000).toFixed(1)}k`
     : String(displayTotal)
 
+  const handleSend = useCallback(() => {
+    let val = inputValue.trim()
+    if ((!val && attachments.length === 0 && fileReferences.length === 0) || isRunning) return
 
+    if (fileReferences.length > 0) {
+      const refsText = fileReferences
+        .map((ref) => `[${ref.name}](file://${ref.path})`)
+        .join(' ')
+      val = `${val} ${refsText}`.trim()
+    }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    onSubmit?.(val, planningMode, attachments)
+    setInputValue('')
+    setAttachments([])
+    setFileReferences([])
+  }, [inputValue, attachments, fileReferences, isRunning, planningMode, onSubmit])
+
+  const handleStop = useCallback(() => onStop?.(), [onStop])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showFileSuggestions && filteredFiles.length > 0) {
       const len = filteredFiles.length
       if (e.key === 'ArrowDown') {
@@ -199,26 +219,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       e.preventDefault()
       handleSend()
     }
-  }
-
-  const handleSend = () => {
-    let val = inputValue.trim()
-    if ((!val && attachments.length === 0 && fileReferences.length === 0) || isRunning) return
-
-    if (fileReferences.length > 0) {
-      const refsText = fileReferences
-        .map((ref) => `[${ref.name}](file://${ref.path})`)
-        .join(' ')
-      val = `${val} ${refsText}`.trim()
-    }
-
-    onSubmit?.(val, planningMode, attachments)
-    setInputValue('')
-    setAttachments([])
-    setFileReferences([])
-  }
-
-  const handleStop = () => onStop?.()
+  }, [showFileSuggestions, filteredFiles, suggestionIndex, selectFileSuggestion, fileReferences, handleSend])
 
   return (
     <div className="input-bar-container" style={{ position: 'relative' }}>
@@ -387,7 +388,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           minRows={1}
           maxRows={8}
           className="input-bar-text-area"
-          placeholder={(attachments.length > 0 || fileReferences.length > 0) ? "" : "Ask anything, @ to mention"}
+          placeholder={(attachments.length > 0 || fileReferences.length > 0) ? '' : 'Ask anything, @ to mention'}
           value={inputValue}
           onChange={(e) => {
             setInputValue(e.target.value)
@@ -488,8 +489,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <div className="toolbar-selector" title="Select model" style={{ cursor: 'pointer' }}>
                 <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
                 <span>
-                  {selectedModel === 'gemini' 
-                    ? availableModels.gemini?.name 
+                  {selectedModel === 'gemini'
+                    ? availableModels.gemini?.name
                     : availableModels.gemma?.name
                   }
                 </span>

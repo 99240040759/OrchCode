@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { chatMessagesAtom, agentRunStateAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
@@ -6,8 +6,6 @@ import type { ChatMessage } from '../store/agentStore'
 import { ChevronDown } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-
-const renderMarkdown = (text: string) => <MarkdownRenderer content={text} />
 
 const decodeBase64 = (base64Str: string): string => {
   try {
@@ -91,7 +89,7 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
             })}
           </div>
         )}
-        {message.content && <div>{renderMarkdown(message.content)}</div>}
+        {message.content && <div><MarkdownRenderer content={message.content} /></div>}
       </div>
     </div>
   )
@@ -102,19 +100,20 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
     prev.message.data === next.message.data
   )
 })
+UserMessage.displayName = 'UserMessage'
 
 
 const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { content: string; durationMs?: number; isStreaming?: boolean }) => {
-  const [isOpen, setIsOpen] = useState(isStreaming ?? false)
-  const [userToggled, setUserToggled] = useState(false)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [isOpen, setIsOpen] = React.useState(isStreaming ?? false)
+  const [userToggled, setUserToggled] = React.useState(false)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (isStreaming && !userToggled) setIsOpen(true)
     if (!isStreaming && !userToggled) setIsOpen(false)
   }, [isStreaming, userToggled])
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (isStreaming && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
@@ -162,7 +161,7 @@ const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { conte
         className="assistant-content chat-reasoning-body"
         style={{ paddingBottom: '8px' }}
       >
-        {renderMarkdown(content || 'Thinking...')}
+        <MarkdownRenderer content={content || 'Thinking...'} />
       </div>
     </details>
   )
@@ -173,6 +172,7 @@ const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { conte
     prev.isStreaming === next.isStreaming
   )
 })
+ReasoningBlock.displayName = 'ReasoningBlock'
 
 const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
   <div className="chat-message-assistant-container">
@@ -200,7 +200,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
             key={`text-${i}`}
             className="assistant-content chat-message-assistant"
           >
-            {renderMarkdown(block.content)}
+            <MarkdownRenderer content={block.content} />
             {message.isStreaming && i === (message.orderedBlocks?.length ?? 0) - 1 && (
               <div className="chat-message-generating-container">
                 <span className="shimmer-text chat-message-generating-text">Generating</span>
@@ -229,10 +229,8 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
     {!message.orderedBlocks && (
       <>
         {message.content && (
-          <div
-            className="assistant-content chat-message-assistant"
-          >
-            {renderMarkdown(message.content)}
+          <div className="assistant-content chat-message-assistant">
+            <MarkdownRenderer content={message.content} />
           </div>
         )}
       </>
@@ -245,15 +243,13 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
     )}
   </div>
 ), (prev, next) => {
-  // Only re-render the message that actually changed — not all messages on every chunk
   if (prev.message.id !== next.message.id) return false
-  if (next.message.isStreaming) return false // Always re-render while actively streaming
+  if (next.message.isStreaming) return false
   if (prev.message.isStreaming !== next.message.isStreaming) return false
   if (prev.message.content !== next.message.content) return false
   const pb = prev.message.orderedBlocks
   const nb = next.message.orderedBlocks
   if (pb?.length !== nb?.length) return false
-  // If the last block changed (most common streaming case) re-render
   if (pb && nb && pb.length > 0) {
     const lastP = pb[pb.length - 1]
     const lastN = nb[nb.length - 1]
@@ -268,22 +264,22 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
   }
   return true
 })
+AssistantMessage.displayName = 'AssistantMessage'
 
 const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)
   const runState = useAtomValue(agentRunStateAtom)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const isAtBottomRef = useRef(true)
-  const prevLengthRef = useRef(messages.length)
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const isAtBottomRef = React.useRef(true)
+  const prevLengthRef = React.useRef(messages.length)
 
   const handleScroll = () => {
     if (!containerRef.current) return
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 80  // #39 fix: tighter threshold
-    isAtBottomRef.current = isAtBottom
+    isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 80
   }
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!containerRef.current) return
     const isStreaming = runState !== 'idle' && runState !== 'error'
     const hasNewMessage = messages.length > prevLengthRef.current
@@ -294,16 +290,10 @@ const ChatThread: React.FC = () => {
       const { scrollHeight, clientHeight } = containerRef.current
       if (isStreaming) {
         if (isAtBottomRef.current) {
-          containerRef.current.scrollTo({
-            top: scrollHeight - clientHeight,
-            behavior: 'auto'
-          })
+          containerRef.current.scrollTo({ top: scrollHeight - clientHeight, behavior: 'auto' })
         }
       } else if (hasNewMessage) {
-        containerRef.current.scrollTo({
-          top: scrollHeight - clientHeight,
-          behavior: 'smooth'
-        })
+        containerRef.current.scrollTo({ top: scrollHeight - clientHeight, behavior: 'smooth' })
       }
     }
 
