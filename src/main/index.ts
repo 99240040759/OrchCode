@@ -80,14 +80,14 @@ export function invalidateWorkspaceCache(conversationId: string) {
   workspaceSerializationCache.delete(conversationId)
 }
 
-import { chatStreamLimiter, tavilyLimiter } from './limiters'
+import { chatStreamLimiter, tavilyLimiter, geminiLimiter } from './limiters'
 export { tavilyLimiter }
 
 const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: (url, options) => {
-    return chatStreamLimiter.schedule(() => {
+    return geminiLimiter.schedule(() => {
       const headers = new Headers(options?.headers || {})
       headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
       headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
