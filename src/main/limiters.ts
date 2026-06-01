@@ -1,11 +1,9 @@
 import Bottleneck from 'bottleneck'
 
-export const chatStreamLimiter = new Bottleneck({
+const globalLimiter = new Bottleneck({
   maxConcurrent: 1,
-  minTime: 1000
+  minTime: 10000
 })
 
-export const tavilyLimiter = new Bottleneck({
-  maxConcurrent: 2,
-  minTime: 500
-})
+export const chatStreamLimiter = globalLimiter
+export const tavilyLimiter = globalLimiter

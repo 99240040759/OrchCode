@@ -87,10 +87,12 @@ const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: (url, options) => {
-    const headers = new Headers(options?.headers || {})
-    headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-    return fetch(url, { ...options, headers })
+    return chatStreamLimiter.schedule(() => {
+      const headers = new Headers(options?.headers || {})
+      headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+      headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+      return fetch(url, { ...options, headers })
+    })
   }
 })
 
@@ -198,7 +200,7 @@ function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: process.platform === 'win32' ? {
-      color: '#1e1e1e',
+      color: '#0f0f11',
       symbolColor: '#9c9c9c',
       height: 38
     } : false,

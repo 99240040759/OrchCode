@@ -813,7 +813,7 @@ details > summary {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  overflow-anchor: none;
+  overflow-anchor: auto;
   padding: 16px 0 24px;
   display: flex;
   flex-direction: column;

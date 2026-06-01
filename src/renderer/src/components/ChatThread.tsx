@@ -272,6 +272,7 @@ const ChatThread: React.FC = () => {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
   const prevLengthRef = React.useRef(messages.length)
+  const prevRunStateRef = React.useRef(runState)
 
   const handleScroll = () => {
     if (!containerRef.current) return
@@ -282,23 +283,27 @@ const ChatThread: React.FC = () => {
   React.useEffect(() => {
     if (!containerRef.current) return
     const isStreaming = runState !== 'idle' && runState !== 'error'
+    const wasStreaming = prevRunStateRef.current !== 'idle' && prevRunStateRef.current !== 'error'
     const hasNewMessage = messages.length > prevLengthRef.current
+    
     prevLengthRef.current = messages.length
+    prevRunStateRef.current = runState
 
-    const performScroll = () => {
-      if (!containerRef.current) return
-      const { scrollHeight, clientHeight } = containerRef.current
-      if (isStreaming) {
+    if (hasNewMessage || (isStreaming && !wasStreaming)) {
+      const performScroll = () => {
+        if (!containerRef.current) return
+        const { scrollHeight, clientHeight } = containerRef.current
         if (isAtBottomRef.current) {
-          containerRef.current.scrollTo({ top: scrollHeight - clientHeight, behavior: 'auto' })
+          containerRef.current.scrollTo({
+            top: scrollHeight - clientHeight,
+            behavior: isStreaming ? 'auto' : 'smooth'
+          })
         }
-      } else if (hasNewMessage) {
-        containerRef.current.scrollTo({ top: scrollHeight - clientHeight, behavior: 'smooth' })
       }
+      const rafId = requestAnimationFrame(performScroll)
+      return () => cancelAnimationFrame(rafId)
     }
-
-    const rafId = requestAnimationFrame(performScroll)
-    return () => cancelAnimationFrame(rafId)
+    return undefined
   }, [messages, runState])
 
   if (messages.length === 0) return null
@@ -311,7 +316,11 @@ const ChatThread: React.FC = () => {
     >
       <div className="chat-thread-spacer-top" />
       {messages.map((message) => (
-        <div key={message.id} className="chat-thread-message-wrapper">
+        <div
+          key={message.id}
+          className="chat-thread-message-wrapper"
+          style={{ overflowAnchor: 'none' }}
+        >
           {message.role === 'user' ? (
             <UserMessage message={message} />
           ) : (
@@ -319,7 +328,8 @@ const ChatThread: React.FC = () => {
           )}
         </div>
       ))}
-      <div className="chat-thread-spacer-bottom" />
+      <div className="chat-thread-spacer-bottom" style={{ overflowAnchor: 'none' }} />
+      <div style={{ overflowAnchor: 'auto', height: '1px', marginTop: '-1px' }} />
     </div>
   )
 }

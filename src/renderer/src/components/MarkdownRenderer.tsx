@@ -31,6 +31,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
         rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
         urlTransform={(value) => value}
         components={{
+          hr: () => null,
           a: ({ href, children, ...props }) => {
             if (href && href.startsWith('file://')) {
               let filePath = decodeURIComponent(href.replace(/^file:\/\/\/?/, ''))

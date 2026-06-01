@@ -25,7 +25,8 @@ function checkWindowsUpdate() {
   sendStatus({ status: 'checking' })
   autoUpdater.checkForUpdates().catch((err) => {
     log.error('[updater] Windows update check error:', err)
-    sendStatus({ status: 'error', error: `Check failed: ${err.message}` })
+    // Send status is already handled by autoUpdater.on('error') globally, 
+    // so we only need to log it here to avoid duplicate status updates!
   })
 }
 
@@ -55,10 +56,10 @@ export function initUpdater() {
     }
   })
 
-  ipcMain.handle('updater:open-mac-release', () => {
+  ipcMain.handle('updater:open-mac-release', async () => {
     log.info('[updater] Mac manual download redirection triggered')
     if (process.platform === 'darwin') {
-      shell.openExternal('https://github.com/sameer786ss/OrchCode/releases/latest')
+      await shell.openExternal('https://github.com/sameer786ss/OrchCode/releases/latest')
       app.quit()
     }
   })
