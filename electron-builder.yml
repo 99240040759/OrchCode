@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: orch-code
+productName: Orch Code
 directories:
   buildResources: build
 files:
@@ -9,9 +9,9 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: orch-code
+  executableName: Orch Code
 nsis:
-  artifactName: OrchCode-Setup.${ext}
+  artifactName: Orch Code Setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -26,7 +26,7 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: OrchCode-${arch}.${ext}
+  artifactName: Orch Code-${arch}.${ext}
   writeUpdateInfo: false
 linux:
   target:
