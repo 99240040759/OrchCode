@@ -90,21 +90,36 @@ export function updateWorkspacePath(conversationId: string, newPath: string): Wo
 
 // ─── Shared path security ──────────────────────────────────────────────────
 
+function findNearestExistingPath(filePath: string): { existingPath: string; remainingSegments: string[] } {
+  const segments: string[] = []
+  let current = resolve(filePath)
+  while (true) {
+    try {
+      const real = realpathSync(current)
+      return { existingPath: real, remainingSegments: segments.reverse() }
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        const parent = dirname(current)
+        if (parent === current) {
+          break
+        }
+        segments.push(current.split(/[/\\]/).pop() ?? '')
+        current = parent
+      } else {
+        throw err
+      }
+    }
+  }
+  return { existingPath: current, remainingSegments: segments.reverse() }
+}
+
 function safeRealpathSync(filePath: string): string {
   try {
     return realpathSync(filePath)
   } catch (err: any) {
     if (err.code === 'ENOENT') {
-      const dir = dirname(filePath)
-      try {
-        const resolvedDir = realpathSync(dir)
-        return join(resolvedDir, filePath.split(/[/\\]/).pop() ?? '')
-      } catch {
-        // Both the file and its parent don't exist — cannot safely resolve.
-        // Throw so the caller (assertWithinWorkspace) rejects the path rather
-        // than accepting an unresolved string that could bypass traversal checks.
-        throw new Error(`Cannot resolve path (parent directory does not exist): "${filePath}"`)
-      }
+      const { existingPath, remainingSegments } = findNearestExistingPath(filePath)
+      return join(existingPath, ...remainingSegments)
     }
     throw err
   }
@@ -187,47 +202,63 @@ export function isBinaryBuffer(buf: Buffer): boolean {
   return buf.subarray(0, 512).includes(0x00)
 }
 
-export async function serializeWorkspace(rootPath: string): Promise<string> {
-  const files: { relativePath: string; content: string }[] = []
+interface TraverseOptions {
+  maxDepth?: number
+  onFile: (fullPath: string, name: string) => Promise<void> | void
+}
 
-  async function traverse(dir: string, depth: number): Promise<void> {
-    if (depth > MAX_DEPTH) return
+async function traverseDir(
+  dir: string,
+  options: TraverseOptions,
+  depth = 0
+): Promise<void> {
+  const maxDepth = options.maxDepth ?? MAX_DEPTH
+  if (depth > maxDepth) return
 
-    let entries: any[] = []
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
+  let entries: any[] = []
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
 
-    const limit = pLimit(20)
-    await Promise.all(
-      entries.map((entry) => limit(async () => {
+  const limit = pLimit(20)
+  await Promise.all(
+    entries.map((entry) =>
+      limit(async () => {
         const name = entry.name
         const fullPath = join(dir, name)
 
         if (entry.isDirectory()) {
           const approvedDotFolders = new Set(['.github', '.vscode'])
           if (IGNORED_DIRS.has(name) || (name.startsWith('.') && !approvedDotFolders.has(name))) return
-          await traverse(fullPath, depth + 1)
+          await traverseDir(fullPath, options, depth + 1)
         } else if (entry.isFile()) {
           if (IGNORED_FILES.has(name)) return
           const ext = extname(name).toLowerCase()
           if (BINARY_EXTENSIONS.has(ext)) return
-
-          try {
-            const stat = await fs.stat(fullPath)
-            if (stat.size > MAX_SERIALIZE_FILE_SIZE) return
-            const content = await fs.readFile(fullPath, 'utf-8')
-            const relPath = relative(rootPath, fullPath)
-            files.push({ relativePath: relPath, content })
-          } catch {}
+          await options.onFile(fullPath, name)
         }
-      }))
+      })
     )
-  }
+  )
+}
 
-  await traverse(rootPath, 0)
+export async function serializeWorkspace(rootPath: string): Promise<string> {
+  const files: { relativePath: string; content: string }[] = []
+
+  await traverseDir(rootPath, {
+    maxDepth: MAX_DEPTH,
+    onFile: async (fullPath) => {
+      try {
+        const stat = await fs.stat(fullPath)
+        if (stat.size > MAX_SERIALIZE_FILE_SIZE) return
+        const content = await fs.readFile(fullPath, 'utf-8')
+        const relPath = relative(rootPath, fullPath)
+        files.push({ relativePath: relPath, content })
+      } catch {}
+    }
+  })
 
   // Sort files alphabetically by relative path to guarantee 100% determinism (Prompt Cache friendly)
   files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
@@ -252,3 +283,21 @@ export async function serializeWorkspace(rootPath: string): Promise<string> {
 
   return filesContent.join('\n')
 }
+
+export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
+  const files: string[] = []
+
+  await traverseDir(rootPath, {
+    maxDepth: 12,
+    onFile: (fullPath) => {
+      try {
+        const relPath = relative(rootPath, fullPath)
+        files.push(relPath)
+      } catch {}
+    }
+  })
+
+  files.sort((a, b) => a.localeCompare(b))
+  return files
+}
+

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Editor } from '@monaco-editor/react'
-import { debounce } from 'lodash-es'
 import * as Tabs from '@radix-ui/react-tabs'
+import * as ScrollArea from '@radix-ui/react-scroll-area'
+import { Editor, DiffEditor } from '@monaco-editor/react'
+import { debounce } from 'lodash-es'
 import {
   Search,
   X,
@@ -13,8 +14,14 @@ import {
   RotateCw,
   ExternalLink,
   ClipboardList,
-  ClipboardCheck,
-  BookOpen
+  BookOpen,
+  ListTodo,
+  PanelRightClose,
+  Info,
+  Package,
+  FileCode,
+  FileDiff,
+  Copy
 } from 'lucide-react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import {
@@ -24,14 +31,44 @@ import {
   activeWorkspaceAtom,
   globalPromptTriggerAtom,
   conversationIdAtom,
-  type ArtifactPanelMode
+  openFilesAtom,
+  artifactsAtom,
+  filesChangedAtom,
+  type EditorFile,
+  type FileChangeEntry
 } from '../store/agentStore'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import MarkdownRenderer from './MarkdownRenderer'
+import { FileIcon } from './ToolCallBlock'
+import type { ArtifactEntry } from '../../../preload/index.d'
+import Skeleton from 'react-loading-skeleton'
+import 'react-loading-skeleton/dist/skeleton.css'
+import { isAgentArtifact, getDisplayName } from '../lib/uiUtils'
 
-const isAgentArtifact = (fileName: string) => {
-  return fileName === 'implementation_plan.md' || fileName === 'task.md' || fileName === 'walkthrough.md'
+const getArtifactIcon = (name: string) => {
+  if (name === 'implementation_plan.md') {
+    return <ClipboardList size={15} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />
+  }
+  if (name === 'walkthrough.md') {
+    return <BookOpen size={15} style={{ flexShrink: 0, color: 'var(--accent-green)' }} />
+  }
+  return <FileText size={15} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
+}
+
+const getRelativeDirPath = (filePath: string, workspacePath?: string) => {
+  let path = filePath
+  if (workspacePath && path.startsWith(workspacePath)) {
+    path = path.slice(workspacePath.length)
+  }
+  if (path.startsWith('/') || path.startsWith('\\')) {
+    path = path.slice(1)
+  }
+  const parts = path.split(/[/\\]/)
+  if (parts.length > 1) {
+    return parts.slice(0, -1).join('/')
+  }
+  return ''
 }
 
 import { Terminal as XTerm } from '@xterm/xterm'
@@ -54,7 +91,11 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
 
   React.useImperativeHandle(ref, () => ({
     fit: () => {
-      try { fitAddonRef.current?.fit() } catch {}
+      try {
+        if (termContainerRef.current && termContainerRef.current.clientWidth > 0) {
+          fitAddonRef.current?.fit()
+        }
+      } catch {}
     }
   }))
 
@@ -63,27 +104,37 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
     let active = true
     let fitTimeout: NodeJS.Timeout | null = null
 
+    const rootStyle = getComputedStyle(document.documentElement)
+    const bgEditor = rootStyle.getPropertyValue('--bg-editor').trim()
+    const textPrimary = rootStyle.getPropertyValue('--text-primary').trim()
+    const textMuted = rootStyle.getPropertyValue('--text-muted').trim()
+    const accentBlue = rootStyle.getPropertyValue('--accent-blue').trim()
+    const accentGreen = rootStyle.getPropertyValue('--accent-green').trim()
+    const accentOrange = rootStyle.getPropertyValue('--accent-orange').trim()
+    const accentPurple = rootStyle.getPropertyValue('--accent-purple').trim()
+    const accentRed = rootStyle.getPropertyValue('--accent-red').trim()
+
     const term = new XTerm({
       theme: {
-        background: '#1e1e1e',
-        foreground: '#f3f3f3',
-        cursor: '#f3f3f3',
-        selectionBackground: 'rgba(255,255,255,0.15)',
-        black: '#1e1e1e',
-        brightBlack: '#3e3e3e',
-        red: '#ef4444',
-        brightRed: '#f87171',
-        green: '#10b981',
-        brightGreen: '#34d399',
-        yellow: '#f59e0b',
-        brightYellow: '#fbbf24',
-        blue: '#3b82f6',
-        brightBlue: '#60a5fa',
-        magenta: '#8b5cf6',
-        brightMagenta: '#a78bfa',
+        background: bgEditor,
+        foreground: textPrimary,
+        cursor: textPrimary,
+        selectionBackground: 'rgba(255, 255, 255, 0.1)',
+        black: '#1c1c1c',
+        brightBlack: textMuted,
+        red: accentRed,
+        brightRed: accentRed,
+        green: accentGreen,
+        brightGreen: accentGreen,
+        yellow: accentOrange,
+        brightYellow: accentOrange,
+        blue: accentBlue,
+        brightBlue: accentBlue,
+        magenta: accentPurple,
+        brightMagenta: accentPurple,
         cyan: '#06b6d4',
         brightCyan: '#22d3ee',
-        white: '#d4d4d4',
+        white: textPrimary,
         brightWhite: '#ffffff'
       },
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
@@ -137,7 +188,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: stri
     })
 
     const debouncedResize = debounce(() => {
-      if (active) {
+      if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
         try { fitAddon.fit() } catch {}
         if (ptyIdRef.current) {
           window.api.terminalResize({ id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
@@ -185,15 +236,30 @@ const BrowserView: React.FC = () => {
   const [displayUrl, setDisplayUrl] = useState('')
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)
+  const panelMode = useAtomValue(artifactPanelModeAtom)
+  const isOpen = useAtomValue(isArtifactPanelOpenAtom)
+
+  const panelModeRef = useRef(panelMode)
+  const isOpenRef = useRef(isOpen)
+
+  useEffect(() => {
+    panelModeRef.current = panelMode
+  }, [panelMode])
+
+  useEffect(() => {
+    isOpenRef.current = isOpen
+  }, [isOpen])
 
   const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
-    if (!containerRef.current) return { x: 0, y: 0, width: 800, height: 600 }
+    if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) {
+      return { x: 0, y: 0, width: 0, height: 0 }
+    }
     const rect = containerRef.current.getBoundingClientRect()
     return {
       x: Math.round(rect.left),
       y: Math.round(rect.top),
-      width: Math.max(Math.round(rect.width), 100),
-      height: Math.max(Math.round(rect.height), 100)
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
     }
   }, [])
 
@@ -239,6 +305,11 @@ const BrowserView: React.FC = () => {
     }
   }, [getBounds])
 
+  useEffect(() => {
+    const bounds = getBounds()
+    window.api.resizeBrowser(bounds).catch(() => {})
+  }, [panelMode, isOpen, getBounds])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden' }}>
       <div
@@ -247,7 +318,7 @@ const BrowserView: React.FC = () => {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          backgroundColor: '#161616',
+          backgroundColor: 'var(--bg-sidebar)',
           borderBottom: '1px solid var(--border-color)',
           flexShrink: 0
         }}
@@ -333,12 +404,262 @@ const BrowserView: React.FC = () => {
   )
 }
 
+const OverviewPanel: React.FC<{
+  activeConvId: string
+  artifacts: ArtifactEntry[]
+  userFiles: FileChangeEntry[]
+  loading: boolean
+  handleArtifactClick: (art: ArtifactEntry) => void
+  handleFileChangeClick: (fc: FileChangeEntry) => void
+}> = ({
+  artifacts,
+  userFiles,
+  loading,
+  handleArtifactClick,
+  handleFileChangeClick
+}) => {
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null)
+
+  return (
+    <ScrollArea.Root className="ScrollAreaRoot">
+      <ScrollArea.Viewport className="ScrollAreaViewport">
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '24px',
+            padding: '24px 32px',
+            backgroundColor: 'var(--bg-app)',
+            minHeight: '100%'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <Info size={18} strokeWidth={1.5} color="var(--text-secondary)" />
+            <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--text-primary)', margin: 0, fontFamily: 'var(--font-display)' }}>Session Overview</h2>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '24px',
+              alignItems: 'start'
+            }}
+          >
+            {/* Artifacts Card */}
+            <div
+              style={{
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-editor)',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '16px',
+                gap: '12px',
+                minHeight: '260px'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 600,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-secondary)',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  paddingBottom: '8px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Package size={14} style={{ color: 'var(--text-secondary)' }} />
+                  <span>Artifacts</span>
+                </div>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+                {loading ? (
+                  <Skeleton count={3} height={28} baseColor="#262626" highlightColor="#333333" style={{ marginBottom: 6, borderRadius: 4 }} />
+                ) : artifacts.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', padding: '8px 4px' }}>
+                    No artifacts created yet.
+                  </div>
+                ) : (
+                  artifacts.map((art) => (
+                    <div
+                      key={art.name}
+                      onClick={() => handleArtifactClick(art)}
+                      onMouseEnter={() => setHoveredItem(art.name)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--text-primary)',
+                        backgroundColor: hoveredItem === art.name ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                    >
+                      {getArtifactIcon(art.name)}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {getDisplayName(art.name)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Files Changed Card */}
+            <div
+              style={{
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-editor)',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '16px',
+                gap: '12px',
+                minHeight: '260px'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 600,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-secondary)',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  paddingBottom: '8px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FileCode size={14} style={{ color: 'var(--text-secondary)' }} />
+                  <span>Files Changed</span>
+                </div>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+                {userFiles.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', padding: '8px 4px' }}>
+                    No workspace files modified.
+                  </div>
+                ) : (
+                  userFiles.map((fc) => (
+                    <div
+                      key={fc.path}
+                      onClick={() => handleFileChangeClick(fc)}
+                      onMouseEnter={() => setHoveredItem(fc.path)}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--text-primary)',
+                        backgroundColor: hoveredItem === fc.path ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                    >
+                      <FileIcon fileName={fc.name} size={13} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{fc.name}</span>
+                      {fc.lineRange && (
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', flexShrink: 0, marginRight: '4px' }}>
+                          {fc.lineRange}
+                        </span>
+                      )}
+                      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                        {fc.additions > 0 && (
+                          <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                            +{fc.additions}
+                          </span>
+                        )}
+                        {fc.deletions > 0 && (
+                          <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                            -{fc.deletions}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </ScrollArea.Viewport>
+      <ScrollArea.Scrollbar className="ScrollAreaScrollbar" orientation="vertical">
+        <ScrollArea.Thumb className="ScrollAreaThumb" />
+      </ScrollArea.Scrollbar>
+      <ScrollArea.Corner className="ScrollAreaCorner" />
+    </ScrollArea.Root>
+  )
+}
+
+
+
 const ArtifactPanel: React.FC = () => {
   const [isOpen, setIsOpen] = useAtom(isArtifactPanelOpenAtom)
   const [activeFile, setActiveFile] = useAtom(activeEditorFileAtom)
   const [panelMode, setPanelMode] = useAtom(artifactPanelModeAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const setGlobalPrompt = useSetAtom(globalPromptTriggerAtom)
+  const [openFiles, setOpenFiles] = useAtom(openFilesAtom)
+
+  useEffect(() => {
+    if (activeFile) {
+      setOpenFiles((prev) => {
+        if (prev.some((f) => f.path === activeFile.path)) return prev
+        return [...prev, activeFile]
+      })
+    }
+  }, [activeFile, setOpenFiles])
+
+  const [hoveredTabPath, setHoveredTabPath] = useState<string | null>(null)
+  const [themeLoaded, setThemeLoaded] = useState(false)
+
+  // Overview-related states and effects
+  const [loading, setLoading] = useState(false)
+  const [artifacts, setArtifacts] = useAtom(artifactsAtom)
+  const convId = useAtomValue(conversationIdAtom)
+  const filesChanged = useAtomValue(filesChangedAtom)
+  const userFiles = filesChanged.filter((fc) => !isAgentArtifact(fc.name))
+
+  const [isDiffMode, setIsDiffMode] = useState(false)
+  const [originalContent, setOriginalContent] = useState<string | null>(null)
+
+  const editorRef = useRef<any>(null)
+  const diffEditorRef = useRef<any>(null)
+
+  const handleEditorMount = (editor: any) => {
+    editorRef.current = editor
+  }
+
+  const handleDiffEditorMount = (editor: any) => {
+    diffEditorRef.current = editor
+  }
+
+  const handleSearchClick = () => {
+    if (isDiffMode) {
+      const modifiedEditor = diffEditorRef.current?.getModifiedEditor()
+      modifiedEditor?.focus()
+      modifiedEditor?.trigger('actions', 'actions.find', null)
+    } else {
+      editorRef.current?.focus()
+      editorRef.current?.trigger('actions', 'actions.find', null)
+    }
+  }
 
   const terminalRef = useRef<{ fit: () => void } | null>(null)
   // #17 fix: only call closeBrowser when it was actually opened — track with ref
@@ -348,11 +669,233 @@ const ArtifactPanel: React.FC = () => {
   const isMarkdown = displayFile?.name.endsWith('.md') ?? false
 
   useEffect(() => {
+    const rootStyle = getComputedStyle(document.documentElement)
+    const bgEditor = rootStyle.getPropertyValue('--bg-editor').trim() || '#1e1e1e'
+    const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
+
+    import('@monaco-editor/react').then(({ loader }) => {
+      loader.init().then((monaco) => {
+        // Disable validation/diagnostics for all built-in languages to avoid red squiggly lines
+        if (monaco.languages.typescript) {
+          try {
+            // Set compiler options to natively support JSX (Preserve = 1) and disable diagnostics
+            const compilerOptions = {
+              jsx: 1, // JsxEmit.Preserve
+              allowNonTsExtensions: true,
+              target: 99, // ScriptTarget.Latest
+              allowJs: true,
+              checkJs: false
+            };
+            monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
+            monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
+
+            monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+              noSemanticValidation: true,
+              noSyntaxValidation: true
+            });
+            monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+              noSemanticValidation: true,
+              noSyntaxValidation: true
+            });
+          } catch (e) {
+            console.warn('[Monaco] TS/JS diagnostics or compiler options configuration failed:', e);
+          }
+        }
+        if (monaco.languages.json) {
+          try {
+            if (typeof monaco.languages.json.jsonDefaults?.setDiagnosticsOptions === 'function') {
+              monaco.languages.json.jsonDefaults.setDiagnosticsOptions({ validate: false })
+            } else if (typeof monaco.languages.json.jsonDefaults?.setOptions === 'function') {
+              monaco.languages.json.jsonDefaults.setOptions({ validate: false })
+            }
+          } catch (e) {
+            console.warn('[Monaco] JSON diagnostics configuration failed:', e)
+          }
+        }
+        if (monaco.languages.html) {
+          try {
+            if (typeof monaco.languages.html.htmlDefaults?.setDiagnosticsOptions === 'function') {
+              monaco.languages.html.htmlDefaults.setDiagnosticsOptions({ validate: false })
+            } else if (typeof monaco.languages.html.htmlDefaults?.setOptions === 'function') {
+              monaco.languages.html.htmlDefaults.setOptions({ validate: false })
+            }
+          } catch (e) {
+            console.warn('[Monaco] HTML diagnostics configuration failed:', e)
+          }
+        }
+        if (monaco.languages.css) {
+          try {
+            if (typeof monaco.languages.css.cssDefaults?.setDiagnosticsOptions === 'function') {
+              monaco.languages.css.cssDefaults.setDiagnosticsOptions({ validate: false })
+            } else if (typeof monaco.languages.css.cssDefaults?.setOptions === 'function') {
+              monaco.languages.css.cssDefaults.setOptions({ validate: false })
+            }
+          } catch (e) {
+            console.warn('[Monaco] CSS diagnostics configuration failed:', e)
+          }
+        }
+
+        monaco.editor.defineTheme('orch-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [
+            { token: 'keyword', foreground: '56b6c2' }, // import, from, const, export, function, etc.
+            { token: 'keyword.js', foreground: '56b6c2' },
+            { token: 'keyword.ts', foreground: '56b6c2' },
+            { token: 'keyword.tsx', foreground: '56b6c2' },
+            { token: 'string', foreground: '98c379' }, // strings
+            { token: 'string.js', foreground: '98c379' },
+            { token: 'string.ts', foreground: '98c379' },
+            { token: 'string.tsx', foreground: '98c379' },
+            { token: 'comment', foreground: '5c6370', fontStyle: 'italic' }, // comments
+            { token: 'number', foreground: 'd19a66' }, // numbers
+            { token: 'regexp', foreground: 'e06c75' },
+            { token: 'type', foreground: 'e5c07b' },
+            { token: 'class', foreground: 'e5c07b' },
+            { token: 'function', foreground: '61afef' }, // functions
+            { token: 'function.js', foreground: '61afef' },
+            { token: 'function.ts', foreground: '61afef' },
+            { token: 'function.tsx', foreground: '61afef' },
+            { token: 'variable', foreground: 'abb2bf' },
+            { token: 'variable.predefined', foreground: 'e06c75' },
+            { token: 'identifier', foreground: 'abb2bf' }
+          ],
+          colors: {
+            'editor.background': bgEditor,
+            'editor.foreground': textPrimary,
+            'editorLineNumber.foreground': '#4b5263',
+            'editorLineNumber.activeForeground': '#c8ccd4',
+            'editor.lineHighlightBackground': '#ffffff08',
+            'editor.selectionBackground': '#ffffff1a',
+            'editor.inactiveSelectionBackground': '#ffffff0d',
+            'editorWidget.background': bgEditor,
+            'editorWidget.border': '#ffffff0f',
+            'editorHoverWidget.background': bgEditor,
+            'editorHoverWidget.border': '#ffffff0f',
+            'scrollbarSlider.background': '#ffffff0f',
+            'scrollbarSlider.hoverBackground': '#ffffff1a',
+            'scrollbarSlider.activeBackground': '#ffffff26',
+            // Hide overview ruler border and decorations (errors, warnings)
+            'editorOverviewRuler.border': '#00000000',
+            'editorOverviewRuler.background': bgEditor,
+            'editorOverviewRuler.addedForeground': '#00000000',
+            'editorOverviewRuler.modifiedForeground': '#00000000',
+            'editorOverviewRuler.deletedForeground': '#00000000',
+            'editorOverviewRuler.errorForeground': '#00000000',
+            'editorOverviewRuler.warningForeground': '#00000000',
+            'editorOverviewRuler.infoForeground': '#00000000',
+            // Hide all inline validation squigglies and error line overlays
+            'editorError.foreground': '#00000000',
+            'editorError.background': '#00000000',
+            'editorError.border': '#00000000',
+            'editorWarning.foreground': '#00000000',
+            'editorWarning.background': '#00000000',
+            'editorWarning.border': '#00000000',
+            'editorInfo.foreground': '#00000000',
+            'editorInfo.background': '#00000000',
+            'editorInfo.border': '#00000000'
+          }
+        })
+        setThemeLoaded(true)
+      })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (activeFile && isDiffMode) {
+      window.api.readOriginalFile(activeFile.path, convId)
+        .then((res) => {
+          setOriginalContent(res?.content ?? '')
+        })
+        .catch((err) => {
+          console.error('[ArtifactPanel] Failed to read original file:', err)
+          setOriginalContent('')
+        })
+    } else {
+      setOriginalContent(null)
+    }
+  }, [activeFile?.path, isDiffMode, convId])
+
+
+
+  useEffect(() => {
+    if (!convId) return
+    let active = true
+    setLoading(true)
+    window.api
+      .listArtifacts(convId)
+      .then((data) => {
+        if (active) {
+          setArtifacts(data ?? [])
+          setLoading(false)
+        }
+      })
+      .catch(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [convId, setArtifacts])
+
+  useEffect(() => {
+    const unsub = window.api.onArtifactsChanged((data) => {
+      setArtifacts(data ?? [])
+    })
+    return unsub
+  }, [setArtifacts])
+
+  const handleArtifactClick = async (artifact: ArtifactEntry) => {
+    try {
+      const fileData = await window.api.readFile(artifact.path, convId)
+      if (fileData) {
+        setIsDiffMode(false)
+        handleOpenFile(fileData)
+      }
+    } catch (err) {
+      console.error('[ArtifactPanel] Failed to open artifact:', err)
+    }
+  }
+
+  const handleFileChangeClick = async (fc: FileChangeEntry) => {
+    try {
+      const fileData = await window.api.readFile(fc.path, convId)
+      if (fileData) {
+        setIsDiffMode(true)
+        handleOpenFile(fileData)
+      }
+    } catch (err) {
+      console.error('[ArtifactPanel] Failed to open changed file:', err)
+    }
+  }
+
+  const handleOpenFile = (fileData: EditorFile) => {
+    setOpenFiles((prev) => {
+      const exists = prev.find((f) => f.path === fileData.path)
+      if (!exists) return [...prev, fileData]
+      return prev
+    })
+    setActiveFile(fileData)
+    setPanelMode('editor')
+  }
+
+  const handleCloseFile = (fileToClose: EditorFile, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const updatedFiles = openFiles.filter((f) => f.path !== fileToClose.path)
+    setOpenFiles(updatedFiles)
+
+    if (activeFile?.path === fileToClose.path) {
+      if (updatedFiles.length > 0) {
+        const nextFile = updatedFiles[updatedFiles.length - 1]
+        setActiveFile(nextFile)
+        setPanelMode('editor')
+      } else {
+        setActiveFile(null)
+        setPanelMode('overview')
+      }
+    }
+  }
+
+
+  useEffect(() => {
     if (panelMode === 'browser') {
       browserWasOpenedRef.current = true
-    } else if (browserWasOpenedRef.current) {
-      window.api.closeBrowser().catch(() => {})
-      browserWasOpenedRef.current = false
     }
     if (panelMode === 'terminal') {
       requestAnimationFrame(() => {
@@ -362,6 +905,7 @@ const ArtifactPanel: React.FC = () => {
   }, [panelMode])
 
   useEffect(() => {
+    // Only close the browser if it was actually opened (mode was set to browser)
     if (!isOpen && browserWasOpenedRef.current) {
       window.api.closeBrowser().catch(() => {})
       browserWasOpenedRef.current = false
@@ -370,204 +914,174 @@ const ArtifactPanel: React.FC = () => {
 
   const handleClose = () => {
     setIsOpen(false)
-    setPanelMode('editor')
-    setActiveFile(null)
   }
 
   if (!isOpen) return null
 
+  const activeTabValue = panelMode === 'editor' ? (activeFile?.path ?? '') : panelMode
+
+  const handleTabChange = (val: string) => {
+    if (val === 'overview') {
+      setPanelMode('overview')
+      setActiveFile(null)
+    } else if (val === 'terminal') {
+      setPanelMode('terminal')
+      setActiveFile(null)
+    } else if (val === 'browser') {
+      setPanelMode('browser')
+      setActiveFile(null)
+    } else {
+      const file = openFiles.find((f) => f.path === val)
+      if (file) {
+        setIsDiffMode(false)
+        setActiveFile(file)
+        setPanelMode('editor')
+      }
+    }
+  }
+
   return (
     <Tabs.Root
-      value={panelMode}
-      onValueChange={(val) => setPanelMode(val as ArtifactPanelMode)}
+      value={activeTabValue}
+      onValueChange={handleTabChange}
       className="artifact-pane"
       style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}
     >
+      {/* Custom Tabs Bar */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'flex-end',
+          justifyContent: 'space-between',
           height: '38px',
-          padding: '0 16px',
-          backgroundColor: 'var(--bg-editor)',
+          backgroundColor: 'var(--bg-sidebar)',
           borderBottom: '1px solid var(--border-color)',
-          marginLeft: '-1px',
-          position: 'relative',
-          zIndex: 2,
-          flexShrink: 0
+          flexShrink: 0,
+          paddingRight: '12px',
+          overflowX: 'auto',
+          scrollbarWidth: 'none'
         }}
       >
-        <Tabs.List style={{ display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}>
-          {[
-            { mode: 'editor', icon: <FileText size={15} />, title: 'Editor' },
-            { mode: 'terminal', icon: <TerminalSquare size={15} />, title: 'Terminal' },
-            { mode: 'browser', icon: <Globe size={15} />, title: 'Browser' }
-          ].map(({ mode, icon, title }) => (
-            <Tabs.Trigger
-              key={mode}
-              value={mode}
-              title={title}
-              style={{
-                width: 26,
-                height: 26,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 4,
-                border: 'none',
-                cursor: 'pointer',
-                backgroundColor: panelMode === mode ? 'rgba(255, 255, 255, 0.10)' : 'transparent',
-                color: panelMode === mode 
-                  ? (mode === 'browser' ? 'var(--accent-blue)' : mode === 'terminal' ? 'var(--accent-green)' : 'var(--text-primary)')
-                  : '#9c9c9c',
-                transition: 'color 0.15s ease, background-color 0.15s ease',
-                position: 'relative'
-              }}
-            >
-              {icon}
-            </Tabs.Trigger>
-          ))}
+        <Tabs.List style={{ display: 'flex', alignItems: 'center', height: '100%', overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {/* Overview Tab */}
+          <Tabs.Trigger
+            value="overview"
+            className="tab-trigger"
+          >
+            <ListTodo size={14} style={{ color: panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)' }} />
+            <span>Overview</span>
+          </Tabs.Trigger>
+
+          {/* Terminal Tab */}
+          <Tabs.Trigger
+            value="terminal"
+            className="tab-trigger"
+          >
+            <TerminalSquare size={14} style={{ color: panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)' }} />
+            <span>Terminal</span>
+          </Tabs.Trigger>
+
+          {/* Browser Tab */}
+          <Tabs.Trigger
+            value="browser"
+            className="tab-trigger"
+          >
+            <Globe size={14} style={{ color: panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)' }} />
+            <span>Browser</span>
+          </Tabs.Trigger>
+
+          {/* Open Files Tabs */}
+          {openFiles.map((file) => {
+            const isHovered = hoveredTabPath === file.path
+            const isCloseVisible = isHovered
+            return (
+              <Tabs.Trigger
+                key={file.path}
+                value={file.path}
+                className="tab-trigger"
+                onMouseEnter={() => setHoveredTabPath(file.path)}
+                onMouseLeave={() => setHoveredTabPath(null)}
+              >
+                {/* Left side icon space */}
+                <div
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    position: 'relative'
+                  }}
+                >
+                  {isCloseVisible ? (
+                    <span
+                      onClick={(e) => handleCloseFile(file, e)}
+                      className="tab-close-btn"
+                    >
+                      <X size={10} />
+                    </span>
+                  ) : (
+                    isAgentArtifact(file.name) ? (
+                      getArtifactIcon(file.name)
+                    ) : (
+                      <SymbolsFileIcon
+                        fileName={file.name}
+                        autoAssign={true}
+                        width={16}
+                        height={16}
+                        style={{ flexShrink: 0 }}
+                      />
+                    )
+                  )}
+                </div>
+
+                <span>
+                  {getDisplayName(file.name)}
+                </span>
+              </Tabs.Trigger>
+            )
+          })}
         </Tabs.List>
+
+        {/* Right side: Collapse Button */}
+        <div
+          onClick={handleClose}
+          title="Collapse Panel"
+          className="artifact-panel-close-btn"
+        >
+          <PanelRightClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
+        </div>
       </div>
 
-      {panelMode === 'editor' && displayFile && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: '38px',
-            padding: '0 16px',
-            gap: '12px',
-            backgroundColor: 'var(--bg-editor)',
-            borderBottom: '1px solid var(--border-color)',
-            flexShrink: 0
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: 'var(--bg-app)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '4px',
-              height: '28px',
-              padding: '0 10px'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-              {isAgentArtifact(displayFile.name) ? (
-                displayFile.name === 'implementation_plan.md' ? (
-                  <ClipboardList size={16} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
-                ) : displayFile.name === 'task.md' ? (
-                  <ClipboardCheck size={16} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
-                ) : (
-                  <BookOpen size={16} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
-                )
-              ) : isMarkdown ? (
-                <FileText size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-              ) : (
-                <SymbolsFileIcon
-                  fileName={displayFile.name}
-                  autoAssign={true}
-                  width={16}
-                  height={16}
-                  style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
-                />
-              )}
-              <span style={{ color: '#f3f3f3', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
-                {displayFile.name === 'implementation_plan.md'
-                  ? 'Implementation Plan'
-                  : displayFile.name === 'task.md'
-                  ? 'Task List'
-                  : displayFile.name === 'walkthrough.md'
-                  ? 'Walkthrough'
-                  : displayFile.name}
-              </span>
-              {!isAgentArtifact(displayFile.name) && (
-                <span style={{ color: '#9c9c9c', fontSize: 'var(--font-size-xxs)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayFile.path}</span>
-              )}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-              {displayFile.name === 'implementation_plan.md' ? (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    className="btn"
-                    style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px', border: '1px solid rgba(255,255,255,0.12)' }}
-                    onClick={() => {
-                      setGlobalPrompt({ prompt: 'I reject the implementation plan. Please make modifications based on my requirements.' })
-                      toast.info('Rejected implementation plan. Agent notified.')
-                    }}
-                  >
-                    Reject
-                  </button>
-                  <button
-                    className="btn primary"
-                    style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px' }}
-                    onClick={() => {
-                      setGlobalPrompt({ prompt: 'I approve the implementation plan. Please proceed with execution.' })
-                      toast.success('Approved plan. Proceeding with execution.')
-                    }}
-                  >
-                    Proceed
-                  </button>
-                </div>
-              ) : !isAgentArtifact(displayFile.name) ? (
-                <>
-                  <div className="panel-header-action" style={{ padding: '2px', color: '#9c9c9c' }}>
-                    <Search size={14} />
-                  </div>
-                  <div
-                    className="panel-header-action"
-                    style={{ padding: '2px', color: '#9c9c9c', cursor: 'pointer' }}
-                    onClick={handleClose}
-                  >
-                    <X size={14} />
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {panelMode === 'terminal' && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            height: '38px',
-            padding: '0 16px',
-            backgroundColor: 'var(--bg-editor)',
-            borderBottom: '1px solid var(--border-color)',
-            flexShrink: 0
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <TerminalSquare size={14} style={{ color: 'var(--accent-green)' }} />
-            <span style={{ fontSize: 'var(--font-size-xs-plus)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-              {activeWorkspace?.name ? `${activeWorkspace.name} — zsh` : 'Terminal'}
-            </span>
-          </div>
-          <div className="panel-header-action" style={{ padding: '2px', color: '#9c9c9c', cursor: 'pointer' }} onClick={handleClose}>
-            <X size={14} />
-          </div>
-        </div>
-      )}
-
+      {/* Panels Viewport */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+        {/* Overview Tab Content */}
+        <Tabs.Content value="overview" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+          <OverviewPanel
+            activeConvId={convId}
+            artifacts={artifacts}
+            userFiles={userFiles}
+            loading={loading}
+            handleArtifactClick={handleArtifactClick}
+            handleFileChangeClick={handleFileChangeClick}
+          />
+        </Tabs.Content>
+
+        {/* Terminal Tab Content */}
         <Tabs.Content value="terminal" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
           <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
         </Tabs.Content>
 
-        <Tabs.Content value="browser" style={{ height: '100%', width: '100%' }}>
-          <BrowserView />
-        </Tabs.Content>
+        {/* Browser Tab Content */}
+        {panelMode === 'browser' && (
+          <Tabs.Content value="browser" style={{ height: '100%', width: '100%' }}>
+            <BrowserView />
+          </Tabs.Content>
+        )}
 
-        <Tabs.Content value="editor" style={{ height: '100%', width: '100%' }}>
+        {/* Editor Tab Content */}
+        <div style={{ display: panelMode === 'editor' ? 'block' : 'none', height: '100%', width: '100%' }}>
           {!displayFile ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px', color: 'var(--text-secondary)', textAlign: 'center', backgroundColor: 'var(--bg-app)' }}>
               <div style={{ fontSize: '40px', marginBottom: '16px', filter: 'grayscale(0.3) contrast(1.2)' }}>📂</div>
@@ -597,7 +1111,7 @@ const ArtifactPanel: React.FC = () => {
                 />
               )}
               {displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: '#1e1e1e', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-editor)', border: '1px solid var(--border-color)' }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
                   <audio controls autoPlay src={`data:${displayFile.mimeType};base64,${displayFile.base64}`} style={{ width: '320px' }} />
                 </div>
@@ -611,6 +1125,77 @@ const ArtifactPanel: React.FC = () => {
           ) : isMarkdown ? (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
               <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  height: '34px',
+                  padding: '0 16px',
+                  backgroundColor: 'var(--bg-sidebar)',
+                  borderBottom: '1px solid var(--border-color)',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                  {isAgentArtifact(displayFile.name) ? (
+                    getArtifactIcon(displayFile.name)
+                  ) : (
+                    <SymbolsFileIcon
+                      fileName={displayFile.name}
+                      autoAssign={true}
+                      width={16}
+                      height={16}
+                      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                    />
+                  )}
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
+                    {getDisplayName(displayFile.name)}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginLeft: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
+                  </span>
+                </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                  {displayFile.name === 'implementation_plan.md' && (
+                    <div style={{ display: 'flex', gap: 6, marginRight: '8px' }}>
+                      <button
+                        className="btn"
+                        style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px', border: '1px solid rgba(255,255,255,0.12)' }}
+                        onClick={() => {
+                          setGlobalPrompt({ prompt: 'I reject the implementation plan. Please make modifications based on my requirements.' })
+                          toast.info('Rejected implementation plan. Agent notified.')
+                        }}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        className="btn primary"
+                        style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px' }}
+                        onClick={() => {
+                          setGlobalPrompt({ prompt: 'I approve the implementation plan. Please proceed with execution.' })
+                          toast.success('Approved plan. Proceeding with execution.')
+                        }}
+                      >
+                        Proceed
+                      </button>
+                    </div>
+                  )}
+                  
+                  <div
+                    title="Copy file content"
+                    onClick={() => {
+                      navigator.clipboard.writeText(displayFile.content ?? '')
+                      toast.success('File content copied!')
+                    }}
+                    className="editor-toolbar-action"
+                  >
+                    <Copy size={13} />
+                  </div>
+                </div>
+              </div>
+
+              <div
                 style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-editor)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
                 className="assistant-content markdown-body"
               >
@@ -618,36 +1203,135 @@ const ArtifactPanel: React.FC = () => {
               </div>
             </div>
           ) : (
-            <Editor
-              height="100%"
-              language={displayFile.language}
-              theme="vs-dark"
-              value={displayFile.content ?? ''}
-              options={{
-                minimap: { enabled: true, showSlider: 'mouseover' },
-                fontSize: 13,
-                fontFamily: 'var(--font-mono)',
-                padding: { top: 16 },
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                readOnly: true,
-                lineNumbersMinChars: 4,
-                automaticLayout: true,
-                cursorBlinking: 'blink',
-                cursorSmoothCaretAnimation: 'on',
-                smoothScrolling: true,
-                folding: true,
-                foldingHighlight: true,
-                contextmenu: true,
-                suggestOnTriggerCharacters: true,
-                quickSuggestions: { other: true, comments: true, strings: true },
-                formatOnType: true,
-                formatOnPaste: true,
-                parameterHints: { enabled: true }
-              }}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  height: '34px',
+                  padding: '0 16px',
+                  backgroundColor: 'var(--bg-sidebar)',
+                  borderBottom: '1px solid var(--border-color)',
+                  flexShrink: 0
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                  <SymbolsFileIcon
+                    fileName={displayFile.name}
+                    autoAssign={true}
+                    width={16}
+                    height={16}
+                    style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                  />
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
+                    {displayFile.name}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginLeft: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
+                  </span>
+                </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                  <div
+                    title={isDiffMode ? "Show Code Editor" : "Show File Diff (vs git HEAD)"}
+                    onClick={() => setIsDiffMode(!isDiffMode)}
+                    className={isDiffMode ? "editor-toolbar-action active" : "editor-toolbar-action"}
+                  >
+                    <FileDiff size={13} />
+                  </div>
+                  <div
+                    title="Find in file (native)"
+                    onClick={handleSearchClick}
+                    className="editor-toolbar-action"
+                  >
+                    <Search size={13} />
+                  </div>
+                  <div
+                    title="Copy file content"
+                    onClick={() => {
+                      navigator.clipboard.writeText(displayFile.content ?? '')
+                      toast.success('File content copied!')
+                    }}
+                    className="editor-toolbar-action"
+                  >
+                    <Copy size={13} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-editor)' }}>
+                {themeLoaded ? (
+                  isDiffMode ? (
+                    <DiffEditor
+                      height="100%"
+                      language={displayFile.language}
+                      theme="orch-dark"
+                      original={originalContent ?? ''}
+                      modified={displayFile.content ?? ''}
+                      onMount={handleDiffEditorMount}
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        renderSideBySide: true,
+                        scrollbar: {
+                          vertical: 'visible',
+                          horizontal: 'visible',
+                          useShadows: false,
+                          verticalScrollbarSize: 8,
+                          horizontalScrollbarSize: 8
+                        }
+                      }}
+                    />
+                  ) : (
+                    <Editor
+                      height="100%"
+                      language={displayFile.language}
+                      theme="orch-dark"
+                      path={displayFile.path}
+                      value={displayFile.content ?? ''}
+                      onMount={handleEditorMount}
+                      options={{
+                        minimap: { enabled: false },
+                        renderValidationDecorations: 'off',
+                        fontSize: 13,
+                        fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
+                        lineHeight: 1.6,
+                        padding: { top: 16 },
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        readOnly: true,
+                        lineNumbersMinChars: 3,
+                        lineDecorationsWidth: 6,
+                        folding: false,
+                        automaticLayout: true,
+                        cursorBlinking: 'blink',
+                        cursorSmoothCaretAnimation: 'on',
+                        smoothScrolling: true,
+                        contextmenu: true,
+                        suggestOnTriggerCharacters: true,
+                        quickSuggestions: { other: true, comments: true, strings: true },
+                        formatOnType: true,
+                        formatOnPaste: true,
+                        parameterHints: { enabled: true },
+                        overviewRulerBorder: false,
+                        overviewRulerLanes: 0,
+                        scrollbar: {
+                          vertical: 'visible',
+                          horizontal: 'visible',
+                          useShadows: false,
+                          verticalScrollbarSize: 8,
+                          horizontalScrollbarSize: 8
+                        }
+                      }}
+                    />
+                  )
+                ) : (
+                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-editor)' }} />
+                )}
+              </div>
+            </div>
           )}
-        </Tabs.Content>
+        </div>
       </div>
     </Tabs.Root>
   )

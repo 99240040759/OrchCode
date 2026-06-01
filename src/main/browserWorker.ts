@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'worker_threads'
 import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
+import { nodeAdapter } from './nodeAdapter'
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -12,37 +13,6 @@ function getTargetLocator(page: Page, selector: string, frameSelector?: string) 
     return page.frameLocator(frameSelector).locator(selector)
   }
   return page.locator(selector)
-}
-
-function nodeAdapter(port: any): any {
-  const listeners = new WeakMap()
-  return {
-    postMessage(message: any, transfer?: any[]) {
-      port.postMessage(message, transfer)
-    },
-    addEventListener(type: string, eh: any) {
-      if (type === 'message') {
-        const l = (data: any) => {
-          if (eh && typeof eh === 'object' && 'handleEvent' in eh) {
-            eh.handleEvent({ data })
-          } else {
-            eh({ data })
-          }
-        }
-        port.on('message', l)
-        listeners.set(eh, l)
-      }
-    },
-    removeEventListener(type: string, eh: any) {
-      if (type === 'message') {
-        const l = listeners.get(eh)
-        if (l) {
-          port.off('message', l)
-          listeners.delete(eh)
-        }
-      }
-    }
-  }
 }
 
 const workerAPI = {
@@ -122,6 +92,26 @@ const workerAPI = {
       intentionalPageUrl = target
       await page!.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 })
       return { success: true, url: page!.url() }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+
+  async syncUrl(url: string) {
+    try {
+      intentionalPageUrl = url
+      if (page) {
+        try {
+          const pageUrl = page.url()
+          if (pageUrl !== url && context) {
+            const found = context.pages().find(p => p.url() === url)
+            if (found) page = found
+          }
+        } catch {
+          page = null
+        }
+      }
+      return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

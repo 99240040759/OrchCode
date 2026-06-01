@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
-import { Plus, Trash2, ChevronDown, ChevronRight, X } from 'lucide-react'
-import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom } from '../store/agentStore'
+import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2 } from 'lucide-react'
+import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
-
 import { formatDistanceToNow } from 'date-fns'
 
 function formatRelativeTime(dateStr: string): string {
@@ -19,8 +18,9 @@ const ThreadList: React.FC = () => {
   const threads = useAtomValue(threadListAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
+  const agentRunState = useAtomValue(agentRunStateAtom)
 
-  const { selectThread, newConversation, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace } = useThreads()
+  const { selectThread, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace } = useThreads()
 
   const [workspacePaths, setWorkspacePaths] = useState<string[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
@@ -58,10 +58,18 @@ const ThreadList: React.FC = () => {
     setExpandedPaths((prev) => ({ ...prev, [path]: !prev[path] }))
   }
 
-  const handleNewChatInWorkspace = async (e: React.MouseEvent, path: string) => {
+  const handleDeleteThread = async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
-    await switchWorkspace(path)
-    await newConversation()
+    const confirmed = await window.api.showConfirmDialog({
+      message: 'Delete this conversation?',
+      detail: 'This will permanently remove the conversation and all its messages.',
+      buttons: ['Cancel', 'Delete'],
+      defaultId: 1,
+      cancelId: 0
+    })
+    if (confirmed === 1) {
+      await deleteThread(threadId)
+    }
   }
 
   const handleCloseWorkspace = async (e: React.MouseEvent, path: string) => {
@@ -85,15 +93,32 @@ const ThreadList: React.FC = () => {
   }
 
   return (
-    <div className="sidebar-section" style={{ padding: '12px 0', gap: 8 }}>
-      <div className="sidebar-section-header" style={{ padding: '0 12px', color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-        <span>Workspaces</span>
+    <div className="sidebar-section" style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}>
+      {/* Projects Header with Add Folder Icon only */}
+      <div
+        className="sidebar-section-header"
+        style={{
+          padding: '0 12px 4px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          color: 'var(--text-secondary)',
+          fontSize: '11px',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase'
+        }}
+      >
+        <span>Projects</span>
+        <span title="Add Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}>
+          <FolderPlus size={14} />
+        </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {allWorkspacePaths.length === 0 ? (
-          <div style={{ padding: '0 16px', color: 'var(--text-secondary)', fontSize: '13px', fontStyle: 'italic' }}>
-            No workspaces opened yet.
+          <div style={{ padding: '0 12px', color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>
+            No projects opened yet.
           </div>
         ) : (
           allWorkspacePaths.map((path) => {
@@ -104,23 +129,12 @@ const ThreadList: React.FC = () => {
 
             return (
               <div key={path} style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Project/Folder Row */}
                 <div
+                  className="workspace-node-row"
                   onClick={() => switchWorkspace(path)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    margin: '0 8px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    backgroundColor: isActive ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)' }}
-                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
                     <div
                       onClick={(e) => { e.stopPropagation(); toggleExpand(path) }}
                       style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: 2 }}
@@ -131,9 +145,12 @@ const ThreadList: React.FC = () => {
                         <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />
                       )}
                     </div>
+
+                    <Folder size={14} color="var(--text-secondary)" style={{ flexShrink: 0 }} />
+
                     <span
                       style={{
-                        fontSize: 'var(--font-size-md)',
+                        fontSize: '13px',
                         fontWeight: isActive ? 600 : 500,
                         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                         overflow: 'hidden',
@@ -146,82 +163,82 @@ const ThreadList: React.FC = () => {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  <div className="workspace-node-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                     <div
                       className="sidebar-section-header-action"
                       onClick={(e) => handleCloseWorkspace(e, path)}
-                      title="Close workspace and delete data"
-                      style={{ padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title="Close project folder"
+                      style={{ padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
-                      <X size={14} />
-                    </div>
-                    <div
-                      className="sidebar-section-header-action"
-                      onClick={(e) => handleNewChatInWorkspace(e, path)}
-                      title="Start chat in workspace"
-                      style={{ padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Plus size={14} strokeWidth={2} />
+                      <X size={13} />
                     </div>
                   </div>
                 </div>
 
+                {/* Sub-threads (indented list) */}
                 {isExpanded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 8px 4px 20px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '2px 0 2px 24px' }}>
                     {workspaceThreads.length === 0 ? (
-                      <span style={{ padding: '6px 12px 6px 12px', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', fontStyle: 'italic' }}>
+                      <span style={{ padding: '6px 12px', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic' }}>
                         No chats yet
                       </span>
                     ) : (
-                      workspaceThreads.map((thread: ThreadEntry) => (
-                        <div
-                          key={thread.id}
-                          className="sidebar-tree-node"
-                          style={{ cursor: 'pointer', padding: 0 }}
-                        >
+                      workspaceThreads.map((thread: ThreadEntry) => {
+                        const isThreadActive = activeThreadId === thread.id
+                        const isRunning = isThreadActive && agentRunState !== 'idle'
+
+                        return (
                           <div
-                            className="sidebar-tree-node-title"
-                            onClick={() => selectThread(thread.id)}
-                            style={{
-                              background: activeThreadId === thread.id ? 'rgba(255,255,255,0.05)' : 'transparent',
-                              borderRadius: 6,
-                              padding: '6px 10px',
-                              margin: '0',
-                              justifyContent: 'space-between',
-                              display: 'flex',
-                              alignItems: 'center',
-                              width: '100%',
-                              transition: 'all 0.15s ease'
-                            }}
+                            key={thread.id}
+                            className="sidebar-tree-node"
+                            style={{ cursor: 'pointer', padding: 0 }}
                           >
-                            <span
-                              style={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                fontSize: 'var(--font-size-md)',
-                                color: activeThreadId === thread.id ? 'var(--text-primary)' : '#b0b0b5',
-                                fontWeight: activeThreadId === thread.id ? 500 : 400,
-                                flex: 1
-                              }}
+                            <div
+                              className={`sidebar-tree-node-title${isThreadActive ? ' active' : ''}`}
+                              onClick={() => selectThread(thread.id)}
+                              style={{ justifyContent: 'space-between' }}
                             >
-                              {thread.title ?? 'New conversation'}
-                            </span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
-                              <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                                {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
-                              </span>
-                              <div
-                                className="sidebar-section-header-action"
-                                onClick={(e) => { e.stopPropagation(); deleteThread(thread.id) }}
-                                title="Delete conversation"
+                              <span
+                                style={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  fontSize: '13px',
+                                  color: isThreadActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                  fontWeight: isThreadActive ? 500 : 400,
+                                  flex: 1
+                                }}
                               >
-                                <Trash2 size={12} />
+                                {thread.title ?? 'New conversation'}
+                              </span>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '8px' }}>
+                                {isRunning ? (
+                                  <Loader2
+                                    size={12}
+                                    style={{
+                                      color: 'var(--accent-blue)',
+                                      animation: 'spin 1s linear infinite'
+                                    }}
+                                  />
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                    {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
+                                  </span>
+                                )}
+                                <div
+                                  className="sidebar-section-header-action"
+                                  onClick={(e) => handleDeleteThread(e, thread.id)}
+                                  title="Delete conversation"
+                                  style={{ display: 'flex', alignItems: 'center' }}
+                                >
+                                  <Trash2 size={12} />
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
@@ -229,36 +246,6 @@ const ThreadList: React.FC = () => {
             )
           })
         )}
-      </div>
-
-      <div
-        className="sidebar-action-text"
-        onClick={() => openWorkspace()}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          margin: '0 8px',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          color: 'var(--text-secondary)',
-          fontSize: 'var(--font-size-md)',
-          fontWeight: 500,
-          transition: 'all 0.2s ease',
-          marginTop: 4
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'var(--text-primary)'
-          e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'var(--text-secondary)'
-          e.currentTarget.style.backgroundColor = 'transparent'
-        }}
-      >
-        <Plus size={16} strokeWidth={2} />
-        <span>Open Workspace</span>
       </div>
     </div>
   )

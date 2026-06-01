@@ -5,8 +5,17 @@ import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage } from '../store/agentStore'
 import { ChevronDown } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
+import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 const renderMarkdown = (text: string) => <MarkdownRenderer content={text} />
+
+const decodeBase64 = (base64Str: string): string => {
+  try {
+    return new TextDecoder().decode(Uint8Array.from(atob(base64Str), (c) => c.charCodeAt(0)))
+  } catch {
+    return 'Failed to decode content'
+  }
+}
 
 const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
@@ -28,36 +37,61 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
       <div className="chat-message-user" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {attachments.length > 0 && (
           <div className="message-attachments">
-            {attachments.map((att, idx) => (
-              <div key={idx} className="message-attachment-chip">
-                {att.type === 'image' ? (
-                  <img
-                    src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
-                    alt={att.name}
-                    onClick={() => {
-                      setActiveEditorFile({
-                        name: att.name,
-                        path: att.name,
-                        isBinary: true,
-                        mimeType: att.mimeType || 'image/png',
-                        base64: att.base64
-                      })
-                      setArtifactPanelMode('editor')
-                      setArtifactPanelOpen(true)
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ) : (
-                  <span style={{ fontSize: 'var(--font-size-sm)' }}>📄</span>
-                )}
-                <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {att.name}
-                </span>
-              </div>
-            ))}
+            {attachments.map((att, idx) => {
+              const handleOpenDoc = () => {
+                setActiveEditorFile({
+                  name: att.name,
+                  path: att.name,
+                  isBinary: false,
+                  mimeType: att.mimeType || 'text/plain',
+                  content: decodeBase64(att.base64)
+                })
+                setArtifactPanelMode('editor')
+                setArtifactPanelOpen(true)
+              }
+              const handleOpenImg = () => {
+                setActiveEditorFile({
+                  name: att.name,
+                  path: att.name,
+                  isBinary: true,
+                  mimeType: att.mimeType || 'image/png',
+                  base64: att.base64
+                })
+                setArtifactPanelMode('editor')
+                setArtifactPanelOpen(true)
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className="message-attachment-chip"
+                  onClick={att.type === 'image' ? handleOpenImg : handleOpenDoc}
+                  title={att.name}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {att.type === 'image' ? (
+                    <img
+                      src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
+                      alt={att.name}
+                    />
+                  ) : (
+                    <SymbolsFileIcon
+                      fileName={att.name.split('/').pop() || att.name}
+                      autoAssign={true}
+                      width={14}
+                      height={14}
+                      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                    />
+                  )}
+                  <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {att.name.split('/').pop() || att.name}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         )}
-        {message.content && <div>{message.content}</div>}
+        {message.content && <div>{renderMarkdown(message.content)}</div>}
       </div>
     </div>
   )
@@ -210,7 +244,30 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
       </div>
     )}
   </div>
-))
+), (prev, next) => {
+  // Only re-render the message that actually changed — not all messages on every chunk
+  if (prev.message.id !== next.message.id) return false
+  if (next.message.isStreaming) return false // Always re-render while actively streaming
+  if (prev.message.isStreaming !== next.message.isStreaming) return false
+  if (prev.message.content !== next.message.content) return false
+  const pb = prev.message.orderedBlocks
+  const nb = next.message.orderedBlocks
+  if (pb?.length !== nb?.length) return false
+  // If the last block changed (most common streaming case) re-render
+  if (pb && nb && pb.length > 0) {
+    const lastP = pb[pb.length - 1]
+    const lastN = nb[nb.length - 1]
+    if (lastP.type !== lastN.type) return false
+    if (lastP.type === 'text' && lastN.type === 'text' && lastP.content !== lastN.content) return false
+    if (lastP.type === 'reasoning' && lastN.type === 'reasoning') {
+      if (lastP.content !== lastN.content || lastP.isStreaming !== lastN.isStreaming) return false
+    }
+    if (lastP.type === 'tool' && lastN.type === 'tool') {
+      if (lastP.status !== lastN.status || lastP.result !== lastN.result) return false
+    }
+  }
+  return true
+})
 
 const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)
@@ -228,25 +285,30 @@ const ChatThread: React.FC = () => {
 
   useEffect(() => {
     if (!containerRef.current) return
-    const { scrollHeight, clientHeight } = containerRef.current
-    // #19 fix: derive isStreaming from runState atom — O(1) vs O(n) message scan
     const isStreaming = runState !== 'idle' && runState !== 'error'
     const hasNewMessage = messages.length > prevLengthRef.current
     prevLengthRef.current = messages.length
 
-    if (isStreaming) {
-      if (isAtBottomRef.current) {
+    const performScroll = () => {
+      if (!containerRef.current) return
+      const { scrollHeight, clientHeight } = containerRef.current
+      if (isStreaming) {
+        if (isAtBottomRef.current) {
+          containerRef.current.scrollTo({
+            top: scrollHeight - clientHeight,
+            behavior: 'auto'
+          })
+        }
+      } else if (hasNewMessage) {
         containerRef.current.scrollTo({
           top: scrollHeight - clientHeight,
-          behavior: 'auto'
+          behavior: 'smooth'
         })
       }
-    } else if (hasNewMessage) {
-      containerRef.current.scrollTo({
-        top: scrollHeight - clientHeight,
-        behavior: 'smooth'
-      })
     }
+
+    const rafId = requestAnimationFrame(performScroll)
+    return () => cancelAnimationFrame(rafId)
   }, [messages, runState])
 
   if (messages.length === 0) return null

@@ -16,7 +16,8 @@ import {
   getWorkspaceContext,
   setActiveConversationId,
   serializeWorkspace,
-  assertWithinWorkspace
+  assertWithinWorkspace,
+  listWorkspaceFiles
 } from './workspace'
 
 import { streamText, generateText, ModelMessage, ToolCallPart, ToolResultPart, stepCountIs } from 'ai'
@@ -327,6 +328,43 @@ ipcMain.handle('file:read', async (_event, filePath: string, conversationId?: st
   }
 })
 
+ipcMain.handle('file:read-original', async (_event, filePath: string, conversationId?: string) => {
+  try {
+    const convId = conversationId || activeConversationId
+    const ctx = getWorkspaceContext(convId) || getOrCreateWorkspaceContext(convId)
+    const safePath = assertWithinWorkspace(ctx.rootPath, filePath, convId)
+    const workspaceRoot = ctx.rootPath
+
+    // Get relative path from workspace root
+    let relativePath = safePath
+    if (relativePath.startsWith(workspaceRoot)) {
+      relativePath = relativePath.slice(workspaceRoot.length)
+    }
+    // Remove leading slash if any
+    if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
+      relativePath = relativePath.slice(1)
+    }
+    // Normalize path separators to forward slashes for git
+    relativePath = relativePath.replace(/\\/g, '/')
+
+    const { execSync } = require('child_process')
+    try {
+      const originalContent = execSync(`git show HEAD:"${relativePath}"`, {
+        cwd: workspaceRoot,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'] // ignore stderr, return stdout
+      })
+      return { content: originalContent }
+    } catch (gitErr) {
+      // If git show fails (e.g. file is untracked/new), return empty content
+      return { content: '' }
+    }
+  } catch (err) {
+    log.error(`[main] file:read-original error:`, err)
+    return { content: '' }
+  }
+})
+
 ipcMain.handle('file:write', async (_event, filePath: string, content: string, conversationId?: string) => {
   try {
     const convId = conversationId || activeConversationId
@@ -395,6 +433,19 @@ ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspac
   log.info(`[main] Workspace bound: conv=${convId} path=${workspacePath}`)
   return ctx
 })
+
+ipcMain.handle('workspace:list-files', async (_event, conversationId: string) => {
+  const convId = conversationId || activeConversationId
+  const ctx = getWorkspaceContext(convId) || getOrCreateWorkspaceContext(convId)
+  if (!ctx || !ctx.rootPath) return []
+  try {
+    return await listWorkspaceFiles(ctx.rootPath)
+  } catch (err) {
+    log.error('[main] Error listing workspace files:', err)
+    return []
+  }
+})
+
 
 ipcMain.handle('workspace:close-and-delete', async (_event, workspacePath: string) => {
   try {
@@ -734,7 +785,7 @@ You have native access to the active workspace context below. Use it to answer q
 ${contextBlock || 'No workspace files available. The user has not opened a workspace yet.'}
 ${browserInstruction}
 ${compactionInstruction ? `\n${compactionInstruction}` : ''}
- 
+
 ── ARTIFACT BOUNDARIES & WORKFLOW COMPLIANCE ──
 You must always structure your software development flow using the sandboxed Artifacts system inside the '.orch-artifacts/' folder of the active workspace.
 Use your existing file-writing tools ('writeToFile', 'replaceFileContent', etc.) to manage these artifact files:
@@ -744,15 +795,7 @@ Use your existing file-writing tools ('writeToFile', 'replaceFileContent', etc.)
    - It should contain clear descriptions of proposed changes, component impacts, and verification methods.
    - You must stop and explicitly wait for the user to approve or reject the plan (they have convenient "Proceed" and "Reject" buttons inside the panel that will message you directly). Do not modify codebase source files until you receive approval!
 
-2. [EXECUTION]: Once the plan is approved, you MUST create or update a checklist at '.orch-artifacts/task.md' to keep track of your task progress.
-   - This task board is shown live to the user in their Right Sidebar's "Tasks & Progress" checklist.
-   - You must use standard markdown checklist syntax to let the app parse and display it perfectly:
-     - \`- [ ] Uncompleted task\`
-     - \`- [/] In-progress task\`
-     - \`- [x] Completed task\`
-   - Check off tasks (\`[x]\`) or mark them in-progress (\`[/]\`) incrementally as you work through the tasks, keeping the task board 100% synchronized with your actual status.
-
-3. [NO WALKTHROUGHS]: Never create or edit walkthrough markdown files. They are completely redundant and not needed.
+2. [NO WALKTHROUGHS]: Never create or edit walkthrough markdown files. They are completely redundant and not needed.
 
 Follow these native planning boundaries strictly to manage your work professionally and transparently!`
 
@@ -805,14 +848,14 @@ Follow these native planning boundaries strictly to manage your work professiona
       if (part.type === 'reasoning-start') {
         currentReasoningStartMs = Date.now()
         orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
-        event.sender.send('agent:stream-chunk', { type: 'reasoning-start' })
+        event.sender.send('agent:stream-chunk', { type: 'reasoning-start', threadId })
       } else if (part.type === 'reasoning-delta') {
         const textDelta = part.text || ''
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') { last.content += textDelta; last.durationMs = Date.now() - currentReasoningStartMs }
-        event.sender.send('agent:stream-chunk', { type: 'reasoning-delta', payload: textDelta })
+        event.sender.send('agent:stream-chunk', { type: 'reasoning-delta', payload: textDelta, threadId })
       } else if (part.type === 'reasoning-end') {
-        event.sender.send('agent:stream-chunk', { type: 'reasoning-end' })
+        event.sender.send('agent:stream-chunk', { type: 'reasoning-end', threadId })
         await saveProgress()
       } else if (part.type === 'text-delta') {
         const textDelta = part.text || ''
@@ -820,17 +863,17 @@ Follow these native planning boundaries strictly to manage your work professiona
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: textDelta })
         else last.content += textDelta
-        event.sender.send('agent:stream-chunk', { type: 'text-delta', payload: textDelta })
+        event.sender.send('agent:stream-chunk', { type: 'text-delta', payload: textDelta, threadId })
       } else if (part.type === 'tool-call') {
         log.info(`[main] Tool: ${part.toolName} (${part.toolCallId})`)
         orderedBlocks.push({ type: 'tool', toolCallId: part.toolCallId, toolName: part.toolName, args: part.input, status: 'pending' })
-        event.sender.send('agent:stream-chunk', { type: 'tool-call', payload: { toolCallId: part.toolCallId, toolName: part.toolName, args: part.input } })
+        event.sender.send('agent:stream-chunk', { type: 'tool-call', payload: { toolCallId: part.toolCallId, toolName: part.toolName, args: part.input }, threadId })
         await saveProgress()
       } else if (part.type === 'tool-result') {
         log.info(`[main] Tool result: ${part.toolName}`)
         const block = orderedBlocks.find((b) => b.type === 'tool' && b.toolCallId === part.toolCallId)
         if (block) { block.result = part.output; block.status = 'complete' }
-        event.sender.send('agent:stream-chunk', { type: 'tool-result', payload: { toolCallId: part.toolCallId, result: part.output } })
+        event.sender.send('agent:stream-chunk', { type: 'tool-result', payload: { toolCallId: part.toolCallId, result: part.output }, threadId })
 
         const writingTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
         if (writingTools.includes(part.toolName)) {
@@ -846,7 +889,7 @@ Follow these native planning boundaries strictly to manage your work professiona
             block.status = 'error'
           }
         }
-        event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg })
+        event.sender.send('agent:stream-chunk', { type: 'error', payload: errorMsg, threadId })
       } else if (part.type === 'finish') {
         const usage = part.totalUsage || {}
         turnPromptTokens = usage.inputTokens || 0
@@ -888,7 +931,8 @@ Follow these native planning boundaries strictly to manage your work professiona
             usage: { promptTokens: turnPromptTokens, completionTokens: turnCompletionTokens, totalTokens: turnTotal },
             accumulatedTokens: compactionTriggered ? 0 : finalAccumulated,
             compactionTriggered
-          }
+          },
+          threadId
         })
         await saveProgress()
       }
@@ -900,7 +944,7 @@ Follow these native planning boundaries strictly to manage your work professiona
   } catch (err: any) {
     log.error('[main] Stream error:', err)
     if (err.name !== 'AbortError') {
-      event.sender.send('agent:stream-chunk', { type: 'error', payload: err.message })
+      event.sender.send('agent:stream-chunk', { type: 'error', payload: err.message, threadId })
     }
   } finally {
     activeAbortControllers.delete(threadId)
@@ -971,19 +1015,26 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, conversationId }: {
 
   activePtys.set(id, ptyProcess)
 
-  const dataListener = ptyProcess.onData((data) => {
-    if (event.sender.isDestroyed()) {
-      try {
-        dataListener.dispose()
-        if (process.platform !== 'win32') {
-          process.kill(-ptyProcess.pid, 'SIGINT')
-        } else {
-          ptyProcess.kill()
-        }
-      } catch {
-        try { ptyProcess.kill() } catch {}
+  let dataListener: any
+  const destroyListener = () => {
+    try {
+      if (dataListener) dataListener.dispose()
+      if (process.platform !== 'win32') {
+        process.kill(-ptyProcess.pid, 'SIGINT')
+      } else {
+        ptyProcess.kill()
       }
-      activePtys.delete(id)
+    } catch {
+      try { ptyProcess.kill() } catch {}
+    }
+    activePtys.delete(id)
+  }
+  event.sender.once('destroyed', destroyListener)
+
+  dataListener = ptyProcess.onData((data) => {
+    if (event.sender.isDestroyed()) {
+      destroyListener()
+      event.sender.off('destroyed', destroyListener)
       return
     }
     try {
@@ -992,6 +1043,7 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, conversationId }: {
   })
 
   ptyProcess.onExit(({ exitCode }) => {
+    event.sender.off('destroyed', destroyListener)
     activePtys.delete(id)
     try { event.sender.send('terminal:exit', { id, exitCode }) } catch {}
     log.info(`[terminal] PTY ${id} exited with code ${exitCode}`)
@@ -1061,9 +1113,17 @@ ipcMain.handle('browser:open', (event, { url, bounds }: { url: string; bounds: {
   })
   browserView.webContents.on('did-navigate', (_e, navUrl) => {
     try { event.sender.send('browser:url-changed', navUrl) } catch {}
+    try {
+      const worker = startBrowserAgentWorker()
+      if (worker) worker.syncUrl(navUrl).catch(() => {})
+    } catch {}
   })
   browserView.webContents.on('did-navigate-in-page', (_e, navUrl) => {
     try { event.sender.send('browser:url-changed', navUrl) } catch {}
+    try {
+      const worker = startBrowserAgentWorker()
+      if (worker) worker.syncUrl(navUrl).catch(() => {})
+    } catch {}
   })
 
   log.info(`[browser] Opened: ${url}`)

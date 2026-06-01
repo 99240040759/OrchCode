@@ -32,7 +32,7 @@
   /* Layout Spacing & Sizing */
   --sidebar-width-expanded: 250px;
   --sidebar-width-collapsed: 50px;
-  --titlebar-height: 36px;
+  --titlebar-height: 38px;
 
   /* Typographic Scale - Strict Uniformity */
   --font-size-micro: 9px;
@@ -158,6 +158,7 @@ details > summary {
   right: 0;
   bottom: 0;
   border: 1px solid var(--border-color);
+  border-left: none;
   pointer-events: none;
   z-index: 999;
 }
@@ -512,7 +513,7 @@ details > summary {
    ========================================================================== */
 .sidebar {
   background-color: var(--bg-sidebar);
-  border-right: 1px solid var(--border-color);
+  border-right: none;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -529,63 +530,6 @@ details > summary {
 
 .sidebar.collapsed {
   width: var(--sidebar-width-collapsed);
-}
-
-.sidebar-top-section {
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  gap: 16px;
-}
-
-.sidebar-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.inbox-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 500;
-  color: var(--text-primary);
-  font-size: var(--font-size-lg);
-}
-
-.sidebar-collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-}
-
-.sidebar-collapse-btn:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-.sidebar-start-conv {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #e5e5e5;
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  cursor: pointer;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.2s ease;
-}
-
-.sidebar-start-conv:hover {
-  color: #ffffff;
-  background-color: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .sidebar-divider {
@@ -610,155 +554,7 @@ details > summary {
   border-radius: 2px;
 }
 
-.sidebar-section {
-  display: flex;
-  flex-direction: column;
-  padding: 16px 0;
-  gap: 14px;
-}
 
-.sidebar-section-header {
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.sidebar-section-header-action {
-  cursor: pointer;
-  color: var(--text-secondary);
-}
-
-.sidebar-section-header-action:hover {
-  color: var(--text-primary);
-}
-
-.sidebar-tree-node {
-  padding: 0 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.sidebar-tree-node-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: #e5e5e5;
-  font-size: var(--font-size-md-plus);
-  cursor: pointer;
-}
-
-.sidebar-action-text {
-  font-size: var(--font-size-md-plus);
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  margin-top: 4px;
-}
-
-.sidebar-action-text:hover {
-  color: var(--text-primary);
-}
-
-.collapsed-icon-wrapper {
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.collapsed-icon-wrapper:hover {
-  color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* Sidebar Footer Panel */
-.sidebar-footer {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: auto;
-}
-
-.sidebar-footer-item {
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #e5e5e5;
-  cursor: pointer;
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.sidebar-footer-item:hover {
-  color: #ffffff;
-  background-color: rgba(255, 255, 255, 0.04);
-}
-
-/* ==========================================================================
-   SECTION 6: Right Sidebar Component (File Viewer / History List)
-   ========================================================================== */
-.right-sidebar {
-  width: var(--sidebar-width-expanded);
-  background-color: var(--bg-sidebar);
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  contain: layout paint;
-  will-change: width, transform;
-}
-
-.right-sidebar.collapsed {
-  width: var(--sidebar-width-collapsed);
-}
-
-.right-sidebar.expanded {
-  width: var(--sidebar-width-expanded);
-}
-
-.right-sidebar-file-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 6px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.right-sidebar-file-row:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.right-sidebar-file-name {
-  flex: 1;
-  font-size: var(--font-size-xs-plus);
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* ==========================================================================
    SECTION 7: Input Bar & Control Center Component
@@ -818,7 +614,7 @@ details > summary {
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid #2d2d2d;
+  border-bottom: 1px solid var(--border-color);
   align-items: center;
   max-height: 120px;
   overflow-y: auto;
@@ -830,8 +626,8 @@ details > summary {
   gap: 6px;
   padding: 4px 8px;
   border-radius: 4px;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
   font-size: var(--font-size-xs);
   color: var(--text-primary);
   font-family: var(--font-display);
@@ -857,7 +653,7 @@ details > summary {
 }
 
 .input-attachment-close:hover {
-  color: #ef4444 !important;
+  color: var(--accent-red);
 }
 
 .message-attachments {
@@ -873,8 +669,8 @@ details > summary {
   gap: 6px;
   padding: 4px 8px;
   border-radius: 4px;
-  background-color: #1e1e1e;
-  border: 1px solid #333333;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border-color);
   font-size: var(--font-size-xxs);
   color: var(--text-primary);
   font-family: var(--font-display);
@@ -892,8 +688,8 @@ details > summary {
 .input-bar-container {
   width: 100%;
   max-width: 685px;
-  background-color: #222222;
-  border: 1px solid #2d2d2d;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -903,7 +699,7 @@ details > summary {
 }
 
 .input-bar-container:focus-within {
-  border-color: #3e3e3e;
+  border-color: var(--border-focus);
   box-shadow: 0 12px 38px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
@@ -991,7 +787,7 @@ details > summary {
 }
 
 .toolbar-submit-btn {
-  background-color: #2d2d2d;
+  background-color: rgba(255, 255, 255, 0.08);
   border: none;
   border-radius: 50%;
   width: 24px;
@@ -1004,7 +800,7 @@ details > summary {
 }
 
 .toolbar-submit-btn:hover {
-  background-color: #383838;
+  background-color: rgba(255, 255, 255, 0.13);
 }
 
 .toolbar-submit-btn:active {
@@ -1076,7 +872,7 @@ details > summary {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  overflow-anchor: auto;
+  overflow-anchor: none;
   padding: 16px 0 24px;
   display: flex;
   flex-direction: column;
@@ -1103,16 +899,16 @@ details > summary {
 
 .chat-message-user-container {
   display: flex;
-  justify-content: flex-end;
   margin-bottom: 24px;
-  padding-left: 60px;
+  padding-left: 0;
 }
 
 .chat-message-user {
   background: #2c2c2e;
-  border-radius: 12px 12px 4px 12px;
-  padding: 10px 14px;
-  max-width: 85%;
+  border-radius: 8px;
+  padding: 6px 16px;
+  max-width: 100%;
+  width: 100%;
   font-size: var(--font-size-lg);
   color: var(--text-primary);
   line-height: 1.5;
@@ -1121,7 +917,7 @@ details > summary {
 
 .chat-message-assistant-container {
   margin-bottom: 24px;
-  padding-right: 40px;
+  padding-right: 0;
   display: flex;
   flex-direction: column;
   gap: 12px; /* Premium spacing gap between thoughts, tool calls, and text paragraphs */
@@ -1199,61 +995,6 @@ details > summary {
 /* ==========================================================================
    SECTION 9: Artifact Panel Component
    ========================================================================== */
-.panel-header {
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-color);
-  background-color: var(--bg-app);
-  flex-shrink: 0;
-}
-
-.panel-header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.panel-header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.panel-header-action {
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  padding: 4px;
-  border-radius: 4px;
-}
-
-.panel-header-action:hover {
-  color: var(--text-primary);
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* Custom TS Badge */
-.ts-badge {
-  background-color: rgba(49, 120, 198, 0.15); /* TypeScript blue with opacity */
-  color: #3178c6;
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xxs);
-  font-weight: 700;
-  padding: 2px 4px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 
 /* Media Preview Layouts inside Artifact Panel */
 .media-preview-container {
@@ -1275,12 +1016,12 @@ details > summary {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #1a1a1a;
+  background-color: var(--bg-editor);
   background-image: 
-    linear-gradient(45deg, #161616 25%, transparent 25%), 
-    linear-gradient(-45deg, #161616 25%, transparent 25%), 
-    linear-gradient(45deg, transparent 75%, #161616 75%), 
-    linear-gradient(-45deg, transparent 75%, #161616 75%);
+    linear-gradient(45deg, var(--bg-sidebar) 25%, transparent 25%), 
+    linear-gradient(-45deg, var(--bg-sidebar) 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, var(--bg-sidebar) 75%), 
+    linear-gradient(-45deg, transparent 75%, var(--bg-sidebar) 75%);
   background-size: 20px 20px;
   background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
   padding: 16px;
@@ -1539,7 +1280,7 @@ details > summary {
 
 /* ── Premium Block Code Elements ── */
 .markdown-content pre {
-  background-color: #141414;
+  background-color: var(--bg-sidebar);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 34px 16px 14px 16px; /* space at top for absolute indicators */
@@ -1666,7 +1407,7 @@ details > summary {
 }
 
 .markdown-content.is-artifact pre {
-  background: #161616;
+  background: var(--bg-sidebar);
   padding: 12px 14px;
   margin: 12px 0;
   font-size: var(--font-size-md);
@@ -1725,3 +1466,310 @@ details > summary {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 0.9; }
 }
+
+/* ==========================================================================
+   SECTION 13: Sidebar Interactive Elements
+   All hover/active states via CSS — NO inline onMouseEnter/Leave
+   ========================================================================== */
+
+/* Titlebar toggle buttons (sidebar expand/collapse, artifact panel expand) */
+.titlebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.titlebar-toggle-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Sidebar collapse button */
+.sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-collapse-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Sidebar "New Conversation" button */
+.sidebar-start-conv {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  margin-bottom: 4px;
+}
+
+.sidebar-start-conv:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar generic menu items (non-functional navigational items) */
+.sidebar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-menu-item:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Sidebar footer item (profile trigger / sign-in button) */
+.sidebar-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-footer-item:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.sidebar-footer-item.google-btn {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-footer-item.google-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar section header actions (FolderPlus icon) */
+.sidebar-section-header-action {
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.sidebar-section-header-action:hover {
+  color: var(--text-primary);
+}
+
+/* Workspace node actions (X delete button) — shown via CSS on parent hover */
+.workspace-node-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-tree-node:hover .workspace-node-actions,
+.workspace-node-row:hover .workspace-node-actions {
+  opacity: 1;
+}
+
+/* Thread row actions (trash icon) — shown on row hover */
+.sidebar-tree-node-title .sidebar-section-header-action {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-tree-node-title:hover .sidebar-section-header-action {
+  opacity: 1;
+}
+
+/* Workspace row */
+.workspace-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-radius: 4px;
+}
+
+.workspace-node-row:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Thread node title row */
+.sidebar-tree-node-title {
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 8px 0 0;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-tree-node-title:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-tree-node-title.active {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ArtifactPanel — collapse/close panel button */
+.artifact-panel-close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.artifact-panel-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ArtifactPanel tab close (X button inside file tab) */
+.tab-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tab-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+/* ArtifactPanel editor toolbar action icons (diff, search, copy) */
+.editor-toolbar-action {
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.editor-toolbar-action:hover {
+  color: var(--text-primary);
+}
+
+.editor-toolbar-action.active {
+  color: var(--accent-blue);
+}
+
+/* ==========================================================================
+   SECTION 14: Radix UI Tabs & ScrollArea Custom Themes
+   ========================================================================== */
+
+/* Headless tab triggers */
+.tab-trigger {
+  padding: 0 16px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--font-size-xs-plus);
+  border: none;
+  background: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  color: var(--text-secondary);
+}
+
+.tab-trigger[data-state="active"] {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.04);
+  font-weight: 500;
+}
+
+.tab-trigger:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Headless ScrollArea classes */
+.ScrollAreaRoot {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ScrollAreaViewport {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.ScrollAreaScrollbar {
+  display: flex;
+  user-select: none;
+  touch-action: none;
+  padding: 2px;
+  background: transparent;
+  transition: background 160ms ease-out;
+  width: 8px;
+  z-index: 20;
+}
+
+.ScrollAreaScrollbar:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ScrollAreaThumb {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+
+.ScrollAreaThumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.ScrollAreaCorner {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "electron.vite.config.ts",
+    "src/main/index.ts",
+    "src/main/browserWorker.ts",
+    "src/preload/index.ts",
+    "src/renderer/src/main.tsx"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}"
+  ],
+  "ignore": [
+    "**/*.d.ts"
+  ],
+  "paths": {
+    "@renderer/*": ["src/renderer/src/*"]
+  },
+  "ignoreDependencies": [
+    "electron",
+    "babel-plugin-react-compiler"
+  ]
+}

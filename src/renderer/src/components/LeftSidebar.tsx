@@ -1,15 +1,9 @@
-import React, { useState, useRef } from 'react'
-import { useDrag } from '@use-gesture/react'
-import {
-  Inbox,
-  PanelLeftClose,
-  PanelLeft,
-  Plus,
-  BookOpen,
-  Settings,
-  Lightbulb,
-  Globe
-} from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useAtom } from 'jotai'
+import { PanelLeftClose, Plus } from 'lucide-react'
+import { authUserAtom } from '../store/agentStore'
+import { GoogleIcon } from '../lib/uiUtils'
 
 interface SidebarProps {
   expanded?: boolean
@@ -19,11 +13,9 @@ interface SidebarProps {
   threadListContent?: React.ReactNode
 }
 
-const MIN_WIDTH = 220
-const MAX_WIDTH = 420
-const DEFAULT_WIDTH = 280
+const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
-export const LeftSidebar: React.FC<SidebarProps> = ({
+const LeftSidebar: React.FC<SidebarProps> = ({
   expanded: controlledExpanded,
   onToggle,
   onStartConversation,
@@ -31,9 +23,37 @@ export const LeftSidebar: React.FC<SidebarProps> = ({
   threadListContent
 }) => {
   const [localExpanded, setLocalExpanded] = useState(true)
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH)
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : localExpanded
-  const dragRef = useRef<HTMLDivElement>(null)
+
+  const [authUser, setAuthUser] = useAtom(authUserAtom)
+
+  useEffect(() => {
+    window.api.getAuthUser().then((user) => {
+      setAuthUser(user)
+    })
+
+    const unsubscribeAuth = window.api.onAuthStatusChanged((user) => {
+      setAuthUser(user)
+    })
+
+    return () => { unsubscribeAuth() }
+  }, [setAuthUser])
+
+  const handleLogin = async () => {
+    try {
+      await window.api.startGoogleAuth()
+    } catch (err) {
+      console.error('Google Sign-in failed:', err)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await window.api.logout()
+    } catch (err) {
+      console.error('Logout failed:', err)
+    }
+  }
 
   const handleToggle = () => {
     const newExpanded = !isExpanded
@@ -43,147 +63,125 @@ export const LeftSidebar: React.FC<SidebarProps> = ({
     onToggle?.(newExpanded)
   }
 
-  const bindDragWithCommit = useDrag(
-    ({ movement: [mx], first, last, memo }) => {
-      if (first) memo = sidebarWidth
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, (memo ?? DEFAULT_WIDTH) + mx))
-      if (dragRef.current?.parentElement) {
-        dragRef.current.parentElement.style.width = `${newWidth}px`
-        dragRef.current.parentElement.style.transition = 'none'
-      }
-      if (last) {
-        setSidebarWidth(newWidth)
-        requestAnimationFrame(() => {
-          if (dragRef.current?.parentElement) {
-            dragRef.current.parentElement.style.width = ''
-            dragRef.current.parentElement.style.transition = ''
-          }
-        })
-      }
-      return memo
-    },
-    { axis: 'x', filterTaps: true, from: () => [0, 0] }
-  )
+  if (!isExpanded) return null
 
   return (
     <aside
-      className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}
+      className="sidebar expanded"
       style={{
         position: 'relative',
         overflow: 'hidden',
-        width: isExpanded ? sidebarWidth : 68,
-        transition: 'width 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-        willChange: 'width'
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+        backgroundColor: 'var(--bg-sidebar)',
+        flexShrink: 0
       }}
     >
-      <div
-        ref={dragRef}
-        {...bindDragWithCommit()}
-        style={{
-          position: 'absolute',
-          right: -2,
-          top: 0,
-          bottom: 0,
-          width: 5,
-          cursor: 'col-resize',
-          zIndex: 10,
-          touchAction: 'none',
-          display: isExpanded ? 'block' : 'none'
-        }}
-        onDoubleClick={() => {
-          setSidebarWidth(DEFAULT_WIDTH)
-          if (dragRef.current?.parentElement) {
-            dragRef.current.parentElement.style.width = ''
-          }
-        }}
-      />
-
-      {isExpanded ? (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-          <div className="sidebar-top-section" style={{ padding: '12px 12px', gap: 12 }}>
-            <div className="sidebar-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '32px' }}>
-              <div className="inbox-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--font-size-lg)', fontWeight: 500 }}>
-                <Inbox size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-                <span style={{ color: '#e5e5e5' }}>Inbox</span>
-              </div>
-              <div className="sidebar-collapse-btn" onClick={handleToggle} title="Collapse Sidebar" style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px' }}>
-                <PanelLeftClose size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              </div>
-            </div>
-
-            <div className="sidebar-start-conv" onClick={onStartConversation}>
-              <Plus size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              <span>Start conversation</span>
-            </div>
-          </div>
-
-          <div className="sidebar-divider" />
-
-          <div className="sidebar-body">
-            {threadListContent && (
-              <>
-                {threadListContent}
-                <div className="sidebar-divider" />
-              </>
-            )}
-          </div>
-
-          <div className="sidebar-divider" />
-
-          <div className="sidebar-footer">
-            <div className="sidebar-footer-item" onClick={() => onFooterItemClick?.('knowledge')}>
-              <BookOpen size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              <span>Knowledge</span>
-            </div>
-            <div className="sidebar-footer-item" onClick={() => onFooterItemClick?.('browser')}>
-              <Globe size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              <span>Browser</span>
-            </div>
-            <div className="sidebar-footer-item" onClick={() => onFooterItemClick?.('settings')}>
-              <Settings size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              <span>Settings</span>
-            </div>
-            <div className="sidebar-footer-item" onClick={() => onFooterItemClick?.('feedback')}>
-              <Lightbulb size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              <span>Provide Feedback</span>
-            </div>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+        {/* Header Row */}
+        <div
+          className="sidebar-header-row"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '38px',
+            paddingLeft: isMac ? '80px' : '12px',
+            paddingRight: '12px',
+            marginTop: 0,
+            gap: '14px',
+            flexShrink: 0,
+            WebkitAppRegion: 'drag'
+          } as any}
+        >
+          <div
+            className="sidebar-collapse-btn"
+            onClick={handleToggle}
+            title="Collapse Sidebar"
+            style={{ WebkitAppRegion: 'no-drag' } as any}
+          >
+            <PanelLeftClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
           </div>
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: 68 }}>
-          <div className="collapsed-sidebar-top" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-            <div className="collapsed-icon-wrapper" onClick={handleToggle} title="Expand Sidebar" style={{ padding: '14px 0', display: 'flex', justifyContent: 'center' }}>
-              <PanelLeft size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-            <div className="sidebar-divider" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 0', alignItems: 'center' }}>
-              <div className="collapsed-icon-wrapper" title="Inbox" style={{ padding: 0 }}>
-                <Inbox size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              </div>
-              <div className="collapsed-icon-wrapper" onClick={onStartConversation} title="Start Conversation" style={{ padding: 0 }}>
-                <Plus size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-              </div>
-            </div>
-            <div className="sidebar-divider" />
-          </div>
 
-          <div className="sidebar-footer" style={{ borderTop: 'none', alignItems: 'center', gap: 20, paddingBottom: 16, paddingTop: 16, width: '100%' }}>
-            <div className="collapsed-icon-wrapper" onClick={() => onFooterItemClick?.('knowledge')} title="Knowledge" style={{ padding: 0 }}>
-              <BookOpen size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-            <div className="collapsed-icon-wrapper" onClick={() => onFooterItemClick?.('browser')} title="Browser" style={{ padding: 0 }}>
-              <Globe size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-            <div className="collapsed-icon-wrapper" onClick={() => onFooterItemClick?.('settings')} title="Settings" style={{ padding: 0 }}>
-              <Settings size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
-            <div className="collapsed-icon-wrapper" onClick={() => onFooterItemClick?.('feedback')} title="Provide Feedback" style={{ padding: 0 }}>
-              <Lightbulb size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            </div>
+        {/* Top Actions */}
+        <div className="sidebar-top-section" style={{ padding: '8px 12px', gap: '4px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          <div
+            className="sidebar-start-conv"
+            onClick={onStartConversation}
+          >
+            <Plus size={16} strokeWidth={2} color="var(--text-secondary)" />
+            <span>New Conversation</span>
           </div>
         </div>
-      )}
+
+        <div style={{ padding: '0 12px', flexShrink: 0 }}>
+          <div className="sidebar-divider" />
+        </div>
+
+        {/* Sidebar projects/threads */}
+        <div className="sidebar-body" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {threadListContent}
+        </div>
+
+        <div style={{ padding: '0 12px', flexShrink: 0 }}>
+          <div className="sidebar-divider" />
+        </div>
+
+        {/* Footer Profile Dropdown / Sign-In Button */}
+        <div className="sidebar-footer" style={{ padding: '8px 12px', flexShrink: 0, WebkitAppRegion: 'no-drag' } as any}>
+          {authUser ? (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button className="sidebar-footer-item">
+                  {authUser.photoUrl ? (
+                    <img src={authUser.photoUrl} alt={authUser.name} style={{ width: '20px', height: '20px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} referrerPolicy="no-referrer" />
+                  ) : (
+                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 600, backgroundColor: 'rgba(255,255,255,0.1)', color: 'var(--text-primary)', flexShrink: 0 }}>
+                      {authUser.name ? authUser.name.charAt(0).toUpperCase() : authUser.email.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                    {authUser.name || authUser.email}
+                  </span>
+                </button>
+              </DropdownMenu.Trigger>
+
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content asChild align="start" side="right" sideOffset={12}>
+                  <div
+                    className="titlebar-profile-dropdown native-dropdown-content"
+                    style={{ transformOrigin: 'bottom left' }}
+                  >
+                    <div className="profile-dropdown-info">
+                      <div className="profile-name">{authUser.name || 'Google User'}</div>
+                      <div className="profile-email">{authUser.email}</div>
+                    </div>
+                    <DropdownMenu.Separator className="profile-dropdown-separator" />
+                    <DropdownMenu.Item className="profile-dropdown-item" onSelect={() => onFooterItemClick?.('settings')}>
+                      Settings
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item className="profile-dropdown-item logout" onSelect={handleLogout}>
+                      Log Out
+                    </DropdownMenu.Item>
+                  </div>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          ) : (
+            <button
+              className="sidebar-footer-item google-btn"
+              onClick={handleLogin}
+            >
+              <GoogleIcon size={14} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Sign In</span>
+            </button>
+          )}
+        </div>
+      </div>
     </aside>
   )
 }
+
 export default LeftSidebar

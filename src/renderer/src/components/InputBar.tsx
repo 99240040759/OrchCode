@@ -1,8 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import TextareaAutosize from 'react-textarea-autosize'
 import { Plus, ChevronDown, ArrowRight, Square, Image, FileText } from 'lucide-react'
 import { useAtomValue, useAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom } from '../store/agentStore'
+import {
+  agentRunStateAtom,
+  sessionTokensAtom,
+  selectedModelAtom,
+  availableModelsAtom,
+  conversationIdAtom,
+  activeWorkspaceAtom
+} from '../store/agentStore'
+import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 interface InputBarProps {
   onSubmit?: (val: string, mode?: string, attachments?: any[]) => void
@@ -23,7 +32,18 @@ function ringColor(fraction: number): string {
   return '#5e5e5e'
 }
 
-export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
+const getDropdownStyle = (minWidth: number): React.CSSProperties => ({
+  background: 'var(--bg-sidebar)',
+  border: '1px solid var(--border-color)',
+  borderRadius: 6,
+  padding: '4px 0',
+  minWidth,
+  zIndex: 1000,
+  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+  transformOrigin: 'top left'
+})
+
+const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
   const [planningMode, setPlanningMode] = useState<PlanningMode>('Planning')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -38,6 +58,74 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const isRunning = runState !== 'idle' && runState !== 'error'
 
+  const activeWorkspace = useAtomValue(activeWorkspaceAtom)
+  const conversationId = useAtomValue(conversationIdAtom)
+
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
+  const [showFileSuggestions, setShowFileSuggestions] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [triggerIndex, setTriggerIndex] = useState(-1)
+  const [suggestionIndex, setSuggestionIndex] = useState(0)
+
+  const [fileReferences, setFileReferences] = useState<Array<{ name: string; path: string }>>([])
+
+  const fetchWorkspaceFiles = useCallback(async () => {
+    if (!conversationId) return
+    try {
+      const files = await window.api.listWorkspaceFiles(conversationId)
+      setWorkspaceFiles(files)
+    } catch (err) {
+      console.error('Failed to load workspace files:', err)
+    }
+  }, [conversationId])
+
+  useEffect(() => {
+    fetchWorkspaceFiles()
+  }, [activeWorkspace, conversationId, fetchWorkspaceFiles])
+
+  // Filter files based on query
+  const filteredFiles = workspaceFiles.filter((f) =>
+    f.toLowerCase().includes(searchQuery.toLowerCase())
+  ).slice(0, 15)
+
+  const selectFileSuggestion = (selectedFile: string) => {
+    if (!textareaRef.current) return
+    const selectionStart = textareaRef.current.selectionStart || 0
+    setInputValue(inputValue.slice(0, triggerIndex) + inputValue.slice(selectionStart))
+    setShowFileSuggestions(false)
+
+    const wsPath = activeWorkspace?.path || ''
+    const absolutePath = `${wsPath.startsWith('/') ? wsPath : '/' + wsPath}/${selectedFile}`
+    const name = selectedFile.split('/').pop() || selectedFile
+
+    setFileReferences((prev) =>
+      prev.some((p) => p.path === absolutePath) ? prev : [...prev, { name, path: absolutePath }]
+    )
+
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(triggerIndex, triggerIndex)
+    }, 0)
+  }
+
+  const checkSuggestions = (val: string, selectionStart: number | null) => {
+    if (selectionStart === null) return setShowFileSuggestions(false)
+    const textBeforeCursor = val.slice(0, selectionStart)
+    const lastAtIdx = textBeforeCursor.lastIndexOf('@')
+
+    if (lastAtIdx !== -1) {
+      const textAfterAt = textBeforeCursor.slice(lastAtIdx + 1)
+      if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+        if (!showFileSuggestions) fetchWorkspaceFiles()
+        setTriggerIndex(lastAtIdx)
+        setSearchQuery(textAfterAt)
+        setShowFileSuggestions(true)
+        setSuggestionIndex(0)
+        return
+      }
+    }
+    setShowFileSuggestions(false)
+  }
 
   const triggerFileSelect = (type: 'image' | 'document') => {
     if (fileInputRef.current) {
@@ -81,33 +169,125 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     ? `${(displayTotal / 1000).toFixed(1)}k`
     : String(displayTotal)
 
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`
-  }, [inputValue])
+
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (showFileSuggestions && filteredFiles.length > 0) {
+      const len = filteredFiles.length
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        return setSuggestionIndex((prev) => (prev + 1) % len)
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        return setSuggestionIndex((prev) => (prev - 1 + len) % len)
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        return selectFileSuggestion(filteredFiles[suggestionIndex])
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        return setShowFileSuggestions(false)
+      }
+    }
+
+    if (e.key === 'Backspace' && fileReferences.length > 0 && textareaRef.current?.selectionStart === 0) {
+      e.preventDefault()
+      setFileReferences((prev) => prev.slice(0, -1))
+    } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
   }
 
   const handleSend = () => {
-    const val = inputValue.trim()
-    if ((!val && attachments.length === 0) || isRunning) return
+    let val = inputValue.trim()
+    if ((!val && attachments.length === 0 && fileReferences.length === 0) || isRunning) return
+
+    if (fileReferences.length > 0) {
+      const refsText = fileReferences
+        .map((ref) => `[${ref.name}](file://${ref.path})`)
+        .join(' ')
+      val = `${val} ${refsText}`.trim()
+    }
+
     onSubmit?.(val, planningMode, attachments)
     setInputValue('')
     setAttachments([])
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    setFileReferences([])
   }
 
   const handleStop = () => onStop?.()
 
   return (
-    <div className="input-bar-container">
+    <div className="input-bar-container" style={{ position: 'relative' }}>
+      {showFileSuggestions && filteredFiles.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 'calc(100% + 8px)',
+            left: 0,
+            right: 0,
+            maxHeight: '220px',
+            overflowY: 'auto',
+            backgroundColor: 'var(--bg-sidebar)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+            zIndex: 1000,
+            padding: '4px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            backdropFilter: 'blur(8px)',
+            color: 'var(--text-primary)'
+          }}
+        >
+          {filteredFiles.map((file, idx) => {
+            const isSelected = idx === suggestionIndex
+            const parts = file.split('/')
+            const name = parts[parts.length - 1]
+            const dir = parts.slice(0, -1).join('/')
+
+            return (
+              <div
+                key={file}
+                onClick={() => selectFileSuggestion(file)}
+                onMouseEnter={() => setSuggestionIndex(idx)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  transition: 'background-color 0.15s ease'
+                }}
+              >
+                <SymbolsFileIcon
+                  fileName={name}
+                  autoAssign={true}
+                  width={14}
+                  height={14}
+                  style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
+                  <span style={{ fontSize: '13px', fontWeight: 500, color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {name}
+                  </span>
+                  {dir && (
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {dir}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <input
         type="file"
         ref={fileInputRef}
@@ -118,24 +298,30 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       {attachments.length > 0 && (
         <div className="input-attachments-container">
           {attachments.map((att, idx) => (
-            <div key={idx} className="input-attachment-chip">
+            <div key={`att-${idx}`} className="input-attachment-chip" title={att.name}>
               {att.type === 'image' ? (
                 <img
                   src={`data:${att.mimeType};base64,${att.base64}`}
                   alt={att.name}
                 />
               ) : (
-                <span style={{ fontSize: 'var(--font-size-sm)' }}>📄</span>
+                <SymbolsFileIcon
+                  fileName={att.name.split('/').pop() || att.name}
+                  autoAssign={true}
+                  width={14}
+                  height={14}
+                  style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                />
               )}
               <span
                 style={{
-                  maxWidth: 120,
+                  maxWidth: 150,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
                 }}
               >
-                {att.name}
+                {att.name.split('/').pop() || att.name}
               </span>
               <button
                 onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
@@ -147,17 +333,89 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ))}
         </div>
       )}
-      <textarea
-        ref={textareaRef}
-        rows={1}
-        className="input-bar-text-area"
-        placeholder="Ask anything, @ to mention"
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={isRunning}
-        style={{ opacity: isRunning ? 0.7 : 1 }}
-      />
+      <div
+        className="input-bar-text-container"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '12px 16px 4px 16px',
+          width: '100%',
+          boxSizing: 'border-box'
+        }}
+      >
+        {fileReferences.map((ref, idx) => (
+          <div
+            key={`ref-${idx}`}
+            title={ref.path}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: 'var(--text-primary)',
+              fontSize: '13px',
+              userSelect: 'none',
+              cursor: 'default',
+              margin: '0 2px',
+              verticalAlign: 'middle'
+            }}
+          >
+            <SymbolsFileIcon
+              fileName={ref.name}
+              autoAssign={true}
+              width={14}
+              height={14}
+              style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+            />
+            <span
+              style={{
+                maxWidth: 150,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontSize: '13px'
+              }}
+            >
+              {ref.name}
+            </span>
+          </div>
+        ))}
+
+        <TextareaAutosize
+          ref={textareaRef}
+          minRows={1}
+          maxRows={8}
+          className="input-bar-text-area"
+          placeholder={(attachments.length > 0 || fileReferences.length > 0) ? "" : "Ask anything, @ to mention"}
+          value={inputValue}
+          onChange={(e) => {
+            setInputValue(e.target.value)
+            checkSuggestions(e.target.value, e.target.selectionStart)
+          }}
+          onSelect={(e) => {
+            const target = e.target as HTMLTextAreaElement
+            checkSuggestions(target.value, target.selectionStart)
+          }}
+          onKeyDown={handleKeyDown}
+          disabled={isRunning}
+          style={{
+            flex: 1,
+            minWidth: '150px',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            resize: 'none',
+            padding: '2px 0',
+            margin: 0,
+            lineHeight: 1.5,
+            opacity: isRunning ? 0.7 : 1,
+            color: 'var(--text-primary)',
+            fontFamily: 'var(--font-display)',
+            fontSize: 'var(--font-size-md-plus)'
+          } as any}
+        />
+      </div>
 
       <div className="input-bar-toolbar">
         <div className="input-bar-toolbar-left">
@@ -171,16 +429,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <DropdownMenu.Content asChild sideOffset={6}>
                 <div
                   className="native-dropdown-content"
-                  style={{
-                    background: 'var(--bg-sidebar)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 6,
-                    padding: '4px 0',
-                    minWidth: 160,
-                    zIndex: 1000,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                    transformOrigin: 'top left'
-                  }}
+                  style={getDropdownStyle(160)}
                 >
                 <DropdownMenu.Item
                   onSelect={() => triggerFileSelect('image')}
@@ -214,16 +463,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <DropdownMenu.Content asChild sideOffset={6}>
                 <div
                   className="native-dropdown-content"
-                  style={{
-                    background: 'var(--bg-sidebar)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 6,
-                    padding: '4px 0',
-                    minWidth: 140,
-                    zIndex: 1000,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                    transformOrigin: 'top left'
-                  }}
+                  style={getDropdownStyle(140)}
                 >
                 {PLANNING_MODES.map((mode) => (
                   <DropdownMenu.Item
@@ -259,16 +499,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <DropdownMenu.Content asChild sideOffset={6}>
                 <div
                   className="native-dropdown-content"
-                  style={{
-                    background: 'var(--bg-sidebar)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 6,
-                    padding: '4px 0',
-                    minWidth: 200,
-                    zIndex: 1000,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                    transformOrigin: 'top left'
-                  }}
+                  style={getDropdownStyle(200)}
                 >
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemini')}

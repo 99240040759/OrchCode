@@ -61,8 +61,9 @@ export const sidebarExpandedAtom = atom<boolean>(true)
 export const activeWorkspaceAtom = atom<{ name: string; path: string } | null>(null)
 
 export const isArtifactPanelOpenAtom = atom<boolean>(false)
-export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser'
-export const artifactPanelModeAtom = atom<ArtifactPanelMode>('editor')
+export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
+export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
+export const openFilesAtom = atom<EditorFile[]>([])
 
 export interface EditorFile {
   name: string

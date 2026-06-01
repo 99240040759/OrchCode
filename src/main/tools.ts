@@ -13,6 +13,7 @@ import {
   isBinaryBuffer,
   assertWithinWorkspace
 } from './workspace'
+import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
 import { Worker } from 'worker_threads'
 import { wrap } from 'comlink'
@@ -44,6 +45,16 @@ import mime from 'mime-types'
 
 const getMimeType = (filePath: string) => {
   return mime.lookup(filePath) || 'application/octet-stream'
+}
+
+function sliceLines(allLines: string[], startLine: number, endLine: number) {
+  const start = Math.max(1, startLine)
+  const end = Math.min(allLines.length, endLine)
+  const beforeLines = allLines.slice(0, start - 1)
+  const rangeLines = allLines.slice(start - 1, end)
+  const afterLines = allLines.slice(end)
+  const rangeText = rangeLines.join('\n')
+  return { start, end, beforeLines, rangeLines, afterLines, rangeText }
 }
 
 // ─── Tool factory ─────────────────────────────────────────────────────────
@@ -220,13 +231,7 @@ export function createCoreTools(convId: string) {
         const normalizedRaw = raw.replace(/\r\n/g, '\n')
         const allLines = normalizedRaw.split('\n')
 
-        const start = Math.max(1, startLine)
-        const end = Math.min(allLines.length, endLine)
-
-        const beforeLines = allLines.slice(0, start - 1)
-        const rangeLines = allLines.slice(start - 1, end)
-        const afterLines = allLines.slice(end)
-        const rangeText = rangeLines.join('\n')
+        const { start, end, beforeLines, afterLines, rangeText } = sliceLines(allLines, startLine, endLine)
 
         const occurrences = rangeText.split(targetContent).length - 1
         if (occurrences === 0) {
@@ -283,13 +288,7 @@ export function createCoreTools(convId: string) {
 
         for (const chunk of sorted) {
           const allLines = normalizedRaw.split('\n')
-          const start = Math.max(1, chunk.startLine)
-          const end = Math.min(allLines.length, chunk.endLine)
-
-          const beforeLines = allLines.slice(0, start - 1)
-          const rangeLines = allLines.slice(start - 1, end)
-          const afterLines = allLines.slice(end)
-          const rangeText = rangeLines.join('\n')
+          const { start, end, beforeLines, afterLines, rangeText } = sliceLines(allLines, chunk.startLine, chunk.endLine)
 
           const occurrences = rangeText.split(chunk.targetContent).length - 1
           if (occurrences === 0) {
@@ -405,29 +404,6 @@ export function createCoreTools(convId: string) {
 let workerInstance: Worker | null = null
 let automatedBrowser: any = null
 
-function customNodeAdapter(port: any): any {
-  const listeners = new WeakMap()
-  return {
-    postMessage(message: any, transfer?: any[]) { port.postMessage(message, transfer) },
-    addEventListener(type: string, eh: any) {
-      if (type === 'message') {
-        const l = (data: any) => {
-          if (eh && typeof eh === 'object' && 'handleEvent' in eh) eh.handleEvent({ data })
-          else eh({ data })
-        }
-        port.on('message', l)
-        listeners.set(eh, l)
-      }
-    },
-    removeEventListener(type: string, eh: any) {
-      if (type === 'message') {
-        const l = listeners.get(eh)
-        if (l) { port.off('message', l); listeners.delete(eh) }
-      }
-    }
-  }
-}
-
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
   const browserView = (globalThis as any).browserView
   if (!browserView) {
@@ -448,7 +424,7 @@ export function startBrowserAgentWorker() {
   workerInstance = new Worker(workerPath, {
     workerData: { mainWindowUrl }
   })
-  automatedBrowser = wrap(customNodeAdapter(workerInstance))
+  automatedBrowser = wrap(nodeAdapter(workerInstance))
   return automatedBrowser
 }
 
@@ -465,7 +441,7 @@ export async function stopBrowserAgentWorker() {
 
 // ─── Browser tools (stateless — no convId needed) ────────────────────────
 
-export const browserNavigate = tool({
+const browserNavigate = tool({
   description: 'Navigates the active browser viewport to a specified URL.',
   inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
   execute: async ({ url }) => {
@@ -478,7 +454,7 @@ export const browserNavigate = tool({
   }
 })
 
-export const browserType = tool({
+const browserType = tool({
   description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
   inputSchema: z.object({
     selector: z.string().describe('CSS selector of the input field.'),
@@ -495,7 +471,7 @@ export const browserType = tool({
   }
 })
 
-export const browserScroll = tool({
+const browserScroll = tool({
   description: 'Scrolls the active webpage viewport.',
   inputSchema: z.object({
     direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'),
@@ -511,7 +487,7 @@ export const browserScroll = tool({
   }
 })
 
-export const browserScreenshot = tool({
+const browserScreenshot = tool({
   description: 'Captures a PNG screenshot of the active browser viewport.',
   inputSchema: z.object({}),
   execute: async () => {
@@ -565,7 +541,7 @@ export const browserScreenshot = tool({
   }
 })
 
-export const browserMouseClickCoordinate = tool({
+const browserMouseClickCoordinate = tool({
   description: 'Clicks at a specific pixel coordinate.',
   inputSchema: z.object({
     x: z.number().int().describe('X coordinate.'),

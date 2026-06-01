@@ -84,6 +84,9 @@ export function useAgentStream() {
   const rafIdRef = useRef<number | null>(null)
   const threadIdRef = useRef<string>(conversationId)
 
+  // O(1) direct pointer to the current streaming reasoning block — avoids O(n) backward scan per chunk
+  const currentReasoningBlockRef = useRef<Extract<StreamBlock, { type: 'reasoning' }> | null>(null)
+
   const cleanupActiveStream = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort()
@@ -97,20 +100,18 @@ export function useAgentStream() {
       cancelAnimationFrame(rafIdRef.current)
       rafIdRef.current = null
     }
+    currentReasoningBlockRef.current = null
   }, [])
 
   useEffect(() => {
     return () => { cleanupActiveStream() }
   }, [cleanupActiveStream])
 
-  // #1 fix: run is stable with useCallback — deps are exactly the values it reads
-  // #2 fix: capture isNewThread at call time before any async work or atom mutation
   const run = useCallback(async (promptText: string, mode?: string, attachments?: any[]) => {
     cleanupActiveStream()
 
-    // #2 fix: capture current thread identity at invocation time — not from closure captures
     const resolvedThreadId = activeThreadId ?? conversationId
-    const isNewThread = !activeThreadId  // #3 fix: capture before setActiveThreadId
+    const isNewThread = !activeThreadId
     threadIdRef.current = resolvedThreadId
 
     if (isNewThread) {
@@ -142,15 +143,12 @@ export function useAgentStream() {
 
     try {
       let fullContent = ''
-      // #20 fix: orderedBlocks is mutated directly during streaming — it's a local
-      // variable committed to state only via flushAssistant(). No immutability needed here.
       const orderedBlocks: StreamBlock[] = []
       let currentReasoningStartMs = 0
       let assistantIsStreaming = true
 
       const flushAssistant = (force = false) => {
         const update = () => {
-          // Take a snapshot of orderedBlocks at flush time
           const snapshot = [...orderedBlocks]
           setMessages((prev) => {
             const hasMsg = prev.some((m) => m.id === assistantMsgId)
@@ -194,53 +192,47 @@ export function useAgentStream() {
       unsubscribeRef.current = window.api.onAgentChunk((chunk) => {
         try {
           if (!chunk) return
+          if (chunk.threadId && chunk.threadId !== threadIdRef.current) return
           const chunkType = chunk.type
           const chunkData = chunk.payload
 
           if (chunkType === 'reasoning-start') {
             currentReasoningStartMs = Date.now()
-            orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0, isStreaming: true })
+            const block: Extract<StreamBlock, { type: 'reasoning' }> = {
+              type: 'reasoning', content: '', durationMs: 0, isStreaming: true
+            }
+            orderedBlocks.push(block)
+            // Store direct pointer — O(1) access for all subsequent deltas
+            currentReasoningBlockRef.current = block
             flushAssistant()
           } else if (chunkType === 'reasoning-delta') {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
-            // Find the last streaming reasoning block using a backward loop — O(1), no array allocation
-            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
-            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
-              const b = orderedBlocks[i]
-              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
-            }
-            if (streamingReasoning) {
-              streamingReasoning.content += textDelta
-              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            const rb = currentReasoningBlockRef.current
+            if (rb) {
+              rb.content += textDelta
+              rb.durationMs = Date.now() - currentReasoningStartMs
             }
             flushAssistant()
           } else if (chunkType === 'reasoning-end') {
-            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
-            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
-              const b = orderedBlocks[i]
-              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
+            const rb = currentReasoningBlockRef.current
+            if (rb) {
+              rb.durationMs = Date.now() - currentReasoningStartMs
+              rb.isStreaming = false
             }
-            if (streamingReasoning) {
-              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
-              streamingReasoning.isStreaming = false
-            }
+            currentReasoningBlockRef.current = null
             flushAssistant()
           } else if (chunkType === 'text-delta') {
             const textDelta = typeof chunkData === 'string' ? chunkData : ''
             fullContent += textDelta
 
-            // Close any streaming reasoning block
-            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
-            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
-              const b = orderedBlocks[i]
-              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
-            }
-            if (streamingReasoning) {
-              streamingReasoning.isStreaming = false
-              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            // Close any open reasoning block
+            const rb = currentReasoningBlockRef.current
+            if (rb) {
+              rb.isStreaming = false
+              rb.durationMs = Date.now() - currentReasoningStartMs
+              currentReasoningBlockRef.current = null
             }
 
-            // Mutate last text block or push new one
             const last = orderedBlocks[orderedBlocks.length - 1]
             if (!last || last.type !== 'text') {
               orderedBlocks.push({ type: 'text', content: textDelta })
@@ -251,15 +243,12 @@ export function useAgentStream() {
           } else if (chunkType === 'tool-call') {
             setRunState('tool-calling')
 
-            // Close streaming reasoning if open
-            let streamingReasoning: Extract<StreamBlock, { type: 'reasoning' }> | undefined
-            for (let i = orderedBlocks.length - 1; i >= 0; i--) {
-              const b = orderedBlocks[i]
-              if (b.type === 'reasoning' && b.isStreaming) { streamingReasoning = b as Extract<StreamBlock, { type: 'reasoning' }>; break }
-            }
-            if (streamingReasoning) {
-              streamingReasoning.isStreaming = false
-              streamingReasoning.durationMs = Date.now() - currentReasoningStartMs
+            // Close any open reasoning block
+            const rb = currentReasoningBlockRef.current
+            if (rb) {
+              rb.isStreaming = false
+              rb.durationMs = Date.now() - currentReasoningStartMs
+              currentReasoningBlockRef.current = null
             }
 
             const tcId = chunkData?.toolCallId ?? `tc-${Date.now()}`
@@ -271,9 +260,11 @@ export function useAgentStream() {
           } else if (chunkType === 'tool-result') {
             const tcId = chunkData?.toolCallId
 
+            // Typed discriminated union — no cast needed
             const toolBlock = orderedBlocks.find(
-              (b) => b.type === 'tool' && (b as any).toolCallId === tcId
-            ) as Extract<StreamBlock, { type: 'tool' }> | undefined
+              (b): b is Extract<StreamBlock, { type: 'tool' }> =>
+                b.type === 'tool' && b.toolCallId === tcId
+            )
 
             if (toolBlock) {
               const fileChange = extractFileChange(toolBlock.toolName, toolBlock.args)
@@ -307,7 +298,6 @@ export function useAgentStream() {
             setRunState('streaming')
           } else if (chunkType === 'error') {
             console.error('[useAgentStream] Error chunk:', chunkData)
-            fullContent += `\n\n[System Error: ${chunkData ?? 'Unknown Error'}]`
             assistantIsStreaming = false
 
             for (const block of orderedBlocks) {
@@ -316,7 +306,6 @@ export function useAgentStream() {
               }
             }
 
-            // Explicitly push a text block containing the error so ChatThread's block map renders it
             orderedBlocks.push({
               type: 'text',
               content: `\n\n[System Error: ${chunkData ?? 'Unknown Error'}]`
@@ -327,6 +316,7 @@ export function useAgentStream() {
             if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null }
           } else if (chunkType === 'finish') {
             assistantIsStreaming = false
+            currentReasoningBlockRef.current = null
 
             const accumulatedTokens = Number(chunkData?.accumulatedTokens ?? 0)
             const compactionTriggered = !!chunkData?.compactionTriggered
@@ -342,7 +332,6 @@ export function useAgentStream() {
 
             if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null }
 
-            // #3 fix: use isNewThread captured at call-start, not the stale atom value
             if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
               const titleText = promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200)
               window.api.generateTitle(titleText, threadIdRef.current)
@@ -392,7 +381,6 @@ export function useAgentStream() {
   }, [activeThreadId, conversationId, selectedModel, setActiveThreadId, setMessages, setRunState,
       setThreads, setFilesChanged, setSessionTokens, cleanupActiveStream])
 
-  // #18 fix: stop() explicitly calls stopAgentStream — no reliance on abort event chain
   const stop = useCallback(() => {
     const tid = threadIdRef.current
     cleanupActiveStream()

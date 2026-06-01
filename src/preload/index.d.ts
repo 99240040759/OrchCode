@@ -46,10 +46,11 @@ export interface UserProfile {
 
 export interface AppAPI {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
+  listWorkspaceFiles: (conversationId: string) => Promise<string[]>
 
   streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) => Promise<void>
   stopAgentStream: (threadId?: string) => Promise<void>
-  onAgentChunk: (callback: (chunk: { type: string; payload: any }) => void) => () => void
+  onAgentChunk: (callback: (chunk: { type: string; payload: any; threadId?: string }) => void) => () => void
   getAvailableModels: () => Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }>
 
   getConversationId: () => Promise<string>
@@ -65,6 +66,7 @@ export interface AppAPI {
 
   listArtifacts: (conversationId: string) => Promise<ArtifactEntry[]>
   readFile: (filePath: string, conversationId?: string) => Promise<any>
+  readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
   writeFile: (filePath: string, content: string, conversationId?: string) => Promise<boolean>
   onArtifactsChanged: (callback: (artifacts: ArtifactEntry[]) => void) => () => void
 

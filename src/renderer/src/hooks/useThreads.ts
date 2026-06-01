@@ -53,6 +53,7 @@ export function useThreads() {
     // Fetch and bind workspace atomically right after session
     try {
       const workspacePath = await window.api.getThreadWorkspace(threadId)
+      if (activeRef.current !== threadId) return
       if (workspacePath) {
         setActiveWorkspace({
           name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
@@ -99,9 +100,13 @@ export function useThreads() {
       }
       setConversationId(newId)
       setActiveThreadId(newId)
+      // Keep the activeWorkspace atom in sync — it stays the same workspace
+      // but the new thread needs to reflect it immediately in the UI
+      if (activeWorkspace) {
+        setActiveWorkspace({ name: activeWorkspace.name, path: activeWorkspace.path })
+      }
       setMessages([])
       setSessionTokens(0)
-      // #12 fix: reload thread list so the new thread appears immediately
       await loadThreads()
       return newId
     } catch (err) {
@@ -161,6 +166,8 @@ export function useThreads() {
     try {
       const ctx = await window.api.selectWorkspace(conversationId)
       if (ctx) {
+        // Persist the workspace binding to the current thread in the backend
+        await window.api.setActiveWorkspace(conversationId, ctx.rootPath)
         setActiveWorkspace({
           name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
           path: ctx.rootPath

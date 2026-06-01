@@ -7,6 +7,8 @@ const api = {
     ipcRenderer.invoke('workspace:set-active', { conversationId, workspacePath }),
   closeAndDeleteWorkspace: (workspacePath: string) =>
     ipcRenderer.invoke('workspace:close-and-delete', workspacePath),
+  listWorkspaceFiles: (conversationId: string) =>
+    ipcRenderer.invoke('workspace:list-files', conversationId),
 
   streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) =>
     ipcRenderer.invoke('agent:stream-request', promptText, threadId, mode, modelType, attachments),
@@ -37,6 +39,8 @@ const api = {
     ipcRenderer.invoke('artifacts:list', conversationId),
   readFile: (filePath: string, conversationId?: string) =>
     ipcRenderer.invoke('file:read', filePath, conversationId),
+  readOriginalFile: (filePath: string, conversationId?: string) =>
+    ipcRenderer.invoke('file:read-original', filePath, conversationId),
   writeFile: (filePath: string, content: string, conversationId?: string) =>
     ipcRenderer.invoke('file:write', filePath, content, conversationId),
   onArtifactsChanged: (callback: (artifacts: any[]) => void) => {
@@ -116,7 +120,4 @@ if (process.contextIsolated) {
   } catch (error) {
     console.error(error)
   }
-} else {
-  // @ts-ignore
-  window.api = api
 }

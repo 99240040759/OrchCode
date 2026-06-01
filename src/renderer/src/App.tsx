@@ -2,13 +2,12 @@ import React, { useEffect } from 'react'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import TitleBar from './components/TitleBar'
 import LeftSidebar from './components/LeftSidebar'
-import RightSidebar from './components/RightSidebar'
 import InputBar from './components/InputBar'
 import ChatThread from './components/ChatThread'
 import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
-import { ChevronDown, Code, Inbox } from 'lucide-react'
+import { ChevronDown, Code } from 'lucide-react'
 import { Toaster } from 'sonner'
 import {
   conversationIdAtom,
@@ -61,8 +60,6 @@ function AppInner(): React.JSX.Element {
     init()
   }, [setConversationId, loadThreads, setAvailableModels])
 
-  const handleOpenWorkspace = () => { openWorkspace() }
-  const handleStartConversation = () => { newConversation() }
   const handlePromptSubmit = (prompt: string, mode?: string, attachments?: any[]) => { run(prompt, mode, attachments) }
 
   const renderChatPane = (fullWidth: boolean) => {
@@ -78,22 +75,10 @@ function AppInner(): React.JSX.Element {
           contain: 'layout'
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: '38px',
-            padding: '0 16px',
-            backgroundColor: 'var(--bg-app)',
-            borderBottom: '1px solid var(--border-color)',
-            color: 'var(--text-secondary)',
-            fontSize: 'var(--font-size-sm)',
-            fontWeight: 500,
-            flexShrink: 0
-          }}
-        >
-          {activeWorkspace ? activeWorkspace.name : 'Select Workspace'} / {activeThreadTitle}
-        </div>
+        <TitleBar
+          title="Orch Code"
+          workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle}
+        />
 
         {hasMessages ? (
           <div style={{
@@ -101,7 +86,7 @@ function AppInner(): React.JSX.Element {
             flexDirection: 'column',
             width: '100%',
             maxWidth: fullWidth ? '720px' : '100%',
-            height: 'calc(100% - 38px)',
+            height: 'calc(100% - var(--titlebar-height))',
             minWidth: 0,
             margin: '0 auto',
             flex: 1
@@ -112,7 +97,7 @@ function AppInner(): React.JSX.Element {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: 'calc(100% - 38px)', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: 'calc(100% - var(--titlebar-height))', overflowY: 'auto' }}>
             <div className="home-prompt-view" style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}>
               {fullWidth && (
                 <div
@@ -127,7 +112,7 @@ function AppInner(): React.JSX.Element {
                 >
                   <h2
                     className="home-prompt-title"
-                    onClick={handleOpenWorkspace}
+                    onClick={openWorkspace}
                     style={{ margin: 0, gap: 6 }}
                   >
                     <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
@@ -136,20 +121,6 @@ function AppInner(): React.JSX.Element {
                       {activeWorkspace ? activeWorkspace.name : 'Select Workspace'}
                     </span>
                   </h2>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--font-size-sm)',
-                      cursor: 'pointer',
-                      fontWeight: 500
-                    }}
-                  >
-                    <Inbox size={14} strokeWidth={2} />
-                    <span>View Inbox</span>
-                  </div>
                 </div>
               )}
 
@@ -178,7 +149,7 @@ function AppInner(): React.JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', position: 'relative', width: '100%' }}>
 
       <Toaster
         position="bottom-right"
@@ -194,43 +165,52 @@ function AppInner(): React.JSX.Element {
         }}
       />
 
-      <TitleBar
-        title="Orch Code"
-        workspaceName={activeWorkspace?.name}
-        onOpenEditor={() => setArtifactPanelOpen(!isArtifactPanelOpen)}
-        onSettingsClick={() => {}}
-      />
+      <PanelGroup direction="horizontal" style={{ width: '100%', height: '100%' }}>
+        {sidebarExpanded && (
+          <>
+            <Panel
+              id="sidebar-panel"
+              defaultSize={20}
+              minSize={15}
+              maxSize={30}
+            >
+              <LeftSidebar
+                expanded={sidebarExpanded}
+                onToggle={(val) => setSidebarExpanded(val)}
+                onStartConversation={newConversation}
+                onFooterItemClick={() => {}}
+                threadListContent={<ThreadList />}
+              />
+            </Panel>
+            <PanelResizeHandle className="panel-resize-handle" />
+          </>
+        )}
 
-      <div className="app-container">
-        <LeftSidebar
-          expanded={sidebarExpanded}
-          onToggle={(val) => setSidebarExpanded(val)}
-          onStartConversation={handleStartConversation}
-          onFooterItemClick={() => {}}
-          threadListContent={<ThreadList />}
-        />
+        <Panel id="main-content-panel">
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', minWidth: 0 }}>
+            <div className="app-container" style={{ height: '100%', width: '100%', flex: 1 }}>
+              <main className="workspace-main" style={{ width: '100%', height: '100%' }}>
 
-        <main className="workspace-main">
+                <div className="app-glow-border" />
 
-          <div className="app-glow-border" />
-
-          {isArtifactPanelOpen ? (
-            <PanelGroup direction="horizontal" className="split-view-container" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
-              <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
-                {renderChatPane(false)}
-              </Panel>
-              <PanelResizeHandle className="panel-resize-handle" />
-              <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
-                <ArtifactPanel />
-              </Panel>
-            </PanelGroup>
-          ) : (
-            renderChatPane(true)
-          )}
-        </main>
-
-        <RightSidebar />
-      </div>
+                {isArtifactPanelOpen ? (
+                  <PanelGroup direction="horizontal" className="split-view-container" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+                    <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
+                      {renderChatPane(false)}
+                    </Panel>
+                    <PanelResizeHandle className="panel-resize-handle" />
+                    <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
+                      <ArtifactPanel />
+                    </Panel>
+                  </PanelGroup>
+                ) : (
+                  renderChatPane(true)
+                )}
+              </main>
+            </div>
+          </div>
+        </Panel>
+      </PanelGroup>
     </div>
   )
 }

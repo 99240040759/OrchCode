@@ -1,6 +1,6 @@
 import * as Comlink from 'comlink'
 
-export interface WorkerUpdateStatus {
+interface WorkerUpdateStatus {
   status: 'idle' | 'checking' | 'available' | 'error'
   version?: string
   error?: string
@@ -75,5 +75,3 @@ const backgroundWorker = {
 }
 
 Comlink.expose(backgroundWorker)
-
-export type BackgroundWorkerType = typeof backgroundWorker

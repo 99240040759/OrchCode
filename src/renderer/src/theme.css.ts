@@ -1,9 +1,18 @@
 import { createGlobalTheme } from '@vanilla-extract/css'
 
+/**
+ * Vanilla-extract design token contract.
+ * Only stores values that are NOT already CSS custom properties —
+ * this prevents circular `var(--x): var(--x)` anti-patterns.
+ *
+ * All color values here are the single source of truth and are also
+ * mapped to CSS custom properties on :root by the theme runtime.
+ */
 export const vars = createGlobalTheme(':root', {
   colors: {
+    bgApp: '#090909',
     bgSidebar: '#090909',
-    bgMain: '#090909',
+    bgEditor: '#090909',
     border: 'rgba(255, 255, 255, 0.06)',
     borderFocus: 'rgba(255, 255, 255, 0.12)',
     textPrimary: '#f3f3f3',
@@ -15,34 +24,5 @@ export const vars = createGlobalTheme(':root', {
     accentOrange: '#f59e0b',
     accentPurple: '#8b5cf6',
     accentRed: '#ef4444'
-  },
-  fonts: {
-    mono: 'var(--font-mono)',
-    display: 'var(--font-display)'
-  },
-  fontSizes: {
-    xxs: 'var(--font-size-xxs)',
-    xs: 'var(--font-size-xs)',
-    xsPlus: 'var(--font-size-xs-plus)',
-    sm: 'var(--font-size-sm)',
-    smPlus: 'var(--font-size-sm-plus)',
-    md: 'var(--font-size-md)',
-    mdPlus: 'var(--font-size-md-plus)',
-    lg: 'var(--font-size-lg)',
-    xl: 'var(--font-size-xl)',
-    xxl: 'var(--font-size-2xl)',
-    xxxl: 'var(--font-size-3xl)'
-  },
-  space: {
-    xs: '4px',
-    sm: '8px',
-    md: '12px',
-    lg: '16px',
-    xl: '20px'
-  },
-  radius: {
-    sm: '4px',
-    md: '6px',
-    lg: '12px'
   }
 })

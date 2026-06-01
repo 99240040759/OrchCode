@@ -1,0 +1,13 @@
+{
+  "threshold": 5,
+  "reporters": ["html", "console"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/out/**",
+    "**/build/**",
+    "**/dist/**",
+    "**/report/**",
+    "**/*.d.ts"
+  ],
+  "absolute": false
+}

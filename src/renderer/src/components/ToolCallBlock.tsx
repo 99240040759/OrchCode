@@ -1,15 +1,12 @@
 import React from 'react'
-import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, ClipboardCheck, BookOpen, MousePointerClick, Keyboard, Camera, ChevronsUpDown } from 'lucide-react'
+import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, BookOpen, MousePointerClick, Keyboard, Camera, ChevronsUpDown } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
 import { Primitive } from '@radix-ui/react-primitive'
 import * as styles from './ToolCallBlock.css'
-
-const isAgentArtifact = (fileName: string) => {
-  return fileName === 'implementation_plan.md' || fileName === 'task.md' || fileName === 'walkthrough.md'
-}
+import { isAgentArtifact } from '../lib/uiUtils'
 
 interface FileIconProps {
   fileName: string
@@ -182,9 +179,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       if (target === 'implementation_plan.md') {
         return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
       }
-      if (target === 'task.md') {
-        return <ClipboardCheck size={15} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
-      }
+
       if (target === 'walkthrough.md') {
         return <BookOpen size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
       }

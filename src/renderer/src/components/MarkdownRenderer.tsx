@@ -6,6 +6,7 @@ import { Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, conversationIdAtom } from '../store/agentStore'
+import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 interface MarkdownRendererProps {
   content: string
@@ -28,6 +29,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+        urlTransform={(value) => value}
         components={{
           a: ({ href, children, ...props }) => {
             if (href && href.startsWith('file://')) {
@@ -52,15 +54,42 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
                 }
               }
 
+              const filename = filePath.split(/[/\\]/).pop() ?? ''
               return (
-                <a
-                  href={href}
+                <span
                   onClick={handleFileClick}
                   title={`Open ${filePath}`}
-                  {...props}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: 'var(--text-primary)',
+                    fontSize: '13px',
+                    userSelect: 'none',
+                    cursor: 'pointer',
+                    margin: '0 2px',
+                    verticalAlign: 'middle'
+                  }}
                 >
-                  {children}
-                </a>
+                  <SymbolsFileIcon
+                    fileName={filename}
+                    autoAssign={true}
+                    width={14}
+                    height={14}
+                    style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                  />
+                  <span
+                    style={{
+                      maxWidth: 150,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: '13px'
+                    }}
+                  >
+                    {children}
+                  </span>
+                </span>
               )
             }
             return (

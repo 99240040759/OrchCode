@@ -43,17 +43,20 @@ function generatePKCE() {
   return { verifier, challenge }
 }
 
-// Direct form request to Google
-function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
+function postHttpsRequest(
+  urlStr: string,
+  rawBody: string,
+  contentType: string,
+  parseError: (parsed: any, statusCode: number) => string
+): Promise<any> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr)
-    const rawBody = new URLSearchParams(formParams).toString()
     const req = https.request({
       hostname: url.hostname,
       path: url.pathname + url.search,
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': contentType,
         'Content-Length': Buffer.byteLength(rawBody)
       }
     }, (res) => {
@@ -63,12 +66,12 @@ function postFormRequest(urlStr: string, formParams: Record<string, string>): Pr
         try {
           const parsed = JSON.parse(data)
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(parsed.error_description || parsed.error || `HTTP ${res.statusCode}`))
+            reject(new Error(parseError(parsed, res.statusCode)))
           } else {
             resolve(parsed)
           }
         } catch {
-          reject(new Error(`Failed to parse google token response: ${data}`))
+          reject(new Error(`Failed to parse response: ${data}`))
         }
       })
     })
@@ -78,39 +81,26 @@ function postFormRequest(urlStr: string, formParams: Record<string, string>): Pr
   })
 }
 
+// Direct form request to Google
+function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
+  const rawBody = new URLSearchParams(formParams).toString()
+  return postHttpsRequest(
+    urlStr,
+    rawBody,
+    'application/x-www-form-urlencoded',
+    (parsed, statusCode) => parsed.error_description || parsed.error || `HTTP ${statusCode}`
+  )
+}
+
 // Direct JSON request to Firebase
 function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlStr)
-    const rawBody = JSON.stringify(bodyObj)
-    const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(rawBody)
-      }
-    }, (res) => {
-      let data = ''
-      res.on('data', (chunk) => { data += chunk })
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data)
-          if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(parsed.error?.message || `HTTP ${res.statusCode}`))
-          } else {
-            resolve(parsed)
-          }
-        } catch {
-          reject(new Error(`Failed to parse firebase response: ${data}`))
-        }
-      })
-    })
-    req.on('error', (err) => reject(err))
-    req.write(rawBody)
-    req.end()
-  })
+  const rawBody = JSON.stringify(bodyObj)
+  return postHttpsRequest(
+    urlStr,
+    rawBody,
+    'application/json',
+    (parsed, statusCode) => parsed.error?.message || `HTTP ${statusCode}`
+  )
 }
 
 export function getCurrentSession(): AuthSession | null {
