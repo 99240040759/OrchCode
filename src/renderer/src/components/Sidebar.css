@@ -1,7 +1,6 @@
 /* --- Left Sidebar Component & Tree Nodes --- */
 .sidebar {
   background-color: var(--bg-sidebar);
-  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   height: 100%;

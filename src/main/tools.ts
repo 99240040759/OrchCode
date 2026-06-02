@@ -209,16 +209,14 @@ export function createCoreTools(convId: string) {
 
   const replaceFileContent = tool({
     description:
-      'Edit a SINGLE contiguous block in an existing file. Searches for TargetContent within the line range [startLine, endLine] and replaces it with ReplacementContent.',
+      'Edit a SINGLE contiguous block in an existing file. Replaces the content in the line range [startLine, endLine] with ReplacementContent.',
     inputSchema: z.object({
       targetFile: z.string().describe('Absolute path to the file to edit. Must be within the workspace root.'),
-      targetContent: z.string().describe('Exact string to find and replace. Must match exactly.'),
-      replacementContent: z.string().describe('Replacement content for the target string.'),
-      startLine: z.number().int().min(1).describe('Start of the search range (1-indexed).'),
-      endLine: z.number().int().min(1).describe('End of the search range (1-indexed, inclusive).'),
-      allowMultiple: z.boolean().default(false).describe('If true, replace all occurrences in the range.')
+      replacementContent: z.string().describe('Replacement content for the line block.'),
+      startLine: z.number().int().min(1).describe('Start of the line range to replace (1-indexed).'),
+      endLine: z.number().int().min(1).describe('End of the line range to replace (1-indexed, inclusive).')
     }),
-    execute: async ({ targetFile, targetContent, replacementContent, startLine, endLine, allowMultiple }) => {
+    execute: async ({ targetFile, replacementContent, startLine, endLine }) => {
       try {
         const safePath = safe(targetFile)
         const raw = await fs.readFile(safePath, 'utf-8')
@@ -226,26 +224,14 @@ export function createCoreTools(convId: string) {
         const normalizedRaw = raw.replace(/\r\n/g, '\n')
         const allLines = normalizedRaw.split('\n')
 
-        const { start, end, beforeLines, afterLines, rangeText } = sliceLines(allLines, startLine, endLine)
+        const { beforeLines, afterLines } = sliceLines(allLines, startLine, endLine)
 
-        const occurrences = rangeText.split(targetContent).length - 1
-        if (occurrences === 0) {
-          throw new Error(`TargetContent not found in lines ${start}–${end} of "${safePath}".\nSearched for:\n${targetContent}`)
-        }
-        if (occurrences > 1 && !allowMultiple) {
-          throw new Error(`Multiple occurrences (${occurrences}) of TargetContent found in lines ${start}–${end}. Set allowMultiple=true to replace all.`)
-        }
-
-        const newRangeText = allowMultiple
-          ? rangeText.split(targetContent).join(replacementContent)
-          : rangeText.replace(targetContent, () => replacementContent)
-
-        const newLines = [...beforeLines, ...newRangeText.split('\n'), ...afterLines]
+        const newLines = [...beforeLines, ...replacementContent.split('\n'), ...afterLines]
         const finalContent = isCrlf ? newLines.join('\r\n') : newLines.join('\n')
 
         await fs.writeFile(safePath, finalContent, 'utf-8')
-        log.info(`[tool:replaceFileContent] edited ${safePath} (occurrences: ${occurrences})`)
-        return { success: true, absolutePath: safePath, occurrencesReplaced: occurrences }
+        log.info(`[tool:replaceFileContent] edited ${safePath} (lines: ${startLine}-${endLine})`)
+        return { success: true, absolutePath: safePath }
       } catch (err: any) {
         log.error('[tool:replaceFileContent] error:', err)
         return { success: false, error: err.message }
@@ -256,9 +242,7 @@ export function createCoreTools(convId: string) {
   const ReplacementChunkSchema = z.object({
     startLine: z.number().int().min(1),
     endLine: z.number().int().min(1),
-    targetContent: z.string(),
-    replacementContent: z.string(),
-    allowMultiple: z.boolean().default(false)
+    replacementContent: z.string()
   })
 
   const multiReplaceFileContent = tool({
@@ -279,26 +263,14 @@ export function createCoreTools(convId: string) {
         let normalizedRaw = raw.replace(/\r\n/g, '\n')
 
         const sorted = [...replacementChunks].sort((a, b) => b.startLine - a.startLine)
-        const results: { startLine: number; endLine: number; occurrencesReplaced: number }[] = []
+        const results: { startLine: number; endLine: number }[] = []
 
         for (const chunk of sorted) {
           const allLines = normalizedRaw.split('\n')
-          const { start, end, beforeLines, afterLines, rangeText } = sliceLines(allLines, chunk.startLine, chunk.endLine)
+          const { start, end, beforeLines, afterLines } = sliceLines(allLines, chunk.startLine, chunk.endLine)
 
-          const occurrences = rangeText.split(chunk.targetContent).length - 1
-          if (occurrences === 0) {
-            throw new Error(`Chunk [lines ${start}–${end}]: TargetContent not found in "${safePath}".\nSearched for:\n${chunk.targetContent}`)
-          }
-          if (occurrences > 1 && !chunk.allowMultiple) {
-            throw new Error(`Chunk [lines ${start}–${end}]: Multiple occurrences (${occurrences}) found. Set allowMultiple=true to replace all.`)
-          }
-
-          const newRangeText = chunk.allowMultiple
-            ? rangeText.split(chunk.targetContent).join(chunk.replacementContent)
-            : rangeText.replace(chunk.targetContent, () => chunk.replacementContent)
-
-          normalizedRaw = [...beforeLines, ...newRangeText.split('\n'), ...afterLines].join('\n')
-          results.push({ startLine: start, endLine: end, occurrencesReplaced: occurrences })
+          normalizedRaw = [...beforeLines, ...chunk.replacementContent.split('\n'), ...afterLines].join('\n')
+          results.push({ startLine: start, endLine: end })
         }
 
         const finalContent = isCrlf ? normalizedRaw.replace(/\n/g, '\r\n') : normalizedRaw
@@ -318,7 +290,7 @@ export function createCoreTools(convId: string) {
     inputSchema: z.object({
       commandLine: z.string().describe('The exact shell command to execute.'),
       cwd: z.string().optional().describe('Absolute path to run the command in. Must be within workspace root. Defaults to workspace root.'),
-      waitMsBeforeAsync: z.number().int().min(0).max(60000).optional().default(30000).describe('Timeout in milliseconds (max 60000).')
+      waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds (max 180000). Defaults to 60000.')
     }),
     execute: async ({ commandLine, cwd, waitMsBeforeAsync }) => {
       try {
@@ -347,6 +319,48 @@ export function createCoreTools(convId: string) {
       } catch (err: any) {
         log.error('[tool:runCommand] error:', err)
         return { success: false, error: err.message, stdout: '', stderr: err.message, exitCode: 1 }
+      }
+    }
+  })
+
+  const searchWorkspace = tool({
+    description: 'Searches the workspace for files containing a specific regex pattern using ripgrep. Use to find where functions/variables are defined or used.',
+    inputSchema: z.object({
+      query: z.string().describe('The regex query to search for.'),
+      includes: z.array(z.string()).optional().describe('Optional array of glob patterns to filter files (e.g. ["*.ts", "*.tsx"]).')
+    }),
+    execute: async ({ query, includes }) => {
+      try {
+        const ctx = wctx()
+        const runDir = ctx.rootPath
+        
+        let cmd = `rg -n -I "${query.replace(/"/g, '\\"')}"`
+        if (includes && includes.length > 0) {
+          const globs = includes.map(g => `-g "${g}"`).join(' ')
+          cmd += ` ${globs}`
+        }
+        
+        const result = await execa(cmd, {
+          shell: true,
+          cwd: runDir,
+          reject: false,
+          timeout: 10000
+        })
+        
+        if (result.exitCode !== 0 && result.stdout.trim() === '') {
+           return { success: true, results: 'No matches found.' }
+        }
+        
+        const output = result.stdout.trim()
+        const lines = output.split('\n')
+        if (lines.length > 50) {
+           return { success: true, results: lines.slice(0, 50).join('\n') + `\n\n... (truncated ${lines.length - 50} more matches)` }
+        }
+        
+        return { success: true, results: output }
+      } catch (err: any) {
+        log.error('[tool:searchWorkspace] error:', err)
+        return { success: false, error: err.message }
       }
     }
   })
@@ -386,7 +400,7 @@ export function createCoreTools(convId: string) {
     }
   })
 
-  return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, runCommand, searchWeb }
+  return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, runCommand, searchWorkspace, searchWeb }
 }
 
 // ─── Browser automation worker ────────────────────────────────────────────

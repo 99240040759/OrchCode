@@ -163,7 +163,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(({ 
       style={{
         width: '100%',
         height: '100%',
-        backgroundColor: 'var(--bg-sidebar)',
+        backgroundColor: 'var(--bg-app)',
         padding: '16px 20px'
       }}
     />

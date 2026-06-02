@@ -94,7 +94,7 @@ const OverviewPanel: React.FC<{
             flexDirection: 'column',
             gap: '24px',
             padding: '24px 32px',
-            backgroundColor: 'var(--bg-sidebar)',
+            backgroundColor: 'var(--bg-app)',
             minHeight: '100%'
           }}
         >
@@ -435,23 +435,23 @@ const ArtifactPanel: React.FC = () => {
             { token: 'identifier', foreground: textSecondary }
           ],
           colors: {
-            'editor.background': '#0f0f11',
+            'editor.background': '#121212',
             'editor.foreground': textPrimary,
             'editorLineNumber.foreground': '#4b5263',
             'editorLineNumber.activeForeground': '#c8ccd4',
             'editor.lineHighlightBackground': '#ffffff08',
             'editor.selectionBackground': '#ffffff1a',
             'editor.inactiveSelectionBackground': '#ffffff0d',
-            'editorWidget.background': '#0f0f11',
+            'editorWidget.background': '#121212',
             'editorWidget.border': '#ffffff0f',
-            'editorHoverWidget.background': '#0f0f11',
+            'editorHoverWidget.background': '#121212',
             'editorHoverWidget.border': '#ffffff0f',
             'scrollbarSlider.background': '#ffffff0f',
             'scrollbarSlider.hoverBackground': '#ffffff1a',
             'scrollbarSlider.activeBackground': '#ffffff26',
             // Hide overview ruler border and decorations (errors, warnings)
             'editorOverviewRuler.border': '#00000000',
-            'editorOverviewRuler.background': '#0f0f11',
+            'editorOverviewRuler.background': '#121212',
             'editorOverviewRuler.addedForeground': '#00000000',
             'editorOverviewRuler.modifiedForeground': '#00000000',
             'editorOverviewRuler.deletedForeground': '#00000000',
@@ -630,7 +630,6 @@ const ArtifactPanel: React.FC = () => {
           justifyContent: 'space-between',
           height: '38px',
           backgroundColor: 'var(--bg-sidebar)',
-          borderBottom: '1px solid var(--border-color)',
           flexShrink: 0,
           paddingRight: isMac ? '12px' : '140px',
           overflowX: 'auto',
@@ -786,7 +785,7 @@ const ArtifactPanel: React.FC = () => {
                 />
               )}
               {displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)' }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
                   <audio controls autoPlay src={`data:${displayFile.mimeType};base64,${displayFile.base64}`} style={{ width: '320px' }} />
                 </div>
@@ -806,7 +805,7 @@ const ArtifactPanel: React.FC = () => {
                   justifyContent: 'space-between',
                   height: '34px',
                   padding: '0 16px',
-                  backgroundColor: 'var(--bg-sidebar)',
+                  backgroundColor: 'var(--bg-app)',
                   borderBottom: '1px solid var(--border-color)',
                   flexShrink: 0
                 }}
@@ -871,7 +870,7 @@ const ArtifactPanel: React.FC = () => {
               </div>
 
               <div
-                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-sidebar)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
+                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-app)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
                 className="assistant-content markdown-body"
               >
                 <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />
@@ -886,7 +885,7 @@ const ArtifactPanel: React.FC = () => {
                   justifyContent: 'space-between',
                   height: '34px',
                   padding: '0 16px',
-                  backgroundColor: 'var(--bg-sidebar)',
+                  backgroundColor: 'var(--bg-app)',
                   borderBottom: '1px solid var(--border-color)',
                   flexShrink: 0
                 }}
@@ -934,7 +933,7 @@ const ArtifactPanel: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-sidebar)' }}>
+              <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-app)' }}>
                 {themeLoaded ? (
                   isDiffMode ? (
                     <DiffEditor
@@ -996,7 +995,7 @@ const ArtifactPanel: React.FC = () => {
                     />
                   )
                 ) : (
-                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-sidebar)' }} />
+                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-app)' }} />
                 )}
               </div>
             </div>

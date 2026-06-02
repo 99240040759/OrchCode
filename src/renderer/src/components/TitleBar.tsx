@@ -173,19 +173,20 @@ const TitleBar: React.FC<TitleBarProps> = ({
   }
 
   return (
-    <header className="titlebar" style={{ paddingLeft: sidebarExpanded ? '16px' : '0px', paddingRight: '16px' }}>
-      {!sidebarExpanded && (
-        <div
-          className="titlebar-left"
+    <header className="titlebar" style={{ display: 'flex', width: '100%' }}>
+      <div
+        className="titlebar-left"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
             paddingLeft: isMac ? '80px' : '12px',
             width: isMac ? '108px' : '40px',
-            WebkitAppRegion: 'no-drag'
-          } as any}
-        >
+            flexShrink: 0,
+          WebkitAppRegion: 'no-drag'
+        } as any}
+      >
+        {!sidebarExpanded && (
           <div
             className="titlebar-toggle-btn"
             onClick={() => setSidebarExpanded(true)}
@@ -193,22 +194,23 @@ const TitleBar: React.FC<TitleBarProps> = ({
           >
             <PanelLeft size={16} strokeWidth={1.5} color="var(--text-secondary)" />
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div className="titlebar-center" style={{ marginLeft: sidebarExpanded ? '0px' : 'auto', marginRight: 'auto' }}>
+      <div className="titlebar-center" style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', paddingLeft: '16px' }}>
         {workspaceName ? workspaceName : title}
       </div>
 
       <div
         className="titlebar-right"
         style={{
-          paddingRight: isMac ? 0 : 140,
+          paddingRight: isMac ? 16 : 140,
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'flex-end',
           gap: '12px',
-          WebkitAppRegion: 'no-drag',
-          marginLeft: sidebarExpanded ? 'auto' : '0px'
+          flexShrink: 0,
+          WebkitAppRegion: 'no-drag'
         } as any}
       >
         {renderUpdateIndicator()}

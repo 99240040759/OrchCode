@@ -10,6 +10,7 @@ files:
   - package.json
 asarUnpack:
   - resources/**
+  - node_modules/@vscode/ripgrep*/**/*
 win:
   executableName: Orch Code
 nsis:

@@ -1,10 +1,9 @@
 import { app } from 'electron'
 import { join, extname, relative, resolve, normalize, sep } from 'path'
-import { mkdirSync, promises as fs } from 'fs'
+import { mkdirSync, promises as fs, existsSync, readFileSync } from 'fs'
 import Bottleneck from 'bottleneck'
+import ignore, { Ignore } from 'ignore'
 
-// MED-8 FIX: Use Bottleneck (already a declared dependency) instead of
-// the hand-rolled pLimit() which lacked timeout handling and error propagation.
 const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
 // ─── Workspace Context ────────────────────────────────────────────────────
@@ -59,11 +58,6 @@ export function updateWorkspacePath(conversationId: string, newPath: string): Wo
 
 // ─── Path Security ────────────────────────────────────────────────────────
 
-/**
- * FIXED: Validates that targetPath resolves WITHIN rootPath.
- * Throws a path traversal error if the target escapes the workspace.
- * Returns the safe, normalized absolute path.
- */
 export function assertWithinWorkspace(
   rootPath: string,
   targetPath: string,
@@ -73,14 +67,12 @@ export function assertWithinWorkspace(
   const resolvedTarget = resolve(rootPath, targetPath)
   const normalizedTarget = normalize(resolvedTarget)
 
-  // Allow exact match on the root itself
   if (normalizedTarget !== normalize(resolve(rootPath)) && !normalizedTarget.startsWith(normalizedRoot)) {
     throw new Error(
       `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
     )
   }
 
-  // Redirect .orch-artifacts references to the secure artifacts directory
   if (conversationId) {
     const wctx = getWorkspaceContext(conversationId) || getOrCreateWorkspaceContext(conversationId)
     if (
@@ -97,8 +89,6 @@ export function assertWithinWorkspace(
   return normalizedTarget
 }
 
-// ─── HTML escape for safe error rendering ────────────────────────────────
-
 export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -108,37 +98,40 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;')
 }
 
-// ─── Workspace file tree (replaces 400KB serialization) ──────────────────
+// ─── Workspace file tree ─────────────────────────────────────────────────
 
-const IGNORED_DIRS = new Set([
-  'node_modules', '.git', 'out', 'dist', '.orch-artifacts', 'build', '.next', '.nuxt', '.cache',
-  '__pycache__', 'venv', '.venv', 'target', 'vendor', '.svelte-kit', 'coverage', '.nyc_output',
-  'storybook-static', '.gemini'
-])
+const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
 const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip',
   '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'
 ])
-const IGNORED_FILES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb'])
-const MAX_DEPTH = 6
 
 export function isBinaryBuffer(buf: Buffer): boolean {
   return buf.subarray(0, 512).includes(0x00)
 }
 
 interface TraverseOptions {
-  maxDepth?: number
   onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
+}
+
+function buildIgnore(rootPath: string): Ignore {
+  const ig = ignore().add(DEFAULT_IGNORED_DIRS)
+  try {
+    const gitignorePath = join(rootPath, '.gitignore')
+    if (existsSync(gitignorePath)) {
+      const content = readFileSync(gitignorePath, 'utf8')
+      ig.add(content)
+    }
+  } catch {}
+  return ig
 }
 
 async function traverseDir(
   dir: string,
   options: TraverseOptions,
-  depth = 0
+  ig: Ignore,
+  rootPath: string
 ): Promise<void> {
-  const maxDepth = options.maxDepth ?? MAX_DEPTH
-  if (depth > maxDepth) return
-
   let entries: any[] = []
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
@@ -152,13 +145,15 @@ async function traverseDir(
       traverseLimiter.schedule(async () => {
         const name = entry.name
         const fullPath = join(dir, name)
+        let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
+        if (entry.isDirectory()) { relPath += '/' }
+
+        // Always check ignore rules
+        if (ig.ignores(relPath)) return
 
         if (entry.isDirectory()) {
-          const approvedDotFolders = new Set(['.github', '.vscode'])
-          if (IGNORED_DIRS.has(name) || (name.startsWith('.') && !approvedDotFolders.has(name))) return
-          await traverseDir(fullPath, options, depth + 1)
+          await traverseDir(fullPath, options, ig, rootPath)
         } else if (entry.isFile()) {
-          if (IGNORED_FILES.has(name)) return
           const ext = extname(name).toLowerCase()
           if (BINARY_EXTENSIONS.has(ext)) return
           try {
@@ -172,22 +167,16 @@ async function traverseDir(
   await Promise.all(promises)
 }
 
-/**
- * REPLACED: Instead of dumping 400KB of file contents into the system prompt,
- * we now generate a compact file tree index (~5KB max).
- * The agent uses viewFile/listDir tools to access specific file contents on demand.
- * This is THE #1 fix for agent quality, token efficiency, and prompt caching stability.
- */
 export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
   const entries: { relativePath: string; sizeBytes: number }[] = []
+  const ig = buildIgnore(rootPath)
 
   await traverseDir(rootPath, {
-    maxDepth: MAX_DEPTH,
     onFile: async (fullPath, _name, sizeBytes) => {
       const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
       entries.push({ relativePath: relPath, sizeBytes })
     }
-  })
+  }, ig, rootPath)
 
   entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 
@@ -205,23 +194,22 @@ export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
   return `Workspace file tree (${entries.length} files):\n${lines.join('\n')}\n\nUse viewFile(absolutePath) or listDir(directoryPath) to read specific files.`
 }
 
-/** @deprecated Use buildWorkspaceIndex instead. Retained for any legacy callers. */
 export async function serializeWorkspace(rootPath: string): Promise<string> {
   return buildWorkspaceIndex(rootPath)
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = []
+  const ig = buildIgnore(rootPath)
 
   await traverseDir(rootPath, {
-    maxDepth: 12,
     onFile: (fullPath) => {
       try {
         const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
         files.push(relPath)
       } catch {}
     }
-  })
+  }, ig, rootPath)
 
   files.sort((a, b) => a.localeCompare(b))
   return files

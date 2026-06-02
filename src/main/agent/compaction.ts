@@ -9,7 +9,7 @@ import {
 } from '../db'
 import log from 'electron-log'
 
-export async function triggerSemanticCompaction(threadId: string, assistantMsgId: string): Promise<void> {
+export async function triggerSemanticCompaction(threadId: string, _assistantMsgId: string): Promise<void> {
   log.info(`[compaction] Starting semantic summary for thread: ${threadId}`)
   try {
     const fullHistory = getThreadMessages(threadId)
@@ -21,9 +21,19 @@ export async function triggerSemanticCompaction(threadId: string, assistantMsgId
       lastCompactionIndex = fullHistory.findIndex((m) => m.id === lastCompactedId)
     }
 
-    const newTurns = lastCompactionIndex !== -1 ? fullHistory.slice(lastCompactionIndex + 1) : fullHistory
+    // SLIDING WINDOW: We leave the last 15 messages completely uncompacted.
+    // We only summarize from the last compacted message up to (length - 15).
+    const WINDOW_SIZE = 15
+    const targetAnchorIndex = Math.max(0, fullHistory.length - WINDOW_SIZE)
+    
+    // If there's nothing new to compact outside the window, skip it.
+    if (targetAnchorIndex <= lastCompactionIndex) {
+       return
+    }
 
-    const formattedHistory = newTurns.map((m) => {
+    const newTurnsToCompact = fullHistory.slice(lastCompactionIndex + 1, targetAnchorIndex + 1)
+
+    const formattedHistory = newTurnsToCompact.map((m) => {
       let text = `[${m.role.toUpperCase()}] ${m.content}`
       if (m.data) {
         try {
@@ -39,17 +49,18 @@ export async function triggerSemanticCompaction(threadId: string, assistantMsgId
                   } else if ((t.toolName === 'replaceFileContent' || t.toolName === 'multiReplaceFileContent') && t.result.absolutePath) {
                     summary += ` (edited: ${t.result.absolutePath})`
                   } else if (t.toolName === 'runCommand' && t.result.stdout) {
-                    summary += ` (output: ${String(t.result.stdout).slice(0, 200)})`
+                    summary += ` (output: ${String(t.result.stdout).slice(0, 1000)})`
                   } else if (t.toolName === 'viewFile' && t.result.absolutePath) {
                     summary += ` (read: ${t.result.absolutePath})`
                   }
                 } else if (t.status === 'error' && t.result) {
-                  const errStr = typeof t.result === 'string' ? t.result : (t.result.error || JSON.stringify(t.result)).slice(0, 200)
-                  summary += ` (error: ${errStr})`
+                  // NO MORE TRUNCATION: preserve up to 4000 chars for full error context
+                  const errStr = typeof t.result === 'string' ? t.result : (t.result.error || JSON.stringify(t.result))
+                  summary += ` (error: ${errStr.slice(0, 4000)})`
                 }
                 return summary
-              }).join(', ')
-              text += `\n(Tools: ${toolSummaries})`
+              }).join('\\n')
+              text += `\n(Tools:\n${toolSummaries})`
             }
           }
         } catch {}
@@ -92,17 +103,17 @@ Format as highly compressed, bulleted Markdown. No intro, no pleasantries.`,
       updateThreadCompactionSummary(threadId, summaryText)
       log.info(`[compaction] Summary compiled for thread: ${threadId} (${summaryText.length} chars)`)
 
-      const compactionMsg = fullHistory.find((m) => m.id === assistantMsgId)
-      if (compactionMsg) {
+      const anchorMsg = fullHistory[targetAnchorIndex]
+      if (anchorMsg) {
         saveMessage(threadId, {
-          id: compactionMsg.id,
-          role: compactionMsg.role,
-          content: compactionMsg.content,
-          data: compactionMsg.data,
-          createdAt: compactionMsg.createdAt,
+          id: anchorMsg.id,
+          role: anchorMsg.role,
+          content: anchorMsg.content,
+          data: anchorMsg.data,
+          createdAt: anchorMsg.createdAt,
           isCompactionAnchor: true
         })
-        log.info(`[compaction] Marked message ${assistantMsgId} as compaction anchor`)
+        log.info(`[compaction] Marked message ${anchorMsg.id} as compaction anchor`)
       }
     }
   } catch (err) {

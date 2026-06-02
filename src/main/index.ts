@@ -15,7 +15,6 @@ import {
   getOrCreateWorkspaceContext,
   updateWorkspacePath,
   getWorkspaceContext,
-  buildWorkspaceIndex,
   assertWithinWorkspace,
   listWorkspaceFiles
 } from './workspace'
@@ -102,12 +101,9 @@ const activePtys = new Map<string, ReturnType<typeof pty.spawn>>()
 let browserView: WebContentsView | null = null
 let onboardingWindow: BrowserWindow | null = null
 
-// Workspace index cache — invalidated on file writes (not on a TTL)
-const workspaceIndexCache = new Map<string, { index: string; timestamp: number }>()
-const WORKSPACE_INDEX_TTL_MS = 60_000 // 60s fallback TTL
-
-export function invalidateWorkspaceCache(conversationId: string) {
-  workspaceIndexCache.delete(conversationId)
+// Workspace index cache — no longer needed, left as no-op for compatibility
+export function invalidateWorkspaceCache(_conversationId: string) {
+  // no-op
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────
@@ -187,7 +183,7 @@ function createMainWindow(): BrowserWindow {
     show: false, autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: process.platform === 'win32' ? {
-      color: '#0f0f11', symbolColor: '#9c9c9c', height: 38
+      color: '#1a1a1a', symbolColor: '#b4b4b4', height: 40
     } : false,
     trafficLightPosition: { x: 16, y: 12 },
     backgroundColor: '#0f0f11',
@@ -613,21 +609,8 @@ async function handleAgentStreamRequest(
     }
     messages.push({ role: 'user', content: promptContent })
 
-    // Build workspace context — FIXED: compact file tree index instead of 400KB dump
-    let contextBlock = ''
-    if (ctx.rootPath) {
-      const cached = workspaceIndexCache.get(convId)
-      if (cached && Date.now() - cached.timestamp < WORKSPACE_INDEX_TTL_MS) {
-        contextBlock = cached.index
-      } else {
-        try {
-          contextBlock = await buildWorkspaceIndex(ctx.rootPath)
-          workspaceIndexCache.set(convId, { index: contextBlock, timestamp: Date.now() })
-        } catch (err) {
-          log.error('[main] buildWorkspaceIndex failed:', err)
-        }
-      }
-    }
+    // We no longer dump the entire file tree into the prompt.
+    // The agent is instructed to use searchWorkspace and listDir instead.
 
     const modeSuffix = mode && mode !== 'undefined' ? `\nMode: ${mode}.` : ''
 
@@ -660,9 +643,7 @@ Keep this context in mind when handling the user's next request.`
 ── WORKSPACE ──
 Root path: ${ctx.rootPath || 'No workspace selected'}
 
-${contextBlock || 'No workspace files found. Ask the user to open a workspace folder.'}
-
-IMPORTANT: Use viewFile(absolutePath) to read specific files. Use listDir(directoryPath) to explore directories. Do NOT assume file contents — always read before editing.
+IMPORTANT: Use searchWorkspace(query) to find files or code by pattern. Use listDir(directoryPath) to explore directories. Do NOT assume file contents — always read before editing.
 ${browserInstruction}${compactionInstruction ? '\n' + compactionInstruction : ''}
 
 ── ARTIFACT BOUNDARIES & WORKFLOW ──

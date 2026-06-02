@@ -4,19 +4,19 @@
   --font-mono: 'JetBrains Mono', monospace;
 
   /* Color Palette - Premium Neutral Dark Design */
-  --bg-app: #121214;
-  --bg-sidebar: #0f0f11;
-  --bg-editor: #0f0f11;
+  --bg-app: #121212;
+  --bg-sidebar: #1A1A1A;
+  --bg-editor: #121212;
 
   /* Translucent & Premium Borders */
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(255, 255, 255, 0.15);
+  --border-color: #333333;
+  --border-focus: #444444;
 
   /* Typography Colors */
-  --text-primary: #e4e4e7;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  --text-dim: #52525b;
+  --text-primary: #FFFFFF;
+  --text-secondary: #B4B4B4;
+  --text-muted: #737373;
+  --text-dim: #525252;
 
   /* Accent Colors */
   --accent-blue: #3b82f6;
@@ -27,7 +27,7 @@
 
   /* Layout Spacing & Sizing */
   --sidebar-width-expanded: 250px;
-  --titlebar-height: 38px;
+  --titlebar-height: 40px;
 
   /* Typographic Scale - Strict Uniformity */
   --font-size-micro: 9px;

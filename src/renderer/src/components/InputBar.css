@@ -139,7 +139,7 @@
 .workspace-main {
   flex: 1;
   min-width: 0;
-  background-color: var(--bg-editor);
+  background-color: var(--bg-app);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -265,7 +265,7 @@
 .input-bar-container {
   width: 100%;
   max-width: 685px;
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: #262626;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   display: flex;
