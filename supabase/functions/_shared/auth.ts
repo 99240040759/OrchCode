@@ -44,5 +44,10 @@ export function validateAnonKey(
   }
 
   if (!token) return false
-  return timingSafeEqual(token, expectedAnonKey)
+  
+  // Trim to prevent accidental whitespace/newlines from breaking the timing-safe comparison
+  const cleanToken = token.trim()
+  const cleanExpected = expectedAnonKey.trim()
+  
+  return timingSafeEqual(cleanToken, cleanExpected)
 }
