@@ -8,7 +8,7 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        external: ['node-pty', 'playwright'],
+        external: ['node-pty', 'playwright-core'],
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           browserWorker: resolve(__dirname, 'src/main/browserWorker.ts')
@@ -20,7 +20,9 @@ export default defineConfig({
       'process.env.FIREBASE_API_KEY': JSON.stringify(process.env.FIREBASE_API_KEY),
       'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID),
       'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID),
-      'process.env.GOOGLE_CLIENT_SECRET': JSON.stringify(process.env.GOOGLE_CLIENT_SECRET),
+      // CRIT-6: GOOGLE_CLIENT_SECRET intentionally removed — PKCE flow does not need a
+      // client secret. Baking it into the distributable allows trivial extraction from
+      // the shipped JS. auth.ts already uses PKCE (generatePKCE()) without needing it.
       'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL),
       'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY)
     }

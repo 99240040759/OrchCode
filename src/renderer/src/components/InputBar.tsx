@@ -12,6 +12,7 @@ import {
   activeWorkspaceAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import './InputBar.css'
 
 interface InputBarProps {
   onSubmit?: (val: string, mode?: string, attachments?: any[]) => void
@@ -224,27 +225,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   return (
     <div className="input-bar-container" style={{ position: 'relative' }}>
       {showFileSuggestions && filteredFiles.length > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 8px)',
-            left: 0,
-            right: 0,
-            maxHeight: '220px',
-            overflowY: 'auto',
-            backgroundColor: 'var(--bg-sidebar)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '8px',
-            boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
-            zIndex: 1000,
-            padding: '4px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-            backdropFilter: 'blur(8px)',
-            color: 'var(--text-primary)'
-          }}
-        >
+        <div className="input-file-suggestions">
           {filteredFiles.map((file, idx) => {
             const isSelected = idx === suggestionIndex
             const parts = file.split('/')
@@ -256,30 +237,21 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                 key={file}
                 onClick={() => selectFileSuggestion(file)}
                 onMouseEnter={() => setSuggestionIndex(idx)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '6px 12px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  backgroundColor: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  transition: 'background-color 0.15s ease'
-                }}
+                className={`input-file-suggestion-item ${isSelected ? 'selected' : ''}`}
               >
                 <SymbolsFileIcon
                   fileName={name}
                   autoAssign={true}
                   width={14}
                   height={14}
-                  style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                  className="input-file-icon"
                 />
-                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
-                  <span style={{ fontSize: '13px', fontWeight: 500, color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div className="input-file-details">
+                  <span className="input-file-name">
                     {name}
                   </span>
                   {dir && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span className="input-file-dir">
                       {dir}
                     </span>
                   )}
@@ -311,17 +283,10 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   autoAssign={true}
                   width={14}
                   height={14}
-                  style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                  className="input-file-icon"
                 />
               )}
-              <span
-                style={{
-                  maxWidth: 150,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
+              <span className="input-attachment-name">
                 {att.name.split('/').pop() || att.name}
               </span>
               <button
@@ -334,50 +299,21 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ))}
         </div>
       )}
-      <div
-        className="input-bar-text-container"
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '12px 16px 4px 16px',
-          width: '100%',
-          boxSizing: 'border-box'
-        }}
-      >
+      <div className="input-bar-text-container input-bar-text-container-inner">
         {fileReferences.map((ref, idx) => (
           <div
             key={`ref-${idx}`}
             title={ref.path}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              color: 'var(--text-primary)',
-              fontSize: '13px',
-              userSelect: 'none',
-              cursor: 'default',
-              margin: '0 2px',
-              verticalAlign: 'middle'
-            }}
+            className="input-file-reference"
           >
             <SymbolsFileIcon
               fileName={ref.name}
               autoAssign={true}
               width={14}
               height={14}
-              style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+              className="input-file-icon"
             />
-            <span
-              style={{
-                maxWidth: 150,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                fontSize: '13px'
-              }}
-            >
+            <span className="input-file-reference-name">
               {ref.name}
             </span>
           </div>
@@ -387,7 +323,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ref={textareaRef}
           minRows={1}
           maxRows={8}
-          className="input-bar-text-area"
+          className="input-bar-text-area input-bar-text-area-override"
           placeholder={(attachments.length > 0 || fileReferences.length > 0) ? '' : 'Ask anything, @ to mention'}
           value={inputValue}
           onChange={(e) => {
@@ -400,21 +336,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           }}
           onKeyDown={handleKeyDown}
           disabled={isRunning}
-          style={{
-            flex: 1,
-            minWidth: '150px',
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            resize: 'none',
-            padding: '2px 0',
-            margin: 0,
-            lineHeight: 1.5,
-            opacity: isRunning ? 0.7 : 1,
-            color: 'var(--text-primary)',
-            fontFamily: 'var(--font-display)',
-            fontSize: 'var(--font-size-md-plus)'
-          } as any}
+          style={{ opacity: isRunning ? 0.7 : 1 } as any}
         />
       </div>
 
@@ -422,8 +344,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         <div className="input-bar-toolbar-left">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <div className="toolbar-icon-btn" title="Add file or image" style={{ cursor: 'pointer' }}>
-                <Plus size={16} style={{ color: 'var(--text-secondary)' }} />
+              <div className="toolbar-icon-btn" title="Add file or image">
+                <Plus size={16} />
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -435,7 +357,6 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                 <DropdownMenu.Item
                   onSelect={() => triggerFileSelect('image')}
                   className="profile-dropdown-item"
-                  style={{ color: 'var(--text-secondary)' }}
                 >
                   <Image size={14} />
                   <span>Upload Image</span>
@@ -443,7 +364,6 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                 <DropdownMenu.Item
                   onSelect={() => triggerFileSelect('document')}
                   className="profile-dropdown-item"
-                  style={{ color: 'var(--text-secondary)' }}
                 >
                   <FileText size={14} />
                   <span>Upload Document</span>
@@ -455,8 +375,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <div className="toolbar-selector" title="Select mode" style={{ cursor: 'pointer' }}>
-                <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
+              <div className="toolbar-selector" title="Select mode">
+                <ChevronDown size={14} />
                 <span>{planningMode}</span>
               </div>
             </DropdownMenu.Trigger>
@@ -470,11 +390,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   <DropdownMenu.Item
                     key={mode}
                     onSelect={() => setPlanningMode(mode)}
-                    className="profile-dropdown-item"
-                    style={{
-                      background: mode === planningMode ? 'rgba(255,255,255,0.05)' : 'transparent',
-                      color: mode === planningMode ? 'var(--text-primary)' : 'var(--text-secondary)'
-                    }}
+                    className={`profile-dropdown-item ${mode === planningMode ? 'selected' : ''}`}
                   >
                     {mode}
                   </DropdownMenu.Item>
@@ -486,8 +402,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <div className="toolbar-selector" title="Select model" style={{ cursor: 'pointer' }}>
-                <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
+              <div className="toolbar-selector" title="Select model">
+                <ChevronDown size={14} />
                 <span>
                   {selectedModel === 'gemini'
                     ? availableModels.gemini?.name
@@ -504,21 +420,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                 >
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemini')}
-                  className="profile-dropdown-item"
-                  style={{
-                    background: selectedModel === 'gemini' ? 'rgba(255,255,255,0.05)' : 'transparent',
-                    color: selectedModel === 'gemini' ? 'var(--text-primary)' : 'var(--text-secondary)'
-                  }}
+                  className={`profile-dropdown-item ${selectedModel === 'gemini' ? 'selected' : ''}`}
                 >
                   <span style={{ fontWeight: 500 }}>{availableModels.gemini?.name || 'Gemini 3.1 Flash Lite'}</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   onSelect={() => setSelectedModel('gemma')}
-                  className="profile-dropdown-item"
-                  style={{
-                    background: selectedModel === 'gemma' ? 'rgba(255,255,255,0.05)' : 'transparent',
-                    color: selectedModel === 'gemma' ? 'var(--text-primary)' : 'var(--text-secondary)'
-                  }}
+                  className={`profile-dropdown-item ${selectedModel === 'gemma' ? 'selected' : ''}`}
                 >
                   <span style={{ fontWeight: 500 }}>{availableModels.gemma?.name || 'Gemma 4'}</span>
                 </DropdownMenu.Item>
@@ -537,7 +445,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               width={RING_RADIUS * 2 + 4}
               height={RING_RADIUS * 2 + 4}
               viewBox={`0 0 ${RING_RADIUS * 2 + 4} ${RING_RADIUS * 2 + 4}`}
-              style={{ transform: 'rotate(-90deg)' }}
+              className="token-ring-svg"
             >
               <circle
                 cx={RING_RADIUS + 2}
@@ -557,7 +465,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                 strokeLinecap="round"
                 strokeDasharray={RING_CIRCUMFERENCE}
                 strokeDashoffset={dashOffset}
-                style={{ transition: 'stroke-dashoffset 0.3s ease, stroke 0.3s ease' }}
+                className="token-ring-circle"
               />
             </svg>
             {fraction > 0.05 && (
@@ -581,8 +489,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               className="toolbar-submit-btn"
               onClick={handleSend}
               title="Submit"
-              disabled={!inputValue.trim() && attachments.length === 0}
-              style={{ opacity: (inputValue.trim() || attachments.length > 0) ? 1 : 0.4 }}
+              disabled={!inputValue.trim() && attachments.length === 0 && fileReferences.length === 0}
+              style={{ opacity: (inputValue.trim() || attachments.length > 0 || fileReferences.length > 0) ? 1 : 0.4 }}
             >
               <ArrowRight size={14} strokeWidth={2.5} style={{ color: 'var(--text-primary)' }} />
             </button>

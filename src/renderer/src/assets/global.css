@@ -1,0 +1,395 @@
+/* --- Design Tokens & Custom Properties (:root) --- */
+:root {
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Color Palette - Premium Neutral Dark Design */
+  --bg-app: #121214;
+  --bg-sidebar: #0f0f11;
+  --bg-editor: #0f0f11;
+
+  /* Translucent & Premium Borders */
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.15);
+
+  /* Typography Colors */
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-dim: #52525b;
+
+  /* Accent Colors */
+  --accent-blue: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --accent-green: #10b981;
+  --accent-orange: #f59e0b;
+  --accent-red: #ef4444;
+
+  /* Layout Spacing & Sizing */
+  --sidebar-width-expanded: 250px;
+  --titlebar-height: 38px;
+
+  /* Typographic Scale - Strict Uniformity */
+  --font-size-micro: 9px;
+  --font-size-xxs: 11px;
+  --font-size-xs: 12px;
+  --font-size-xs-plus: 12.5px;
+  --font-size-sm: 13px;
+  --font-size-sm-plus: 13.5px;
+  --font-size-md: 14px;
+  --font-size-md-plus: 14.5px;
+  --font-size-lg: 15px;
+  --font-size-xl: 17px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+}
+
+/* --- Base Reset, Scrollbars & Default Styling --- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+/* Explicitly enable text selections inside text inputs, code structures, and chat markdown blocks */
+input,
+textarea,
+[contenteditable="true"],
+code,
+pre,
+.assistant-content,
+.markdown-content,
+.chat-reasoning-body {
+  user-select: text !important;
+}
+
+.assistant-content * {
+  user-select: text;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease, text-decoration 0.15s ease;
+}
+
+a:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary {
+  list-style: none;
+}
+
+/* Scrollbar Defaults & Consolidations */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsla(0, 0%, 100%, 0.08);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsla(0, 0%, 100%, 0.16);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+/* --- CSS Keyframes & Animations --- */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes textShimmer {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 150% 0;
+  }
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}
+
+/* ==========================================================================
+   SECTION 12: Sidebar Interactive Elements
+   All hover/active states via CSS — NO React onMouseEnter/Leave
+   ========================================================================== */
+
+/* Titlebar toggle buttons (sidebar expand/collapse, artifact panel expand) */
+.titlebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.titlebar-toggle-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Sidebar collapse button */
+.sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-collapse-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Sidebar "New Conversation" button */
+.sidebar-start-conv {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  margin-bottom: 4px;
+}
+
+.sidebar-start-conv:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar generic menu items */
+.sidebar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-menu-item:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Sidebar footer item (profile trigger / sign-in button) */
+.sidebar-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 8px 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sidebar-footer-item:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.sidebar-footer-item.google-btn {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-footer-item.google-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar section header actions (FolderPlus icon) */
+.sidebar-section-header-action {
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.sidebar-section-header-action:hover {
+  color: var(--text-primary);
+}
+
+/* Workspace node actions (X delete button) — shown via CSS on parent hover */
+.workspace-node-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-tree-node:hover .workspace-node-actions,
+.workspace-node-row:hover .workspace-node-actions {
+  opacity: 1;
+}
+
+/* Thread row actions (trash icon) — shown on row hover */
+.sidebar-tree-node-title .sidebar-section-header-action {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-tree-node-title:hover .sidebar-section-header-action {
+  opacity: 1;
+}
+
+/* Workspace row */
+.workspace-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-radius: 4px;
+}
+
+.workspace-node-row:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Thread node title row */
+.sidebar-tree-node-title {
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 8px 0 0;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-tree-node-title:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-tree-node-title.active {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ArtifactPanel — collapse/close panel button */
+.artifact-panel-close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.artifact-panel-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ArtifactPanel tab close (X button inside file tab) */
+.tab-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tab-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+/* ArtifactPanel editor toolbar action icons */
+.editor-toolbar-action {
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.editor-toolbar-action:hover {
+  color: var(--text-primary);
+}
+
+.editor-toolbar-action.active {
+  color: var(--accent-blue);
+}
+
+/* OverviewPanel artifact/file card items — pure CSS hover, no React state */
+.overview-item {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.overview-item:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}

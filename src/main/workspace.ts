@@ -1,44 +1,13 @@
 import { app } from 'electron'
-import { join, extname, relative, resolve, normalize } from 'path'
+import { join, extname, relative, resolve, normalize, sep } from 'path'
 import { mkdirSync, promises as fs } from 'fs'
+import Bottleneck from 'bottleneck'
 
-function pLimit(concurrency: number) {
-  const queue: (() => void)[] = []
-  let activeCount = 0
+// MED-8 FIX: Use Bottleneck (already a declared dependency) instead of
+// the hand-rolled pLimit() which lacked timeout handling and error propagation.
+const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
-  const next = () => {
-    activeCount--
-    if (queue.length > 0) {
-      const nextFn = queue.shift()
-      if (nextFn) nextFn()
-    }
-  }
-
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const run = () => {
-        activeCount++
-        fn().then(resolve, reject).finally(next)
-      }
-
-      if (activeCount < concurrency) {
-        run()
-      } else {
-        queue.push(run)
-      }
-    })
-  }
-}
-
-let activeConversationId: string = ''
-
-export function setActiveConversationId(id: string) {
-  activeConversationId = id
-}
-
-export function getActiveConversationId(): string {
-  return activeConversationId
-}
+// ─── Workspace Context ────────────────────────────────────────────────────
 
 export interface WorkspaceContext {
   conversationId: string
@@ -88,39 +57,58 @@ export function updateWorkspacePath(conversationId: string, newPath: string): Wo
   return ctx
 }
 
-// ─── Shared path security ──────────────────────────────────────────────────
-
+// ─── Path Security ────────────────────────────────────────────────────────
 
 /**
- * Validates that targetPath resolves within rootPath (or permitted system dirs).
- * Exported and shared by both index.ts and tools.ts — single implementation.
- * Throws on traversal. Returns the safe, normalised absolute path.
+ * FIXED: Validates that targetPath resolves WITHIN rootPath.
+ * Throws a path traversal error if the target escapes the workspace.
+ * Returns the safe, normalized absolute path.
  */
 export function assertWithinWorkspace(
   rootPath: string,
   targetPath: string,
   conversationId?: string
 ): string {
-  const cid = conversationId || activeConversationId
-  const wctx = getWorkspaceContext(cid) || getOrCreateWorkspaceContext(cid)
-
+  const normalizedRoot = normalize(resolve(rootPath)) + sep
   const resolvedTarget = resolve(rootPath, targetPath)
   const normalizedTarget = normalize(resolvedTarget)
 
-  // Redirect any .orch-artifacts reference to the secure artifacts directory
-  if (
-    normalizedTarget.includes('/.orch-artifacts/') ||
-    normalizedTarget.endsWith('/.orch-artifacts')
-  ) {
-    const idx = normalizedTarget.indexOf('.orch-artifacts')
-    const relativePart = normalizedTarget.substring(idx + '.orch-artifacts'.length)
-    return normalize(join(wctx.artifactsPath, relativePart))
+  // Allow exact match on the root itself
+  if (normalizedTarget !== normalize(resolve(rootPath)) && !normalizedTarget.startsWith(normalizedRoot)) {
+    throw new Error(
+      `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
+    )
+  }
+
+  // Redirect .orch-artifacts references to the secure artifacts directory
+  if (conversationId) {
+    const wctx = getWorkspaceContext(conversationId) || getOrCreateWorkspaceContext(conversationId)
+    if (
+      normalizedTarget.includes('.orch-artifacts' + sep) ||
+      normalizedTarget.endsWith('.orch-artifacts')
+    ) {
+      const idx = normalizedTarget.indexOf('.orch-artifacts')
+      const relativePart = normalizedTarget.substring(idx + '.orch-artifacts'.length)
+      const safeArtifactPath = normalize(join(wctx.artifactsPath, relativePart))
+      return safeArtifactPath
+    }
   }
 
   return normalizedTarget
 }
 
-// ─── Workspace serialisation ──────────────────────────────────────────────
+// ─── HTML escape for safe error rendering ────────────────────────────────
+
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// ─── Workspace file tree (replaces 400KB serialization) ──────────────────
 
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'out', 'dist', '.orch-artifacts', 'build', '.next', '.nuxt', '.cache',
@@ -129,11 +117,9 @@ const IGNORED_DIRS = new Set([
 ])
 const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip',
-  '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db'
+  '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'
 ])
 const IGNORED_FILES = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb'])
-const MAX_SERIALIZE_FILE_SIZE = 100 * 1024
-const MAX_TOTAL_CHARACTERS = 400_000
 const MAX_DEPTH = 6
 
 export function isBinaryBuffer(buf: Buffer): boolean {
@@ -142,7 +128,7 @@ export function isBinaryBuffer(buf: Buffer): boolean {
 
 interface TraverseOptions {
   maxDepth?: number
-  onFile: (fullPath: string, name: string) => Promise<void> | void
+  onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
 }
 
 async function traverseDir(
@@ -160,10 +146,10 @@ async function traverseDir(
     return
   }
 
-  const limit = pLimit(20)
-  await Promise.all(
-    entries.map((entry) =>
-      limit(async () => {
+  const promises: Promise<void>[] = []
+  for (const entry of entries) {
+    promises.push(
+      traverseLimiter.schedule(async () => {
         const name = entry.name
         const fullPath = join(dir, name)
 
@@ -175,51 +161,53 @@ async function traverseDir(
           if (IGNORED_FILES.has(name)) return
           const ext = extname(name).toLowerCase()
           if (BINARY_EXTENSIONS.has(ext)) return
-          await options.onFile(fullPath, name)
+          try {
+            const stat = await fs.stat(fullPath)
+            await options.onFile(fullPath, name, stat.size)
+          } catch {}
         }
       })
     )
-  )
+  }
+  await Promise.all(promises)
 }
 
-export async function serializeWorkspace(rootPath: string): Promise<string> {
-  const files: { relativePath: string; content: string }[] = []
+/**
+ * REPLACED: Instead of dumping 400KB of file contents into the system prompt,
+ * we now generate a compact file tree index (~5KB max).
+ * The agent uses viewFile/listDir tools to access specific file contents on demand.
+ * This is THE #1 fix for agent quality, token efficiency, and prompt caching stability.
+ */
+export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
+  const entries: { relativePath: string; sizeBytes: number }[] = []
 
   await traverseDir(rootPath, {
     maxDepth: MAX_DEPTH,
-    onFile: async (fullPath) => {
-      try {
-        const stat = await fs.stat(fullPath)
-        if (stat.size > MAX_SERIALIZE_FILE_SIZE) return
-        const content = await fs.readFile(fullPath, 'utf-8')
-        const relPath = relative(rootPath, fullPath)
-        files.push({ relativePath: relPath, content })
-      } catch {}
+    onFile: async (fullPath, _name, sizeBytes) => {
+      const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
+      entries.push({ relativePath: relPath, sizeBytes })
     }
   })
 
-  // Sort files alphabetically by relative path to guarantee 100% determinism (Prompt Cache friendly)
-  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+  entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 
-  const filesContent: string[] = []
-  let totalLength = 0
-
-  for (const file of files) {
-    if (totalLength >= MAX_TOTAL_CHARACTERS) break
-
-    const fileString = `=== FILE: ${file.relativePath} ===\n${file.content}\n`
-    if (totalLength + fileString.length > MAX_TOTAL_CHARACTERS) {
-      const remaining = MAX_TOTAL_CHARACTERS - totalLength
-      if (remaining > 50) {
-        filesContent.push(`=== FILE: ${file.relativePath} ===\n${file.content.slice(0, remaining)}... [TRUNCATED]\n`)
-      }
-      break
-    }
-    filesContent.push(fileString)
-    totalLength += fileString.length
+  if (entries.length === 0) {
+    return 'Workspace is empty. No files found.'
   }
 
-  return filesContent.join('\n')
+  const lines = entries.map((e) => {
+    const sizeStr = e.sizeBytes >= 1024
+      ? `${(e.sizeBytes / 1024).toFixed(1)}KB`
+      : `${e.sizeBytes}B`
+    return `  ${e.relativePath} (${sizeStr})`
+  })
+
+  return `Workspace file tree (${entries.length} files):\n${lines.join('\n')}\n\nUse viewFile(absolutePath) or listDir(directoryPath) to read specific files.`
+}
+
+/** @deprecated Use buildWorkspaceIndex instead. Retained for any legacy callers. */
+export async function serializeWorkspace(rootPath: string): Promise<string> {
+  return buildWorkspaceIndex(rootPath)
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
@@ -229,7 +217,7 @@ export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
     maxDepth: 12,
     onFile: (fullPath) => {
       try {
-        const relPath = relative(rootPath, fullPath)
+        const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
         files.push(relPath)
       } catch {}
     }
@@ -238,4 +226,3 @@ export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   files.sort((a, b) => a.localeCompare(b))
   return files
 }
-

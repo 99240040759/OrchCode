@@ -124,7 +124,7 @@ export function useAgentStream() {
     }
 
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: crypto.randomUUID(),
       role: 'user',
       content: promptText,
       data: attachments && attachments.length > 0 ? JSON.stringify({ attachments }) : undefined,
@@ -132,7 +132,7 @@ export function useAgentStream() {
     }
     setMessages((prev) => [...prev, userMsg])
 
-    const assistantMsgId = `assistant-${Date.now()}`
+    const assistantMsgId = crypto.randomUUID()
     const assistantMsg: ChatMessage = {
       id: assistantMsgId,
       role: 'assistant',
@@ -258,7 +258,7 @@ export function useAgentStream() {
               currentReasoningBlockRef.current = null
             }
 
-            const tcId = chunkData?.toolCallId ?? `tc-${Date.now()}`
+            const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
             const tcName = chunkData?.toolName ?? 'unknown'
             const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
             orderedBlocks.push({ type: 'tool', toolCallId: tcId, toolName: tcName, args: tcArgs, status: 'pending' })

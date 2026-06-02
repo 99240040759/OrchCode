@@ -9,7 +9,6 @@ import { tavilyLimiter } from './limiters'
 import {
   getWorkspaceContext,
   getOrCreateWorkspaceContext,
-  getActiveConversationId,
   isBinaryBuffer,
   assertWithinWorkspace
 } from './workspace'
@@ -17,6 +16,7 @@ import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
 import { Worker } from 'worker_threads'
 import { wrap } from 'comlink'
+import mime from 'mime-types'
 
 // ─── Workspace resolution ─────────────────────────────────────────────────
 
@@ -37,10 +37,6 @@ function isCommandBlocked(command: string): boolean {
   return BLOCKED_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
 }
 
-// ─── Web search ───────────────────────────────────────────────────────────
-
-import mime from 'mime-types'
-
 // ─── MIME helpers ─────────────────────────────────────────────────────────
 
 const getMimeType = (filePath: string) => {
@@ -57,9 +53,8 @@ function sliceLines(allLines: string[], startLine: number, endLine: number) {
   return { start, end, beforeLines, rangeLines, afterLines, rangeText }
 }
 
-// ─── Tool factory ─────────────────────────────────────────────────────────
-// Each tool receives the convId from the stream-request closure — no global
-// state dependency, no conversationId leaking through model args (#15 fix).
+// ─── Core tool factory ────────────────────────────────────────────────────
+// Each tool receives the convId from the stream-request closure — no global state.
 
 export function createCoreTools(convId: string) {
   const wctx = () => resolveWorkspace(convId)
@@ -377,15 +372,10 @@ export function createCoreTools(convId: string) {
             },
             body: JSON.stringify({ query, domain, maxResults })
           })
-          if (!response.ok) {
-            throw new Error(`Proxy error: HTTP ${response.status}`)
-          }
+          if (!response.ok) throw new Error(`Proxy error: HTTP ${response.status}`)
           const data = await response.json()
           const results = (data.results ?? []).map((r: any) => ({
-            title: r.title,
-            url: r.url,
-            snippet: r.content,
-            score: r.score
+            title: r.title, url: r.url, snippet: r.content, score: r.score
           }))
           return { query, answer: data.answer ?? null, results, totalResults: results.length }
         } catch (err: any) {
@@ -399,14 +389,14 @@ export function createCoreTools(convId: string) {
   return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, runCommand, searchWeb }
 }
 
-// ─── Browser automation worker ───────────────────────────────────────────
+// ─── Browser automation worker ────────────────────────────────────────────
 
 let workerInstance: Worker | null = null
 let automatedBrowser: any = null
 
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
-  const browserView = (globalThis as any).browserView
-  if (!browserView) {
+  const bv = (globalThis as any).browserView
+  if (!bv) {
     return {
       success: false,
       error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
@@ -420,10 +410,8 @@ export function startBrowserAgentWorker() {
   const mainWindow = (globalThis as any).mainWindow
   const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const workerPath = join(__dirname, 'browserWorker.js')
-  log.info(`[tools] Spawning Playwright background worker at: ${workerPath} with mainWindowUrl: ${mainWindowUrl}`)
-  workerInstance = new Worker(workerPath, {
-    workerData: { mainWindowUrl }
-  })
+  log.info(`[tools] Spawning Playwright background worker at: ${workerPath}`)
+  workerInstance = new Worker(workerPath, { workerData: { mainWindowUrl } })
   automatedBrowser = wrap(nodeAdapter(workerInstance))
   return automatedBrowser
 }
@@ -439,129 +427,129 @@ export async function stopBrowserAgentWorker() {
   }
 }
 
-// ─── Browser tools (stateless — no convId needed) ────────────────────────
+// ─── Browser tools factory ─────────────────────────────────────────────────
+// FIXED: Now a factory function that takes convId — eliminates the global getActiveConversationId() call
+// which was the root cause of screenshots saving to the wrong conversation directory.
 
-const browserNavigate = tool({
-  description: 'Navigates the active browser viewport to a specified URL.',
-  inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
-  execute: async ({ url }) => {
-    log.info(`[tool:browserNavigate] url="${url}"`)
-    const check = checkBrowserViewActive()
-    if (check) return check
-    const agent = startBrowserAgentWorker()
-    try { return await agent.navigate(url) }
-    catch (err: any) { log.error('[tool:browserNavigate] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-const browserType = tool({
-  description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
-  inputSchema: z.object({
-    selector: z.string().describe('CSS selector of the input field.'),
-    text: z.string().describe('The text to type.'),
-    frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
-  }),
-  execute: async ({ selector, text, frameSelector }) => {
-    log.info(`[tool:browserType] selector="${selector}"`)
-    const check = checkBrowserViewActive()
-    if (check) return check
-    const agent = startBrowserAgentWorker()
-    try { return await agent.type(selector, text, frameSelector) }
-    catch (err: any) { log.error('[tool:browserType] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-const browserScroll = tool({
-  description: 'Scrolls the active webpage viewport.',
-  inputSchema: z.object({
-    direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'),
-    amount: z.number().int().positive().optional().describe('Pixels to scroll (default 400).')
-  }),
-  execute: async ({ direction, amount }) => {
-    log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
-    const check = checkBrowserViewActive()
-    if (check) return check
-    const agent = startBrowserAgentWorker()
-    try { return await agent.scroll(direction, amount) }
-    catch (err: any) { log.error('[tool:browserScroll] worker error:', err); return { success: false, error: err.message } }
-  }
-})
-
-const browserScreenshot = tool({
-  description: 'Captures a PNG screenshot of the active browser viewport.',
-  inputSchema: z.object({}),
-  execute: async () => {
-    log.info('[tool:browserScreenshot] executing...')
-    const check = checkBrowserViewActive()
-    if (check) return check
-    const agent = startBrowserAgentWorker()
-    try {
-      const cid = getActiveConversationId()
-      const screenshotDir = join(app.getPath('userData'), 'conversations', cid, 'screenshots')
-      await fs.mkdir(screenshotDir, { recursive: true })
-
-      // Rotate: keep only the last 10 screenshots
-      try {
-        const existing = await fs.readdir(screenshotDir)
-        const pngs = existing.filter(f => f.endsWith('.png')).sort()
-        for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) {
-          await fs.rm(join(screenshotDir, old), { force: true })
-        }
-      } catch {}
-
-      const filename = `screenshot_${Date.now()}.png`
-      const screenshotPath = join(screenshotDir, filename)
-      const res = await agent.screenshot(screenshotPath)
-      if (res.success) {
-        return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename }
-      }
-      return res
-    } catch (err: any) {
-      log.error('[tool:browserScreenshot] worker error:', err)
-      return { success: false, error: err.message }
+export function browserTools(convId: string) {
+  const browserNavigate = tool({
+    description: 'Navigates the active browser viewport to a specified URL.',
+    inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
+    execute: async ({ url }) => {
+      log.info(`[tool:browserNavigate] url="${url}"`)
+      const check = checkBrowserViewActive()
+      if (check) return check
+      const agent = startBrowserAgentWorker()
+      try { return await agent.navigate(url) }
+      catch (err: any) { log.error('[tool:browserNavigate] worker error:', err); return { success: false, error: err.message } }
     }
-  },
-  toModelOutput: async ({ output }: { output: any }) => {
-    if (output.success && output.filePath) {
+  })
+
+  const browserType = tool({
+    description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
+    inputSchema: z.object({
+      selector: z.string().describe('CSS selector of the input field.'),
+      text: z.string().describe('The text to type.'),
+      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
+    }),
+    execute: async ({ selector, text, frameSelector }) => {
+      log.info(`[tool:browserType] selector="${selector}"`)
+      const check = checkBrowserViewActive()
+      if (check) return check
+      const agent = startBrowserAgentWorker()
+      try { return await agent.type(selector, text, frameSelector) }
+      catch (err: any) { log.error('[tool:browserType] worker error:', err); return { success: false, error: err.message } }
+    }
+  })
+
+  const browserScroll = tool({
+    description: 'Scrolls the active webpage viewport.',
+    inputSchema: z.object({
+      direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'),
+      amount: z.number().int().positive().optional().describe('Pixels to scroll (default 400).')
+    }),
+    execute: async ({ direction, amount }) => {
+      log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
+      const check = checkBrowserViewActive()
+      if (check) return check
+      const agent = startBrowserAgentWorker()
+      try { return await agent.scroll(direction, amount) }
+      catch (err: any) { log.error('[tool:browserScroll] worker error:', err); return { success: false, error: err.message } }
+    }
+  })
+
+  const browserScreenshot = tool({
+    description: 'Captures a PNG screenshot of the active browser viewport.',
+    inputSchema: z.object({}),
+    execute: async () => {
+      log.info('[tool:browserScreenshot] executing...')
+      const check = checkBrowserViewActive()
+      if (check) return check
+      const agent = startBrowserAgentWorker()
       try {
-        const cleanPath = output.filePath.replace('file://', '')
-        const base64Image = (await fs.readFile(cleanPath)).toString('base64')
-        return {
-          type: 'content',
-          value: [
-            { type: 'image-data', data: base64Image, mediaType: 'image/png' },
-            { type: 'text', text: `Screenshot captured: ${output.filePath}` }
-          ]
+        // HIGH-6 FIX: Use closure-scoped convId instead of global getActiveConversationId()
+        // This ensures the screenshot always saves to the directory of the thread that requested it,
+        // even if the user has switched threads in the UI.
+        const screenshotDir = join(app.getPath('userData'), 'conversations', convId, 'screenshots')
+        await fs.mkdir(screenshotDir, { recursive: true })
+
+        // Rotate: keep only the last 10 screenshots
+        try {
+          const existing = await fs.readdir(screenshotDir)
+          const pngs = existing.filter((f) => f.endsWith('.png')).sort()
+          for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) {
+            await fs.rm(join(screenshotDir, old), { force: true })
+          }
+        } catch {}
+
+        const filename = `screenshot_${Date.now()}.png`
+        const screenshotPath = join(screenshotDir, filename)
+        const res = await agent.screenshot(screenshotPath)
+        if (res.success) {
+          return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename }
         }
+        return res
       } catch (err: any) {
-        return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }] }
+        log.error('[tool:browserScreenshot] worker error:', err)
+        return { success: false, error: err.message }
       }
+    },
+    toModelOutput: async ({ output }: { output: any }) => {
+      if (output.success && output.filePath) {
+        try {
+          const cleanPath = output.filePath.replace('file://', '')
+          const base64Image = (await fs.readFile(cleanPath)).toString('base64')
+          return {
+            type: 'content',
+            value: [
+              { type: 'image-data', data: base64Image, mediaType: 'image/png' },
+              { type: 'text', text: `Screenshot captured: ${output.filePath}` }
+            ]
+          }
+        } catch (err: any) {
+          return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }] }
+        }
+      }
+      return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
     }
-    return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
-  }
-})
+  })
 
-const browserMouseClickCoordinate = tool({
-  description: 'Clicks at a specific pixel coordinate.',
-  inputSchema: z.object({
-    x: z.number().int().describe('X coordinate.'),
-    y: z.number().int().describe('Y coordinate.'),
-    button: z.enum(['left', 'right', 'middle']).default('left').describe('Mouse button.')
-  }),
-  execute: async ({ x, y, button }) => {
-    log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
-    const check = checkBrowserViewActive()
-    if (check) return check
-    const agent = startBrowserAgentWorker()
-    try { return await agent.mouseClickCoordinate(x, y, button) }
-    catch (err: any) { log.error('[tool:browserMouseClickCoordinate] worker error:', err); return { success: false, error: err.message } }
-  }
-})
+  const browserMouseClickCoordinate = tool({
+    description: 'Clicks at a specific pixel coordinate.',
+    inputSchema: z.object({
+      x: z.number().int().describe('X coordinate.'),
+      y: z.number().int().describe('Y coordinate.'),
+      button: z.enum(['left', 'right', 'middle']).default('left').describe('Mouse button.')
+    }),
+    execute: async ({ x, y, button }) => {
+      log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
+      const check = checkBrowserViewActive()
+      if (check) return check
+      const agent = startBrowserAgentWorker()
+      try { return await agent.mouseClickCoordinate(x, y, button) }
+      catch (err: any) { log.error('[tool:browserMouseClickCoordinate] worker error:', err); return { success: false, error: err.message } }
+    }
+  })
 
-export const browserTools = {
-  browserNavigate,
-  browserType,
-  browserScroll,
-  browserScreenshot,
-  browserMouseClickCoordinate
+  return { browserNavigate, browserType, browserScroll, browserScreenshot, browserMouseClickCoordinate }
 }

@@ -1,60 +1,60 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { validateAnonKey } from "../_shared/auth.ts";
+import { createHandler, jsonResponse, errorResponse } from "../_shared/handler.ts";
 
-const ALLOWED_ORIGIN = "app://orch-code";
+// HIGH-11 FIX: Added strict input validation — previously query/domain/maxResults
+// had zero validation, allowing empty queries, malicious domains, and maxResults=10000.
+const MAX_QUERY_LENGTH = 500;
+const MAX_RESULTS_LIMIT = 10;
+const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$/;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+serve(createHandler(async (req, env) => {
+  const tavilyKey = env["TAVILY_API_KEY"];
+  if (!tavilyKey) {
+    return errorResponse("Server Configuration Error: TAVILY_API_KEY is missing.", 500);
   }
 
-  const expectedAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const projectRef = supabaseUrl ? new URL(supabaseUrl).hostname.split('.')[0] : '';
-
-  if (!expectedAnonKey) {
-    return new Response("Server Configuration Error: SUPABASE_ANON_KEY is missing.", { status: 500, headers: corsHeaders });
-  }
-
-  if (!validateAnonKey(req, expectedAnonKey, projectRef)) {
-    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-  }
-
+  let body: any;
   try {
-    const { query, domain, maxResults } = await req.json();
-    const apiKey = Deno.env.get("TAVILY_API_KEY");
-    if (!apiKey) {
-      throw new Error("Server Configuration Error: TAVILY_API_KEY is missing.");
-    }
-
-    const response = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query,
-        include_domains: domain ? [domain] : undefined,
-        include_answer: true,
-        max_results: maxResults ?? 5,
-      }),
-    });
-
-    const data = await response.json();
-    return new Response(JSON.stringify(data), {
-      status: response.status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    body = await req.json();
+  } catch {
+    return errorResponse("Invalid JSON body.", 400);
   }
-});
+
+  const { query, domain, maxResults } = body;
+
+  // Validate query
+  if (!query || typeof query !== "string" || query.trim().length === 0) {
+    return errorResponse("'query' is required and must be a non-empty string.", 400);
+  }
+  if (query.length > MAX_QUERY_LENGTH) {
+    return errorResponse(`'query' must not exceed ${MAX_QUERY_LENGTH} characters.`, 400);
+  }
+
+  // Validate domain (optional)
+  if (domain !== undefined && domain !== null) {
+    if (typeof domain !== "string" || !DOMAIN_PATTERN.test(domain)) {
+      return errorResponse("'domain' must be a valid domain name (e.g. example.com).", 400);
+    }
+  }
+
+  // Validate maxResults — cap at 10 to prevent billing abuse
+  const resolvedMaxResults = Math.min(
+    Math.max(1, Number.isInteger(maxResults) ? maxResults : 5),
+    MAX_RESULTS_LIMIT
+  );
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: tavilyKey,
+      query: query.trim(),
+      include_domains: domain ? [domain] : undefined,
+      include_answer: true,
+      max_results: resolvedMaxResults,
+    }),
+  });
+
+  const data = await response.json();
+  return jsonResponse(data, response.status);
+}));

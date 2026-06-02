@@ -1,0 +1,51 @@
+/* --- General Buttons & Reusable Interaction Elements --- */
+.btn {
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: var(--font-size-sm-plus);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn.primary {
+  background-color: var(--text-primary);
+  color: var(--bg-app);
+  border-color: transparent;
+}
+
+.btn.primary:hover {
+  background-color: #ffffff;
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgba(156, 156, 156, 0.4) 0%,
+    rgba(243, 243, 243, 0.95) 50%,
+    rgba(156, 156, 156, 0.4) 100%
+  );
+  background-size: 150% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2.2s infinite linear;
+  font-weight: 500;
+  display: inline-block;
+}

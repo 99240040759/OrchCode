@@ -1,4 +1,6 @@
-appId: com.electron.app
+# MED-12 FIX: Changed from boilerplate 'com.electron.app' to proper app ID.
+# This affects macOS Keychain access, notification permissions, and app identity.
+appId: com.orchcode.app
 productName: Orch Code
 directories:
   buildResources: build
@@ -24,6 +26,9 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+  # HIGH-10: notarize requires Apple Developer credentials (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+  # APPLE_TEAM_ID env vars + hardened runtime entitlements). Set to false for dev builds.
+  # To enable: set notarize: true and configure credentials in CI environment.
   notarize: false
 dmg:
   artifactName: Orch Code-${arch}.${ext}
@@ -33,16 +38,12 @@ linux:
     - AppImage
     - snap
     - deb
-  maintainer: electronjs.org
-  category: Utility
+  maintainer: team@orchcode.app
+  category: Development
 appImage:
   artifactName: ${name}-${version}.${ext}
-# Allow electron-builder to rebuild native dependencies per-target arch.
-# Previously set to false which prevented rebuilding for x64 when running on arm64.
-# Remove or set to true so `install-app-deps` can rebuild native modules.
 npmRebuild: true
 publish:
   provider: github
   owner: sameer786ss
   repo: OrchCode
-

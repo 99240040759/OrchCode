@@ -7,6 +7,7 @@ import {
   chatMessagesAtom,
   activeWorkspaceAtom,
   sessionTokensAtom,
+  filesChangedAtom,
   type ChatMessage
 } from '../store/agentStore'
 import type { ThreadEntry } from '../../../preload/index.d'
@@ -20,6 +21,7 @@ export function useThreads() {
   const setActiveWorkspace = useSetAtom(activeWorkspaceAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
+  const setFilesChanged = useSetAtom(filesChangedAtom)
 
   const activeRef = useRef<string | null>(activeThreadId)
 
@@ -41,6 +43,7 @@ export function useThreads() {
     setConversationId(threadId)
     setMessages([])
     setSessionTokens(0)
+    setFilesChanged([]) // HIGH-1 FIX: Clear file diff indicators when switching threads
 
     // Set session first, then immediately bind workspace BEFORE returning control.
     // This prevents any IPC fired between the two calls from getting a default workspace context.
@@ -90,7 +93,7 @@ export function useThreads() {
     } catch (err) {
       console.error('[useThreads] Failed to load thread messages:', err)
     }
-  }, [setActiveThreadId, setConversationId, setMessages, setSessionTokens, setActiveWorkspace, threads])
+  }, [setActiveThreadId, setConversationId, setMessages, setSessionTokens, setFilesChanged, setActiveWorkspace, threads])
 
   const newConversation = useCallback(async () => {
     try {
@@ -102,13 +105,14 @@ export function useThreads() {
       setActiveThreadId(newId)
       setMessages([])
       setSessionTokens(0)
+      setFilesChanged([]) // HIGH-1 FIX: Clear file diff indicators for new conversation
       await loadThreads()
       return newId
     } catch (err) {
       console.error('[useThreads] New conversation error:', err)
       return null
     }
-  }, [activeWorkspace, setConversationId, setActiveThreadId, setMessages, setSessionTokens, loadThreads])
+  }, [activeWorkspace, setConversationId, setActiveThreadId, setMessages, setSessionTokens, setFilesChanged, loadThreads])
 
   const deleteThread = useCallback(async (threadId: string) => {
     try {

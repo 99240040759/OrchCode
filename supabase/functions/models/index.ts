@@ -1,34 +1,23 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { validateAnonKey } from "../_shared/auth.ts";
+import { createHandler, jsonResponse, errorResponse } from "../_shared/handler.ts";
 
-const ALLOWED_ORIGIN = "app://orch-code";
+// MED-6 FIX: Model IDs/names now read from environment variables,
+// no longer hardcoded. Change models without redeploying the function.
+// Set GEMINI_MODEL_ID, GEMINI_MODEL_NAME, GEMMA_MODEL_ID, GEMMA_MODEL_NAME in Supabase secrets.
+const DEFAULT_GEMINI_ID = "gemini-2.5-flash-preview-05-20";
+const DEFAULT_GEMINI_NAME = "Gemini 2.5 Flash";
+const DEFAULT_GEMMA_ID = "gemma-3-27b-it";
+const DEFAULT_GEMMA_NAME = "Gemma 3 27B";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+serve(createHandler(async (_req, env) => {
+  const gemini = {
+    id: env["GEMINI_MODEL_ID"] || DEFAULT_GEMINI_ID,
+    name: env["GEMINI_MODEL_NAME"] || DEFAULT_GEMINI_NAME,
+  };
+  const gemma = {
+    id: env["GEMMA_MODEL_ID"] || DEFAULT_GEMMA_ID,
+    name: env["GEMMA_MODEL_NAME"] || DEFAULT_GEMMA_NAME,
+  };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  const expectedAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const projectRef = supabaseUrl ? new URL(supabaseUrl).hostname.split('.')[0] : '';
-
-  if (!expectedAnonKey) {
-    return new Response("Server Configuration Error: SUPABASE_ANON_KEY is missing.", { status: 500, headers: corsHeaders });
-  }
-
-  if (!validateAnonKey(req, expectedAnonKey, projectRef)) {
-    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-  }
-
-  const gemini = { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite" }
-  const gemma = { id: "gemma-4-26b-a4b-it", name: "Gemma 4" }
-
-  return new Response(JSON.stringify({ gemini, gemma }), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-});
+  return jsonResponse({ gemini, gemma });
+}));

@@ -221,3 +221,16 @@
   animation: spin 0.8s linear infinite;
   margin-top: 8px;
 }
+
+.onboarding-error {
+  font-size: 12px;
+  color: #ef4444;
+  text-align: center;
+  margin: 0;
+  padding: 6px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}

@@ -1,0 +1,69 @@
+/* --- Radix UI Tabs & ScrollArea Custom Themes --- */
+/* Headless tab triggers */
+.tab-trigger {
+  padding: 0 16px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: var(--font-size-xs-plus);
+  border: none;
+  background: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  color: var(--text-secondary);
+}
+
+.tab-trigger[data-state="active"] {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.04);
+  font-weight: 500;
+}
+
+.tab-trigger:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Headless ScrollArea classes */
+.ScrollAreaRoot {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ScrollAreaViewport {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.ScrollAreaScrollbar {
+  display: flex;
+  user-select: none;
+  touch-action: none;
+  padding: 2px;
+  background: transparent;
+  transition: background 160ms ease-out;
+  width: 8px;
+  z-index: 20;
+}
+
+.ScrollAreaScrollbar:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ScrollAreaThumb {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+
+.ScrollAreaThumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.ScrollAreaCorner {
+  background: rgba(0, 0, 0, 0.2);
+}

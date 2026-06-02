@@ -6,6 +6,7 @@ import type { ChatMessage } from '../store/agentStore'
 import { ChevronDown } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import './ChatThread.css'
 
 const decodeBase64 = (base64Str: string): string => {
   try {
@@ -32,7 +33,7 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
 
   return (
     <div className="chat-message-user-container">
-      <div className="chat-message-user" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="chat-message-user chat-message-user-content">
         {attachments.length > 0 && (
           <div className="message-attachments">
             {attachments.map((att, idx) => {
@@ -65,7 +66,6 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
                   className="message-attachment-chip"
                   onClick={att.type === 'image' ? handleOpenImg : handleOpenDoc}
                   title={att.name}
-                  style={{ cursor: 'pointer' }}
                 >
                   {att.type === 'image' ? (
                     <img
@@ -78,10 +78,10 @@ const UserMessage = React.memo(({ message }: { message: ChatMessage }) => {
                       autoAssign={true}
                       width={14}
                       height={14}
-                      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                      className="chat-attachment-icon"
                     />
                   )}
-                  <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="chat-attachment-name">
                     {att.name.split('/').pop() || att.name}
                   </span>
                 </div>
@@ -134,32 +134,17 @@ const ReasoningBlock = React.memo(({ content, durationMs, isStreaming }: { conte
       }}
       className="chat-reasoning-details"
     >
-      <summary
-        className="chat-reasoning-summary"
-        style={{
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          listStyle: 'none'
-        }}
-      >
+      <summary className="chat-reasoning-summary chat-reasoning-summary-content">
         <span>{title}</span>
         <ChevronDown
           size={14}
           className="chat-reasoning-chevron"
-          style={{
-            transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-            transition: 'transform 0.12s ease',
-            flexShrink: 0
-          }}
         />
       </summary>
 
       <div
         ref={scrollRef}
         className="assistant-content chat-reasoning-body"
-        style={{ paddingBottom: '8px' }}
       >
         <MarkdownRenderer content={content || 'Thinking...'} />
       </div>
@@ -319,7 +304,6 @@ const ChatThread: React.FC = () => {
         <div
           key={message.id}
           className="chat-thread-message-wrapper"
-          style={{ overflowAnchor: 'none' }}
         >
           {message.role === 'user' ? (
             <UserMessage message={message} />
@@ -328,8 +312,8 @@ const ChatThread: React.FC = () => {
           )}
         </div>
       ))}
-      <div className="chat-thread-spacer-bottom" style={{ overflowAnchor: 'none' }} />
-      <div style={{ overflowAnchor: 'auto', height: '1px', marginTop: '-1px' }} />
+      <div className="chat-thread-spacer-bottom" />
+      <div className="chat-thread-anchor" />
     </div>
   )
 }

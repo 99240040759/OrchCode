@@ -9,10 +9,6 @@ import {
   Globe,
   TerminalSquare,
   FileText,
-  ArrowLeft,
-  ArrowRight,
-  RotateCw,
-  ExternalLink,
   ClipboardList,
   BookOpen,
   ListTodo,
@@ -45,6 +41,11 @@ import type { ArtifactEntry } from '../../../preload/index.d'
 import Skeleton from 'react-loading-skeleton'
 import 'react-loading-skeleton/dist/skeleton.css'
 import { isAgentArtifact, getDisplayName } from '../lib/uiUtils'
+import OverviewPanel from './OverviewPanel'
+import './ArtifactPanel.css'
+import TerminalView from './TerminalView'
+import BrowserView from './BrowserView'
+import type { TerminalViewHandle } from './TerminalView'
 
 const getArtifactIcon = (name: string) => {
   if (name === 'implementation_plan.md') {
@@ -71,347 +72,6 @@ const getRelativeDirPath = (filePath: string, workspacePath?: string) => {
   return ''
 }
 
-import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import '@xterm/xterm/css/xterm.css'
-
-interface TerminalViewHandle {
-  fit: () => void
-}
-
-const TerminalView = React.forwardRef<TerminalViewHandle, { workspacePath?: string }>(({ workspacePath }, ref) => {
-  const conversationId = useAtomValue(conversationIdAtom)
-  const termContainerRef = useRef<HTMLDivElement>(null)
-
-  const fitAddonRef = useRef<FitAddon | null>(null)
-  const ptyIdRef = useRef<string | null>(null)
-  const unsubDataRef = useRef<(() => void) | null>(null)
-  const unsubExitRef = useRef<(() => void) | null>(null)
-
-  React.useImperativeHandle(ref, () => ({
-    fit: () => {
-      try {
-        if (termContainerRef.current && termContainerRef.current.clientWidth > 0) {
-          fitAddonRef.current?.fit()
-        }
-      } catch {}
-    }
-  }))
-
-  useEffect(() => {
-    if (!termContainerRef.current) return
-    let active = true
-    let fitTimeout: NodeJS.Timeout | null = null
-
-    const rootStyle = getComputedStyle(document.documentElement)
-    const bgEditor = rootStyle.getPropertyValue('--bg-editor').trim()
-    const textPrimary = rootStyle.getPropertyValue('--text-primary').trim()
-    const textMuted = rootStyle.getPropertyValue('--text-muted').trim()
-    const accentBlue = rootStyle.getPropertyValue('--accent-blue').trim()
-    const accentGreen = rootStyle.getPropertyValue('--accent-green').trim()
-    const accentOrange = rootStyle.getPropertyValue('--accent-orange').trim()
-    const accentPurple = rootStyle.getPropertyValue('--accent-purple').trim()
-    const accentRed = rootStyle.getPropertyValue('--accent-red').trim()
-
-    const term = new XTerm({
-      theme: {
-        background: bgEditor,
-        foreground: textPrimary,
-        cursor: textPrimary,
-        selectionBackground: 'rgba(255, 255, 255, 0.1)',
-        black: '#1c1c1c',
-        brightBlack: textMuted,
-        red: accentRed,
-        brightRed: accentRed,
-        green: accentGreen,
-        brightGreen: accentGreen,
-        yellow: accentOrange,
-        brightYellow: accentOrange,
-        blue: accentBlue,
-        brightBlue: accentBlue,
-        magenta: accentPurple,
-        brightMagenta: accentPurple,
-        cyan: '#06b6d4',
-        brightCyan: '#22d3ee',
-        white: textPrimary,
-        brightWhite: '#ffffff'
-      },
-      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-      fontSize: 13,
-      lineHeight: 1.4,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      scrollback: 5000,
-      allowTransparency: false,
-      convertEol: true
-    })
-
-    const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
-    term.loadAddon(fitAddon)
-    term.loadAddon(webLinksAddon)
-    term.open(termContainerRef.current)
-
-    fitTimeout = setTimeout(() => {
-      if (active) {
-        try { fitAddon.fit() } catch {}
-      }
-    }, 50)
-
-    fitAddonRef.current = fitAddon
-
-    const { cols, rows } = term
-    window.api.createTerminal({ cols, rows, cwd: workspacePath, conversationId }).then(({ id }) => {
-      if (!active) {
-        window.api.closeTerminal({ id }).catch(console.error)
-        return
-      }
-      ptyIdRef.current = id
-
-      unsubDataRef.current = window.api.onTerminalData(({ id: dataId, data }) => {
-        if (dataId === id) term.write(data)
-      })
-
-      unsubExitRef.current = window.api.onTerminalExit(({ id: exitId }) => {
-        if (exitId === id) {
-          term.write('\r\n\x1b[2m[Process exited]\x1b[0m\r\n')
-          ptyIdRef.current = null
-        }
-      })
-
-      term.onData((data) => {
-        if (ptyIdRef.current) window.api.terminalInput({ id: ptyIdRef.current, data })
-      })
-    }).catch((err) => {
-      if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
-    })
-
-    const debouncedResize = debounce(() => {
-      if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
-        try { fitAddon.fit() } catch {}
-        if (ptyIdRef.current) {
-          window.api.terminalResize({ id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
-        }
-      }
-    }, 100)
-
-    const resizeObs = new ResizeObserver(() => {
-      debouncedResize()
-    })
-    resizeObs.observe(termContainerRef.current)
-
-    return () => {
-      active = false
-      if (fitTimeout) clearTimeout(fitTimeout)
-      debouncedResize.cancel()
-      resizeObs.disconnect()
-      if (unsubDataRef.current) unsubDataRef.current()
-      if (unsubExitRef.current) unsubExitRef.current()
-      if (ptyIdRef.current) {
-        window.api.closeTerminal({ id: ptyIdRef.current }).catch(() => {})
-        ptyIdRef.current = null
-      }
-      term.dispose()
-    }
-  }, [workspacePath, conversationId])
-
-  return (
-    <div
-      ref={termContainerRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'var(--bg-sidebar)',
-        padding: '16px 20px'
-      }}
-    />
-  )
-})
-TerminalView.displayName = 'TerminalView'
-
-const BrowserView: React.FC = () => {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [urlInput, setUrlInput] = useState('https://google.com')
-  const [displayUrl, setDisplayUrl] = useState('')
-  const [title, setTitle] = useState('Browser')
-  const [isLoaded, setIsLoaded] = useState(false)
-  const isLoadedRef = useRef(false)
-  const panelMode = useAtomValue(artifactPanelModeAtom)
-  const isOpen = useAtomValue(isArtifactPanelOpenAtom)
-
-  const panelModeRef = useRef(panelMode)
-  const isOpenRef = useRef(isOpen)
-
-  useEffect(() => {
-    panelModeRef.current = panelMode
-  }, [panelMode])
-
-  useEffect(() => {
-    isOpenRef.current = isOpen
-  }, [isOpen])
-
-  const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
-    if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) {
-      return { x: 0, y: 0, width: 0, height: 0 }
-    }
-    const rect = containerRef.current.getBoundingClientRect()
-    return {
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    }
-  }, [])
-
-  const navigate = useCallback((url: string) => {
-    const target = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
-    window.api.navigateBrowser(target)
-    setUrlInput(target)
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    const rafId = requestAnimationFrame(() => {
-      if (!active) return
-      const bounds = getBounds()
-      window.api.openBrowser({ url: urlInput, bounds }).then(() => {
-        if (active) {
-          setIsLoaded(true)
-          isLoadedRef.current = true
-        }
-      }).catch(console.error)
-    })
-
-    const unsubTitle = window.api.onBrowserTitleUpdated((t) => {
-      if (active) setTitle(t)
-    })
-    const unsubUrl = window.api.onBrowserUrlChanged((u) => {
-      if (active) {
-        setDisplayUrl(u)
-        setUrlInput(u)
-      }
-    })
-
-    const resizeObs = new ResizeObserver(() => {
-      if (active && isLoadedRef.current) {
-        window.api.resizeBrowser(getBounds()).catch(() => {})
-      }
-    })
-    if (containerRef.current) resizeObs.observe(containerRef.current)
-
-    return () => {
-      active = false
-      cancelAnimationFrame(rafId)
-      resizeObs.disconnect()
-      unsubTitle()
-      unsubUrl()
-      window.api.closeBrowser().catch(() => {})
-      setIsLoaded(false)
-      isLoadedRef.current = false
-    }
-  }, [getBounds])
-
-  useEffect(() => {
-    if (isLoadedRef.current) {
-      const bounds = getBounds()
-      window.api.resizeBrowser(bounds).catch(() => {})
-    }
-  }, [panelMode, isOpen, getBounds])
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden' }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
-          backgroundColor: 'var(--bg-sidebar)',
-          borderBottom: '1px solid var(--border-color)',
-          flexShrink: 0
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button
-            className="browser-nav-btn"
-            onClick={() => window.api.browserBack()}
-            title="Back"
-          >
-            <ArrowLeft size={14} />
-          </button>
-          <button
-            className="browser-nav-btn"
-            onClick={() => window.api.browserForward()}
-            title="Forward"
-          >
-            <ArrowRight size={14} />
-          </button>
-          <button
-            className="browser-nav-btn"
-            onClick={() => window.api.browserReload()}
-            title="Reload"
-          >
-            <RotateCw size={13} />
-          </button>
-        </div>
-
-        <input
-          className="browser-url-bar"
-          value={urlInput}
-          onChange={(e) => setUrlInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') navigate(urlInput)
-          }}
-          spellCheck={false}
-          placeholder="Enter URL or search..."
-        />
-
-        <button
-          className="browser-nav-btn"
-          onClick={() => navigate(urlInput)}
-          title="Go"
-          style={{ color: 'var(--accent-blue)' }}
-        >
-          <ExternalLink size={13} />
-        </button>
-
-        {title && (
-          <div
-            style={{
-              fontSize: 'var(--font-size-xxs)',
-              color: 'var(--text-secondary)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: 180,
-              marginLeft: 'auto',
-              paddingLeft: 8
-            }}
-            title={displayUrl || urlInput}
-          >
-            {title}
-          </div>
-        )}
-      </div>
-
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          backgroundColor: 'transparent',
-          position: 'relative'
-        }}
-      >
-        {!isLoaded && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-            Loading browser...
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
 const OverviewPanel: React.FC<{
   activeConvId: string
@@ -610,9 +270,9 @@ const OverviewPanel: React.FC<{
   )
 }
 
-
-
 let monacoInitialized = false
+
+const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
 const ArtifactPanel: React.FC = () => {
   const [isOpen, setIsOpen] = useAtom(isArtifactPanelOpenAtom)
@@ -666,7 +326,7 @@ const ArtifactPanel: React.FC = () => {
     }
   }
 
-  const terminalRef = useRef<{ fit: () => void } | null>(null)
+  const terminalRef = useRef<TerminalViewHandle | null>(null)
   // #17 fix: only call closeBrowser when it was actually opened — track with ref
   const browserWasOpenedRef = useRef(false)
 
@@ -974,7 +634,7 @@ const ArtifactPanel: React.FC = () => {
           backgroundColor: 'var(--bg-sidebar)',
           borderBottom: '1px solid var(--border-color)',
           flexShrink: 0,
-          paddingRight: '12px',
+          paddingRight: isMac ? '12px' : '140px',
           overflowX: 'auto',
           scrollbarWidth: 'none'
         }}

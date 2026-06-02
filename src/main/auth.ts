@@ -5,6 +5,7 @@ import https from 'https'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import log from 'electron-log'
+import { escapeHtml } from './workspace'
 
 export interface UserProfile {
   uid: string
@@ -284,7 +285,7 @@ export async function initAuth() {
           }
           if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'text/html' })
-            res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' + err.message + '</p></div></body></html>')
+            res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' + escapeHtml(err.message) + '</p></div></body></html>')
           }
           pendingLoginReject = null
           reject(err)

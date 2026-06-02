@@ -1,13 +1,16 @@
 import React, { useState } from 'react'
 import './OnboardingView.css'
 import { GoogleIcon } from '../lib/uiUtils'
+import { toast } from 'sonner'
 
 export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
   const [user, setUser] = useState<{ name?: string; email?: string; photoUrl?: string } | null>(null)
 
   const handleSignIn = async () => {
     setLoading(true)
+    setAuthError(null)
     try {
       const profile = await window.api.startGoogleAuth()
       if (profile) {
@@ -17,9 +20,14 @@ export const OnboardingView: React.FC = () => {
         }, 2500)
       } else {
         setLoading(false)
+        setAuthError('Sign-in was cancelled or no profile returned.')
+        toast.error('Sign-in cancelled. Please try again.')
       }
-    } catch (err) {
+    } catch (err: any) {
       setLoading(false)
+      const msg = err?.message || 'Unknown error'
+      setAuthError(msg)
+      toast.error(`Sign-in failed: ${msg}`)
       console.error('Onboarding Sign-in failed:', err)
     }
   }
@@ -44,10 +52,15 @@ export const OnboardingView: React.FC = () => {
                 <span className="onboarding-loading-text">Connecting to Google Auth...</span>
               </div>
             ) : (
-              <button className="onboarding-btn" onClick={handleSignIn}>
-                <GoogleIcon size={18} />
-                <span className="onboarding-btn-text">Sign In with Google</span>
-              </button>
+              <>
+                <button className="onboarding-btn" onClick={handleSignIn}>
+                  <GoogleIcon size={18} />
+                  <span className="onboarding-btn-text">Sign In with Google</span>
+                </button>
+                {authError && (
+                  <p className="onboarding-error">{authError}</p>
+                )}
+              </>
             )}
           </div>
         ) : (

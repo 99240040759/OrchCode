@@ -1,0 +1,38 @@
+/* --- Left Sidebar Component & Tree Nodes --- */
+.sidebar {
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  contain: layout paint;
+}
+
+/* sidebar width is controlled by inline style (250px hardcoded) — no .collapsed variant needed */
+.sidebar.expanded {
+  width: var(--sidebar-width-expanded);
+}
+
+.sidebar-divider {
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.06);
+  width: 100%;
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+}
