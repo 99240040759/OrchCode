@@ -68,3 +68,24 @@
 .panel-resize-handle[data-resize-handle-active] {
   background-color: var(--border-focus);
 }
+
+/* UI-1: Thin icon rail shown when the sidebar is collapsed.
+   Gives users a clear click target to re-expand — no more invisible void. */
+.sidebar-collapsed-rail {
+  width: 40px;
+  flex-shrink: 0;
+  height: 100vh;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: calc(var(--titlebar-height) + 12px);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.sidebar-collapsed-rail:hover {
+  background-color: var(--bg-sidebar-hover, rgba(255,255,255,0.04));
+}

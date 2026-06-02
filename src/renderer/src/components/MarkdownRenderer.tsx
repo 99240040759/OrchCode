@@ -16,7 +16,7 @@ interface MarkdownRendererProps {
 
 type CodeChildProps = { className?: string; children?: React.ReactNode }
 
-// FIXED: Extract text recursively from any React node
+// Extract text recursively from any React node
 function extractText(node: any): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
   if (Array.isArray(node)) return node.map(extractText).join('')
@@ -24,9 +24,9 @@ function extractText(node: any): string {
   return ''
 }
 
-// FIXED: Build a stable components factory using a ref bag to hold setters/state.
+// Build a stable components factory using a ref bag to hold setters/state.
 // This prevents the ReactMarkdown components object from being recreated on every render,
-// which was causing full tree re-renders during streaming (HIGH-3).
+// which was causing full tree re-renders during streaming.
 function useMarkdownComponents(isArtifact: boolean) {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
@@ -37,12 +37,16 @@ function useMarkdownComponents(isArtifact: boolean) {
   const stateRef = React.useRef({ setArtifactPanelOpen, setActiveEditorFile, setArtifactPanelMode, conversationId })
   stateRef.current = { setArtifactPanelOpen, setActiveEditorFile, setArtifactPanelMode, conversationId }
 
-  // Stable components object — only recreated if isArtifact changes (practically never)
+  // Stable components object \u2014 only recreated if isArtifact changes (practically never)
   return React.useMemo(() => ({
     hr: () => null,
     a: ({ href, children, ...props }: any) => {
       if (href && href.startsWith('file://')) {
-        let filePath = decodeURIComponent(href.replace(/^\/file:\/\/\/?/, '').replace(/^file:\/\/\/?/, ''))
+        // MINOR-5: Strip the file:// prefix BEFORE decoding so %3A in the drive
+        // letter (e.g. C%3A) is decoded correctly. Old order (decode then strip)
+        // would leave a stray leading slash on Windows paths like /C:/path.
+        const stripped = href.replace(/^file:\/\/\/?/, '')
+        let filePath = decodeURIComponent(stripped)
         if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) {
           filePath = '/' + filePath
         }

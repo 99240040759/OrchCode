@@ -17,7 +17,8 @@ export const OnboardingView: React.FC = () => {
         setUser(profile)
         setTimeout(() => {
           window.api.openMainAndCloseOnboarding()
-        }, 2500)
+        // UI-10: Reduced from 2500ms — 1200ms feels snappy while still showing brand
+        }, 1200)
       } else {
         setLoading(false)
         setAuthError('Sign-in was cancelled or no profile returned.')

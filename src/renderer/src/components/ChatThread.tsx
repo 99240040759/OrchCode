@@ -236,15 +236,20 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
   const nb = next.message.orderedBlocks
   if (pb?.length !== nb?.length) return false
   if (pb && nb && pb.length > 0) {
-    const lastP = pb[pb.length - 1]
-    const lastN = nb[nb.length - 1]
-    if (lastP.type !== lastN.type) return false
-    if (lastP.type === 'text' && lastN.type === 'text' && lastP.content !== lastN.content) return false
-    if (lastP.type === 'reasoning' && lastN.type === 'reasoning') {
-      if (lastP.content !== lastN.content || lastP.isStreaming !== lastN.isStreaming) return false
-    }
-    if (lastP.type === 'tool' && lastN.type === 'tool') {
-      if (lastP.status !== lastN.status || lastP.result !== lastN.result) return false
+    // UI-7: Check ALL blocks, not just the last one.
+    // Previously only the last block was compared, so mutations to middle blocks
+    // (e.g. a tool block going from pending→complete) would be silently missed.
+    for (let i = 0; i < pb.length; i++) {
+      const p = pb[i]
+      const n = nb[i]
+      if (p.type !== n.type) return false
+      if (p.type === 'text' && n.type === 'text' && p.content !== n.content) return false
+      if (p.type === 'reasoning' && n.type === 'reasoning') {
+        if (p.content !== n.content || p.isStreaming !== n.isStreaming) return false
+      }
+      if (p.type === 'tool' && n.type === 'tool') {
+        if (p.status !== n.status || p.result !== n.result) return false
+      }
     }
   }
   return true

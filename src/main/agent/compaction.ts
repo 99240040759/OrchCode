@@ -1,5 +1,6 @@
 import { generateText } from 'ai'
-import { google, getAvailableModels } from '../index'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { geminiLimiter } from '../limiters'
 import {
   getThreadMessages,
   getLastCompactedMessageId,
@@ -8,6 +9,30 @@ import {
   saveMessage
 } from '../db'
 import log from 'electron-log'
+
+// CRIT-5: Compaction uses its own google provider instance sourced directly from env,
+// breaking the circular dependency on index.ts. This provider is still rate-limited
+// via geminiLimiter so compaction doesn't burst through the queue.
+//
+// Compaction always uses a fixed model (gemma via gemini endpoint) regardless of the
+// user's selected model \u2014 intentional design: light-weight summarisation only.
+function makeCompactionProvider() {
+  return createGoogleGenerativeAI({
+    baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
+    apiKey: 'placeholder',
+    fetch: (url, options) => {
+      return geminiLimiter.schedule(() => {
+        const headers = new Headers(options?.headers || {})
+        headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+        headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+        return fetch(url, { ...options, headers })
+      })
+    }
+  })
+}
+
+// Fixed compaction model ID — intentionally gemma-4-31b-it (user requirement)
+const COMPACTION_MODEL_ID = 'gemma-4-31b-it'
 
 export async function triggerSemanticCompaction(threadId: string, _assistantMsgId: string): Promise<void> {
   log.info(`[compaction] Starting semantic summary for thread: ${threadId}`)
@@ -25,10 +50,10 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
     // We only summarize from the last compacted message up to (length - 15).
     const WINDOW_SIZE = 15
     const targetAnchorIndex = Math.max(0, fullHistory.length - WINDOW_SIZE)
-    
+
     // If there's nothing new to compact outside the window, skip it.
     if (targetAnchorIndex <= lastCompactionIndex) {
-       return
+      return
     }
 
     const newTurnsToCompact = fullHistory.slice(lastCompactionIndex + 1, targetAnchorIndex + 1)
@@ -42,7 +67,7 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
             const toolBlocks = blocks.filter((b: any) => b.type === 'tool')
             if (toolBlocks.length > 0) {
               const toolSummaries = toolBlocks.map((t: any) => {
-                let summary = `${t.toolName} → ${t.status}`
+                let summary = `${t.toolName} \u2192 ${t.status}`
                 if (t.result && t.status === 'complete') {
                   if (t.toolName === 'writeToFile' && t.result.absolutePath) {
                     summary += ` (created: ${t.result.absolutePath})`
@@ -54,12 +79,12 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
                     summary += ` (read: ${t.result.absolutePath})`
                   }
                 } else if (t.status === 'error' && t.result) {
-                  // NO MORE TRUNCATION: preserve up to 4000 chars for full error context
                   const errStr = typeof t.result === 'string' ? t.result : (t.result.error || JSON.stringify(t.result))
                   summary += ` (error: ${errStr.slice(0, 4000)})`
                 }
                 return summary
-              }).join('\\n')
+              // MINOR-3: Fixed \u2014 was join('\\n') which produced literal backslash-n, not newlines
+              }).join('\n')
               text += `\n(Tools:\n${toolSummaries})`
             }
           }
@@ -69,11 +94,10 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
     }).join('\n\n')
 
     const oldSummary = lastCompactionIndex !== -1 ? getThreadCompactionSummary(threadId) : null
-    const models = await getAvailableModels()
-    if (!models.gemini) throw new Error('Gemini model not configured.')
-    const compactionModel = models.gemini.id
 
-    log.info(`[compaction] Generating summary using ${compactionModel}...`)
+    log.info(`[compaction] Generating summary using fixed model ${COMPACTION_MODEL_ID}...`)
+
+    const compactionGoogle = makeCompactionProvider()
 
     let prompt = ''
     if (oldSummary) {
@@ -83,7 +107,7 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
     }
 
     const result = await generateText({
-      model: google(compactionModel),
+      model: compactionGoogle(COMPACTION_MODEL_ID),
       system: `You are an expert compiler of software agent states.
 Analyze the provided conversation history and compile a high-density, structured semantic summary.
 
@@ -118,5 +142,6 @@ Format as highly compressed, bulleted Markdown. No intro, no pleasantries.`,
     }
   } catch (err) {
     log.error('[compaction] Failed to generate semantic summary:', err)
+    throw err // re-throw so caller (.catch) receives it for token-reset logic
   }
 }

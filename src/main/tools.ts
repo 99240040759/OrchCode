@@ -8,8 +8,6 @@ import log from 'electron-log'
 import { tavilyLimiter } from './limiters'
 import {
   getWorkspaceContext,
-  getOrCreateWorkspaceContext,
-  isBinaryBuffer,
   assertWithinWorkspace
 } from './workspace'
 import { nodeAdapter } from './nodeAdapter'
@@ -21,7 +19,9 @@ import mime from 'mime-types'
 // ─── Workspace resolution ─────────────────────────────────────────────────
 
 function resolveWorkspace(convId: string) {
-  return getWorkspaceContext(convId) || getOrCreateWorkspaceContext(convId)
+  const ctx = getWorkspaceContext(convId)
+  if (!ctx) throw new Error(`No workspace context for conversation ${convId}. Workspace must be initialized before tool execution.`)
+  return ctx
 }
 
 // ─── Security ─────────────────────────────────────────────────────────────
@@ -41,6 +41,24 @@ function isCommandBlocked(command: string): boolean {
 
 const getMimeType = (filePath: string) => {
   return mime.lookup(filePath) || 'application/octet-stream'
+}
+
+const BINARY_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'application/octet-stream', 'application/zip', 'application/x-tar', 'application/pdf']
+const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/typescript']
+
+/**
+ * MED-11: Two-phase binary detection.
+ * Phase 1: Check MIME type from extension (fast, accurate for named binary files).
+ * Phase 2: Fall back to null-byte scan for files without extensions or with wrong extensions.
+ */
+function isFileBinary(filePath: string, buf: Buffer): boolean {
+  const detectedMime = getMimeType(filePath)
+  // If MIME is in known text prefixes, it's definitely not binary
+  if (TEXT_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return false
+  // If MIME is in known binary prefixes, it's definitely binary
+  if (BINARY_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return true
+  // Unknown/generic MIME \u2014 fall back to null-byte scan (original isBinaryBuffer logic)
+  return buf.subarray(0, 512).includes(0x00)
 }
 
 function sliceLines(allLines: string[], startLine: number, endLine: number) {
@@ -132,7 +150,8 @@ export function createCoreTools(convId: string) {
 
         const rawBuffer = await fs.readFile(safePath)
 
-        if (isBinaryBuffer(rawBuffer)) {
+        // MED-11: Use two-phase binary detection (MIME first, then null-byte scan)
+        if (isFileBinary(safePath, rawBuffer)) {
           const mimeType = getMimeType(safePath)
           return {
             content: `[Binary File: ${mimeType}] Base64 encoded data included.`,
@@ -333,30 +352,34 @@ export function createCoreTools(convId: string) {
       try {
         const ctx = wctx()
         const runDir = ctx.rootPath
-        
-        let cmd = `rg -n -I "${query.replace(/"/g, '\\"')}"`
+
+        // CRIT-4: Use args array with shell:false to prevent command injection.
+        // Previously: execa(cmd, { shell: true }) with unescaped glob patterns.
+        const args = ['-n', '-I', query]
         if (includes && includes.length > 0) {
-          const globs = includes.map(g => `-g "${g}"`).join(' ')
-          cmd += ` ${globs}`
+          for (const glob of includes) {
+            args.push('-g', glob)
+          }
         }
-        
-        const result = await execa(cmd, {
-          shell: true,
+
+        const result = await execa('rg', args, {
+          shell: false,
           cwd: runDir,
           reject: false,
           timeout: 10000
         })
-        
+
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
            return { success: true, results: 'No matches found.' }
         }
-        
+
         const output = result.stdout.trim()
         const lines = output.split('\n')
-        if (lines.length > 50) {
-           return { success: true, results: lines.slice(0, 50).join('\n') + `\n\n... (truncated ${lines.length - 50} more matches)` }
+        // MINOR-6: Increased from 50 to 200 lines — 50 was far too low for real codebases
+        if (lines.length > 200) {
+           return { success: true, results: lines.slice(0, 200).join('\n') + `\n\n... (truncated ${lines.length - 200} more matches. Refine your query or add glob filters.)` }
         }
-        
+
         return { success: true, results: output }
       } catch (err: any) {
         log.error('[tool:searchWorkspace] error:', err)

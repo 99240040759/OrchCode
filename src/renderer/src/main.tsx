@@ -1,5 +1,10 @@
 import { init as initSentry } from '@sentry/electron/renderer'
-import { getSharedWorker } from './lib/workerManager'
+import { getSharedWorker, terminateSharedWorker } from './lib/workerManager'
+
+// ARCH-3: Terminate background worker on renderer unload to prevent orphaned threads
+window.addEventListener('beforeunload', () => {
+  terminateSharedWorker()
+})
 
 // Initialize Sentry Renderer SDK (inherits DSN and enabled settings from Main)
 initSentry()

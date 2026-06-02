@@ -208,19 +208,26 @@ export async function initAuth() {
 
           const urlParams = new URLSearchParams(reqUrl.split('?')[1])
           const authCode = urlParams.get('code')
+          const authError = urlParams.get('error')
 
-          // Render Success landing page
+          // CRIT-6: Validate authCode BEFORE rendering the success page.
+          // Google returns ?error=access_denied (or similar) when user cancels.
+          if (!authCode || authError) {
+            const reason = authError || 'No authorization code returned'
+            log.warn(`[auth] Auth callback received without code: ${reason}`)
+            res.writeHead(200, { 'Content-Type': 'text/html' })
+            res.end(`<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Sign In Cancelled</h1><p style="color:#9c9c9c; font-size:14px;">Reason: ${escapeHtml(reason)}. You can close this tab and try again.</p></div></body></html>`)
+            if (tempServer) { tempServer.close(); tempServer = null }
+            pendingLoginReject = null
+            reject(new Error(`Auth cancelled: ${reason}`))
+            return
+          }
+
+          // Auth code is valid — now show success page and proceed with token exchange
           res.writeHead(200, { 'Content-Type': 'text/html' })
           res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #272727; text-align:center; max-width:400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"><h1 style="color:#10b981; font-size:24px; margin-bottom:10px;">Login Successful</h1><p style="color:#9c9c9c; font-size:14px; margin-bottom:20px;">You have successfully signed in. You can close this tab and return to your app.</p></div></body></html>')
-          
-          if (tempServer) {
-            tempServer.close()
-            tempServer = null
-          }
 
-          if (!authCode) {
-            throw new Error('Authorization code not returned by Google')
-          }
+          if (tempServer) { tempServer.close(); tempServer = null }
 
           log.info('[auth] Received Google auth code, exchanging for tokens...')
 

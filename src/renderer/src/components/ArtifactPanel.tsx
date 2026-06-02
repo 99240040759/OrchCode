@@ -72,7 +72,6 @@ const getRelativeDirPath = (filePath: string, workspacePath?: string) => {
 
 
 const OverviewPanel: React.FC<{
-  activeConvId: string
   artifacts: ArtifactEntry[]
   userFiles: FileChangeEntry[]
   loading: boolean
@@ -268,7 +267,15 @@ const OverviewPanel: React.FC<{
   )
 }
 
-let monacoInitialized = false
+// UI-2: Use window.__orchcodeMonacoInitialized instead of a plain module var.
+// During HMR in dev mode, module-level vars reset on hot reload but the window
+// object persists — avoiding duplicate theme registration errors.
+function isMonacoAlreadyInitialized(): boolean {
+  return !!(window as any).__orchcodeMonacoInitialized
+}
+function markMonacoInitialized(): void {
+  (window as any).__orchcodeMonacoInitialized = true
+}
 
 const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
@@ -332,7 +339,7 @@ const ArtifactPanel: React.FC = () => {
   const isMarkdown = displayFile?.name.endsWith('.md') ?? false
 
   useEffect(() => {
-    if (monacoInitialized) {
+    if (isMonacoAlreadyInitialized()) {
       setThemeLoaded(true)
       return
     }
@@ -470,7 +477,7 @@ const ArtifactPanel: React.FC = () => {
             'editorInfo.border': '#00000000'
           }
         })
-        monacoInitialized = true
+        markMonacoInitialized()
         setThemeLoaded(true)
       })
     })
@@ -733,7 +740,6 @@ const ArtifactPanel: React.FC = () => {
         {/* Overview Tab Content */}
         <Tabs.Content value="overview" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
           <OverviewPanel
-            activeConvId={convId}
             artifacts={artifacts}
             userFiles={userFiles}
             loading={loading}

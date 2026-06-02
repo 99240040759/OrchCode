@@ -10,6 +10,10 @@ const BrowserView: React.FC = () => {
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)
   const isLoadedRef = useRef(false)
+  // UI-8: Guard against double-close. ArtifactPanel also calls closeBrowser() on panel
+  // close, which unmounts BrowserView and triggers the cleanup below — resulting in two
+  // closeBrowser() calls. The second call tries to terminate an already-null worker.
+  const closedRef = useRef(false)
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
 
@@ -69,7 +73,12 @@ const BrowserView: React.FC = () => {
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()
-      window.api.closeBrowser().catch(() => {})
+      // UI-8: Only call closeBrowser once \u2014 guard against double-invocation
+      // from both unmount and ArtifactPanel's own close handler.
+      if (!closedRef.current) {
+        closedRef.current = true
+        window.api.closeBrowser().catch(() => {})
+      }
       setIsLoaded(false)
       isLoadedRef.current = false
     }

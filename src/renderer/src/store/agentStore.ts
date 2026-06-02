@@ -1,5 +1,21 @@
+// ARCH-2: Atoms live here. Types are in ./types.ts.
+// All existing imports from this file continue to work via re-exports below.
 import { atom } from 'jotai'
 import type { ThreadEntry, ArtifactEntry, UpdateStatus, UserProfile } from '../../../preload/index.d'
+
+// Re-export all types so existing imports `from '../store/agentStore'` keep working
+export type {
+  AgentRunState,
+  StreamBlock,
+  ChatMessage,
+  ToolCallEntry,
+  FileChangeEntry,
+  ArtifactPanelMode,
+  EditorFile,
+  ModelInfo
+} from './types'
+
+// ─── Atoms ────────────────────────────────────────────────────────────────────
 
 export const conversationIdAtom = atom<string>('')
 
@@ -12,47 +28,13 @@ export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
   return threads.find((t) => t.id === activeId)
 })
 
-type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
-export const agentRunStateAtom = atom<AgentRunState>('idle')
+export const agentRunStateAtom = atom<import('./types').AgentRunState>('idle')
 
-export type StreamBlock =
-  | { type: 'text'; content: string }
-  | { type: 'reasoning'; content: string; durationMs?: number; isStreaming?: boolean }
-  | { type: 'tool'; toolCallId: string; toolName: string; args: Record<string, unknown>; result?: unknown; status: 'pending' | 'complete' | 'error' }
-  | { type: 'compaction' }
-
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  data?: string
-  orderedBlocks?: StreamBlock[]
-  timestamp: number
-  isStreaming?: boolean
-}
-
-export interface ToolCallEntry {
-  id: string
-  toolName: string
-  args: Record<string, unknown>
-  result?: unknown
-  status: 'pending' | 'complete' | 'error'
-}
-
-export const chatMessagesAtom = atom<ChatMessage[]>([])
+export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
 
-export interface FileChangeEntry {
-  path: string
-  name: string
-  toolName: string
-  additions: number
-  deletions: number
-  lineRange: string
-  timestamp: number
-}
-export const filesChangedAtom = atom<FileChangeEntry[]>([])
+export const filesChangedAtom = atom<import('./types').FileChangeEntry[]>([])
 
 export const sessionTokensAtom = atom<number>(0)
 
@@ -61,31 +43,16 @@ export const sidebarExpandedAtom = atom<boolean>(true)
 export const activeWorkspaceAtom = atom<{ name: string; path: string } | null>(null)
 
 export const isArtifactPanelOpenAtom = atom<boolean>(false)
-export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
-export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
-export const openFilesAtom = atom<EditorFile[]>([])
+export const artifactPanelModeAtom = atom<import('./types').ArtifactPanelMode>('overview')
+export const openFilesAtom = atom<import('./types').EditorFile[]>([])
 
-export interface EditorFile {
-  name: string
-  path: string
-  content?: string
-  language?: string
-  isBinary?: boolean
-  mimeType?: string
-  base64?: string
-}
-export const activeEditorFileAtom = atom<EditorFile | null>(null)
+export const activeEditorFileAtom = atom<import('./types').EditorFile | null>(null)
 
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 
 export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string } | null>(null)
 
-export interface ModelInfo {
-  id: string
-  name: string
-}
-
-export const availableModelsAtom = atom<Record<string, ModelInfo>>({})
+export const availableModelsAtom = atom<Record<string, import('./types').ModelInfo>>({})
 export const selectedModelAtom = atom<string>('gemini')
 
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })

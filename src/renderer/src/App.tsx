@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import TitleBar from './components/TitleBar'
 import LeftSidebar from './components/LeftSidebar'
@@ -191,13 +191,23 @@ function AppInner(): React.JSX.Element {
         }}
       />
 
-      {sidebarExpanded && (
+      {sidebarExpanded ? (
         <LeftSidebar
           expanded={sidebarExpanded}
           onToggle={(val) => setSidebarExpanded(val)}
           onStartConversation={newConversation}
           threadListContent={<ThreadList />}
         />
+      ) : (
+        // UI-1: Show a thin collapsed rail instead of removing sidebar from DOM entirely.
+        // Without this, users have no visual affordance to re-expand the sidebar.
+        <div
+          className="sidebar-collapsed-rail"
+          onClick={() => setSidebarExpanded(true)}
+          title="Expand sidebar"
+        >
+          <Code size={16} style={{ color: 'var(--text-secondary)' }} />
+        </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', minWidth: 0, flex: 1 }}>
@@ -244,11 +254,29 @@ function AppInner(): React.JSX.Element {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App(): React.JSX.Element {
-  const params = new URLSearchParams(window.location.search)
-  const view = params.get('view')
+  // CRIT-12: Read URL params once in useState initializer — not on every render
+  const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))
 
   if (view === 'onboarding') {
-    return <OnboardingView />
+    // CRIT-11: Onboarding is a separate BrowserWindow. It has no Jotai Provider or Toaster
+    // from the main window. Add a minimal Toaster here so toast.error() actually renders.
+    return (
+      <>
+        <Toaster
+          position="bottom-center"
+          theme="dark"
+          toastOptions={{
+            style: {
+              background: '#161616',
+              border: '1px solid var(--border-color)',
+              color: '#f3f3f3',
+              fontSize: 13
+            }
+          }}
+        />
+        <OnboardingView />
+      </>
+    )
   }
 
   return (

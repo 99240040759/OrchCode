@@ -19,8 +19,7 @@ interface InputBarProps {
   onStop?: () => void
 }
 
-const PLANNING_MODES = ['Planning', 'Code', 'Debug', 'Explain'] as const
-type PlanningMode = (typeof PLANNING_MODES)[number]
+// MED-2: Mode selector removed — single Agent mode only
 
 const MAX_TOKENS = 200_000
 const RING_RADIUS = 9
@@ -46,7 +45,6 @@ const getDropdownStyle = (minWidth: number): React.CSSProperties => ({
 
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
-  const [planningMode, setPlanningMode] = useState<PlanningMode>('Planning')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const runState = useAtomValue(agentRunStateAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
@@ -91,8 +89,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const selectFileSuggestion = useCallback((selectedFile: string) => {
     if (!textareaRef.current) return
-    const selectionStart = textareaRef.current.selectionStart || 0
-    setInputValue((prev) => prev.slice(0, triggerIndex) + prev.slice(selectionStart))
+    // UI-6: Read selectionStart from the DOM ref at mutation time, not at callback
+    // definition time — avoids a stale closure when typing quickly between renders.
+    const currentEl = textareaRef.current
+    setInputValue((prev) => {
+      const selStart = currentEl.selectionStart || 0
+      return prev.slice(0, triggerIndex) + prev.slice(selStart)
+    })
     setShowFileSuggestions(false)
 
     const wsPath = activeWorkspace?.path ?? ''
@@ -184,11 +187,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       val = `${val} ${refsText}`.trim()
     }
 
-    onSubmit?.(val, planningMode, attachments)
+    onSubmit?.(val, undefined, attachments)
     setInputValue('')
     setAttachments([])
     setFileReferences([])
-  }, [inputValue, attachments, fileReferences, isRunning, planningMode, onSubmit])
+  }, [inputValue, attachments, fileReferences, isRunning, onSubmit])
 
   const handleStop = useCallback(() => onStop?.(), [onStop])
 
@@ -373,32 +376,6 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
 
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <div className="toolbar-selector" title="Select mode">
-                <ChevronDown size={14} />
-                <span>{planningMode}</span>
-              </div>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content asChild sideOffset={6}>
-                <div
-                  className="native-dropdown-content"
-                  style={getDropdownStyle(140)}
-                >
-                {PLANNING_MODES.map((mode) => (
-                  <DropdownMenu.Item
-                    key={mode}
-                    onSelect={() => setPlanningMode(mode)}
-                    className={`profile-dropdown-item ${mode === planningMode ? 'selected' : ''}`}
-                  >
-                    {mode}
-                  </DropdownMenu.Item>
-                ))}
-                </div>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
 
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>

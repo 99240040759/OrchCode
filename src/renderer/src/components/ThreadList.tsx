@@ -20,7 +20,7 @@ const ThreadList: React.FC = () => {
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const agentRunState = useAtomValue(agentRunStateAtom)
 
-  const { selectThread, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace } = useThreads()
+  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace } = useThreads()
 
   const [workspacePaths, setWorkspacePaths] = useState<string[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
@@ -134,7 +134,10 @@ const ThreadList: React.FC = () => {
                 {/* Project/Folder Row */}
                 <div
                   className="workspace-node-row"
-                  onClick={() => switchWorkspace(path)}
+                  // UI-5: Row click expands/collapses the workspace section.
+                  // Previously called switchWorkspace() which unexpectedly changed
+                  // the active conversation context just from clicking a folder row.
+                  onClick={() => toggleExpand(path)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
                     <div

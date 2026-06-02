@@ -115,13 +115,16 @@ export function useAgentStream() {
 
     const resolvedThreadId = activeThreadId ?? conversationId
     const isNewThread = !activeThreadId
-    // Stamp this invocation's stream ID — the closure below captures this exact value.
-    // Any chunk whose threadId does not match is from a prior stale stream and is discarded.
     activeStreamThreadIdRef.current = resolvedThreadId
 
     if (isNewThread) {
       setActiveThreadId(conversationId)
     }
+
+    // UI-11: Set 'thinking' state IMMEDIATELY when run() is called — before the
+    // IPC call. This ensures the stop button is visible and spinning during the
+    // 10-second chatStreamLimiter queue wait, so users know their message was received.
+    setRunState('thinking')
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -198,6 +201,12 @@ export function useAgentStream() {
       // immutable value. Chunks from any prior or future stream are rejected.
       const streamThreadId = resolvedThreadId
 
+      // CRIT-9: Assign unsubscribeRef before the IPC call so cleanup always works.
+      // Defensive guard: if the subscription somehow fails, we don't leak the old ref.
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current()
+        unsubscribeRef.current = null
+      }
       unsubscribeRef.current = window.api.onAgentChunk((chunk) => {
         try {
           if (!chunk) return
@@ -320,6 +329,17 @@ export function useAgentStream() {
             flushAssistant(true)
             setRunState('error')
             if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null }
+          } else if (chunkType === 'step-limit') {
+            // MED-3: Agent hit the 50-step limit. Show a notification so users know
+            // the agent stopped mid-task and they can ask it to continue.
+            orderedBlocks.push({
+              type: 'text',
+              content: '\n\n> **⚠️ Agent reached the 50-step limit.** The task may be incomplete. Ask me to continue if needed.'
+            })
+            flushAssistant()
+          } else if (chunkType === 'compaction-failed') {
+            // MED-6: Compaction failed — silently note it, no UI disruption needed
+            console.warn('[useAgentStream] Compaction failed for thread:', streamThreadId)
           } else if (chunkType === 'finish') {
             assistantIsStreaming = false
             currentReasoningBlockRef.current = null

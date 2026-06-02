@@ -60,7 +60,7 @@ app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
 // ─── Google AI & NVIDIA NIM providers (proxied through Supabase edge function) ──────────
 
-import { chatStreamLimiter, tavilyLimiter, geminiLimiter } from './limiters'
+import { chatStreamLimiter, tavilyLimiter, geminiLimiter, nvidiaLimiter } from './limiters'
 import { createOpenAI } from '@ai-sdk/openai'
 export { tavilyLimiter }
 
@@ -81,7 +81,8 @@ export const nvidia = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) => {
-    return geminiLimiter.schedule(() => {
+    // CRIT-1: Use dedicated nvidiaLimiter — independent from geminiLimiter
+    return nvidiaLimiter.schedule(() => {
       const headers = new Headers(options?.headers || {})
       headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
       headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
@@ -90,14 +91,58 @@ export const nvidia = createOpenAI({
   }
 })
 
-export function resolveModel(modelId: string) {
+/**
+ * Resolves a model ID to the correct Vercel AI SDK provider instance
+ * AND returns the correct providerOptions to enable native reasoning tokens.
+ *
+ * Reasoning support by model:
+ *   gemini-3.x  → google provider + thinkingConfig.thinkingLevel (Gemini 3.x API)
+ *   gemma-4-*   → google provider + chatTemplateKwargs.enable_thinking (Gemma 4 API)
+ *   nvidia/*    → openai-compat provider — NIM does NOT emit standard reasoning-delta
+ *                 tokens. Thinking may leak into text-delta content naturally.
+ *                 No providerOptions needed (would be ignored or error).
+ */
+export function resolveModel(modelId: string): {
+  model: Parameters<typeof streamText>[0]['model']
+  providerOptions: any
+} {
+  // NVIDIA NIM — OpenAI-compatible, no native reasoning token support
   if (modelId.startsWith('nvidia/')) {
-    return nvidia.chat(modelId.replace('nvidia/', ''))
+    return {
+      model: nvidia.chat(modelId.replace('nvidia/', '')),
+      providerOptions: {}
+    }
   }
-  return google(modelId)
+
+  // Gemma 4 — uses chat_template_kwargs to enable thinking
+  if (modelId.startsWith('gemma-4') || modelId.includes('gemma-4')) {
+    return {
+      model: google(modelId),
+      providerOptions: {
+        google: {
+          chatTemplateKwargs: { enable_thinking: true }
+        }
+      }
+    }
+  }
+
+  // Gemini 3.x and later — uses thinkingConfig.thinkingLevel
+  // For Gemini 2.5 models the SDK accepts thinkingBudget; since we're on 3.x we use thinkingLevel.
+  return {
+    model: google(modelId),
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          thinkingLevel: 'auto', // 'auto' = model decides when reasoning is useful
+          includeThoughts: true   // expose thoughts as reasoning-delta stream parts
+        }
+      }
+    }
+  }
 }
 
 // ─── Model cache ──────────────────────────────────────────────────────────
+// ARCH-1: Candidate for extraction into ipc/models.ts in a future refactor.
 
 interface ModelInfo {
   id: string
@@ -116,8 +161,9 @@ let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
 
-export async function getAvailableModels(): Promise<AvailableModels> {
-  if (cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
+// MINOR-1: Added force param to allow cache-busting (e.g. after model config changes)
+export async function getAvailableModels(force = false): Promise<AvailableModels> {
+  if (!force && cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
   const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, {
     headers: { 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` }
   })
@@ -268,7 +314,7 @@ ipcMain.handle('workspace:select', async (_event, conversationId: string) => {
 
   const selectedPath = result.filePaths[0]
   addOpenedWorkspace(selectedPath)
-  const ctx = updateWorkspacePath(conversationId, selectedPath)
+  const ctx = await updateWorkspacePath(conversationId, selectedPath)
   invalidateWorkspaceCache(conversationId)
 
   try { setThreadWorkspace(conversationId, selectedPath) } catch (err) {
@@ -280,7 +326,7 @@ ipcMain.handle('workspace:select', async (_event, conversationId: string) => {
 })
 
 ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspacePath }) => {
-  const ctx = updateWorkspacePath(conversationId, workspacePath)
+  const ctx = await updateWorkspacePath(conversationId, workspacePath)
   addOpenedWorkspace(workspacePath)
   invalidateWorkspaceCache(conversationId)
 
@@ -293,7 +339,7 @@ ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspac
 })
 
 ipcMain.handle('workspace:list-files', async (_event, conversationId: string) => {
-  const ctx = getWorkspaceContext(conversationId) || getOrCreateWorkspaceContext(conversationId)
+  const ctx = getWorkspaceContext(conversationId) || await getOrCreateWorkspaceContext(conversationId)
   if (!ctx?.rootPath) return []
   try { return await listWorkspaceFiles(ctx.rootPath) }
   catch (err) { log.error('[main] Error listing workspace files:', err); return [] }
@@ -319,7 +365,7 @@ ipcMain.handle('workspace:close-and-delete', async (_event, workspacePath: strin
 
 ipcMain.handle('file:read', async (_event, filePath: string, conversationId?: string) => {
   try {
-    const ctx = getWorkspaceContext(conversationId!) || getOrCreateWorkspaceContext(conversationId!)
+    const ctx = getWorkspaceContext(conversationId!) || await getOrCreateWorkspaceContext(conversationId!)
     const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
 
     const rawBuffer = await fs.readFile(safePath)
@@ -349,7 +395,7 @@ ipcMain.handle('file:read', async (_event, filePath: string, conversationId?: st
 
 ipcMain.handle('file:read-original', async (_event, filePath: string, conversationId?: string) => {
   try {
-    const ctx = getWorkspaceContext(conversationId!) || getOrCreateWorkspaceContext(conversationId!)
+    const ctx = getWorkspaceContext(conversationId!) || await getOrCreateWorkspaceContext(conversationId!)
     const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
     const workspaceRoot = ctx.rootPath
 
@@ -380,7 +426,7 @@ ipcMain.handle('file:read-original', async (_event, filePath: string, conversati
 
 ipcMain.handle('file:write', async (_event, filePath: string, content: string, conversationId?: string) => {
   try {
-    const ctx = getWorkspaceContext(conversationId!) || getOrCreateWorkspaceContext(conversationId!)
+    const ctx = getWorkspaceContext(conversationId!) || await getOrCreateWorkspaceContext(conversationId!)
     const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
     await fs.writeFile(safePath, content, 'utf-8')
     invalidateWorkspaceCache(conversationId!)
@@ -397,11 +443,11 @@ ipcMain.handle('mastra:get-conversation-id', () => {
   return `session-${crypto.randomUUID()}`
 })
 
-ipcMain.handle('session:set-active', (_event, threadId: string) => {
+ipcMain.handle('session:set-active', async (_event, threadId: string) => {
   // Bind workspace for this thread if available
   try {
     const wsPath = getThreadWorkspace(threadId)
-    if (wsPath) updateWorkspacePath(threadId, wsPath)
+    if (wsPath) await updateWorkspacePath(threadId, wsPath)
   } catch (err) {
     log.warn(`[main] Failed to auto-bind workspace for session ${threadId}:`, err)
   }
@@ -410,7 +456,7 @@ ipcMain.handle('session:set-active', (_event, threadId: string) => {
 
 ipcMain.handle('mastra:new-conversation', async () => {
   const newId = `session-${crypto.randomUUID()}`
-  getOrCreateWorkspaceContext(newId)
+  await getOrCreateWorkspaceContext(newId)
   log.info(`[main] New conversation: ${newId}`)
   return { conversationId: newId }
 })
@@ -457,7 +503,7 @@ ipcMain.handle('mastra:generate-title', async (_event, { text, threadId }) => {
     const models = await getAvailableModels()
     if (!models.gemini) throw new Error('Gemini model not configured.')
     const result = await generateText({
-      model: resolveModel(models.gemini.id),
+      model: resolveModel(models.gemini.id).model,
       prompt: `Generate a short 3-6 word title for this conversation. No quotes, no punctuation at end. Just the title.\n\n${text}`
     })
     const title = result.text?.trim() ?? null
@@ -472,7 +518,7 @@ async function handleAgentStreamRequest(
   event: any,
   promptText: string,
   threadId: string,
-  mode?: string,
+  _mode?: string,
   modelType?: string,
   attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }>
 ) {
@@ -491,7 +537,7 @@ async function handleAgentStreamRequest(
   // Bind workspace for this thread if available
   try {
     const wsPath = getThreadWorkspace(convId)
-    if (wsPath) updateWorkspacePath(convId, wsPath)
+    if (wsPath) await updateWorkspacePath(convId, wsPath)
   } catch (err) {
     log.warn(`[main] Failed to bind workspace for stream ${convId}:`, err)
   }
@@ -508,7 +554,7 @@ async function handleAgentStreamRequest(
     const attachmentsData = attachments && attachments.length > 0 ? JSON.stringify({ attachments }) : undefined
     await saveMessage(convId, { id: userMsgId, role: 'user', content: promptText, data: attachmentsData })
 
-    const ctx = getWorkspaceContext(convId) || getOrCreateWorkspaceContext(convId)
+    const ctx = getWorkspaceContext(convId) || await getOrCreateWorkspaceContext(convId)
     if (ctx.isUserWorkspace && !getThreadWorkspace(convId)) {
       try {
         setThreadWorkspace(convId, ctx.rootPath)
@@ -646,7 +692,7 @@ async function handleAgentStreamRequest(
     // We no longer dump the entire file tree into the prompt.
     // The agent is instructed to use searchWorkspace and listDir instead.
 
-    const modeSuffix = mode && mode !== 'undefined' ? `\nMode: ${mode}.` : ''
+    // MED-2: Mode selector removed — single Agent mode. modeSuffix is no longer used.
 
     let browserInstruction = ''
     if (browserView) {
@@ -672,7 +718,7 @@ Keep this context in mind when handling the user's next request.`
       }
     }
 
-    const systemInstruction = `You are Antigravity, a highly capable developer coding assistant. Active conversation ID: ${convId}.${modeSuffix}
+    const systemInstruction = `You are Orch Code, a highly capable AI developer assistant. Active conversation ID: ${convId}.
 
 ── WORKSPACE ──
 Root path: ${ctx.rootPath || 'No workspace selected'}
@@ -703,13 +749,20 @@ Follow these boundaries strictly to manage your work professionally and transpar
       ...(browserView ? browserTools(convId) : {})
     }
 
+    const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
+
     const result = streamText({
-      model: resolveModel(rawModel.id),
+      model: resolvedModel,
       system: systemInstruction,
       messages,
       tools: activeTools,
       stopWhen: stepCountIs(50),
-      abortSignal: controller.signal
+      abortSignal: controller.signal,
+      // Pass per-model providerOptions to enable native reasoning token streaming.
+      // For Gemini 3.x: thinkingConfig enables reasoning-start/delta/end stream parts.
+      // For Gemma 4: chatTemplateKwargs enables think-block streaming via the same events.
+      // For NVIDIA models: empty object — NIM doesn't support reasoning token API.
+      ...(Object.keys(modelProviderOptions).length > 0 ? { providerOptions: modelProviderOptions } : {})
     })
 
     // FIXED: Use crypto.randomUUID() instead of Date.now() to prevent ID collisions
@@ -720,13 +773,19 @@ Follow these boundaries strictly to manage your work professionally and transpar
     let turnCompletionTokens = 0
 
     const saveProgress = async () => {
-      if (assistantContent || orderedBlocks.length > 0) {
+      // CRIT-3: Snapshot both arrays at call time — the for-await loop continues
+      // mutating orderedBlocks while this async function is suspended at the await.
+      // Without a snapshot, a later save would overwrite with a more complete state
+      // (usually fine) but a concurrent call can capture a half-mutated array (bad).
+      const blocksSnapshot = [...orderedBlocks]
+      const contentSnapshot = assistantContent
+      if (contentSnapshot || blocksSnapshot.length > 0) {
         try {
           await saveMessage(convId, {
             id: assistantMsgId,
             role: 'assistant',
-            content: assistantContent || '[Action Taken]',
-            data: JSON.stringify(orderedBlocks)
+            content: contentSnapshot || '[Action Taken]',
+            data: JSON.stringify(blocksSnapshot)
           })
         } catch (saveErr) {
           log.error('[main] Progressive save failed:', saveErr)
@@ -798,17 +857,36 @@ Follow these boundaries strictly to manage your work professionally and transpar
         if (finalAccumulated >= 200_000) {
           compactionTriggered = true
           log.info(`[main] Compaction triggered at ${finalAccumulated} tokens for thread ${convId}`)
-          triggerSemanticCompaction(convId, assistantMsgId).catch((err) => {
-            log.error('[main] Asynchronous semantic compaction failed:', err)
-          })
+          // MED-6: Only reset token counter after compaction actually succeeds
+          triggerSemanticCompaction(convId, assistantMsgId)
+            .then(() => {
+              try { updateThreadAccumulatedTokens(convId, 0) } catch {}
+              log.info(`[main] Compaction succeeded — token counter reset for ${convId}`)
+            })
+            .catch((err) => {
+              log.error('[main] Asynchronous semantic compaction failed — token counter NOT reset:', err)
+              // Preserve current accumulated count so next turn triggers compaction again
+              try { updateThreadAccumulatedTokens(convId, finalAccumulated) } catch {}
+              // Notify renderer that compaction failed
+              try { event.sender.send('agent:stream-chunk', { type: 'compaction-failed', threadId: convId }) } catch {}
+            })
+        }
+
+        // MED-3: Check if agent hit step limit and notify renderer
+        const finishReason = (part as any).finishReason ?? (part as any).reason ?? ''
+        if (finishReason === 'max-steps' || finishReason === 'length') {
+          log.warn(`[main] Agent hit step limit for thread ${convId}`)
+          event.sender.send('agent:stream-chunk', { type: 'step-limit', threadId: convId })
         }
 
         log.info(`[main] Stream finish — turn: ${turnTotal} tokens`)
 
-        try {
-          updateThreadAccumulatedTokens(convId, compactionTriggered ? 0 : finalAccumulated)
-        } catch (dbErr) {
-          log.error('[main] Failed to save native accumulated tokens:', dbErr)
+        if (!compactionTriggered) {
+          try {
+            updateThreadAccumulatedTokens(convId, finalAccumulated)
+          } catch (dbErr) {
+            log.error('[main] Failed to save native accumulated tokens:', dbErr)
+          }
         }
 
         event.sender.send('agent:stream-chunk', {
@@ -824,7 +902,8 @@ Follow these boundaries strictly to manage your work professionally and transpar
       }
     }
 
-    if (!controller.signal.aborted) await saveProgress()
+    // MED-10: Always save on abort — preserve partial tool call results
+    await saveProgress()
 
   } catch (err: any) {
     log.error('[main] Stream error:', err)

@@ -81,7 +81,9 @@ function getDB(): Database.Database {
   if (!checkColumn('messages', 'isCompactionAnchor')) {
     dbInstance!.exec(`ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`)
   }
-  dbInstance!.exec(`CREATE INDEX IF NOT EXISTS idx_messages_compaction ON messages(threadId, isCompactionAnchor)`)
+  // MINOR-2: Removed standalone CREATE INDEX IF NOT EXISTS for idx_messages_compaction —
+  // it's already declared in the CREATE TABLE block above and running it twice on every
+  // startup is a redundant no-op.
 
   return dbInstance
 }

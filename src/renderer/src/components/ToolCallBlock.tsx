@@ -1,8 +1,8 @@
 import React from 'react'
 import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, BookOpen, MousePointerClick, Keyboard, Camera, ChevronsUpDown } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import { useSetAtom } from 'jotai'
-import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
+import { useSetAtom, useAtomValue } from 'jotai'
+import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, conversationIdAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
 import * as styles from './ToolCallBlock.css'
 import { isAgentArtifact } from '../lib/uiUtils'
@@ -133,11 +133,13 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  const conversationId = useAtomValue(conversationIdAtom)
 
   const handleClick = async () => {
     if (!isFile || !fullPath) return
     try {
-      const fileData = await window.api.readFile(fullPath)
+      // MINOR-4: Pass conversationId so assertWithinWorkspace uses correct workspace root
+      const fileData = await window.api.readFile(fullPath, conversationId)
       if (fileData) {
         setActiveEditorFile(fileData)
         setArtifactPanelMode('editor')

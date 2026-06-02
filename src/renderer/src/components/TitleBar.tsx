@@ -204,6 +204,10 @@ const TitleBar: React.FC<TitleBarProps> = ({
       <div
         className="titlebar-right"
         style={{
+          // UI-9: Windows titlebar overlay is 140px wide (set in BrowserWindow config).
+          // At non-100% DPI (e.g. 125%) the OS-rendered controls can mis-measure — if the
+          // controls bleed into our content, increase this value to match observed width.
+          // macOS traffic lights are inset on the left (16px), right side is free.
           paddingRight: isMac ? 16 : 140,
           display: 'flex',
           alignItems: 'center',
