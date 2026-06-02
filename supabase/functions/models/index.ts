@@ -4,10 +4,10 @@ import { createHandler, jsonResponse, errorResponse } from "../_shared/handler.t
 // MED-6 FIX: Model IDs/names now read from environment variables,
 // no longer hardcoded. Change models without redeploying the function.
 // Set GEMINI_MODEL_ID, GEMINI_MODEL_NAME, GEMMA_MODEL_ID, GEMMA_MODEL_NAME in Supabase secrets.
-const DEFAULT_GEMINI_ID = "gemini-2.5-flash-preview-05-20";
-const DEFAULT_GEMINI_NAME = "Gemini 2.5 Flash";
-const DEFAULT_GEMMA_ID = "gemma-3-27b-it";
-const DEFAULT_GEMMA_NAME = "Gemma 3 27B";
+const DEFAULT_GEMINI_ID = "gemini-3.1-flash-lite";
+const DEFAULT_GEMINI_NAME = "Gemini 3.1 Flash Lite";
+const DEFAULT_GEMMA_ID = "gemma-4-31b-it";
+const DEFAULT_GEMMA_NAME = "Gemma 4 31B";
 
 serve(createHandler(async (_req, env) => {
   const gemini = {

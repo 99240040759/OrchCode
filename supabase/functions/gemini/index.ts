@@ -6,9 +6,9 @@ import { corsHeaders } from "../_shared/handler.ts";
 // Previously ANY path was forwarded to Google's API, making this a fully open proxy.
 const ALLOWED_PATH_PATTERNS = [
   /^\/v1beta\/models$/,
-  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+\/generateContent$/,
-  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+\/streamGenerateContent$/,
-  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+\/countTokens$/,
+  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[\/:]generateContent$/,
+  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[\/:]streamGenerateContent$/,
+  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[\/:]countTokens$/,
 ];
 
 function isAllowedPath(subpath: string): boolean {
