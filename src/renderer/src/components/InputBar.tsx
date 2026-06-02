@@ -405,10 +405,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <div className="toolbar-selector" title="Select model">
                 <ChevronDown size={14} />
                 <span>
-                  {selectedModel === 'gemini'
-                    ? availableModels.gemini?.name
-                    : availableModels.gemma?.name
-                  }
+                  {availableModels[selectedModel]?.name || selectedModel}
                 </span>
               </div>
             </DropdownMenu.Trigger>
@@ -418,18 +415,15 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   className="native-dropdown-content"
                   style={getDropdownStyle(200)}
                 >
-                <DropdownMenu.Item
-                  onSelect={() => setSelectedModel('gemini')}
-                  className={`profile-dropdown-item ${selectedModel === 'gemini' ? 'selected' : ''}`}
-                >
-                  <span style={{ fontWeight: 500 }}>{availableModels.gemini?.name || 'Gemini 3.1 Flash Lite'}</span>
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  onSelect={() => setSelectedModel('gemma')}
-                  className={`profile-dropdown-item ${selectedModel === 'gemma' ? 'selected' : ''}`}
-                >
-                  <span style={{ fontWeight: 500 }}>{availableModels.gemma?.name || 'Gemma 4'}</span>
-                </DropdownMenu.Item>
+                {Object.entries(availableModels).map(([key, model]) => (
+                  <DropdownMenu.Item
+                    key={key}
+                    onSelect={() => setSelectedModel(key)}
+                    className={`profile-dropdown-item ${selectedModel === key ? 'selected' : ''}`}
+                  >
+                    <span style={{ fontWeight: 500 }}>{model.name}</span>
+                  </DropdownMenu.Item>
+                ))}
                 </div>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>

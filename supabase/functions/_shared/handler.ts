@@ -38,7 +38,7 @@ export function createHandler(fn: HandlerFn) {
 
     // Build env map for handler
     const env: EnvMap = {};
-    const envKeys = ["SUPABASE_ANON_KEY", "SUPABASE_URL", "GOOGLE_GENERATIVE_AI_API_KEY", "TAVILY_API_KEY"];
+    const envKeys = ["SUPABASE_ANON_KEY", "SUPABASE_URL", "GOOGLE_GENERATIVE_AI_API_KEY", "TAVILY_API_KEY", "NVIDIA_API_KEY"];
     for (const key of envKeys) {
       const val = Deno.env.get(key);
       if (val) env[key] = val;

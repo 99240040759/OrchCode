@@ -8,6 +8,12 @@ const DEFAULT_GEMINI_ID = "gemini-3.1-flash-lite";
 const DEFAULT_GEMINI_NAME = "Gemini 3.1 Flash Lite";
 const DEFAULT_GEMMA_ID = "gemma-4-31b-it";
 const DEFAULT_GEMMA_NAME = "Gemma 4 31B";
+const DEFAULT_KIMI_ID = "nvidia/moonshotai/kimi-k2.6";
+const DEFAULT_KIMI_NAME = "Kimi K2.6";
+const DEFAULT_MINIMAX_ID = "nvidia/minimaxai/minimax-m2.7";
+const DEFAULT_MINIMAX_NAME = "Minimax M2.7";
+const DEFAULT_GLM_ID = "nvidia/z-ai/glm-5.1";
+const DEFAULT_GLM_NAME = "GLM 5.1";
 
 serve(createHandler(async (_req, env) => {
   const gemini = {
@@ -18,6 +24,18 @@ serve(createHandler(async (_req, env) => {
     id: env["GEMMA_MODEL_ID"] || DEFAULT_GEMMA_ID,
     name: env["GEMMA_MODEL_NAME"] || DEFAULT_GEMMA_NAME,
   };
+  const kimi = {
+    id: env["KIMI_MODEL_ID"] || DEFAULT_KIMI_ID,
+    name: env["KIMI_MODEL_NAME"] || DEFAULT_KIMI_NAME,
+  };
+  const minimax = {
+    id: env["MINIMAX_MODEL_ID"] || DEFAULT_MINIMAX_ID,
+    name: env["MINIMAX_MODEL_NAME"] || DEFAULT_MINIMAX_NAME,
+  };
+  const glm = {
+    id: env["GLM_MODEL_ID"] || DEFAULT_GLM_ID,
+    name: env["GLM_MODEL_NAME"] || DEFAULT_GLM_NAME,
+  };
 
-  return jsonResponse({ gemini, gemma });
+  return jsonResponse({ gemini, gemma, kimi, minimax, glm });
 }));

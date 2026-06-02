@@ -58,9 +58,10 @@ log.info('[main] Orch-Code starting...')
 app.commandLine.appendSwitch('remote-debugging-port', '9222')
 app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
-// ─── Google AI provider (proxied through Supabase edge function) ──────────
+// ─── Google AI & NVIDIA NIM providers (proxied through Supabase edge function) ──────────
 
 import { chatStreamLimiter, tavilyLimiter, geminiLimiter } from './limiters'
+import { createOpenAI } from '@ai-sdk/openai'
 export { tavilyLimiter }
 
 export const google = createGoogleGenerativeAI({
@@ -76,13 +77,46 @@ export const google = createGoogleGenerativeAI({
   }
 })
 
+export const nvidia = createOpenAI({
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
+  apiKey: 'placeholder',
+  fetch: (url, options) => {
+    return geminiLimiter.schedule(() => {
+      const headers = new Headers(options?.headers || {})
+      headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+      headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+      return fetch(url, { ...options, headers })
+    })
+  }
+})
+
+export function resolveModel(modelId: string) {
+  if (modelId.startsWith('nvidia/')) {
+    return nvidia.chat(modelId.replace('nvidia/', ''))
+  }
+  return google(modelId)
+}
+
 // ─── Model cache ──────────────────────────────────────────────────────────
 
-let cachedModels: { gemini?: { id: string; name: string }; gemma?: { id: string; name: string } } | null = null
+interface ModelInfo {
+  id: string
+  name: string
+}
+
+interface AvailableModels {
+  gemini?: ModelInfo
+  gemma?: ModelInfo
+  kimi?: ModelInfo
+  minimax?: ModelInfo
+  glm?: ModelInfo
+}
+
+let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
 
-export async function getAvailableModels(): Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }> {
+export async function getAvailableModels(): Promise<AvailableModels> {
   if (cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
   const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, {
     headers: { 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` }
@@ -423,7 +457,7 @@ ipcMain.handle('mastra:generate-title', async (_event, { text, threadId }) => {
     const models = await getAvailableModels()
     if (!models.gemini) throw new Error('Gemini model not configured.')
     const result = await generateText({
-      model: google(models.gemini.id),
+      model: resolveModel(models.gemini.id),
       prompt: `Generate a short 3-6 word title for this conversation. No quotes, no punctuation at end. Just the title.\n\n${text}`
     })
     const title = result.text?.trim() ?? null
@@ -659,7 +693,7 @@ Use writeToFile, replaceFileContent tools to manage these artifact files:
 Follow these boundaries strictly to manage your work professionally and transparently!`
 
     const models = await getAvailableModels()
-    const rawModel = modelType === 'gemma' ? models.gemma : models.gemini
+    const rawModel = models[modelType as keyof typeof models] || models.gemini
     if (!rawModel) throw new Error(`${modelType} model not configured on server.`)
 
     // FIXED: Pass convId into browser tools factory so screenshot saves to correct directory
@@ -670,7 +704,7 @@ Follow these boundaries strictly to manage your work professionally and transpar
     }
 
     const result = streamText({
-      model: google(rawModel.id),
+      model: resolveModel(rawModel.id),
       system: systemInstruction,
       messages,
       tools: activeTools,

@@ -80,8 +80,13 @@ export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).leng
 
 export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string } | null>(null)
 
-export const availableModelsAtom = atom<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }>({})
-export const selectedModelAtom = atom<'gemini' | 'gemma'>('gemini')
+export interface ModelInfo {
+  id: string
+  name: string
+}
+
+export const availableModelsAtom = atom<Record<string, ModelInfo>>({})
+export const selectedModelAtom = atom<string>('gemini')
 
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 
