@@ -168,7 +168,10 @@
   justify-content: center;
   padding: 4px;
   border-radius: 4px;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .code-block-copy-btn:hover {

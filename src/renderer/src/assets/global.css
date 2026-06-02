@@ -5,7 +5,7 @@
 
   /* Color Palette - Premium Neutral Dark Design */
   --bg-app: #121212;
-  --bg-sidebar: #1A1A1A;
+  --bg-sidebar: #1a1a1a;
   --bg-editor: #121212;
 
   /* Translucent & Premium Borders */
@@ -13,8 +13,8 @@
   --border-focus: #444444;
 
   /* Typography Colors */
-  --text-primary: #FFFFFF;
-  --text-secondary: #B4B4B4;
+  --text-primary: #ffffff;
+  --text-secondary: #b4b4b4;
   --text-muted: #737373;
   --text-dim: #525252;
 
@@ -61,7 +61,7 @@ img {
 /* Explicitly enable text selections inside text inputs, code structures, and chat markdown blocks */
 input,
 textarea,
-[contenteditable="true"],
+[contenteditable='true'],
 code,
 pre,
 .assistant-content,
@@ -94,7 +94,9 @@ a {
   color: var(--accent-blue);
   text-decoration: none;
   font-weight: 500;
-  transition: color 0.15s ease, text-decoration 0.15s ease;
+  transition:
+    color 0.15s ease,
+    text-decoration 0.15s ease;
 }
 
 a:hover {
@@ -135,7 +137,9 @@ details > summary {
 
 /* --- CSS Keyframes & Animations --- */
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes textShimmer {
@@ -148,8 +152,13 @@ details > summary {
 }
 
 @keyframes pulse-opacity {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.9; }
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 
 /* ==========================================================================
@@ -203,7 +212,9 @@ details > summary {
   border-radius: 6px;
   background-color: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
   margin-bottom: 4px;
 }
 
@@ -223,7 +234,9 @@ details > summary {
   cursor: pointer;
   padding: 8px 12px;
   border-radius: 6px;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .sidebar-menu-item:hover {
@@ -246,7 +259,9 @@ details > summary {
   background: none;
   border: none;
   text-align: left;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .sidebar-footer-item:hover {
@@ -359,7 +374,9 @@ details > summary {
   border-radius: 50%;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .tab-close-btn:hover {

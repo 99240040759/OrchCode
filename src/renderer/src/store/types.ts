@@ -1,12 +1,16 @@
-// ARCH-2: Types extracted from agentStore.ts into their own file.
-// All existing imports from agentStore continue to work via re-exports there.
-
 export type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
 
 export type StreamBlock =
   | { type: 'text'; content: string }
   | { type: 'reasoning'; content: string; durationMs?: number; isStreaming?: boolean }
-  | { type: 'tool'; toolCallId: string; toolName: string; args: Record<string, unknown>; result?: unknown; status: 'pending' | 'complete' | 'error' }
+  | {
+      type: 'tool'
+      toolCallId: string
+      toolName: string
+      args: Record<string, unknown>
+      result?: unknown
+      status: 'pending' | 'complete' | 'error'
+    }
   | { type: 'compaction' }
 
 export interface ChatMessage {

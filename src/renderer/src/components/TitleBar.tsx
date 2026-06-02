@@ -1,10 +1,6 @@
 import React, { useEffect } from 'react'
 import { useAtom } from 'jotai'
-import {
-  updateStatusAtom,
-  sidebarExpandedAtom,
-  isArtifactPanelOpenAtom
-} from '../store/agentStore'
+import { updateStatusAtom, sidebarExpandedAtom, isArtifactPanelOpenAtom } from '../store/agentStore'
 import { getSharedWorker } from '../lib/workerManager'
 import { PanelLeft, PanelRight } from 'lucide-react'
 
@@ -15,10 +11,7 @@ interface TitleBarProps {
 
 const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
-const TitleBar: React.FC<TitleBarProps> = ({
-  title = 'Orch Code',
-  workspaceName
-}) => {
+const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
@@ -88,9 +81,12 @@ const TitleBar: React.FC<TitleBarProps> = ({
 
     let intervalId: ReturnType<typeof setInterval> | null = null
     if (isMac) {
-      intervalId = setInterval(() => {
-        runMacWorkerCheck()
-      }, 3 * 60 * 60 * 1000)
+      intervalId = setInterval(
+        () => {
+          runMacWorkerCheck()
+        },
+        3 * 60 * 60 * 1000
+      )
     }
 
     return () => {
@@ -162,10 +158,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
         title={status === 'error' && error ? error : undefined}
       >
         {status === 'downloading' && (
-          <div
-            className="titlebar-update-progress-bar"
-            style={{ width: `${progress ?? 0}%` }}
-          />
+          <div className="titlebar-update-progress-bar" style={{ width: `${progress ?? 0}%` }} />
         )}
         <span className="titlebar-update-text">{text}</span>
       </div>
@@ -176,15 +169,17 @@ const TitleBar: React.FC<TitleBarProps> = ({
     <header className="titlebar" style={{ display: 'flex', width: '100%' }}>
       <div
         className="titlebar-left"
-          style={{
+        style={
+          {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
             paddingLeft: isMac ? '80px' : '12px',
             width: isMac ? '108px' : '40px',
             flexShrink: 0,
-          WebkitAppRegion: 'no-drag'
-        } as any}
+            WebkitAppRegion: 'no-drag'
+          } as any
+        }
       >
         {!sidebarExpanded && (
           <div
@@ -197,25 +192,32 @@ const TitleBar: React.FC<TitleBarProps> = ({
         )}
       </div>
 
-      <div className="titlebar-center" style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', paddingLeft: '16px' }}>
+      <div
+        className="titlebar-center"
+        style={{
+          flex: 1,
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          paddingLeft: '16px'
+        }}
+      >
         {workspaceName ? workspaceName : title}
       </div>
 
       <div
         className="titlebar-right"
-        style={{
-          // UI-9: Windows titlebar overlay is 140px wide (set in BrowserWindow config).
-          // At non-100% DPI (e.g. 125%) the OS-rendered controls can mis-measure — if the
-          // controls bleed into our content, increase this value to match observed width.
-          // macOS traffic lights are inset on the left (16px), right side is free.
-          paddingRight: isMac ? 16 : 140,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          gap: '12px',
-          flexShrink: 0,
-          WebkitAppRegion: 'no-drag'
-        } as any}
+        style={
+          {
+            paddingRight: isMac ? 16 : 140,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '12px',
+            flexShrink: 0,
+            WebkitAppRegion: 'no-drag'
+          } as any
+        }
       >
         {renderUpdateIndicator()}
 

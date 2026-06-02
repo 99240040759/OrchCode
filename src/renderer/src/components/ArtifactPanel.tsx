@@ -70,20 +70,13 @@ const getRelativeDirPath = (filePath: string, workspacePath?: string) => {
   return ''
 }
 
-
 const OverviewPanel: React.FC<{
   artifacts: ArtifactEntry[]
   userFiles: FileChangeEntry[]
   loading: boolean
   handleArtifactClick: (art: ArtifactEntry) => void
   handleFileChangeClick: (fc: FileChangeEntry) => void
-}> = ({
-  artifacts,
-  userFiles,
-  loading,
-  handleArtifactClick,
-  handleFileChangeClick
-}) => {
+}> = ({ artifacts, userFiles, loading, handleArtifactClick, handleFileChangeClick }) => {
   return (
     <ScrollArea.Root className="ScrollAreaRoot">
       <ScrollArea.Viewport className="ScrollAreaViewport">
@@ -99,7 +92,17 @@ const OverviewPanel: React.FC<{
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <Info size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--text-primary)', margin: 0, fontFamily: 'var(--font-display)' }}>Session Overview</h2>
+            <h2
+              style={{
+                fontSize: 'var(--font-size-lg)',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                margin: 0,
+                fontFamily: 'var(--font-display)'
+              }}
+            >
+              Session Overview
+            </h2>
           </div>
 
           <div
@@ -110,7 +113,7 @@ const OverviewPanel: React.FC<{
               alignItems: 'start'
             }}
           >
-            {/* Artifacts Card */}
+            {}
             <div
               style={{
                 borderRadius: '8px',
@@ -142,11 +145,31 @@ const OverviewPanel: React.FC<{
                   <span>Artifacts</span>
                 </div>
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  overflowY: 'auto'
+                }}
+              >
                 {loading ? (
-                  <Skeleton count={3} height={28} baseColor="#262626" highlightColor="#333333" style={{ marginBottom: 6, borderRadius: 4 }} />
+                  <Skeleton
+                    count={3}
+                    height={28}
+                    baseColor="#262626"
+                    highlightColor="#333333"
+                    style={{ marginBottom: 6, borderRadius: 4 }}
+                  />
                 ) : artifacts.length === 0 ? (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', padding: '8px 4px' }}>
+                  <div
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--font-size-sm)',
+                      padding: '8px 4px'
+                    }}
+                  >
                     No artifacts created yet.
                   </div>
                 ) : (
@@ -168,7 +191,13 @@ const OverviewPanel: React.FC<{
                       }}
                     >
                       {getArtifactIcon(art.name)}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
                         {getDisplayName(art.name)}
                       </span>
                     </div>
@@ -177,7 +206,7 @@ const OverviewPanel: React.FC<{
               </div>
             </div>
 
-            {/* Files Changed Card */}
+            {}
             <div
               style={{
                 borderRadius: '8px',
@@ -209,9 +238,23 @@ const OverviewPanel: React.FC<{
                   <span>Files Changed</span>
                 </div>
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+              <div
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  overflowY: 'auto'
+                }}
+              >
                 {userFiles.length === 0 ? (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', padding: '8px 4px' }}>
+                  <div
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--font-size-sm)',
+                      padding: '8px 4px'
+                    }}
+                  >
                     No workspace files modified.
                   </div>
                 ) : (
@@ -233,20 +276,51 @@ const OverviewPanel: React.FC<{
                       }}
                     >
                       <FileIcon fileName={fc.name} size={13} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{fc.name}</span>
+                      <span
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          flex: 1
+                        }}
+                      >
+                        {fc.name}
+                      </span>
                       {fc.lineRange && (
-                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', flexShrink: 0, marginRight: '4px' }}>
+                        <span
+                          style={{
+                            color: 'var(--text-muted)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--font-size-xs)',
+                            flexShrink: 0,
+                            marginRight: '4px'
+                          }}
+                        >
                           {fc.lineRange}
                         </span>
                       )}
                       <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                         {fc.additions > 0 && (
-                          <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                          <span
+                            style={{
+                              color: 'var(--accent-green)',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: 'var(--font-size-xs)',
+                              fontWeight: 700
+                            }}
+                          >
                             +{fc.additions}
                           </span>
                         )}
                         {fc.deletions > 0 && (
-                          <span style={{ color: 'var(--accent-red)', fontFamily: 'var(--font-mono)', fontSize: 'var(--font-size-xs)', fontWeight: 700 }}>
+                          <span
+                            style={{
+                              color: 'var(--accent-red)',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: 'var(--font-size-xs)',
+                              fontWeight: 700
+                            }}
+                          >
                             -{fc.deletions}
                           </span>
                         )}
@@ -267,14 +341,11 @@ const OverviewPanel: React.FC<{
   )
 }
 
-// UI-2: Use window.__orchcodeMonacoInitialized instead of a plain module var.
-// During HMR in dev mode, module-level vars reset on hot reload but the window
-// object persists — avoiding duplicate theme registration errors.
 function isMonacoAlreadyInitialized(): boolean {
   return !!(window as any).__orchcodeMonacoInitialized
 }
 function markMonacoInitialized(): void {
-  (window as any).__orchcodeMonacoInitialized = true
+  ;(window as any).__orchcodeMonacoInitialized = true
 }
 
 const isMac = navigator.userAgent.toLowerCase().includes('mac')
@@ -299,7 +370,6 @@ const ArtifactPanel: React.FC = () => {
   const [hoveredTabPath, setHoveredTabPath] = useState<string | null>(null)
   const [themeLoaded, setThemeLoaded] = useState(false)
 
-  // Overview-related states and effects
   const [loading, setLoading] = useState(false)
   const [artifacts, setArtifacts] = useAtom(artifactsAtom)
   const convId = useAtomValue(conversationIdAtom)
@@ -332,7 +402,7 @@ const ArtifactPanel: React.FC = () => {
   }
 
   const terminalRef = useRef<TerminalViewHandle | null>(null)
-  // #17 fix: only call closeBrowser when it was actually opened — track with ref
+
   const browserWasOpenedRef = useRef(false)
 
   const displayFile = activeFile
@@ -346,40 +416,56 @@ const ArtifactPanel: React.FC = () => {
 
     const rootStyle = getComputedStyle(document.documentElement)
     const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
-    const accentBlue = (rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6').replace('#', '')
-    const accentGreen = (rootStyle.getPropertyValue('--accent-green').trim() || '#10b981').replace('#', '')
-    const accentOrange = (rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b').replace('#', '')
-    const accentPurple = (rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6').replace('#', '')
-    const accentRed = (rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444').replace('#', '')
-    const textSecondary = (rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa').replace('#', '')
-    const textMuted = (rootStyle.getPropertyValue('--text-muted').trim() || '#71717a').replace('#', '')
+    const accentBlue = (rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6').replace(
+      '#',
+      ''
+    )
+    const accentGreen = (rootStyle.getPropertyValue('--accent-green').trim() || '#10b981').replace(
+      '#',
+      ''
+    )
+    const accentOrange = (
+      rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b'
+    ).replace('#', '')
+    const accentPurple = (
+      rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6'
+    ).replace('#', '')
+    const accentRed = (rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444').replace(
+      '#',
+      ''
+    )
+    const textSecondary = (
+      rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa'
+    ).replace('#', '')
+    const textMuted = (rootStyle.getPropertyValue('--text-muted').trim() || '#71717a').replace(
+      '#',
+      ''
+    )
 
     import('@monaco-editor/react').then(({ loader }) => {
       loader.init().then((monaco) => {
-        // Disable validation/diagnostics for all built-in languages to avoid red squiggly lines
         if (monaco.languages.typescript) {
           try {
-            // Set compiler options to natively support JSX (Preserve = 1) and disable diagnostics
             const compilerOptions = {
-              jsx: 1, // JsxEmit.Preserve
+              jsx: 1,
               allowNonTsExtensions: true,
-              target: 99, // ScriptTarget.Latest
+              target: 99,
               allowJs: true,
               checkJs: false
-            };
-            monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
-            monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
+            }
+            monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
+            monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions)
 
             monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
               noSemanticValidation: true,
               noSyntaxValidation: true
-            });
+            })
             monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
               noSemanticValidation: true,
               noSyntaxValidation: true
-            });
+            })
           } catch (e) {
-            console.warn('[Monaco] TS/JS diagnostics or compiler options configuration failed:', e);
+            console.warn('[Monaco] TS/JS diagnostics or compiler options configuration failed:', e)
           }
         }
         if (monaco.languages.json) {
@@ -420,20 +506,20 @@ const ArtifactPanel: React.FC = () => {
           base: 'vs-dark',
           inherit: true,
           rules: [
-            { token: 'keyword', foreground: accentPurple }, // import, from, const, export, function, etc.
+            { token: 'keyword', foreground: accentPurple },
             { token: 'keyword.js', foreground: accentPurple },
             { token: 'keyword.ts', foreground: accentPurple },
             { token: 'keyword.tsx', foreground: accentPurple },
-            { token: 'string', foreground: accentGreen }, // strings
+            { token: 'string', foreground: accentGreen },
             { token: 'string.js', foreground: accentGreen },
             { token: 'string.ts', foreground: accentGreen },
             { token: 'string.tsx', foreground: accentGreen },
-            { token: 'comment', foreground: textMuted, fontStyle: 'italic' }, // comments
-            { token: 'number', foreground: accentOrange }, // numbers
+            { token: 'comment', foreground: textMuted, fontStyle: 'italic' },
+            { token: 'number', foreground: accentOrange },
             { token: 'regexp', foreground: accentRed },
             { token: 'type', foreground: accentOrange },
             { token: 'class', foreground: accentOrange },
-            { token: 'function', foreground: accentBlue }, // functions
+            { token: 'function', foreground: accentBlue },
             { token: 'function.js', foreground: accentBlue },
             { token: 'function.ts', foreground: accentBlue },
             { token: 'function.tsx', foreground: accentBlue },
@@ -456,7 +542,7 @@ const ArtifactPanel: React.FC = () => {
             'scrollbarSlider.background': '#ffffff0f',
             'scrollbarSlider.hoverBackground': '#ffffff1a',
             'scrollbarSlider.activeBackground': '#ffffff26',
-            // Hide overview ruler border and decorations (errors, warnings)
+
             'editorOverviewRuler.border': '#00000000',
             'editorOverviewRuler.background': '#121212',
             'editorOverviewRuler.addedForeground': '#00000000',
@@ -465,7 +551,7 @@ const ArtifactPanel: React.FC = () => {
             'editorOverviewRuler.errorForeground': '#00000000',
             'editorOverviewRuler.warningForeground': '#00000000',
             'editorOverviewRuler.infoForeground': '#00000000',
-            // Hide all inline validation squigglies and error line overlays
+
             'editorError.foreground': '#00000000',
             'editorError.background': '#00000000',
             'editorError.border': '#00000000',
@@ -485,7 +571,8 @@ const ArtifactPanel: React.FC = () => {
 
   useEffect(() => {
     if (activeFile && isDiffMode) {
-      window.api.readOriginalFile(activeFile.path, convId)
+      window.api
+        .readOriginalFile(activeFile.path, convId)
         .then((res) => {
           setOriginalContent(res?.content ?? '')
         })
@@ -497,8 +584,6 @@ const ArtifactPanel: React.FC = () => {
       setOriginalContent(null)
     }
   }, [activeFile?.path, isDiffMode, convId])
-
-
 
   useEffect(() => {
     if (!convId) return
@@ -512,8 +597,12 @@ const ArtifactPanel: React.FC = () => {
           setLoading(false)
         }
       })
-      .catch(() => { if (active) setLoading(false) })
-    return () => { active = false }
+      .catch(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [convId, setArtifacts])
 
   useEffect(() => {
@@ -523,57 +612,68 @@ const ArtifactPanel: React.FC = () => {
     return unsub
   }, [setArtifacts])
 
-  const handleOpenFile = useCallback((fileData: EditorFile) => {
-    setOpenFiles((prev) => {
-      const exists = prev.find((f) => f.path === fileData.path)
-      if (!exists) return [...prev, fileData]
-      return prev
-    })
-    setActiveFile(fileData)
-    setPanelMode('editor')
-  }, [setOpenFiles, setActiveFile, setPanelMode])
+  const handleOpenFile = useCallback(
+    (fileData: EditorFile) => {
+      setOpenFiles((prev) => {
+        const exists = prev.find((f) => f.path === fileData.path)
+        if (!exists) return [...prev, fileData]
+        return prev
+      })
+      setActiveFile(fileData)
+      setPanelMode('editor')
+    },
+    [setOpenFiles, setActiveFile, setPanelMode]
+  )
 
-  const handleArtifactClick = useCallback(async (artifact: ArtifactEntry) => {
-    try {
-      const fileData = await window.api.readFile(artifact.path, convId)
-      if (fileData) {
-        setIsDiffMode(false)
-        handleOpenFile(fileData)
+  const handleArtifactClick = useCallback(
+    async (artifact: ArtifactEntry) => {
+      try {
+        const fileData = await window.api.readFile(artifact.path, convId)
+        if (fileData) {
+          setIsDiffMode(false)
+          handleOpenFile(fileData)
+        }
+      } catch (err) {
+        console.error('[ArtifactPanel] Failed to open artifact:', err)
       }
-    } catch (err) {
-      console.error('[ArtifactPanel] Failed to open artifact:', err)
-    }
-  }, [convId, handleOpenFile])
+    },
+    [convId, handleOpenFile]
+  )
 
-  const handleFileChangeClick = useCallback(async (fc: FileChangeEntry) => {
-    try {
-      const fileData = await window.api.readFile(fc.path, convId)
-      if (fileData) {
-        setIsDiffMode(true)
-        handleOpenFile(fileData)
+  const handleFileChangeClick = useCallback(
+    async (fc: FileChangeEntry) => {
+      try {
+        const fileData = await window.api.readFile(fc.path, convId)
+        if (fileData) {
+          setIsDiffMode(true)
+          handleOpenFile(fileData)
+        }
+      } catch (err) {
+        console.error('[ArtifactPanel] Failed to open changed file:', err)
       }
-    } catch (err) {
-      console.error('[ArtifactPanel] Failed to open changed file:', err)
-    }
-  }, [convId, handleOpenFile])
+    },
+    [convId, handleOpenFile]
+  )
 
-  const handleCloseFile = useCallback((fileToClose: EditorFile, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const updatedFiles = openFiles.filter((f) => f.path !== fileToClose.path)
-    setOpenFiles(updatedFiles)
+  const handleCloseFile = useCallback(
+    (fileToClose: EditorFile, e: React.MouseEvent) => {
+      e.stopPropagation()
+      const updatedFiles = openFiles.filter((f) => f.path !== fileToClose.path)
+      setOpenFiles(updatedFiles)
 
-    if (activeFile?.path === fileToClose.path) {
-      if (updatedFiles.length > 0) {
-        const nextFile = updatedFiles[updatedFiles.length - 1]
-        setActiveFile(nextFile)
-        setPanelMode('editor')
-      } else {
-        setActiveFile(null)
-        setPanelMode('overview')
+      if (activeFile?.path === fileToClose.path) {
+        if (updatedFiles.length > 0) {
+          const nextFile = updatedFiles[updatedFiles.length - 1]
+          setActiveFile(nextFile)
+          setPanelMode('editor')
+        } else {
+          setActiveFile(null)
+          setPanelMode('overview')
+        }
       }
-    }
-  }, [openFiles, activeFile, setOpenFiles, setActiveFile, setPanelMode])
-
+    },
+    [openFiles, activeFile, setOpenFiles, setActiveFile, setPanelMode]
+  )
 
   useEffect(() => {
     if (panelMode === 'browser') {
@@ -587,7 +687,6 @@ const ArtifactPanel: React.FC = () => {
   }, [panelMode])
 
   useEffect(() => {
-    // Only close the browser if it was actually opened (mode was set to browser)
     if (!isOpen && browserWasOpenedRef.current) {
       window.api.closeBrowser().catch(() => {})
       browserWasOpenedRef.current = false
@@ -602,34 +701,43 @@ const ArtifactPanel: React.FC = () => {
 
   const activeTabValue = panelMode === 'editor' ? (activeFile?.path ?? '') : panelMode
 
-  const handleTabChange = useCallback((val: string) => {
-    if (val === 'overview') {
-      setPanelMode('overview')
-      setActiveFile(null)
-    } else if (val === 'terminal') {
-      setPanelMode('terminal')
-      setActiveFile(null)
-    } else if (val === 'browser') {
-      setPanelMode('browser')
-      setActiveFile(null)
-    } else {
-      const file = openFiles.find((f) => f.path === val)
-      if (file) {
-        setIsDiffMode(false)
-        setActiveFile(file)
-        setPanelMode('editor')
+  const handleTabChange = useCallback(
+    (val: string) => {
+      if (val === 'overview') {
+        setPanelMode('overview')
+        setActiveFile(null)
+      } else if (val === 'terminal') {
+        setPanelMode('terminal')
+        setActiveFile(null)
+      } else if (val === 'browser') {
+        setPanelMode('browser')
+        setActiveFile(null)
+      } else {
+        const file = openFiles.find((f) => f.path === val)
+        if (file) {
+          setIsDiffMode(false)
+          setActiveFile(file)
+          setPanelMode('editor')
+        }
       }
-    }
-  }, [openFiles, setPanelMode, setActiveFile])
+    },
+    [openFiles, setPanelMode, setActiveFile]
+  )
 
   return (
     <Tabs.Root
       value={activeTabValue}
       onValueChange={handleTabChange}
       className="artifact-pane"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', borderLeft: 'none' }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+        borderLeft: 'none'
+      }}
     >
-      {/* Custom Tabs Bar */}
+      {}
       <div
         style={{
           display: 'flex',
@@ -643,35 +751,49 @@ const ArtifactPanel: React.FC = () => {
           scrollbarWidth: 'none'
         }}
       >
-        <Tabs.List style={{ display: 'flex', alignItems: 'center', height: '100%', overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {/* Overview Tab */}
-          <Tabs.Trigger
-            value="overview"
-            className="tab-trigger"
-          >
-            <ListTodo size={14} style={{ color: panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)' }} />
+        <Tabs.List
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: '100%',
+            overflowX: 'auto',
+            scrollbarWidth: 'none'
+          }}
+        >
+          {}
+          <Tabs.Trigger value="overview" className="tab-trigger">
+            <ListTodo
+              size={14}
+              style={{
+                color: panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)'
+              }}
+            />
             <span>Overview</span>
           </Tabs.Trigger>
 
-          {/* Terminal Tab */}
-          <Tabs.Trigger
-            value="terminal"
-            className="tab-trigger"
-          >
-            <TerminalSquare size={14} style={{ color: panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)' }} />
+          {}
+          <Tabs.Trigger value="terminal" className="tab-trigger">
+            <TerminalSquare
+              size={14}
+              style={{
+                color: panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)'
+              }}
+            />
             <span>Terminal</span>
           </Tabs.Trigger>
 
-          {/* Browser Tab */}
-          <Tabs.Trigger
-            value="browser"
-            className="tab-trigger"
-          >
-            <Globe size={14} style={{ color: panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)' }} />
+          {}
+          <Tabs.Trigger value="browser" className="tab-trigger">
+            <Globe
+              size={14}
+              style={{
+                color: panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)'
+              }}
+            />
             <span>Browser</span>
           </Tabs.Trigger>
 
-          {/* Open Files Tabs */}
+          {}
           {openFiles.map((file) => {
             const isHovered = hoveredTabPath === file.path
             const isCloseVisible = isHovered
@@ -683,7 +805,7 @@ const ArtifactPanel: React.FC = () => {
                 onMouseEnter={() => setHoveredTabPath(file.path)}
                 onMouseLeave={() => setHoveredTabPath(null)}
               >
-                {/* Left side icon space */}
+                {}
                 <div
                   style={{
                     width: '14px',
@@ -696,49 +818,49 @@ const ArtifactPanel: React.FC = () => {
                   }}
                 >
                   {isCloseVisible ? (
-                    <span
-                      onClick={(e) => handleCloseFile(file, e)}
-                      className="tab-close-btn"
-                    >
+                    <span onClick={(e) => handleCloseFile(file, e)} className="tab-close-btn">
                       <X size={10} />
                     </span>
+                  ) : isAgentArtifact(file.name) ? (
+                    getArtifactIcon(file.name)
                   ) : (
-                    isAgentArtifact(file.name) ? (
-                      getArtifactIcon(file.name)
-                    ) : (
-                      <SymbolsFileIcon
-                        fileName={file.name}
-                        autoAssign={true}
-                        width={16}
-                        height={16}
-                        style={{ flexShrink: 0 }}
-                      />
-                    )
+                    <SymbolsFileIcon
+                      fileName={file.name}
+                      autoAssign={true}
+                      width={16}
+                      height={16}
+                      style={{ flexShrink: 0 }}
+                    />
                   )}
                 </div>
 
-                <span>
-                  {getDisplayName(file.name)}
-                </span>
+                <span>{getDisplayName(file.name)}</span>
               </Tabs.Trigger>
             )
           })}
         </Tabs.List>
 
-        {/* Right side: Collapse Button */}
-        <div
-          onClick={handleClose}
-          title="Collapse Panel"
-          className="artifact-panel-close-btn"
-        >
+        {}
+        <div onClick={handleClose} title="Collapse Panel" className="artifact-panel-close-btn">
           <PanelRightClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
         </div>
       </div>
 
-      {/* Panels Viewport */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-        {/* Overview Tab Content */}
-        <Tabs.Content value="overview" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+      {}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+      >
+        {}
+        <Tabs.Content
+          value="overview"
+          style={{ height: '100%', width: '100%', overflow: 'hidden' }}
+        >
           <OverviewPanel
             artifacts={artifacts}
             userFiles={userFiles}
@@ -748,29 +870,91 @@ const ArtifactPanel: React.FC = () => {
           />
         </Tabs.Content>
 
-        {/* Terminal Tab Content */}
-        <Tabs.Content value="terminal" style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+        {}
+        <Tabs.Content
+          value="terminal"
+          style={{ height: '100%', width: '100%', overflow: 'hidden' }}
+        >
           <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
         </Tabs.Content>
 
-        {/* Browser Tab Content */}
-        {panelMode === 'browser' && (
-          <Tabs.Content value="browser" style={{ height: '100%', width: '100%' }}>
-            <BrowserView />
-          </Tabs.Content>
-        )}
+        <Tabs.Content 
+          value="browser" 
+          forceMount
+          style={{ 
+            height: '100%', 
+            width: '100%',
+            display: panelMode === 'browser' ? 'block' : 'none'
+          }}
+        >
+          <BrowserView />
+        </Tabs.Content>
 
-        {/* Editor Tab Content */}
-        <div style={{ display: panelMode === 'editor' ? 'block' : 'none', height: '100%', width: '100%' }}>
+        {}
+        <div
+          style={{
+            display: panelMode === 'editor' ? 'block' : 'none',
+            height: '100%',
+            width: '100%'
+          }}
+        >
           {!displayFile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px', color: 'var(--text-secondary)', textAlign: 'center', backgroundColor: 'var(--bg-app)' }}>
-              <div style={{ fontSize: '40px', marginBottom: '16px', filter: 'grayscale(0.3) contrast(1.2)' }}>📂</div>
-              <h3 style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', fontWeight: 500, marginBottom: '6px', fontFamily: 'var(--font-display)' }}>No File Open</h3>
-              <p style={{ fontSize: 'var(--font-size-xs-plus)', maxWidth: '300px', lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0 }}>Select a file from the sidebar or ask the agent to edit or create a code file.</p>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                padding: '40px',
+                color: 'var(--text-secondary)',
+                textAlign: 'center',
+                backgroundColor: 'var(--bg-app)'
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '40px',
+                  marginBottom: '16px',
+                  filter: 'grayscale(0.3) contrast(1.2)'
+                }}
+              >
+                📂
+              </div>
+              <h3
+                style={{
+                  fontSize: 'var(--font-size-lg)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 500,
+                  marginBottom: '6px',
+                  fontFamily: 'var(--font-display)'
+                }}
+              >
+                No File Open
+              </h3>
+              <p
+                style={{
+                  fontSize: 'var(--font-size-xs-plus)',
+                  maxWidth: '300px',
+                  lineHeight: 1.5,
+                  color: 'var(--text-secondary)',
+                  margin: 0
+                }}
+              >
+                Select a file from the sidebar or ask the agent to edit or create a code file.
+              </p>
             </div>
           ) : displayFile.isBinary ? (
             <div
-              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', backgroundColor: 'var(--bg-app)', padding: '24px' }}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'auto',
+                backgroundColor: 'var(--bg-app)',
+                padding: '24px'
+              }}
               className="media-preview-container"
             >
               {displayFile.mimeType?.startsWith('image/') && (
@@ -778,7 +962,13 @@ const ArtifactPanel: React.FC = () => {
                   <img
                     src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
                     alt={displayFile.name}
-                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                      borderRadius: '4px',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                    }}
                   />
                 </div>
               )}
@@ -787,23 +977,62 @@ const ArtifactPanel: React.FC = () => {
                   controls
                   autoPlay
                   src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
-                  style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '4px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    borderRadius: '4px',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                  }}
                 />
               )}
               {displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 32, borderRadius: 8, backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', fontFamily: 'var(--font-mono)' }}>{displayFile.name}</span>
-                  <audio controls autoPlay src={`data:${displayFile.mimeType};base64,${displayFile.base64}`} style={{ width: '320px' }} />
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 16,
+                    padding: 32,
+                    borderRadius: 8,
+                    backgroundColor: 'var(--bg-app)',
+                    border: '1px solid var(--border-color)'
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: 'var(--font-size-sm)',
+                      fontFamily: 'var(--font-mono)'
+                    }}
+                  >
+                    {displayFile.name}
+                  </span>
+                  <audio
+                    controls
+                    autoPlay
+                    src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
+                    style={{ width: '320px' }}
+                  />
                 </div>
               )}
-              {!displayFile.mimeType?.startsWith('image/') && !displayFile.mimeType?.startsWith('video/') && !displayFile.mimeType?.startsWith('audio/') && (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-                  Unsupported preview format ({displayFile.mimeType})
-                </div>
-              )}
+              {!displayFile.mimeType?.startsWith('image/') &&
+                !displayFile.mimeType?.startsWith('video/') &&
+                !displayFile.mimeType?.startsWith('audio/') && (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                    Unsupported preview format ({displayFile.mimeType})
+                  </div>
+                )}
             </div>
           ) : isMarkdown ? (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                overflow: 'hidden',
+                flex: 1
+              }}
+            >
               <div
                 style={{
                   display: 'flex',
@@ -816,7 +1045,9 @@ const ArtifactPanel: React.FC = () => {
                   flexShrink: 0
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}
+                >
                   {isAgentArtifact(displayFile.name) ? (
                     getArtifactIcon(displayFile.name)
                   ) : (
@@ -828,22 +1059,46 @@ const ArtifactPanel: React.FC = () => {
                       style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
                     />
                   )}
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
+                  <span
+                    style={{
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      fontSize: 'var(--font-size-sm)',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
                     {getDisplayName(displayFile.name)}
                   </span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginLeft: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontSize: 'var(--font-size-xs)',
+                      marginLeft: '4px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
                     {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
                   </span>
                 </div>
-                
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
                   {displayFile.name === 'implementation_plan.md' && (
                     <div style={{ display: 'flex', gap: 6, marginRight: '8px' }}>
                       <button
                         className="btn"
-                        style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px', border: '1px solid rgba(255,255,255,0.12)' }}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: 'var(--font-size-xxs)',
+                          height: '22px',
+                          border: '1px solid rgba(255,255,255,0.12)'
+                        }}
                         onClick={() => {
-                          setGlobalPrompt({ prompt: 'I reject the implementation plan. Please make modifications based on my requirements.' })
+                          setGlobalPrompt({
+                            prompt:
+                              'I reject the implementation plan. Please make modifications based on my requirements.'
+                          })
                           toast.info('Rejected implementation plan. Agent notified.')
                         }}
                       >
@@ -851,9 +1106,16 @@ const ArtifactPanel: React.FC = () => {
                       </button>
                       <button
                         className="btn primary"
-                        style={{ padding: '2px 8px', fontSize: 'var(--font-size-xxs)', height: '22px' }}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: 'var(--font-size-xxs)',
+                          height: '22px'
+                        }}
                         onClick={() => {
-                          setGlobalPrompt({ prompt: 'I approve the implementation plan. Please proceed with execution.' })
+                          setGlobalPrompt({
+                            prompt:
+                              'I approve the implementation plan. Please proceed with execution.'
+                          })
                           toast.success('Approved plan. Proceeding with execution.')
                         }}
                       >
@@ -861,7 +1123,7 @@ const ArtifactPanel: React.FC = () => {
                       </button>
                     </div>
                   )}
-                  
+
                   <div
                     title="Copy file content"
                     onClick={() => {
@@ -876,14 +1138,31 @@ const ArtifactPanel: React.FC = () => {
               </div>
 
               <div
-                style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', backgroundColor: 'var(--bg-app)', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: 'var(--font-size-md-plus)', userSelect: 'text' }}
+                style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  padding: '24px 32px',
+                  backgroundColor: 'var(--bg-app)',
+                  color: 'var(--text-primary)',
+                  lineHeight: 1.6,
+                  fontSize: 'var(--font-size-md-plus)',
+                  userSelect: 'text'
+                }}
                 className="assistant-content markdown-body"
               >
                 <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', flex: 1 }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                overflow: 'hidden',
+                flex: 1
+              }}
+            >
               <div
                 style={{
                   display: 'flex',
@@ -896,7 +1175,9 @@ const ArtifactPanel: React.FC = () => {
                   flexShrink: 0
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}
+                >
                   <SymbolsFileIcon
                     fileName={displayFile.name}
                     autoAssign={true}
@@ -904,19 +1185,37 @@ const ArtifactPanel: React.FC = () => {
                     height={16}
                     style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
                   />
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: 'var(--font-size-sm)', whiteSpace: 'nowrap' }}>
+                  <span
+                    style={{
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      fontSize: 'var(--font-size-sm)',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
                     {getDisplayName(displayFile.name)}
                   </span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginLeft: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontSize: 'var(--font-size-xs)',
+                      marginLeft: '4px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
                     {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
                   </span>
                 </div>
-                
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
                   <div
-                    title={isDiffMode ? "Show Code Editor" : "Show File Diff (vs git HEAD)"}
+                    title={isDiffMode ? 'Show Code Editor' : 'Show File Diff (vs git HEAD)'}
                     onClick={() => setIsDiffMode(!isDiffMode)}
-                    className={isDiffMode ? "editor-toolbar-action active" : "editor-toolbar-action"}
+                    className={
+                      isDiffMode ? 'editor-toolbar-action active' : 'editor-toolbar-action'
+                    }
                   >
                     <FileDiff size={13} />
                   </div>
@@ -976,7 +1275,8 @@ const ArtifactPanel: React.FC = () => {
                         minimap: { enabled: false },
                         renderValidationDecorations: 'off',
                         fontSize: 13,
-                        fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
+                        fontFamily:
+                          '"JetBrains Mono", "Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
                         lineHeight: 1.6,
                         padding: { top: 16 },
                         scrollBeyondLastLine: false,
@@ -1003,7 +1303,9 @@ const ArtifactPanel: React.FC = () => {
                     />
                   )
                 ) : (
-                  <div style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-app)' }} />
+                  <div
+                    style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-app)' }}
+                  />
                 )}
               </div>
             </div>

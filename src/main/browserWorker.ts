@@ -19,13 +19,14 @@ const workerAPI = {
   async connect(url?: string) {
     try {
       if (browser) {
-        try { await browser.close() } catch {}
+        try {
+          await browser.close()
+        } catch {}
       }
       browser = await chromium.connectOverCDP('http://localhost:9222')
       context = browser.contexts()[0]
       const pages = context.pages()
 
-      // Exclude main Electron application files/dev server target to prevent hijacking
       const mainWindowUrl = workerData?.mainWindowUrl
       const mainAppKeywords = ['chrome-extension://', 'app.html', 'index.html']
       if (mainWindowUrl) {
@@ -37,31 +38,41 @@ const workerAPI = {
           mainAppKeywords.push(lowerUrl.replace('127.0.0.1', 'localhost'))
         }
       }
-      const browserPages = pages.filter(p => {
+      const browserPages = pages.filter((p) => {
         const u = p.url().toLowerCase()
-        if (mainWindowUrl && (u === mainWindowUrl.toLowerCase() || u.startsWith(mainWindowUrl.toLowerCase()))) {
+        if (
+          mainWindowUrl &&
+          (u === mainWindowUrl.toLowerCase() || u.startsWith(mainWindowUrl.toLowerCase()))
+        ) {
           return false
         }
-        return !mainAppKeywords.some(kw => u.startsWith(kw) || u.includes(kw))
+        return !mainAppKeywords.some((kw) => u.startsWith(kw) || u.includes(kw))
       })
 
       if (browserPages.length > 0) {
         if (url) {
           intentionalPageUrl = url
-          page = browserPages.find(p => {
-            const u = p.url()
-            return u === url || u.startsWith(url.split('?')[0])
-          }) ?? browserPages[0]
+          page =
+            browserPages.find((p) => {
+              const u = p.url()
+              return u === url || u.startsWith(url.split('?')[0])
+            }) ?? browserPages[0]
         } else if (intentionalPageUrl) {
-          page = browserPages.find(p => {
-            const u = p.url()
-            return u === intentionalPageUrl || u.startsWith((intentionalPageUrl as string).split('?')[0])
-          }) ?? browserPages[0]
+          page =
+            browserPages.find((p) => {
+              const u = p.url()
+              return (
+                u === intentionalPageUrl ||
+                u.startsWith((intentionalPageUrl as string).split('?')[0])
+              )
+            }) ?? browserPages[0]
         } else {
           page = browserPages[browserPages.length - 1] ?? browserPages[0]
         }
       } else {
-        throw new Error('Playwright could not locate the active Browser View page. Please verify the Browser panel is open in your Artifact screen.')
+        throw new Error(
+          'Playwright could not locate the active Browser View page. Please verify the Browser panel is open in your Artifact screen.'
+        )
       }
 
       return { success: true }
@@ -71,7 +82,6 @@ const workerAPI = {
   },
 
   async ensurePage(url?: string): Promise<{ ok: boolean; error?: string }> {
-    // Validate current page is still alive before any operation
     if (page) {
       try {
         await page.evaluate(() => true)
@@ -104,7 +114,7 @@ const workerAPI = {
         try {
           const pageUrl = page.url()
           if (pageUrl !== url && context) {
-            const found = context.pages().find(p => p.url() === url)
+            const found = context.pages().find((p) => p.url() === url)
             if (found) page = found
           }
         } catch {
@@ -133,7 +143,8 @@ const workerAPI = {
     if (!ready.ok) return { success: false, error: ready.error }
     try {
       const dist = amount || 400
-      let x = 0, y = 0
+      let x = 0,
+        y = 0
       if (direction === 'up') y = -dist
       else if (direction === 'down') y = dist
       else if (direction === 'left') x = -dist
@@ -146,7 +157,6 @@ const workerAPI = {
     }
   },
 
-
   async screenshot(filePath: string) {
     const ready = await this.ensurePage()
     if (!ready.ok) return { success: false, error: ready.error }
@@ -158,7 +168,6 @@ const workerAPI = {
     }
   },
 
-
   async mouseClickCoordinate(x: number, y: number, button?: 'left' | 'right' | 'middle') {
     const ready = await this.ensurePage()
     if (!ready.ok) return { success: false, error: ready.error }
@@ -169,7 +178,6 @@ const workerAPI = {
       return { success: false, error: err.message }
     }
   },
-
 
   async disconnect() {
     try {

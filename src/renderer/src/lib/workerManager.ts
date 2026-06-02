@@ -9,16 +9,13 @@ export function getSharedWorker(): any {
 
   try {
     sharedWorkerInstance = new BackgroundWorker()
-    sharedWorkerApi = Comlink.wrap(sharedWorkerInstance)
+    sharedWorkerApi = Comlink.wrap(sharedWorkerInstance as Worker)
 
-    // Sync client ID for telemetry
-    // MINOR-7: Guard localStorage access — may be unavailable in sandboxed contexts
-    const clientId = typeof localStorage !== 'undefined'
-      ? localStorage.getItem('orchcode_client_id')
-      : null
+    const clientId =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('orchcode_client_id') : null
 
     if (clientId && sharedWorkerApi.init) {
-      (sharedWorkerApi.init(clientId) as Promise<void>).catch((err: any) => {
+      ;(sharedWorkerApi.init(clientId) as Promise<void>).catch((err: any) => {
         console.error('[workerManager] Worker init failed:', err)
       })
     }
@@ -30,10 +27,6 @@ export function getSharedWorker(): any {
   return sharedWorkerApi
 }
 
-/**
- * ARCH-3: Terminate the background worker and clear singleton state.
- * Call this on renderer cleanup (e.g. app:before-quit) to avoid orphaned worker threads.
- */
 export function terminateSharedWorker(): void {
   if (sharedWorkerInstance) {
     try {

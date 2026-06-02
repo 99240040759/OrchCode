@@ -13,7 +13,9 @@ let currentStatus: UpdateStatus = { status: 'idle' }
 
 function sendStatus(status: UpdateStatus) {
   currentStatus = status
-  log.info(`[updater] Status transition: ${status.status} (version: ${status.version || 'unknown'}, progress: ${status.progress ?? 'N/A'})`)
+  log.info(
+    `[updater] Status transition: ${status.status} (version: ${status.version || 'unknown'}, progress: ${status.progress ?? 'N/A'})`
+  )
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send('updater:status-changed', status)
@@ -25,18 +27,13 @@ function checkWindowsUpdate() {
   sendStatus({ status: 'checking' })
   autoUpdater.checkForUpdates().catch((err) => {
     log.error('[updater] Windows update check error:', err)
-    // Send status is already handled by autoUpdater.on('error') globally, 
-    // so we only need to log it here to avoid duplicate status updates!
   })
 }
 
 export function initUpdater() {
-
-  // Bind IPC listeners
   ipcMain.handle('updater:get-status', () => currentStatus)
   ipcMain.handle('app:get-version', () => app.getVersion())
 
-  // Bypasses update scheduling in development environment
   if (!app.isPackaged) {
     log.info('[updater] Dev environment detected. Skipping update checks.')
     return
@@ -64,10 +61,9 @@ export function initUpdater() {
     }
   })
 
-  // Windows Auto-Updater configurations & event handlers
   if (process.platform === 'win32') {
     autoUpdater.logger = log
-    autoUpdater.autoDownload = true // Automatically download update in background
+    autoUpdater.autoDownload = true
 
     autoUpdater.on('checking-for-update', () => {
       sendStatus({ status: 'checking' })
@@ -99,7 +95,6 @@ export function initUpdater() {
     })
   }
 
-  // Run initial check after 6 seconds (Windows only)
   setTimeout(() => {
     log.info('[updater] Initial background update check')
     if (process.platform === 'win32') {
@@ -107,11 +102,13 @@ export function initUpdater() {
     }
   }, 6000)
 
-  // Recurrent update check (every 3 hours)
-  setInterval(() => {
-    log.info('[updater] Scheduled background update check')
-    if (process.platform === 'win32') {
-      checkWindowsUpdate()
-    }
-  }, 3 * 60 * 60 * 1000)
+  setInterval(
+    () => {
+      log.info('[updater] Scheduled background update check')
+      if (process.platform === 'win32') {
+        checkWindowsUpdate()
+      }
+    },
+    3 * 60 * 60 * 1000
+  )
 }

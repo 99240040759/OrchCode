@@ -26,8 +26,6 @@ const backgroundWorker = {
   },
 
   async sendTelemetryEvent(eventName: string, params: Record<string, string> = {}) {
-    // Vite inlines VITE_-prefixed env vars at build time into the worker bundle.
-    // Falls back to the hardcoded measurement ID if not set.
     const tid = (import.meta as any).env?.VITE_GA4_MEASUREMENT_ID ?? 'G-JSW00QYW8X'
     const queryParams = new URLSearchParams({
       v: '2',
@@ -51,7 +49,9 @@ const backgroundWorker = {
 
   async checkMacUpdate(currentVersion: string): Promise<WorkerUpdateStatus> {
     try {
-      const response = await fetch(`https://raw.githubusercontent.com/sameer786ss/OrchCode/main/latest.yml?t=${Date.now()}`)
+      const response = await fetch(
+        `https://raw.githubusercontent.com/sameer786ss/OrchCode/main/latest.yml?t=${Date.now()}`
+      )
       if (!response.ok) {
         throw new Error(`HTTP status ${response.status}`)
       }

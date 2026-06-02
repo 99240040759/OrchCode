@@ -7,17 +7,10 @@
     "src/preload/index.ts",
     "src/renderer/src/main.tsx"
   ],
-  "project": [
-    "src/**/*.{ts,tsx}"
-  ],
-  "ignore": [
-    "**/*.d.ts"
-  ],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": ["**/*.d.ts"],
   "paths": {
     "@renderer/*": ["src/renderer/src/*"]
   },
-  "ignoreDependencies": [
-    "electron",
-    "babel-plugin-react-compiler"
-  ]
+  "ignoreDependencies": ["electron", "babel-plugin-react-compiler"]
 }

@@ -6,8 +6,6 @@ import ignore, { Ignore } from 'ignore'
 
 const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
-// ─── Workspace Context ────────────────────────────────────────────────────
-
 export interface WorkspaceContext {
   conversationId: string
   rootPath: string
@@ -17,11 +15,6 @@ export interface WorkspaceContext {
 
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 
-/**
- * Gets or creates a workspace context for a conversation.
- * MED-7: If a user workspace is provided, artifacts live inside it at `.orch-artifacts/`.
- * If no workspace is open, there is no artifact system — only chat.
- */
 export async function getOrCreateWorkspaceContext(
   conversationId: string,
   userSelectedPath?: string
@@ -31,14 +24,11 @@ export async function getOrCreateWorkspaceContext(
   }
 
   const isUserWorkspace = !!userSelectedPath
-  const rootPath = userSelectedPath ?? join(app.getPath('userData'), 'conversations', conversationId)
+  const rootPath =
+    userSelectedPath ?? join(app.getPath('userData'), 'conversations', conversationId)
 
-  // MED-7: Artifacts always live inside the user's workspace, not in userData.
-  // When no workspace is selected, artifactsPath points inside the fallback rootPath
-  // but the agent system prompt won't expose it (no workspace → no artifact tools).
   const artifactsPath = join(rootPath, '.orch-artifacts')
 
-  // CRIT-8: Use async mkdir — avoids blocking the Electron main process event loop
   await fs.mkdir(rootPath, { recursive: true })
   if (isUserWorkspace) {
     await fs.mkdir(artifactsPath, { recursive: true })
@@ -49,19 +39,16 @@ export async function getOrCreateWorkspaceContext(
   return ctx
 }
 
-/** Synchronous lookup — never creates or blocks. */
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
   return workspaceRegistry.get(conversationId)
 }
 
-/**
- * Updates the workspace path for an existing conversation context.
- * MED-7: Artifacts folder is always `.orch-artifacts` inside the new workspace root.
- * CRIT-8: Both mkdir calls are now async.
- */
-export async function updateWorkspacePath(conversationId: string, newPath: string): Promise<WorkspaceContext> {
+export async function updateWorkspacePath(
+  conversationId: string,
+  newPath: string
+): Promise<WorkspaceContext> {
   const artifactsPath = join(newPath, '.orch-artifacts')
-  // CRIT-8: Async mkdir — no longer blocks main process event loop
+
   await fs.mkdir(newPath, { recursive: true })
   await fs.mkdir(artifactsPath, { recursive: true })
 
@@ -75,8 +62,6 @@ export async function updateWorkspacePath(conversationId: string, newPath: strin
   return ctx
 }
 
-// ─── Path Security ────────────────────────────────────────────────────────
-
 export function assertWithinWorkspace(
   rootPath: string,
   targetPath: string,
@@ -86,11 +71,10 @@ export function assertWithinWorkspace(
   const resolvedTarget = resolve(rootPath, targetPath)
   const normalizedTarget = normalize(resolvedTarget)
 
-  // MED-7 + MED-8: The old artifact redirect block (lines 76-87 in original) is removed.
-  // Since artifactsPath is now INSIDE rootPath (rootPath/.orch-artifacts/), the standard
-  // workspace boundary check already covers it — no special redirect needed.
-  // The Windows path-join bug (join(artifactsPath, '\relativePart') stripping base) is gone.
-  if (normalizedTarget !== normalize(resolve(rootPath)) && !normalizedTarget.startsWith(normalizedRoot)) {
+  if (
+    normalizedTarget !== normalize(resolve(rootPath)) &&
+    !normalizedTarget.startsWith(normalizedRoot)
+  ) {
     throw new Error(
       `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
     )
@@ -112,8 +96,22 @@ export function escapeHtml(str: string): string {
 
 const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
 const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip',
-  '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.mp4',
+  '.zip',
+  '.gz',
+  '.tar',
+  '.exe',
+  '.dll',
+  '.sqlite',
+  '.db',
+  '.bin',
+  '.wasm'
 ])
 
 export function isBinaryBuffer(buf: Buffer): boolean {
@@ -156,7 +154,9 @@ async function traverseDir(
         const name = entry.name
         const fullPath = join(dir, name)
         let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-        if (entry.isDirectory()) { relPath += '/' }
+        if (entry.isDirectory()) {
+          relPath += '/'
+        }
 
         if (ig.ignores(relPath)) return
 
@@ -180,12 +180,17 @@ export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
   const entries: { relativePath: string; sizeBytes: number }[] = []
   const ig = buildIgnore(rootPath)
 
-  await traverseDir(rootPath, {
-    onFile: async (fullPath, _name, sizeBytes) => {
-      const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-      entries.push({ relativePath: relPath, sizeBytes })
-    }
-  }, ig, rootPath)
+  await traverseDir(
+    rootPath,
+    {
+      onFile: async (fullPath, _name, sizeBytes) => {
+        const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
+        entries.push({ relativePath: relPath, sizeBytes })
+      }
+    },
+    ig,
+    rootPath
+  )
 
   entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 
@@ -194,9 +199,7 @@ export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
   }
 
   const lines = entries.map((e) => {
-    const sizeStr = e.sizeBytes >= 1024
-      ? `${(e.sizeBytes / 1024).toFixed(1)}KB`
-      : `${e.sizeBytes}B`
+    const sizeStr = e.sizeBytes >= 1024 ? `${(e.sizeBytes / 1024).toFixed(1)}KB` : `${e.sizeBytes}B`
     return `  ${e.relativePath} (${sizeStr})`
   })
 
@@ -211,14 +214,19 @@ export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = []
   const ig = buildIgnore(rootPath)
 
-  await traverseDir(rootPath, {
-    onFile: (fullPath) => {
-      try {
-        const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-        files.push(relPath)
-      } catch {}
-    }
-  }, ig, rootPath)
+  await traverseDir(
+    rootPath,
+    {
+      onFile: (fullPath) => {
+        try {
+          const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
+          files.push(relPath)
+        } catch {}
+      }
+    },
+    ig,
+    rootPath
+  )
 
   files.sort((a, b) => a.localeCompare(b))
   return files

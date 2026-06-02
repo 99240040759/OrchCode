@@ -6,9 +6,18 @@ import { vanillaExtractPlugin } from '@vanilla-extract/vite-plugin'
 
 // Ensure critical environment variables are present during build
 if (process.env.NODE_ENV === 'production' && !process.env.SUPABASE_URL) {
-  console.warn('\n\x1b[33m%s\x1b[0m', '⚠️ WARNING: SUPABASE_URL is not set during build. The packaged app will crash when fetching models!')
-  console.warn('\x1b[33m%s\x1b[0m', 'If building locally, ensure you have a .env file with your secrets.')
-  console.warn('\x1b[33m%s\x1b[0m', 'If using GitHub Actions, ensure the secret is added to "Repository secrets", not "Environment secrets".\n')
+  console.warn(
+    '\n\x1b[33m%s\x1b[0m',
+    '⚠️ WARNING: SUPABASE_URL is not set during build. The packaged app will crash when fetching models!'
+  )
+  console.warn(
+    '\x1b[33m%s\x1b[0m',
+    'If building locally, ensure you have a .env file with your secrets.'
+  )
+  console.warn(
+    '\x1b[33m%s\x1b[0m',
+    'If using GitHub Actions, ensure the secret is added to "Repository secrets", not "Environment secrets".\n'
+  )
 }
 
 export default defineConfig({

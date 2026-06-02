@@ -6,58 +6,61 @@ import { join, relative, extname, dirname } from 'path'
 import { execa } from 'execa'
 import log from 'electron-log'
 import { tavilyLimiter } from './limiters'
-import {
-  getWorkspaceContext,
-  assertWithinWorkspace
-} from './workspace'
+import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
 import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
 import { Worker } from 'worker_threads'
 import { wrap } from 'comlink'
 import mime from 'mime-types'
 
-// ─── Workspace resolution ─────────────────────────────────────────────────
-
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
-  if (!ctx) throw new Error(`No workspace context for conversation ${convId}. Workspace must be initialized before tool execution.`)
+  if (!ctx)
+    throw new Error(
+      `No workspace context for conversation ${convId}. Workspace must be initialized before tool execution.`
+    )
   return ctx
 }
-
-// ─── Security ─────────────────────────────────────────────────────────────
 
 const BLOCKED_COMMAND_PATTERNS = [
   /\brm\s+(-[rRf]+\s+)?[\/~]/,
   /\bsudo\b/,
   /\bcurl\b.*\|\s*(ba)?sh/,
-  /\bwget\b.*\|\s*(ba)?sh/,
+  /\bwget\b.*\|\s*(ba)?sh/
 ]
 
 function isCommandBlocked(command: string): boolean {
   return BLOCKED_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
 }
 
-// ─── MIME helpers ─────────────────────────────────────────────────────────
-
 const getMimeType = (filePath: string) => {
   return mime.lookup(filePath) || 'application/octet-stream'
 }
 
-const BINARY_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'application/octet-stream', 'application/zip', 'application/x-tar', 'application/pdf']
-const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/typescript']
+const BINARY_MIME_PREFIXES = [
+  'image/',
+  'video/',
+  'audio/',
+  'application/octet-stream',
+  'application/zip',
+  'application/x-tar',
+  'application/pdf'
+]
+const TEXT_MIME_PREFIXES = [
+  'text/',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript'
+]
 
-/**
- * MED-11: Two-phase binary detection.
- * Phase 1: Check MIME type from extension (fast, accurate for named binary files).
- * Phase 2: Fall back to null-byte scan for files without extensions or with wrong extensions.
- */
 function isFileBinary(filePath: string, buf: Buffer): boolean {
   const detectedMime = getMimeType(filePath)
-  // If MIME is in known text prefixes, it's definitely not binary
+
   if (TEXT_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return false
-  // If MIME is in known binary prefixes, it's definitely binary
+
   if (BINARY_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return true
-  // Unknown/generic MIME \u2014 fall back to null-byte scan (original isBinaryBuffer logic)
+
   return buf.subarray(0, 512).includes(0x00)
 }
 
@@ -70,9 +73,6 @@ function sliceLines(allLines: string[], startLine: number, endLine: number) {
   const rangeText = rangeLines.join('\n')
   return { start, end, beforeLines, rangeLines, afterLines, rangeText }
 }
-
-// ─── Core tool factory ────────────────────────────────────────────────────
-// Each tool receives the convId from the stream-request closure — no global state.
 
 export function createCoreTools(convId: string) {
   const wctx = () => resolveWorkspace(convId)
@@ -101,9 +101,13 @@ export function createCoreTools(convId: string) {
             let numChildren: number | undefined
 
             if (isDirectory) {
-              try { numChildren = (await fs.readdir(fullPath)).length } catch {}
+              try {
+                numChildren = (await fs.readdir(fullPath)).length
+              } catch {}
             } else {
-              try { sizeBytes = (await fs.stat(fullPath)).size } catch {}
+              try {
+                sizeBytes = (await fs.stat(fullPath)).size
+              } catch {}
             }
 
             return {
@@ -150,7 +154,6 @@ export function createCoreTools(convId: string) {
 
         const rawBuffer = await fs.readFile(safePath)
 
-        // MED-11: Use two-phase binary detection (MIME first, then null-byte scan)
         if (isFileBinary(safePath, rawBuffer)) {
           const mimeType = getMimeType(safePath)
           return {
@@ -176,7 +179,15 @@ export function createCoreTools(convId: string) {
         const targetLines = allLines.slice(start - 1, end)
         const numberedContent = targetLines.map((line, i) => `${start + i}: ${line}`).join('\n')
 
-        return { content: numberedContent, rawContent: targetLines.join('\n'), absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
+        return {
+          content: numberedContent,
+          rawContent: targetLines.join('\n'),
+          absolutePath: safePath,
+          totalLines,
+          readStart: start,
+          readEnd: end,
+          truncated: wasTruncated
+        }
       } catch (err: any) {
         log.error('[tool:viewFile] error:', err)
         return { success: false, error: err.message }
@@ -192,7 +203,10 @@ export function createCoreTools(convId: string) {
           ]
         }
       }
-      return { type: 'content', value: [{ type: 'text', text: output.content || output.error || 'No content' }] }
+      return {
+        type: 'content',
+        value: [{ type: 'text', text: output.content || output.error || 'No content' }]
+      }
     }
   })
 
@@ -200,16 +214,24 @@ export function createCoreTools(convId: string) {
     description:
       'Create a new file (or overwrite an existing one) within the workspace. Parent directories are created automatically. Set overwrite=true to replace an existing file.',
     inputSchema: z.object({
-      targetFile: z.string().describe('Absolute path for the file to create. Must be within the workspace root.'),
+      targetFile: z
+        .string()
+        .describe('Absolute path for the file to create. Must be within the workspace root.'),
       codeContent: z.string().describe('Full file content to write.'),
-      overwrite: z.boolean().default(false).describe('If true, overwrite an existing file. Defaults to false.')
+      overwrite: z
+        .boolean()
+        .default(false)
+        .describe('If true, overwrite an existing file. Defaults to false.')
     }),
     execute: async ({ targetFile, codeContent, overwrite }) => {
       try {
         const safePath = safe(targetFile)
 
         let exists = false
-        try { await fs.stat(safePath); exists = true } catch {}
+        try {
+          await fs.stat(safePath)
+          exists = true
+        } catch {}
 
         if (exists && !overwrite) {
           throw new Error(`File already exists: "${safePath}". Set overwrite=true to replace it.`)
@@ -230,10 +252,20 @@ export function createCoreTools(convId: string) {
     description:
       'Edit a SINGLE contiguous block in an existing file. Replaces the content in the line range [startLine, endLine] with ReplacementContent.',
     inputSchema: z.object({
-      targetFile: z.string().describe('Absolute path to the file to edit. Must be within the workspace root.'),
+      targetFile: z
+        .string()
+        .describe('Absolute path to the file to edit. Must be within the workspace root.'),
       replacementContent: z.string().describe('Replacement content for the line block.'),
-      startLine: z.number().int().min(1).describe('Start of the line range to replace (1-indexed).'),
-      endLine: z.number().int().min(1).describe('End of the line range to replace (1-indexed, inclusive).')
+      startLine: z
+        .number()
+        .int()
+        .min(1)
+        .describe('Start of the line range to replace (1-indexed).'),
+      endLine: z
+        .number()
+        .int()
+        .min(1)
+        .describe('End of the line range to replace (1-indexed, inclusive).')
     }),
     execute: async ({ targetFile, replacementContent, startLine, endLine }) => {
       try {
@@ -268,14 +300,23 @@ export function createCoreTools(convId: string) {
     description:
       'Edit MULTIPLE non-contiguous blocks in an existing file in a single call. Chunks are applied in reverse line order to preserve line numbers.',
     inputSchema: z.object({
-      targetFile: z.string().describe('Absolute path to the file to edit. Must be within the workspace root.'),
-      instruction: z.string().describe('Human-readable description of what changes are being made.'),
-      replacementChunks: z.array(ReplacementChunkSchema).min(1).describe('Array of replacement chunks to apply.')
+      targetFile: z
+        .string()
+        .describe('Absolute path to the file to edit. Must be within the workspace root.'),
+      instruction: z
+        .string()
+        .describe('Human-readable description of what changes are being made.'),
+      replacementChunks: z
+        .array(ReplacementChunkSchema)
+        .min(1)
+        .describe('Array of replacement chunks to apply.')
     }),
     execute: async ({ targetFile, instruction, replacementChunks }) => {
       try {
         const safePath = safe(targetFile)
-        log.info(`[tool:multiReplaceFileContent] ${safePath} — ${instruction} (${replacementChunks.length} chunks)`)
+        log.info(
+          `[tool:multiReplaceFileContent] ${safePath} — ${instruction} (${replacementChunks.length} chunks)`
+        )
 
         const raw = await fs.readFile(safePath, 'utf-8')
         const isCrlf = raw.includes('\r\n')
@@ -286,9 +327,17 @@ export function createCoreTools(convId: string) {
 
         for (const chunk of sorted) {
           const allLines = normalizedRaw.split('\n')
-          const { start, end, beforeLines, afterLines } = sliceLines(allLines, chunk.startLine, chunk.endLine)
+          const { start, end, beforeLines, afterLines } = sliceLines(
+            allLines,
+            chunk.startLine,
+            chunk.endLine
+          )
 
-          normalizedRaw = [...beforeLines, ...chunk.replacementContent.split('\n'), ...afterLines].join('\n')
+          normalizedRaw = [
+            ...beforeLines,
+            ...chunk.replacementContent.split('\n'),
+            ...afterLines
+          ].join('\n')
           results.push({ startLine: start, endLine: end })
         }
 
@@ -308,8 +357,20 @@ export function createCoreTools(convId: string) {
       'Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Dangerous commands (sudo, rm -rf /, curl|sh) are blocked. Timeout defaults to 30s.',
     inputSchema: z.object({
       commandLine: z.string().describe('The exact shell command to execute.'),
-      cwd: z.string().optional().describe('Absolute path to run the command in. Must be within workspace root. Defaults to workspace root.'),
-      waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds (max 180000). Defaults to 60000.')
+      cwd: z
+        .string()
+        .optional()
+        .describe(
+          'Absolute path to run the command in. Must be within workspace root. Defaults to workspace root.'
+        ),
+      waitMsBeforeAsync: z
+        .number()
+        .int()
+        .min(0)
+        .max(180000)
+        .optional()
+        .default(60000)
+        .describe('Timeout in milliseconds (max 180000). Defaults to 60000.')
     }),
     execute: async ({ commandLine, cwd, waitMsBeforeAsync }) => {
       try {
@@ -317,7 +378,12 @@ export function createCoreTools(convId: string) {
         const runDir = cwd ? assertWithinWorkspace(ctx.rootPath, cwd, convId) : ctx.rootPath
 
         if (isCommandBlocked(commandLine)) {
-          return { stdout: '', stderr: `Command blocked for security: "${commandLine}"`, exitCode: 1, success: false }
+          return {
+            stdout: '',
+            stderr: `Command blocked for security: "${commandLine}"`,
+            exitCode: 1,
+            success: false
+          }
         }
 
         log.info(`[tool:runCommand] cwd=${runDir} cmd=${commandLine}`)
@@ -343,18 +409,20 @@ export function createCoreTools(convId: string) {
   })
 
   const searchWorkspace = tool({
-    description: 'Searches the workspace for files containing a specific regex pattern using ripgrep. Use to find where functions/variables are defined or used.',
+    description:
+      'Searches the workspace for files containing a specific regex pattern using ripgrep. Use to find where functions/variables are defined or used.',
     inputSchema: z.object({
       query: z.string().describe('The regex query to search for.'),
-      includes: z.array(z.string()).optional().describe('Optional array of glob patterns to filter files (e.g. ["*.ts", "*.tsx"]).')
+      includes: z
+        .array(z.string())
+        .optional()
+        .describe('Optional array of glob patterns to filter files (e.g. ["*.ts", "*.tsx"]).')
     }),
     execute: async ({ query, includes }) => {
       try {
         const ctx = wctx()
         const runDir = ctx.rootPath
 
-        // CRIT-4: Use args array with shell:false to prevent command injection.
-        // Previously: execa(cmd, { shell: true }) with unescaped glob patterns.
         const args = ['-n', '-I', query]
         if (includes && includes.length > 0) {
           for (const glob of includes) {
@@ -370,14 +438,19 @@ export function createCoreTools(convId: string) {
         })
 
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
-           return { success: true, results: 'No matches found.' }
+          return { success: true, results: 'No matches found.' }
         }
 
         const output = result.stdout.trim()
         const lines = output.split('\n')
-        // MINOR-6: Increased from 50 to 200 lines — 50 was far too low for real codebases
+
         if (lines.length > 200) {
-           return { success: true, results: lines.slice(0, 200).join('\n') + `\n\n... (truncated ${lines.length - 200} more matches. Refine your query or add glob filters.)` }
+          return {
+            success: true,
+            results:
+              lines.slice(0, 200).join('\n') +
+              `\n\n... (truncated ${lines.length - 200} more matches. Refine your query or add glob filters.)`
+          }
         }
 
         return { success: true, results: output }
@@ -394,7 +467,14 @@ export function createCoreTools(convId: string) {
     inputSchema: z.object({
       query: z.string().describe('The search query.'),
       domain: z.string().optional().describe('Optional domain to prioritize in results.'),
-      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Max number of results (1–10, default 5).')
+      maxResults: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .default(5)
+        .describe('Max number of results (1–10, default 5).')
     }),
     execute: async ({ query, domain, maxResults }) => {
       return tavilyLimiter.schedule(async () => {
@@ -403,8 +483,8 @@ export function createCoreTools(convId: string) {
           const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/tavily`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-              'apikey': process.env.SUPABASE_ANON_KEY || '',
+              Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+              apikey: process.env.SUPABASE_ANON_KEY || '',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({ query, domain, maxResults })
@@ -412,7 +492,10 @@ export function createCoreTools(convId: string) {
           if (!response.ok) throw new Error(`Proxy error: HTTP ${response.status}`)
           const data = await response.json()
           const results = (data.results ?? []).map((r: any) => ({
-            title: r.title, url: r.url, snippet: r.content, score: r.score
+            title: r.title,
+            url: r.url,
+            snippet: r.content,
+            score: r.score
           }))
           return { query, answer: data.answer ?? null, results, totalResults: results.length }
         } catch (err: any) {
@@ -423,10 +506,17 @@ export function createCoreTools(convId: string) {
     }
   })
 
-  return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, runCommand, searchWorkspace, searchWeb }
+  return {
+    listDir,
+    viewFile,
+    writeToFile,
+    replaceFileContent,
+    multiReplaceFileContent,
+    runCommand,
+    searchWorkspace,
+    searchWeb
+  }
 }
-
-// ─── Browser automation worker ────────────────────────────────────────────
 
 let workerInstance: Worker | null = null
 let automatedBrowser: any = null
@@ -436,7 +526,8 @@ function checkBrowserViewActive(): { success: boolean; error?: string } | null {
   if (!bv) {
     return {
       success: false,
-      error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
+      error:
+        'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
     }
   }
   return null
@@ -455,7 +546,9 @@ export function startBrowserAgentWorker() {
 
 export async function stopBrowserAgentWorker() {
   if (automatedBrowser) {
-    try { await automatedBrowser.disconnect() } catch {}
+    try {
+      await automatedBrowser.disconnect()
+    } catch {}
     automatedBrowser = null
   }
   if (workerInstance) {
@@ -463,10 +556,6 @@ export async function stopBrowserAgentWorker() {
     workerInstance = null
   }
 }
-
-// ─── Browser tools factory ─────────────────────────────────────────────────
-// FIXED: Now a factory function that takes convId — eliminates the global getActiveConversationId() call
-// which was the root cause of screenshots saving to the wrong conversation directory.
 
 export function browserTools(convId: string) {
   const browserNavigate = tool({
@@ -477,25 +566,37 @@ export function browserTools(convId: string) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
-      try { return await agent.navigate(url) }
-      catch (err: any) { log.error('[tool:browserNavigate] worker error:', err); return { success: false, error: err.message } }
+      try {
+        return await agent.navigate(url)
+      } catch (err: any) {
+        log.error('[tool:browserNavigate] worker error:', err)
+        return { success: false, error: err.message }
+      }
     }
   })
 
   const browserType = tool({
-    description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
+    description:
+      'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
     inputSchema: z.object({
       selector: z.string().describe('CSS selector of the input field.'),
       text: z.string().describe('The text to type.'),
-      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
+      frameSelector: z
+        .string()
+        .optional()
+        .describe('Optional CSS selector of the iframe containing the target input.')
     }),
     execute: async ({ selector, text, frameSelector }) => {
       log.info(`[tool:browserType] selector="${selector}"`)
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
-      try { return await agent.type(selector, text, frameSelector) }
-      catch (err: any) { log.error('[tool:browserType] worker error:', err); return { success: false, error: err.message } }
+      try {
+        return await agent.type(selector, text, frameSelector)
+      } catch (err: any) {
+        log.error('[tool:browserType] worker error:', err)
+        return { success: false, error: err.message }
+      }
     }
   })
 
@@ -510,8 +611,12 @@ export function browserTools(convId: string) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
-      try { return await agent.scroll(direction, amount) }
-      catch (err: any) { log.error('[tool:browserScroll] worker error:', err); return { success: false, error: err.message } }
+      try {
+        return await agent.scroll(direction, amount)
+      } catch (err: any) {
+        log.error('[tool:browserScroll] worker error:', err)
+        return { success: false, error: err.message }
+      }
     }
   })
 
@@ -524,13 +629,9 @@ export function browserTools(convId: string) {
       if (check) return check
       const agent = startBrowserAgentWorker()
       try {
-        // HIGH-6 FIX: Use closure-scoped convId instead of global getActiveConversationId()
-        // This ensures the screenshot always saves to the directory of the thread that requested it,
-        // even if the user has switched threads in the UI.
         const screenshotDir = join(app.getPath('userData'), 'conversations', convId, 'screenshots')
         await fs.mkdir(screenshotDir, { recursive: true })
 
-        // Rotate: keep only the last 10 screenshots
         try {
           const existing = await fs.readdir(screenshotDir)
           const pngs = existing.filter((f) => f.endsWith('.png')).sort()
@@ -543,7 +644,12 @@ export function browserTools(convId: string) {
         const screenshotPath = join(screenshotDir, filename)
         const res = await agent.screenshot(screenshotPath)
         if (res.success) {
-          return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename }
+          return {
+            success: true,
+            message: 'Screenshot captured.',
+            filePath: `file://${screenshotPath}`,
+            filename
+          }
         }
         return res
       } catch (err: any) {
@@ -564,10 +670,16 @@ export function browserTools(convId: string) {
             ]
           }
         } catch (err: any) {
-          return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }] }
+          return {
+            type: 'content',
+            value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }]
+          }
         }
       }
-      return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
+      return {
+        type: 'content',
+        value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }]
+      }
     }
   })
 
@@ -583,10 +695,20 @@ export function browserTools(convId: string) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
-      try { return await agent.mouseClickCoordinate(x, y, button) }
-      catch (err: any) { log.error('[tool:browserMouseClickCoordinate] worker error:', err); return { success: false, error: err.message } }
+      try {
+        return await agent.mouseClickCoordinate(x, y, button)
+      } catch (err: any) {
+        log.error('[tool:browserMouseClickCoordinate] worker error:', err)
+        return { success: false, error: err.message }
+      }
     }
   })
 
-  return { browserNavigate, browserType, browserScroll, browserScreenshot, browserMouseClickCoordinate }
+  return {
+    browserNavigate,
+    browserType,
+    browserScroll,
+    browserScreenshot,
+    browserMouseClickCoordinate
+  }
 }

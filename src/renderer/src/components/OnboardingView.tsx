@@ -6,7 +6,9 @@ import { toast } from 'sonner'
 export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
-  const [user, setUser] = useState<{ name?: string; email?: string; photoUrl?: string } | null>(null)
+  const [user, setUser] = useState<{ name?: string; email?: string; photoUrl?: string } | null>(
+    null
+  )
 
   const handleSignIn = async () => {
     setLoading(true)
@@ -17,7 +19,6 @@ export const OnboardingView: React.FC = () => {
         setUser(profile)
         setTimeout(() => {
           window.api.openMainAndCloseOnboarding()
-        // UI-10: Reduced from 2500ms — 1200ms feels snappy while still showing brand
         }, 1200)
       } else {
         setLoading(false)
@@ -44,7 +45,9 @@ export const OnboardingView: React.FC = () => {
             <div className="onboarding-logo-container">
               <div className="onboarding-logo-icon">☄️</div>
               <h1 className="onboarding-title">Orch Code</h1>
-              <p className="onboarding-subtitle">Supercharge your development agentic experience.</p>
+              <p className="onboarding-subtitle">
+                Supercharge your development agentic experience.
+              </p>
             </div>
 
             {loading ? (
@@ -58,9 +61,7 @@ export const OnboardingView: React.FC = () => {
                   <GoogleIcon size={18} />
                   <span className="onboarding-btn-text">Sign In with Google</span>
                 </button>
-                {authError && (
-                  <p className="onboarding-error">{authError}</p>
-                )}
+                {authError && <p className="onboarding-error">{authError}</p>}
               </>
             )}
           </div>
@@ -68,7 +69,12 @@ export const OnboardingView: React.FC = () => {
           <div className="onboarding-welcome">
             <div className="onboarding-avatar-container">
               {user.photoUrl ? (
-                <img src={user.photoUrl} alt={user.name} className="onboarding-avatar-img" referrerPolicy="no-referrer" />
+                <img
+                  src={user.photoUrl}
+                  alt={user.name}
+                  className="onboarding-avatar-img"
+                  referrerPolicy="no-referrer"
+                />
               ) : (
                 <div className="onboarding-avatar-fallback">
                   {user.name ? user.name.charAt(0).toUpperCase() : 'U'}

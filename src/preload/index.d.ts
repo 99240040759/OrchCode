@@ -48,10 +48,18 @@ export interface AppAPI {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
   listWorkspaceFiles: (conversationId: string) => Promise<string[]>
 
-  streamAgent: (promptText: string, threadId: string, mode?: string, modelType?: string, attachments?: any[]) => Promise<void>
+  streamAgent: (
+    promptText: string,
+    threadId: string,
+    mode?: string,
+    modelType?: string,
+    attachments?: any[]
+  ) => Promise<void>
   stopAgentStream: (threadId?: string) => Promise<void>
-  onAgentChunk: (callback: (chunk: { type: string; payload: any; threadId?: string }) => void) => () => void
-  getAvailableModels: () => Promise<{ gemini?: { id: string; name: string }; gemma?: { id: string; name: string } }>
+  onAgentChunk: (
+    callback: (chunk: { type: string; payload: any; threadId?: string }) => void
+  ) => () => void
+  getAvailableModels: () => Promise<Record<string, { id: string; name: string }>>
 
   getConversationId: () => Promise<string>
   newConversation: () => Promise<{ conversationId: string }>
@@ -70,14 +78,22 @@ export interface AppAPI {
   writeFile: (filePath: string, content: string, conversationId?: string) => Promise<boolean>
   onArtifactsChanged: (callback: (artifacts: ArtifactEntry[]) => void) => () => void
 
-  createTerminal: (opts: { cols: number; rows: number; cwd?: string; conversationId?: string }) => Promise<{ id: string }>
+  createTerminal: (opts: {
+    cols: number
+    rows: number
+    cwd?: string
+    conversationId?: string
+  }) => Promise<{ id: string }>
   terminalInput: (opts: { id: string; data: string }) => Promise<void>
   terminalResize: (opts: { id: string; cols: number; rows: number }) => Promise<void>
   closeTerminal: (opts: { id: string }) => Promise<void>
   onTerminalData: (callback: (payload: { id: string; data: string }) => void) => () => void
   onTerminalExit: (callback: (payload: { id: string; exitCode: number }) => void) => () => void
 
-  openBrowser: (opts: { url: string; bounds: { x: number; y: number; width: number; height: number } }) => Promise<void>
+  openBrowser: (opts: {
+    url: string
+    bounds: { x: number; y: number; width: number; height: number }
+  }) => Promise<void>
   navigateBrowser: (url: string) => Promise<void>
   browserBack: () => Promise<void>
   browserForward: () => Promise<void>
@@ -87,7 +103,13 @@ export interface AppAPI {
   onBrowserTitleUpdated: (callback: (title: string) => void) => () => void
   onBrowserUrlChanged: (callback: (url: string) => void) => () => void
 
-  showConfirmDialog: (opts: { message: string; detail?: string; buttons?: string[]; defaultId?: number; cancelId?: number }) => Promise<number>
+  showConfirmDialog: (opts: {
+    message: string
+    detail?: string
+    buttons?: string[]
+    defaultId?: number
+    cancelId?: number
+  }) => Promise<number>
 
   getUpdateStatus: () => Promise<UpdateStatus>
   checkForUpdates: () => Promise<void>

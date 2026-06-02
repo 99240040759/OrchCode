@@ -1,11 +1,11 @@
 import React from 'react'
 
-/** Returns true if the filename is an agent-generated artifact (not a user workspace file). */
 export function isAgentArtifact(fileName: string): boolean {
-  return fileName === 'implementation_plan.md' || fileName === 'walkthrough.md' || fileName === 'task.md'
+  return (
+    fileName === 'implementation_plan.md' || fileName === 'walkthrough.md' || fileName === 'task.md'
+  )
 }
 
-/** Maps raw artifact filenames to human-readable display labels. */
 export function getDisplayName(fileName: string): string {
   if (fileName === 'implementation_plan.md') return 'Implementation Plan'
   if (fileName === 'walkthrough.md') return 'Walkthrough'
@@ -13,7 +13,6 @@ export function getDisplayName(fileName: string): string {
   return fileName
 }
 
-/** Shared Google brand logo SVG. */
 export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
   <svg
     viewBox="0 0 24 24"

@@ -10,7 +10,7 @@
   background-color: var(--bg-sidebar);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   z-index: 1000;
   padding: 4px;
   display: flex;
@@ -131,9 +131,10 @@
 }
 
 .token-ring-circle {
-  transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease;
+  transition:
+    stroke-dashoffset 0.3s ease,
+    stroke 0.3s ease;
 }
-
 
 /* --- Input Bar & Control Center Component --- */
 .workspace-main {
@@ -270,13 +271,19 @@
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25), 0 0 1px rgba(255, 255, 255, 0.05);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.25),
+    0 0 1px rgba(255, 255, 255, 0.05);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .input-bar-container:focus-within {
   border-color: var(--border-focus);
-  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 12px 38px rgba(0, 0, 0, 0.35),
+    0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 /* textarea padding is set inline in InputBar.tsx to allow dynamic resizing;
@@ -353,7 +360,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.2s ease, background-color 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .toolbar-icon-btn:hover {

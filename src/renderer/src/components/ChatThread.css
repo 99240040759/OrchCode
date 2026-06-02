@@ -60,7 +60,6 @@
   cursor: pointer;
 }
 
-
 /* --- Chat Thread & Bubble Messages Component --- */
 .chat-thread-container {
   scrollbar-width: none !important;

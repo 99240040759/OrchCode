@@ -1,7 +1,12 @@
 import React, { useMemo, useState, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2 } from 'lucide-react'
-import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
+import {
+  threadListAtom,
+  activeThreadIdAtom,
+  activeWorkspaceAtom,
+  agentRunStateAtom
+} from '../store/agentStore'
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
 import { formatDistanceToNow } from 'date-fns'
@@ -25,7 +30,6 @@ const ThreadList: React.FC = () => {
   const [workspacePaths, setWorkspacePaths] = useState<string[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
 
-  // Expand the active workspace automatically
   React.useEffect(() => {
     if (activeWorkspace?.path) {
       setExpandedPaths((prev) => ({
@@ -48,55 +52,62 @@ const ThreadList: React.FC = () => {
     loadWorkspacesList()
   }, [activeWorkspace?.path, loadWorkspacesList])
 
-  // Deduplicated, stable workspace path list — memoized to avoid Array.from+Set on every render
   const allWorkspacePaths = useMemo(() => {
-    return Array.from(new Set([
-      ...(activeWorkspace?.path ? [activeWorkspace.path] : []),
-      ...workspacePaths
-    ]))
+    return Array.from(
+      new Set([...(activeWorkspace?.path ? [activeWorkspace.path] : []), ...workspacePaths])
+    )
   }, [activeWorkspace?.path, workspacePaths])
 
   const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => ({ ...prev, [path]: !prev[path] }))
   }, [])
 
-  const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
-    e.stopPropagation()
-    const confirmed = await window.api.showConfirmDialog({
-      message: 'Delete this conversation?',
-      detail: 'This will permanently remove the conversation and all its messages.',
-      buttons: ['Cancel', 'Delete'],
-      defaultId: 1,
-      cancelId: 0
-    })
-    if (confirmed === 1) {
-      await deleteThread(threadId)
-    }
-  }, [deleteThread])
-
-  const handleCloseWorkspace = useCallback(async (e: React.MouseEvent, path: string) => {
-    e.stopPropagation()
-    const name = path.split(/[/\\]/).pop() ?? 'Workspace'
-
-    const confirmDelete = await window.api.showConfirmDialog({
-      message: `Delete workspace data for "${name}"?`,
-      detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts from disk. Real codebase files inside the directory itself will NOT be touched.`,
-      buttons: ['Cancel', 'Delete Data'],
-      defaultId: 1,
-      cancelId: 0
-    })
-
-    if (confirmDelete === 1) {
-      const success = await closeAndDeleteWorkspace(path)
-      if (success) {
-        await loadWorkspacesList()
+  const handleDeleteThread = useCallback(
+    async (e: React.MouseEvent, threadId: string) => {
+      e.stopPropagation()
+      const confirmed = await window.api.showConfirmDialog({
+        message: 'Delete this conversation?',
+        detail: 'This will permanently remove the conversation and all its messages.',
+        buttons: ['Cancel', 'Delete'],
+        defaultId: 1,
+        cancelId: 0
+      })
+      if (confirmed === 1) {
+        await deleteThread(threadId)
       }
-    }
-  }, [closeAndDeleteWorkspace, loadWorkspacesList])
+    },
+    [deleteThread]
+  )
+
+  const handleCloseWorkspace = useCallback(
+    async (e: React.MouseEvent, path: string) => {
+      e.stopPropagation()
+      const name = path.split(/[/\\]/).pop() ?? 'Workspace'
+
+      const confirmDelete = await window.api.showConfirmDialog({
+        message: `Delete workspace data for "${name}"?`,
+        detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts from disk. Real codebase files inside the directory itself will NOT be touched.`,
+        buttons: ['Cancel', 'Delete Data'],
+        defaultId: 1,
+        cancelId: 0
+      })
+
+      if (confirmDelete === 1) {
+        const success = await closeAndDeleteWorkspace(path)
+        if (success) {
+          await loadWorkspacesList()
+        }
+      }
+    },
+    [closeAndDeleteWorkspace, loadWorkspacesList]
+  )
 
   return (
-    <div className="sidebar-section" style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}>
-      {/* Projects Header */}
+    <div
+      className="sidebar-section"
+      style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}
+    >
+      {}
       <div
         className="sidebar-section-header"
         style={{
@@ -112,14 +123,25 @@ const ThreadList: React.FC = () => {
         }}
       >
         <span>Projects</span>
-        <span title="Add Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}>
+        <span
+          title="Add Project Folder"
+          className="sidebar-section-header-action"
+          onClick={() => openWorkspace()}
+        >
           <FolderPlus size={14} />
         </span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {allWorkspacePaths.length === 0 ? (
-          <div style={{ padding: '0 12px', color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>
+          <div
+            style={{
+              padding: '0 12px',
+              color: 'var(--text-muted)',
+              fontSize: '13px',
+              fontStyle: 'italic'
+            }}
+          >
             No projects opened yet.
           </div>
         ) : (
@@ -131,18 +153,28 @@ const ThreadList: React.FC = () => {
 
             return (
               <div key={path} style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Project/Folder Row */}
-                <div
-                  className="workspace-node-row"
-                  // UI-5: Row click expands/collapses the workspace section.
-                  // Previously called switchWorkspace() which unexpectedly changed
-                  // the active conversation context just from clicking a folder row.
-                  onClick={() => toggleExpand(path)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                {}
+                <div className="workspace-node-row" onClick={() => toggleExpand(path)}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      minWidth: 0,
+                      flex: 1
+                    }}
+                  >
                     <div
-                      onClick={(e) => { e.stopPropagation(); toggleExpand(path) }}
-                      style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: 2 }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleExpand(path)
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        cursor: 'pointer',
+                        padding: 2
+                      }}
                     >
                       {isExpanded ? (
                         <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
@@ -168,23 +200,45 @@ const ThreadList: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="workspace-node-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  <div
+                    className="workspace-node-actions"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+                  >
                     <div
                       className="sidebar-section-header-action"
                       onClick={(e) => handleCloseWorkspace(e, path)}
                       title="Close project folder"
-                      style={{ padding: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      style={{
+                        padding: 2,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
                     >
                       <X size={13} />
                     </div>
                   </div>
                 </div>
 
-                {/* Sub-threads (indented list) */}
+                {}
                 {isExpanded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '2px 0 2px 24px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                      padding: '2px 0 2px 24px'
+                    }}
+                  >
                     {workspaceThreads.length === 0 ? (
-                      <span style={{ padding: '6px 12px', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic' }}>
+                      <span
+                        style={{
+                          padding: '6px 12px',
+                          color: 'var(--text-dim)',
+                          fontSize: '12px',
+                          fontStyle: 'italic'
+                        }}
+                      >
                         No chats yet
                       </span>
                     ) : (
@@ -209,7 +263,9 @@ const ThreadList: React.FC = () => {
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
                                   fontSize: '13px',
-                                  color: isThreadActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                  color: isThreadActive
+                                    ? 'var(--text-primary)'
+                                    : 'var(--text-secondary)',
                                   fontWeight: isThreadActive ? 500 : 400,
                                   flex: 1
                                 }}
@@ -217,7 +273,15 @@ const ThreadList: React.FC = () => {
                                 {thread.title ?? 'New conversation'}
                               </span>
 
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: '8px' }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  flexShrink: 0,
+                                  marginLeft: '8px'
+                                }}
+                              >
                                 {isRunning ? (
                                   <Loader2
                                     size={12}
@@ -227,7 +291,13 @@ const ThreadList: React.FC = () => {
                                     }}
                                   />
                                 ) : (
-                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '11px',
+                                      color: 'var(--text-muted)',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
                                     {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
                                   </span>
                                 )}

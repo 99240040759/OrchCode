@@ -87,5 +87,5 @@
 }
 
 .sidebar-collapsed-rail:hover {
-  background-color: var(--bg-sidebar-hover, rgba(255,255,255,0.04));
+  background-color: var(--bg-sidebar-hover, rgba(255, 255, 255, 0.04));
 }

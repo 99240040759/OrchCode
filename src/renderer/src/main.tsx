@@ -1,27 +1,23 @@
 import { init as initSentry } from '@sentry/electron/renderer'
 import { getSharedWorker, terminateSharedWorker } from './lib/workerManager'
 
-// ARCH-3: Terminate background worker on renderer unload to prevent orphaned threads
 window.addEventListener('beforeunload', () => {
   terminateSharedWorker()
 })
 
-// Initialize Sentry Renderer SDK (inherits DSN and enabled settings from Main)
 initSentry()
 
-// Initialize background telemetry client ID
 let clientId = localStorage.getItem('orchcode_client_id')
 if (!clientId) {
   clientId = self.crypto.randomUUID()
   localStorage.setItem('orchcode_client_id', clientId)
 }
 
-// Bootstrap consolidated worker off-thread telemetry
 try {
   const workerApi = getSharedWorker()
   if (workerApi) {
-    workerApi.sendTelemetryEvent('app_launch', { 
-      platform: navigator.userAgent.includes('Mac') ? 'macos' : 'windows' 
+    workerApi.sendTelemetryEvent('app_launch', {
+      platform: navigator.userAgent.includes('Mac') ? 'macos' : 'windows'
     })
   }
 } catch (err) {

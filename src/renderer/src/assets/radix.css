@@ -10,11 +10,13 @@
   font-size: var(--font-size-xs-plus);
   border: none;
   background: transparent;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
   color: var(--text-secondary);
 }
 
-.tab-trigger[data-state="active"] {
+.tab-trigger[data-state='active'] {
   color: var(--text-primary);
   background-color: rgba(255, 255, 255, 0.04);
   font-weight: 500;

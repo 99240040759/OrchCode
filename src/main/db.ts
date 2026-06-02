@@ -66,10 +66,9 @@ function getDB(): Database.Database {
     );
   `)
 
-  // Migrate using PRAGMA table_info to safely check for columns
   const checkColumn = (table: string, column: string) => {
     const cols = dbInstance!.pragma(`table_info(${table})`) as any[]
-    return cols.some(c => c.name === column)
+    return cols.some((c) => c.name === column)
   }
 
   if (!checkColumn('threads', 'accumulatedTokens')) {
@@ -79,29 +78,34 @@ function getDB(): Database.Database {
     dbInstance!.exec(`ALTER TABLE threads ADD COLUMN compactionSummary TEXT`)
   }
   if (!checkColumn('messages', 'isCompactionAnchor')) {
-    dbInstance!.exec(`ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`)
+    dbInstance!.exec(
+      `ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`
+    )
   }
-  // MINOR-2: Removed standalone CREATE INDEX IF NOT EXISTS for idx_messages_compaction —
-  // it's already declared in the CREATE TABLE block above and running it twice on every
-  // startup is a redundant no-op.
 
   return dbInstance
 }
 
 export function getThreads(): (ThreadEntry & { workspacePath?: string | null })[] {
   const db = getDB()
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     SELECT t.*, tw.workspacePath FROM threads t
     LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
     ORDER BY t.updatedAt DESC
-  `).all() as (ThreadEntry & { workspacePath?: string | null })[]
+  `
+    )
+    .all() as (ThreadEntry & { workspacePath?: string | null })[]
 }
 
 export function getThreadMessages(threadId: string): ThreadMessage[] {
   const db = getDB()
-  return db.prepare(
-    'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC'
-  ).all(threadId) as ThreadMessage[]
+  return db
+    .prepare(
+      'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC'
+    )
+    .all(threadId) as ThreadMessage[]
 }
 
 export function saveMessage(
@@ -123,21 +127,25 @@ export function saveMessage(
   db.transaction(() => {
     const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
     if (!threadExists) {
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
         VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
-      `).run(threadId, now, now)
+      `
+      ).run(threadId, now, now)
     } else {
       db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
     }
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO messages (id, threadId, role, content, data, createdAt, isCompactionAnchor)
       VALUES (@id, @threadId, @role, @content, @data, @createdAt, @isCompactionAnchor)
       ON CONFLICT(id) DO UPDATE SET
         content = excluded.content,
         data = excluded.data,
         isCompactionAnchor = excluded.isCompactionAnchor
-    `).run(msg)
+    `
+    ).run(msg)
   })()
 
   return {
@@ -157,8 +165,10 @@ export function deleteThread(threadId: string): boolean {
 export function updateThreadTitle(threadId: string, title: string): boolean {
   const db = getDB()
   const now = new Date().toISOString()
-  return db.prepare('UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?')
-    .run(title, now, threadId).changes > 0
+  return (
+    db.prepare('UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId)
+      .changes > 0
+  )
 }
 
 export function getThreadAccumulatedTokens(threadId: string): number {
@@ -177,32 +187,44 @@ export function setThreadWorkspace(threadId: string, workspacePath: string): voi
   const now = new Date().toISOString()
   const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
   if (!threadExists) {
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
       VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
-    `).run(threadId, now, now)
+    `
+    ).run(threadId, now, now)
   }
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath)
     VALUES (?, ?)
-  `).run(threadId, workspacePath)
+  `
+  ).run(threadId, workspacePath)
 }
 
 export function getThreadWorkspace(threadId: string): string | null {
   const db = getDB()
-  const row = db.prepare('SELECT workspacePath FROM thread_workspaces WHERE threadId = ?').get(threadId) as any
+  const row = db
+    .prepare('SELECT workspacePath FROM thread_workspaces WHERE threadId = ?')
+    .get(threadId) as any
   return row?.workspacePath ?? null
 }
 
 export function getUniqueWorkspaces(): string[] {
   const db = getDB()
-  return (db.prepare('SELECT path FROM opened_workspaces ORDER BY lastOpenedAt DESC').all() as { path: string }[])
-    .map(r => r.path)
+  return (
+    db.prepare('SELECT path FROM opened_workspaces ORDER BY lastOpenedAt DESC').all() as {
+      path: string
+    }[]
+  ).map((r) => r.path)
 }
 
 export function addOpenedWorkspace(path: string): void {
   const db = getDB()
-  db.prepare('INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, new Date().toISOString())
+  db.prepare('INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(
+    path,
+    new Date().toISOString()
+  )
 }
 
 export function deleteOpenedWorkspace(path: string): void {
@@ -214,32 +236,37 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   const db = getDB()
   let threadIds: string[] = []
   db.transaction(() => {
-    const rows = db.prepare('SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as { threadId: string }[]
-    threadIds = rows.map(r => r.threadId)
+    const rows = db
+      .prepare('SELECT threadId FROM thread_workspaces WHERE workspacePath = ?')
+      .all(workspacePath) as { threadId: string }[]
+    threadIds = rows.map((r) => r.threadId)
     const stmtDel = db.prepare('DELETE FROM threads WHERE id = ?')
     for (const id of threadIds) stmtDel.run(id)
   })()
   return threadIds
 }
- 
+
 export function getThreadCompactionSummary(threadId: string): string | null {
   const db = getDB()
   const row = db.prepare('SELECT compactionSummary FROM threads WHERE id = ?').get(threadId) as any
   return row?.compactionSummary ?? null
 }
- 
+
 export function updateThreadCompactionSummary(threadId: string, summary: string | null): void {
   const db = getDB()
   db.prepare('UPDATE threads SET compactionSummary = ? WHERE id = ?').run(summary, threadId)
 }
- 
+
 export function getLastCompactedMessageId(threadId: string): string | null {
   const db = getDB()
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT id FROM messages 
     WHERE threadId = ? AND isCompactionAnchor = 1
     ORDER BY createdAt DESC LIMIT 1
-  `).get(threadId) as any
+  `
+    )
+    .get(threadId) as any
   return row?.id ?? null
 }
- 

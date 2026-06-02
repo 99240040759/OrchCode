@@ -17,16 +17,13 @@ import {
   activeThreadAtom,
   hasMessagesAtom,
   globalPromptTriggerAtom,
-  availableModelsAtom
+  availableModelsAtom,
+  selectedModelAtom
 } from './store/agentStore'
 import { useAgentStream } from './hooks/useAgentStream'
 import { useThreads } from './hooks/useThreads'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
 
-// ─── ChatPane ──────────────────────────────────────────────────────────────────
-// A proper React component (not a render function) so React can correctly diff,
-// reconcile, and memoize the subtree. Previously this was an inline function call
-// which caused TitleBar, ChatThread and InputBar to remount on every parent render.
 interface ChatPaneProps {
   fullWidth: boolean
   onSubmit: (prompt: string, mode?: string, attachments?: any[]) => void
@@ -37,99 +34,117 @@ interface ChatPaneProps {
   hasMessages: boolean
 }
 
-const ChatPane = React.memo<ChatPaneProps>(({
-  fullWidth,
-  onSubmit,
-  onStop,
-  onOpenArtifacts,
-  onOpenWorkspace,
-  workspaceName,
-  hasMessages
-}) => {
-  return (
-    <div
-      className="chat-pane"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        height: '100%',
-        position: 'relative',
-        contain: 'layout'
-      }}
-    >
-      <TitleBar title="Orch Code" workspaceName={workspaceName} />
-
-      {hasMessages ? (
-        <div style={{
+const ChatPane = React.memo<ChatPaneProps>(
+  ({
+    fullWidth,
+    onSubmit,
+    onStop,
+    onOpenArtifacts,
+    onOpenWorkspace,
+    workspaceName,
+    hasMessages
+  }) => {
+    return (
+      <div
+        className="chat-pane"
+        style={{
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
-          maxWidth: fullWidth ? '720px' : '100%',
-          height: 'calc(100% - var(--titlebar-height))',
-          minWidth: 0,
-          margin: '0 auto',
-          flex: 1
-        }}>
-          <ChatThread />
-          <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>
-            <InputBar onSubmit={onSubmit} onStop={onStop} />
+          height: '100%',
+          position: 'relative',
+          contain: 'layout'
+        }}
+      >
+        <TitleBar title="Orch Code" workspaceName={workspaceName} />
+
+        {hasMessages ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%',
+              maxWidth: fullWidth ? '720px' : '100%',
+              height: 'calc(100% - var(--titlebar-height))',
+              minWidth: 0,
+              margin: '0 auto',
+              flex: 1
+            }}
+          >
+            <ChatThread />
+            <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>
+              <InputBar onSubmit={onSubmit} onStop={onStop} />
+            </div>
           </div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: 'calc(100% - var(--titlebar-height))', overflowY: 'auto' }}>
-          <div className="home-prompt-view" style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}>
-            {fullWidth && (
-              <div
-                className="home-prompt-header"
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-end',
-                  marginBottom: 12
-                }}
-              >
-                <h2
-                  className="home-prompt-title"
-                  onClick={onOpenWorkspace}
-                  style={{ margin: 0, gap: 6 }}
-                >
-                  <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
-                  <ChevronDown size={14} style={{ color: 'var(--text-secondary)', marginTop: 2 }} />
-                  <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                    {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
-                  </span>
-                </h2>
-              </div>
-            )}
-
-            <InputBar onSubmit={onSubmit} onStop={onStop} />
-
-            {fullWidth && (
-              <div className="prompt-sub-links" style={{ marginTop: 16, gap: 16 }}>
-                <a
-                  href="#"
-                  className="prompt-sub-link"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    onOpenArtifacts()
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              flex: 1,
+              width: '100%',
+              height: 'calc(100% - var(--titlebar-height))',
+              overflowY: 'auto'
+            }}
+          >
+            <div
+              className="home-prompt-view"
+              style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}
+            >
+              {fullWidth && (
+                <div
+                  className="home-prompt-header"
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-end',
+                    marginBottom: 12
                   }}
                 >
-                  <Code size={14} strokeWidth={2} />
-                  <span>Open editor</span>
-                </a>
-              </div>
-            )}
+                  <h2
+                    className="home-prompt-title"
+                    onClick={onOpenWorkspace}
+                    style={{ margin: 0, gap: 6 }}
+                  >
+                    <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
+                    <ChevronDown
+                      size={14}
+                      style={{ color: 'var(--text-secondary)', marginTop: 2 }}
+                    />
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                      {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
+                    </span>
+                  </h2>
+                </div>
+              )}
+
+              <InputBar onSubmit={onSubmit} onStop={onStop} />
+
+              {fullWidth && (
+                <div className="prompt-sub-links" style={{ marginTop: 16, gap: 16 }}>
+                  <a
+                    href="#"
+                    className="prompt-sub-link"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      onOpenArtifacts()
+                    }}
+                  >
+                    <Code size={14} strokeWidth={2} />
+                    <span>Open editor</span>
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  )
-})
+        )}
+      </div>
+    )
+  }
+)
 ChatPane.displayName = 'ChatPane'
 
-// ─── AppInner ──────────────────────────────────────────────────────────────────
 function AppInner(): React.JSX.Element {
   const setConversationId = useSetAtom(conversationIdAtom)
   const setAvailableModels = useSetAtom(availableModelsAtom)
@@ -138,7 +153,8 @@ function AppInner(): React.JSX.Element {
   const hasMessages = useAtomValue(hasMessagesAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
-  const activeThreadTitle = activeThread ? (activeThread.title || 'New Chat') : 'New Chat'
+  const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
+  const activeThreadTitle = activeThread ? activeThread.title || 'New Chat' : 'New Chat'
 
   const { run, stop } = useAgentStream()
   const { openWorkspace, newConversation, loadThreads } = useThreads()
@@ -158,7 +174,14 @@ function AppInner(): React.JSX.Element {
       await loadThreads()
       try {
         const models = await window.api.getAvailableModels()
-        if (models) setAvailableModels(models)
+        if (models) {
+          setAvailableModels(models)
+          const modelKeys = Object.keys(models)
+
+          if (!selectedModel && modelKeys.length > 0) {
+            setSelectedModel(modelKeys[0])
+          }
+        }
       } catch (err) {
         console.error('Failed to load available models:', err)
       }
@@ -175,8 +198,15 @@ function AppInner(): React.JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', position: 'relative', width: '100%' }}>
-
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        overflow: 'hidden',
+        position: 'relative',
+        width: '100%'
+      }}
+    >
       <Toaster
         position="bottom-right"
         theme="dark"
@@ -191,33 +221,35 @@ function AppInner(): React.JSX.Element {
         }}
       />
 
-      {sidebarExpanded ? (
+      {sidebarExpanded && (
         <LeftSidebar
           expanded={sidebarExpanded}
           onToggle={(val) => setSidebarExpanded(val)}
           onStartConversation={newConversation}
           threadListContent={<ThreadList />}
         />
-      ) : (
-        // UI-1: Show a thin collapsed rail instead of removing sidebar from DOM entirely.
-        // Without this, users have no visual affordance to re-expand the sidebar.
-        <div
-          className="sidebar-collapsed-rail"
-          onClick={() => setSidebarExpanded(true)}
-          title="Expand sidebar"
-        >
-          <Code size={16} style={{ color: 'var(--text-secondary)' }} />
-        </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100vh', minWidth: 0, flex: 1 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100vh',
+          minWidth: 0,
+          flex: 1
+        }}
+      >
         <div className="app-container" style={{ height: '100%', width: '100%', flex: 1 }}>
           <main className="workspace-main" style={{ width: '100%', height: '100%' }}>
-
             <div className="app-glow-border" />
 
             {isArtifactPanelOpen ? (
-              <PanelGroup direction="horizontal" className="split-view-container" style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+              <PanelGroup
+                direction="horizontal"
+                className="split-view-container"
+                style={{ width: '100%', height: '100%', overflow: 'hidden' }}
+              >
                 <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
                   <ChatPane
                     fullWidth={false}
@@ -252,14 +284,10 @@ function AppInner(): React.JSX.Element {
   )
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
 function App(): React.JSX.Element {
-  // CRIT-12: Read URL params once in useState initializer — not on every render
   const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))
 
   if (view === 'onboarding') {
-    // CRIT-11: Onboarding is a separate BrowserWindow. It has no Jotai Provider or Toaster
-    // from the main window. Add a minimal Toaster here so toast.error() actually renders.
     return (
       <>
         <Toaster

@@ -1,8 +1,24 @@
 import React from 'react'
-import { Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, BookOpen, MousePointerClick, Keyboard, Camera, ChevronsUpDown } from 'lucide-react'
+import {
+  Terminal,
+  FolderOpen,
+  Globe,
+  AlertCircle,
+  ClipboardList,
+  BookOpen,
+  MousePointerClick,
+  Keyboard,
+  Camera,
+  ChevronsUpDown
+} from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, conversationIdAtom } from '../store/agentStore'
+import {
+  isArtifactPanelOpenAtom,
+  activeEditorFileAtom,
+  artifactPanelModeAtom,
+  conversationIdAtom
+} from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
 import * as styles from './ToolCallBlock.css'
 import { isAgentArtifact } from '../lib/uiUtils'
@@ -68,15 +84,23 @@ function getToolDetails(toolCall: ToolCallEntry) {
       if (args.startLine !== undefined && args.endLine !== undefined) {
         deletions = (args.endLine as number) - (args.startLine as number) + 1
       }
-      if (args.replacementContent) additions = (args.replacementContent as string).split('\n').length
+      if (args.replacementContent)
+        additions = (args.replacementContent as string).split('\n').length
       break
     case 'multiReplaceFileContent':
       operation = 'Edited chunks in'
       fullPath = (args.targetFile as string) ?? ''
       isFile = true
       if (args.replacementChunks && Array.isArray(args.replacementChunks)) {
-        additions = args.replacementChunks.reduce((acc: number, c: any) => acc + (c.replacementContent ? c.replacementContent.split('\n').length : 0), 0)
-        deletions = args.replacementChunks.reduce((acc: number, c: any) => acc + ((c.endLine || 0) - (c.startLine || 0) + 1), 0)
+        additions = args.replacementChunks.reduce(
+          (acc: number, c: any) =>
+            acc + (c.replacementContent ? c.replacementContent.split('\n').length : 0),
+          0
+        )
+        deletions = args.replacementChunks.reduce(
+          (acc: number, c: any) => acc + ((c.endLine || 0) - (c.startLine || 0) + 1),
+          0
+        )
       }
       break
     case 'runCommand':
@@ -97,7 +121,8 @@ function getToolDetails(toolCall: ToolCallEntry) {
       break
     case 'browserType':
       operation = 'Typed in browser'
-      const typeLabel = args.selector && args.text ? `${args.selector} ➔ "${args.text}"` : (args.selector ?? '')
+      const typeLabel =
+        args.selector && args.text ? `${args.selector} ➔ "${args.text}"` : (args.selector ?? '')
       target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${typeLabel}` : typeLabel
       break
     case 'browserScroll':
@@ -129,7 +154,8 @@ function getToolDetails(toolCall: ToolCallEntry) {
 }
 
 const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile, additions, deletions, lineRange } = getToolDetails(toolCall)
+  const { operation, target, fullPath, isFile, additions, deletions, lineRange } =
+    getToolDetails(toolCall)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -138,7 +164,6 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   const handleClick = async () => {
     if (!isFile || !fullPath) return
     try {
-      // MINOR-4: Pass conversationId so assertWithinWorkspace uses correct workspace root
       const fileData = await window.api.readFile(fullPath, conversationId)
       if (fileData) {
         setActiveEditorFile(fileData)
@@ -211,9 +236,13 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       className={`${styles.toolCallWrapper} ${isFile ? styles.interactive : styles.nonInteractive}`}
       title={isFile ? `Open ${fullPath}` : undefined}
     >
-      <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>{operation}</span>
+      <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>
+        {operation}
+      </span>
 
-      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>{renderIcon()}</span>
+      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>
+        {renderIcon()}
+      </span>
 
       <span
         style={{
@@ -248,12 +277,26 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
 
       {renderStatus()}
 
-      {!isAgentArtifact(target) && (toolCall.toolName === 'writeToFile' || toolCall.toolName === 'replaceFileContent' || toolCall.toolName === 'multiReplaceFileContent') && (additions > 0 || deletions > 0) && (
-        <div style={{ display: 'flex', gap: 3, fontSize: '10px', fontFamily: 'var(--font-mono)', fontWeight: 600, marginLeft: 2, flexShrink: 0 }}>
-          {additions > 0 && <span style={{ color: 'var(--accent-green)' }}>+{additions}</span>}
-          {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
-        </div>
-      )}
+      {!isAgentArtifact(target) &&
+        (toolCall.toolName === 'writeToFile' ||
+          toolCall.toolName === 'replaceFileContent' ||
+          toolCall.toolName === 'multiReplaceFileContent') &&
+        (additions > 0 || deletions > 0) && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 3,
+              fontSize: '10px',
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 600,
+              marginLeft: 2,
+              flexShrink: 0
+            }}
+          >
+            {additions > 0 && <span style={{ color: 'var(--accent-green)' }}>+{additions}</span>}
+            {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
+          </div>
+        )}
     </button>
   )
 }

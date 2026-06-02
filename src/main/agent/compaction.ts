@@ -10,12 +10,6 @@ import {
 } from '../db'
 import log from 'electron-log'
 
-// CRIT-5: Compaction uses its own google provider instance sourced directly from env,
-// breaking the circular dependency on index.ts. This provider is still rate-limited
-// via geminiLimiter so compaction doesn't burst through the queue.
-//
-// Compaction always uses a fixed model (gemma via gemini endpoint) regardless of the
-// user's selected model \u2014 intentional design: light-weight summarisation only.
 function makeCompactionProvider() {
   return createGoogleGenerativeAI({
     baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
@@ -31,10 +25,12 @@ function makeCompactionProvider() {
   })
 }
 
-// Fixed compaction model ID — intentionally gemma-4-31b-it (user requirement)
 const COMPACTION_MODEL_ID = 'gemma-4-31b-it'
 
-export async function triggerSemanticCompaction(threadId: string, _assistantMsgId: string): Promise<void> {
+export async function triggerSemanticCompaction(
+  threadId: string,
+  _assistantMsgId: string
+): Promise<void> {
   log.info(`[compaction] Starting semantic summary for thread: ${threadId}`)
   try {
     const fullHistory = getThreadMessages(threadId)
@@ -46,52 +42,59 @@ export async function triggerSemanticCompaction(threadId: string, _assistantMsgI
       lastCompactionIndex = fullHistory.findIndex((m) => m.id === lastCompactedId)
     }
 
-    // SLIDING WINDOW: We leave the last 15 messages completely uncompacted.
-    // We only summarize from the last compacted message up to (length - 15).
     const WINDOW_SIZE = 15
     const targetAnchorIndex = Math.max(0, fullHistory.length - WINDOW_SIZE)
 
-    // If there's nothing new to compact outside the window, skip it.
     if (targetAnchorIndex <= lastCompactionIndex) {
       return
     }
 
     const newTurnsToCompact = fullHistory.slice(lastCompactionIndex + 1, targetAnchorIndex + 1)
 
-    const formattedHistory = newTurnsToCompact.map((m) => {
-      let text = `[${m.role.toUpperCase()}] ${m.content}`
-      if (m.data) {
-        try {
-          const blocks = JSON.parse(m.data)
-          if (Array.isArray(blocks)) {
-            const toolBlocks = blocks.filter((b: any) => b.type === 'tool')
-            if (toolBlocks.length > 0) {
-              const toolSummaries = toolBlocks.map((t: any) => {
-                let summary = `${t.toolName} \u2192 ${t.status}`
-                if (t.result && t.status === 'complete') {
-                  if (t.toolName === 'writeToFile' && t.result.absolutePath) {
-                    summary += ` (created: ${t.result.absolutePath})`
-                  } else if ((t.toolName === 'replaceFileContent' || t.toolName === 'multiReplaceFileContent') && t.result.absolutePath) {
-                    summary += ` (edited: ${t.result.absolutePath})`
-                  } else if (t.toolName === 'runCommand' && t.result.stdout) {
-                    summary += ` (output: ${String(t.result.stdout).slice(0, 1000)})`
-                  } else if (t.toolName === 'viewFile' && t.result.absolutePath) {
-                    summary += ` (read: ${t.result.absolutePath})`
-                  }
-                } else if (t.status === 'error' && t.result) {
-                  const errStr = typeof t.result === 'string' ? t.result : (t.result.error || JSON.stringify(t.result))
-                  summary += ` (error: ${errStr.slice(0, 4000)})`
-                }
-                return summary
-              // MINOR-3: Fixed \u2014 was join('\\n') which produced literal backslash-n, not newlines
-              }).join('\n')
-              text += `\n(Tools:\n${toolSummaries})`
+    const formattedHistory = newTurnsToCompact
+      .map((m) => {
+        let text = `[${m.role.toUpperCase()}] ${m.content}`
+        if (m.data) {
+          try {
+            const blocks = JSON.parse(m.data)
+            if (Array.isArray(blocks)) {
+              const toolBlocks = blocks.filter((b: any) => b.type === 'tool')
+              if (toolBlocks.length > 0) {
+                const toolSummaries = toolBlocks
+                  .map((t: any) => {
+                    let summary = `${t.toolName} \u2192 ${t.status}`
+                    if (t.result && t.status === 'complete') {
+                      if (t.toolName === 'writeToFile' && t.result.absolutePath) {
+                        summary += ` (created: ${t.result.absolutePath})`
+                      } else if (
+                        (t.toolName === 'replaceFileContent' ||
+                          t.toolName === 'multiReplaceFileContent') &&
+                        t.result.absolutePath
+                      ) {
+                        summary += ` (edited: ${t.result.absolutePath})`
+                      } else if (t.toolName === 'runCommand' && t.result.stdout) {
+                        summary += ` (output: ${String(t.result.stdout).slice(0, 1000)})`
+                      } else if (t.toolName === 'viewFile' && t.result.absolutePath) {
+                        summary += ` (read: ${t.result.absolutePath})`
+                      }
+                    } else if (t.status === 'error' && t.result) {
+                      const errStr =
+                        typeof t.result === 'string'
+                          ? t.result
+                          : t.result.error || JSON.stringify(t.result)
+                      summary += ` (error: ${errStr.slice(0, 4000)})`
+                    }
+                    return summary
+                  })
+                  .join('\n')
+                text += `\n(Tools:\n${toolSummaries})`
+              }
             }
-          }
-        } catch {}
-      }
-      return text
-    }).join('\n\n')
+          } catch {}
+        }
+        return text
+      })
+      .join('\n\n')
 
     const oldSummary = lastCompactionIndex !== -1 ? getThreadCompactionSummary(threadId) : null
 
@@ -125,7 +128,9 @@ Format as highly compressed, bulleted Markdown. No intro, no pleasantries.`,
     const summaryText = result.text?.trim() ?? null
     if (summaryText) {
       updateThreadCompactionSummary(threadId, summaryText)
-      log.info(`[compaction] Summary compiled for thread: ${threadId} (${summaryText.length} chars)`)
+      log.info(
+        `[compaction] Summary compiled for thread: ${threadId} (${summaryText.length} chars)`
+      )
 
       const anchorMsg = fullHistory[targetAnchorIndex]
       if (anchorMsg) {
@@ -142,6 +147,6 @@ Format as highly compressed, bulleted Markdown. No intro, no pleasantries.`,
     }
   } catch (err) {
     log.error('[compaction] Failed to generate semantic summary:', err)
-    throw err // re-throw so caller (.catch) receives it for token-reset logic
+    throw err
   }
 }

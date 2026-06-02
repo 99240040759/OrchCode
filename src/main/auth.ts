@@ -25,19 +25,14 @@ let currentSession: AuthSession | null = null
 let tempServer: http.Server | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
 
-// Helper for PKCE encoding
 function base64URLEncode(buffer: Buffer): string {
-  return buffer.toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '')
+  return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
 function sha256(str: string): Buffer {
   return crypto.createHash('sha256').update(str).digest()
 }
 
-// Generate code verifier and challenge
 function generatePKCE() {
   const verifier = base64URLEncode(crypto.randomBytes(32))
   const challenge = base64URLEncode(sha256(verifier))
@@ -52,37 +47,41 @@ function postHttpsRequest(
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr)
-    const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': contentType,
-        'Content-Length': Buffer.byteLength(rawBody)
-      }
-    }, (res) => {
-      let data = ''
-      res.on('data', (chunk) => { data += chunk })
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data)
-          if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(parseError(parsed, res.statusCode)))
-          } else {
-            resolve(parsed)
-          }
-        } catch {
-          reject(new Error(`Failed to parse response: ${data}`))
+    const req = https.request(
+      {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': Buffer.byteLength(rawBody)
         }
-      })
-    })
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (chunk) => {
+          data += chunk
+        })
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data)
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error(parseError(parsed, res.statusCode)))
+            } else {
+              resolve(parsed)
+            }
+          } catch {
+            reject(new Error(`Failed to parse response: ${data}`))
+          }
+        })
+      }
+    )
     req.on('error', (err) => reject(err))
     req.write(rawBody)
     req.end()
   })
 }
 
-// Direct form request to Google
 function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
   const rawBody = new URLSearchParams(formParams).toString()
   return postHttpsRequest(
@@ -93,7 +92,6 @@ function postFormRequest(urlStr: string, formParams: Record<string, string>): Pr
   )
 }
 
-// Direct JSON request to Firebase
 function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
   const rawBody = JSON.stringify(bodyObj)
   return postHttpsRequest(
@@ -108,10 +106,12 @@ export function getCurrentSession(): AuthSession | null {
   return currentSession
 }
 
-// Decrypt persistent session from disk
 export async function loadSession(): Promise<AuthSession | null> {
   try {
-    const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
+    const exists = await fs
+      .stat(sessionFilePath)
+      .then(() => true)
+      .catch(() => false)
     if (!exists) return null
 
     const encrypted = await fs.readFile(sessionFilePath)
@@ -120,7 +120,9 @@ export async function loadSession(): Promise<AuthSession | null> {
       currentSession = JSON.parse(rawString)
       return currentSession
     } else {
-      log.warn('[auth] SECURITY WARNING: OS encryption is unavailable. Session tokens are stored as plaintext on disk.')
+      log.warn(
+        '[auth] SECURITY WARNING: OS encryption is unavailable. Session tokens are stored as plaintext on disk.'
+      )
       currentSession = JSON.parse(encrypted.toString('utf-8'))
       return currentSession
     }
@@ -130,7 +132,6 @@ export async function loadSession(): Promise<AuthSession | null> {
   }
 }
 
-// Encrypt and persist session on disk
 async function saveSession(session: AuthSession | null) {
   try {
     if (!session) {
@@ -143,7 +144,9 @@ async function saveSession(session: AuthSession | null) {
       const encrypted = safeStorage.encryptString(rawString)
       await fs.writeFile(sessionFilePath, encrypted)
     } else {
-      log.warn('[auth] SECURITY WARNING: OS encryption is unavailable. Storing session tokens as plaintext. This is insecure on shared/compromised machines.')
+      log.warn(
+        '[auth] SECURITY WARNING: OS encryption is unavailable. Storing session tokens as plaintext. This is insecure on shared/compromised machines.'
+      )
       await fs.writeFile(sessionFilePath, rawString, 'utf-8')
     }
   } catch (err) {
@@ -151,7 +154,6 @@ async function saveSession(session: AuthSession | null) {
   }
 }
 
-// Trigger state updates inside Renderer
 function broadcastUserStatus(user: UserProfile | null) {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
@@ -161,13 +163,11 @@ function broadcastUserStatus(user: UserProfile | null) {
 }
 
 export async function initAuth() {
-  // Load active session at startup
   currentSession = await loadSession()
   if (currentSession) {
     log.info('[auth] Recovered session for:', currentSession.user.email)
   }
 
-  // Register IPC Handlers
   ipcMain.handle('auth:get-user', () => {
     return currentSession ? currentSession.user : null
   })
@@ -175,13 +175,14 @@ export async function initAuth() {
   ipcMain.handle('auth:login', async () => {
     log.info('[auth] Triggering Google Sign-in flow...')
 
-    // Cancel any in-flight login and close its server (#31 fix)
     if (pendingLoginReject) {
       pendingLoginReject(new Error('Login cancelled: new login initiated'))
       pendingLoginReject = null
     }
     if (tempServer) {
-      try { tempServer.close() } catch {}
+      try {
+        tempServer.close()
+      } catch {}
       tempServer = null
     }
 
@@ -191,7 +192,9 @@ export async function initAuth() {
     const firebaseKey = process.env.FIREBASE_API_KEY
 
     if (!clientId || !firebaseKey) {
-      log.error('[auth] Missing required GOOGLE_CLIENT_ID or FIREBASE_API_KEY environment variables.')
+      log.error(
+        '[auth] Missing required GOOGLE_CLIENT_ID or FIREBASE_API_KEY environment variables.'
+      )
       throw new Error('Authentication service configuration is missing.')
     }
 
@@ -210,28 +213,34 @@ export async function initAuth() {
           const authCode = urlParams.get('code')
           const authError = urlParams.get('error')
 
-          // CRIT-6: Validate authCode BEFORE rendering the success page.
-          // Google returns ?error=access_denied (or similar) when user cancels.
           if (!authCode || authError) {
             const reason = authError || 'No authorization code returned'
             log.warn(`[auth] Auth callback received without code: ${reason}`)
             res.writeHead(200, { 'Content-Type': 'text/html' })
-            res.end(`<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Sign In Cancelled</h1><p style="color:#9c9c9c; font-size:14px;">Reason: ${escapeHtml(reason)}. You can close this tab and try again.</p></div></body></html>`)
-            if (tempServer) { tempServer.close(); tempServer = null }
+            res.end(
+              `<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Sign In Cancelled</h1><p style="color:#9c9c9c; font-size:14px;">Reason: ${escapeHtml(reason)}. You can close this tab and try again.</p></div></body></html>`
+            )
+            if (tempServer) {
+              tempServer.close()
+              tempServer = null
+            }
             pendingLoginReject = null
             reject(new Error(`Auth cancelled: ${reason}`))
             return
           }
 
-          // Auth code is valid — now show success page and proceed with token exchange
           res.writeHead(200, { 'Content-Type': 'text/html' })
-          res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #272727; text-align:center; max-width:400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"><h1 style="color:#10b981; font-size:24px; margin-bottom:10px;">Login Successful</h1><p style="color:#9c9c9c; font-size:14px; margin-bottom:20px;">You have successfully signed in. You can close this tab and return to your app.</p></div></body></html>')
+          res.end(
+            '<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #272727; text-align:center; max-width:400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"><h1 style="color:#10b981; font-size:24px; margin-bottom:10px;">Login Successful</h1><p style="color:#9c9c9c; font-size:14px; margin-bottom:20px;">You have successfully signed in. You can close this tab and return to your app.</p></div></body></html>'
+          )
 
-          if (tempServer) { tempServer.close(); tempServer = null }
+          if (tempServer) {
+            tempServer.close()
+            tempServer = null
+          }
 
           log.info('[auth] Received Google auth code, exchanging for tokens...')
 
-          // 1. Exchange Auth Code for Google Tokens
           const googleTokenParams: Record<string, string> = {
             client_id: clientId,
             code: authCode,
@@ -244,7 +253,10 @@ export async function initAuth() {
             googleTokenParams.client_secret = process.env.GOOGLE_CLIENT_SECRET
           }
 
-          const googleTokens = await postFormRequest('https://oauth2.googleapis.com/token', googleTokenParams)
+          const googleTokens = await postFormRequest(
+            'https://oauth2.googleapis.com/token',
+            googleTokenParams
+          )
 
           const googleIdToken = googleTokens.id_token
           if (!googleIdToken) {
@@ -253,7 +265,6 @@ export async function initAuth() {
 
           log.info('[auth] Exchanging Google token with Firebase REST API...')
 
-          // 2. Exchange Google ID Token with Firebase REST Auth
           const firebaseAuthUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${firebaseKey}`
           const firebaseSession = await postJsonRequest(firebaseAuthUrl, {
             postBody: `id_token=${googleIdToken}&providerId=google.com`,
@@ -262,7 +273,6 @@ export async function initAuth() {
             returnSecureToken: true
           })
 
-          // 3. Compile session profile
           const user: UserProfile = {
             uid: firebaseSession.localId,
             name: firebaseSession.displayName,
@@ -276,14 +286,12 @@ export async function initAuth() {
             user
           }
 
-          // 4. Secure session natively on OS Keychain
           await saveSession(currentSession)
           log.info('[auth] Login completed. Authenticated user:', user.email)
-          
+
           pendingLoginReject = null
           broadcastUserStatus(user)
           resolve(user)
-
         } catch (err: any) {
           log.error('[auth] Login flow failed:', err)
           if (tempServer) {
@@ -292,7 +300,11 @@ export async function initAuth() {
           }
           if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'text/html' })
-            res.end('<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' + escapeHtml(err.message) + '</p></div></body></html>')
+            res.end(
+              '<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' +
+                escapeHtml(err.message) +
+                '</p></div></body></html>'
+            )
           }
           pendingLoginReject = null
           reject(err)
@@ -302,7 +314,9 @@ export async function initAuth() {
       tempServer.on('error', (err: any) => {
         log.error('[auth] Redirect server socket error:', err)
         if (tempServer) {
-          try { tempServer.close() } catch {}
+          try {
+            tempServer.close()
+          } catch {}
           tempServer = null
         }
         pendingLoginReject = null
@@ -310,15 +324,16 @@ export async function initAuth() {
       })
 
       tempServer.listen(port, '127.0.0.1', () => {
-        // Open consent flow in default browser
-        const redirectUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
-          client_id: clientId,
-          redirect_uri: `http://localhost:${port}/callback`,
-          response_type: 'code',
-          scope: 'openid email profile',
-          code_challenge: challenge,
-          code_challenge_method: 'S256'
-        }).toString()
+        const redirectUrl =
+          'https://accounts.google.com/o/oauth2/v2/auth?' +
+          new URLSearchParams({
+            client_id: clientId,
+            redirect_uri: `http://localhost:${port}/callback`,
+            response_type: 'code',
+            scope: 'openid email profile',
+            code_challenge: challenge,
+            code_challenge_method: 'S256'
+          }).toString()
 
         shell.openExternal(redirectUrl)
       })

@@ -10,9 +10,7 @@ const BrowserView: React.FC = () => {
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)
   const isLoadedRef = useRef(false)
-  // UI-8: Guard against double-close. ArtifactPanel also calls closeBrowser() on panel
-  // close, which unmounts BrowserView and triggers the cleanup below — resulting in two
-  // closeBrowser() calls. The second call tries to terminate an already-null worker.
+
   const closedRef = useRef(false)
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
@@ -20,8 +18,12 @@ const BrowserView: React.FC = () => {
   const panelModeRef = useRef(panelMode)
   const isOpenRef = useRef(isOpen)
 
-  useEffect(() => { panelModeRef.current = panelMode }, [panelMode])
-  useEffect(() => { isOpenRef.current = isOpen }, [isOpen])
+  useEffect(() => {
+    panelModeRef.current = panelMode
+  }, [panelMode])
+  useEffect(() => {
+    isOpenRef.current = isOpen
+  }, [isOpen])
 
   const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
     if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) {
@@ -47,17 +49,25 @@ const BrowserView: React.FC = () => {
     const rafId = requestAnimationFrame(() => {
       if (!active) return
       const bounds = getBounds()
-      window.api.openBrowser({ url: urlInput, bounds }).then(() => {
-        if (active) {
-          setIsLoaded(true)
-          isLoadedRef.current = true
-        }
-      }).catch(console.error)
+      window.api
+        .openBrowser({ url: urlInput, bounds })
+        .then(() => {
+          if (active) {
+            setIsLoaded(true)
+            isLoadedRef.current = true
+          }
+        })
+        .catch(console.error)
     })
 
-    const unsubTitle = window.api.onBrowserTitleUpdated((t) => { if (active) setTitle(t) })
+    const unsubTitle = window.api.onBrowserTitleUpdated((t) => {
+      if (active) setTitle(t)
+    })
     const unsubUrl = window.api.onBrowserUrlChanged((u) => {
-      if (active) { setDisplayUrl(u); setUrlInput(u) }
+      if (active) {
+        setDisplayUrl(u)
+        setUrlInput(u)
+      }
     })
 
     const resizeObs = new ResizeObserver(() => {
@@ -73,8 +83,7 @@ const BrowserView: React.FC = () => {
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()
-      // UI-8: Only call closeBrowser once \u2014 guard against double-invocation
-      // from both unmount and ArtifactPanel's own close handler.
+
       if (!closedRef.current) {
         closedRef.current = true
         window.api.closeBrowser().catch(() => {})
@@ -92,7 +101,15 @@ const BrowserView: React.FC = () => {
   }, [panelMode, isOpen, getBounds])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden'
+      }}
+    >
       <div
         style={{
           display: 'flex',
@@ -108,10 +125,18 @@ const BrowserView: React.FC = () => {
           <button className="browser-nav-btn" onClick={() => window.api.browserBack()} title="Back">
             <ArrowLeft size={14} />
           </button>
-          <button className="browser-nav-btn" onClick={() => window.api.browserForward()} title="Forward">
+          <button
+            className="browser-nav-btn"
+            onClick={() => window.api.browserForward()}
+            title="Forward"
+          >
             <ArrowRight size={14} />
           </button>
-          <button className="browser-nav-btn" onClick={() => window.api.browserReload()} title="Reload">
+          <button
+            className="browser-nav-btn"
+            onClick={() => window.api.browserReload()}
+            title="Reload"
+          >
             <RotateCw size={13} />
           </button>
         </div>
@@ -120,7 +145,9 @@ const BrowserView: React.FC = () => {
           className="browser-url-bar"
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') navigate(urlInput) }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') navigate(urlInput)
+          }}
           spellCheck={false}
           placeholder="Enter URL or search..."
         />
@@ -158,7 +185,16 @@ const BrowserView: React.FC = () => {
         style={{ flex: 1, backgroundColor: 'transparent', position: 'relative' }}
       >
         {!isLoaded && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--font-size-sm)'
+            }}
+          >
             Loading browser...
           </div>
         )}
