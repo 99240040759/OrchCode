@@ -943,6 +943,8 @@ const ArtifactPanel: React.FC = () => {
                       original={originalContent ?? ''}
                       modified={displayFile.content ?? ''}
                       onMount={handleDiffEditorMount}
+                      keepCurrentOriginalModel={true}
+                      keepCurrentModifiedModel={true}
                       options={{
                         readOnly: true,
                         minimap: { enabled: false },
