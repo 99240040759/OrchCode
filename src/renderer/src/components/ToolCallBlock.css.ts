@@ -1,12 +1,11 @@
 import { style } from '@vanilla-extract/css'
-import { vars } from '../theme.css'
 
 export const toolCallWrapper = style({
   display: 'inline-flex',
   alignItems: 'center',
   gap: '6px',
   fontSize: 'var(--font-size-xs)',
-  color: vars.colors.textSecondary,
+  color: 'var(--text-secondary)',
   marginBottom: 0,
   padding: '2px 6px',
   userSelect: 'none',
@@ -26,7 +25,7 @@ export const interactive = style({
   cursor: 'pointer',
   selectors: {
     '&:hover': {
-      color: vars.colors.textPrimary,
+      color: 'var(--text-primary)',
       backgroundColor: 'rgba(255, 255, 255, 0.04)'
     }
   }

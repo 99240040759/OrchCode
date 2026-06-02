@@ -2,8 +2,9 @@ import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
 import crypto from 'crypto'
 import { app, shell, BrowserWindow, WebContentsView, ipcMain, dialog } from 'electron'
-import { join, extname, sep } from 'path'
-import { promises as fs, readFileSync, execFileSync } from 'fs'
+import { join, extname } from 'path'
+import { promises as fs, readFileSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
 import { initAuth, loadSession, getCurrentSession } from './auth'
@@ -37,7 +38,6 @@ import {
   addOpenedWorkspace,
   deleteOpenedWorkspace,
   getThreadCompactionSummary,
-  updateThreadCompactionSummary,
   getLastCompactedMessageId,
   updateThreadAccumulatedTokens,
   getThreadAccumulatedTokens
@@ -466,6 +466,10 @@ async function handleAgentStreamRequest(
     log.warn(`[main] Failed to bind workspace for stream ${convId}:`, err)
   }
 
+  let assistantMsgId = ''
+  let assistantContent = ''
+  const orderedBlocks: any[] = []
+
   try {
     const history = await getThreadMessages(convId)
 
@@ -694,10 +698,8 @@ Follow these boundaries strictly to manage your work professionally and transpar
     })
 
     // FIXED: Use crypto.randomUUID() instead of Date.now() to prevent ID collisions
-    const assistantMsgId = crypto.randomUUID()
-
-    let assistantContent = ''
-    const orderedBlocks: any[] = []
+    assistantMsgId = crypto.randomUUID()
+    
     let currentReasoningStartMs = 0
     let turnPromptTokens = 0
     let turnCompletionTokens = 0

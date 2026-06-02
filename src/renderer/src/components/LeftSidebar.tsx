@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useAtom } from 'jotai'
-import { FolderPlus, Trash2, Plus, MessageSquare, ChevronDown, ChevronRight, LogOut, ExternalLink, Moon, PanelLeftClose } from 'lucide-react'
+import { PanelLeftClose, Plus } from 'lucide-react'
 import './Sidebar.css'
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'

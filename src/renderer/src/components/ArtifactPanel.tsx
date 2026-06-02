@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import * as ScrollArea from '@radix-ui/react-scroll-area'
 import { Editor, DiffEditor } from '@monaco-editor/react'
-import { debounce } from 'lodash-es'
 import {
   Search,
   X,
@@ -41,7 +40,6 @@ import type { ArtifactEntry } from '../../../preload/index.d'
 import Skeleton from 'react-loading-skeleton'
 import 'react-loading-skeleton/dist/skeleton.css'
 import { isAgentArtifact, getDisplayName } from '../lib/uiUtils'
-import OverviewPanel from './OverviewPanel'
 import './ArtifactPanel.css'
 import TerminalView from './TerminalView'
 import BrowserView from './BrowserView'
