@@ -5,15 +5,15 @@ import { createHandler, jsonResponse, errorResponse } from '../_shared/handler.t
 // no longer hardcoded. Change models without redeploying the function.
 // Set GEMINI_MODEL_ID, GEMINI_MODEL_NAME, GEMMA_MODEL_ID, GEMMA_MODEL_NAME in Supabase secrets.
 const DEFAULT_GEMINI_ID = 'gemini-3.1-flash-lite'
-const DEFAULT_GEMINI_NAME = 'Gemini 3.1 Flash Lite'
+const DEFAULT_GEMINI_NAME = 'Gemini 3.1 Flash Lite (Fastest)'
 const DEFAULT_GEMMA_ID = 'gemma-4-31b-it'
-const DEFAULT_GEMMA_NAME = 'Gemma 4 31B'
+const DEFAULT_GEMMA_NAME = 'Gemma 4 31B (Thinking)'
 const DEFAULT_KIMI_ID = 'nvidia/moonshotai/kimi-k2.6'
-const DEFAULT_KIMI_NAME = 'Kimi K2.6'
+const DEFAULT_KIMI_NAME = 'Kimi K2.6 (Fast Think)'
 const DEFAULT_MINIMAX_ID = 'nvidia/minimaxai/minimax-m2.7'
-const DEFAULT_MINIMAX_NAME = 'Minimax M2.7'
+const DEFAULT_MINIMAX_NAME = 'Minimax M2.7 (Slowest)'
 const DEFAULT_GLM_ID = 'nvidia/z-ai/glm-5.1'
-const DEFAULT_GLM_NAME = 'GLM 5.1'
+const DEFAULT_GLM_NAME = 'GLM 5.1 (Slow)'
 
 serve(
   createHandler(async (_req, env) => {
