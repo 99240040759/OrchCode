@@ -4,7 +4,6 @@ import {
   agentRunStateAtom,
   chatMessagesAtom,
   activeThreadIdAtom,
-  conversationIdAtom,
   threadListAtom,
   filesChangedAtom,
   sessionTokensAtom,
@@ -13,11 +12,70 @@ import {
   type StreamBlock,
   type FileChangeEntry
 } from '../store/agentStore'
+import { parseToolFileOp, isToolResultError } from '../lib/parseToolFileOp'
 
-function countLines(content: unknown): number {
-  if (typeof content !== 'string') return 0
-  return content.split('\n').length
+// ─── Error Message Cleanup ────────────────────────────────────────────────────
+
+function cleanErrorMessage(rawErr: unknown): string {
+  if (!rawErr) return 'An unknown error occurred while processing the request.'
+
+  // If it's an object, extract message directly
+  if (typeof rawErr === 'object' && rawErr !== null) {
+    const e = rawErr as any
+    if (typeof e.message === 'string') return cleanErrorMessage(e.message)
+    if (typeof e.error === 'string') return e.error
+    if (typeof e.msg === 'string') return e.msg
+  }
+
+  const errorStr = typeof rawErr === 'string' ? rawErr : JSON.stringify(rawErr)
+
+  // Try JSON parse for nested error objects
+  if (typeof rawErr === 'string') {
+    try {
+      const parsed = JSON.parse(rawErr)
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.message === 'string') return parsed.message
+        if (typeof parsed.error === 'string') return parsed.error
+        if (parsed.error?.message) return parsed.error.message
+        if (typeof parsed.msg === 'string') return parsed.msg
+        if (typeof parsed.description === 'string') return parsed.description
+      }
+    } catch {
+      // not json, fall through
+    }
+  }
+
+  if (
+    errorStr.includes('apikey') ||
+    errorStr.includes('Invalid API Key') ||
+    errorStr.includes('Unauthorized') ||
+    errorStr.includes('auth') ||
+    errorStr.includes('API key')
+  ) {
+    return 'Authentication failed. Please check your account settings or sign in again.'
+  }
+  if (errorStr.includes('Failed to fetch') || errorStr.includes('fetch failed')) {
+    return 'Unable to connect to the server. Please check your network connection and try again.'
+  }
+  if (errorStr.includes('model_not_found') || errorStr.includes('does not exist')) {
+    return 'The selected AI model is temporarily unavailable. Please select another model.'
+  }
+  if (errorStr.includes('rate limit') || errorStr.includes('429')) {
+    return 'Request limit reached. Please wait a moment before trying again.'
+  }
+  if (errorStr.includes('timeout') || errorStr.includes('504')) {
+    return 'The request took too long to respond. Please try again in a few moments.'
+  }
+
+  // If it looks like a raw JSON blob, give a generic message
+  if (errorStr.startsWith('{') && errorStr.endsWith('}')) {
+    return 'An unexpected error occurred. Please try again.'
+  }
+
+  return errorStr
 }
+
+// ─── File Change Extractor (uses shared parseToolFileOp) ─────────────────────
 
 function extractFileChange(
   toolName: string,
@@ -26,54 +84,25 @@ function extractFileChange(
   const fileTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
   if (!fileTools.includes(toolName)) return null
 
-  let path = ''
-  let additions = 0
-  let deletions = 0
-  let lineRange = ''
+  const op = parseToolFileOp(toolName, args)
+  if (!op.fullPath) return null
 
-  const targetFile = args.targetFile
-  if (typeof targetFile === 'string') path = targetFile
-
-  if (toolName === 'writeToFile') {
-    if ('codeContent' in args) additions = countLines(args.codeContent)
-  } else if (toolName === 'replaceFileContent') {
-    const startLine = args.startLine
-    const endLine = args.endLine
-    if (typeof startLine === 'number' && typeof endLine === 'number') {
-      lineRange = `L${startLine}-${endLine}`
-      deletions = endLine - startLine + 1
-    }
-    if ('replacementContent' in args) additions = countLines(args.replacementContent)
-  } else if (toolName === 'multiReplaceFileContent') {
-    const chunks = args.replacementChunks
-    if (Array.isArray(chunks)) {
-      let minLine = Infinity
-      let maxLine = -Infinity
-      for (const c of chunks) {
-        if (c && typeof c === 'object') {
-          if ('replacementContent' in c) additions += countLines(c.replacementContent)
-          const s = (c as any).startLine
-          const e = (c as any).endLine
-          if (typeof s === 'number' && typeof e === 'number') {
-            deletions += e - s + 1
-            if (s < minLine) minLine = s
-            if (e > maxLine) maxLine = e
-          }
-        }
-      }
-      if (minLine !== Infinity && maxLine !== -Infinity) {
-        lineRange = `L${minLine}-${maxLine}`
-      }
-    }
+  const name = op.fullPath.split(/[/\\]/).pop() ?? op.fullPath
+  return {
+    path: op.fullPath,
+    name,
+    toolName,
+    additions: op.additions,
+    deletions: op.deletions,
+    lineRange: op.lineRange,
+    timestamp: Date.now()
   }
-
-  if (!path) return null
-  const name = path.split(/[/\\]/).pop() ?? path
-  return { path, name, toolName, additions, deletions, lineRange, timestamp: Date.now() }
 }
 
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 export function useAgentStream() {
-  const conversationId = useAtomValue(conversationIdAtom)
+  // Single unified thread ID atom (conversationIdAtom is now the same atom)
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const setRunState = useSetAtom(agentRunStateAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
@@ -82,19 +111,15 @@ export function useAgentStream() {
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
 
-  const abortRef = useRef<AbortController | null>(null)
+  // Removed: abortRef — the abort controller was wired to nothing (streamAgent doesn't
+  // accept a signal through the IPC bridge). Stop is handled exclusively via stopAgentStream IPC.
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const rafIdRef = useRef<number | null>(null)
-
   const activeStreamThreadIdRef = useRef<string>('')
 
   const currentReasoningBlockRef = useRef<Extract<StreamBlock, { type: 'reasoning' }> | null>(null)
 
   const cleanupActiveStream = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort()
-      abortRef.current = null
-    }
     if (unsubscribeRef.current) {
       unsubscribeRef.current()
       unsubscribeRef.current = null
@@ -114,16 +139,22 @@ export function useAgentStream() {
   }, [cleanupActiveStream])
 
   const run = useCallback(
-    async (promptText: string, mode?: string, attachments?: any[]) => {
+    async (promptText: string, mode?: string, attachments?: any[], forceThreadId?: string) => {
       cleanupActiveStream()
 
-      const resolvedThreadId = activeThreadId ?? conversationId
-      const isNewThread = !activeThreadId
+      // Use explicit forceThreadId if provided (from newConversation or selectThread),
+      // otherwise fall back to the current atom value. This avoids async atom-read races.
+      const resolvedThreadId = forceThreadId ?? activeThreadId
+      const isNewThread = !activeThreadId && !forceThreadId
+
       activeStreamThreadIdRef.current = resolvedThreadId
 
-      if (isNewThread) {
-        setActiveThreadId(conversationId)
+      if (resolvedThreadId && resolvedThreadId !== activeThreadId) {
+        setActiveThreadId(resolvedThreadId)
       }
+
+      // Reset file changes for this run
+      setFilesChanged([])
 
       setRunState('thinking')
 
@@ -146,9 +177,6 @@ export function useAgentStream() {
         isStreaming: true
       }
       setMessages((prev) => [...prev, assistantMsg])
-      setRunState('thinking')
-
-      abortRef.current = new AbortController()
 
       try {
         let fullContent = ''
@@ -209,11 +237,12 @@ export function useAgentStream() {
           unsubscribeRef.current()
           unsubscribeRef.current = null
         }
+
         unsubscribeRef.current = window.api.onAgentChunk((chunk) => {
           try {
             if (!chunk) return
-
             if (chunk.threadId && chunk.threadId !== streamThreadId) return
+
             const chunkType = chunk.type
             const chunkData = chunk.payload
 
@@ -310,16 +339,12 @@ export function useAgentStream() {
                     return [...prev, fileChange]
                   })
                 }
+
                 const res = chunkData?.result
-                const isErr =
-                  res &&
-                  ((typeof res === 'string' &&
-                    (res.toLowerCase().includes('error:') ||
-                      res.toLowerCase().includes('failed:') ||
-                      res.toLowerCase().includes('traversal blocked'))) ||
-                    (typeof res === 'object' && ('error' in res || (res as any).success === false)))
-                toolBlock.result = chunkData?.result
-                toolBlock.status = isErr ? 'error' : 'complete'
+                toolBlock.result = res
+                toolBlock.status = isToolResultError(res) ? 'error' : 'complete'
+                // Clear argsDelta once result arrives
+                toolBlock.argsDelta = undefined
               }
 
               flushAssistant()
@@ -328,6 +353,7 @@ export function useAgentStream() {
               console.error('[useAgentStream] Error chunk:', chunkData)
               assistantIsStreaming = false
 
+              // Mark all pending tool blocks as errored
               for (const block of orderedBlocks) {
                 if (block.type === 'tool' && block.status === 'pending') {
                   block.status = 'error'
@@ -335,8 +361,8 @@ export function useAgentStream() {
               }
 
               orderedBlocks.push({
-                type: 'text',
-                content: `\n\n[System Error: ${chunkData ?? 'Unknown Error'}]`
+                type: 'error',
+                message: cleanErrorMessage(chunkData)
               })
 
               flushAssistant(true)
@@ -346,26 +372,19 @@ export function useAgentStream() {
                 unsubscribeRef.current = null
               }
             } else if (chunkType === 'step-limit') {
+              // Only fires if model hits token length limit (our step limit is removed)
               orderedBlocks.push({
                 type: 'text',
                 content:
-                  '\n\n> **⚠️ Agent reached the 50-step limit.** The task may be incomplete. Ask me to continue if needed.'
+                  '\n\n> **⚠️ The model hit its context limit.** You can ask me to continue from where I left off.'
               })
               flushAssistant()
-            } else if (chunkType === 'compaction-failed') {
-              console.warn('[useAgentStream] Compaction failed for thread:', streamThreadId)
             } else if (chunkType === 'finish') {
               assistantIsStreaming = false
               currentReasoningBlockRef.current = null
 
               const accumulatedTokens = Number(chunkData?.accumulatedTokens ?? 0)
-              const compactionTriggered = !!chunkData?.compactionTriggered
-
               setSessionTokens(accumulatedTokens)
-
-              if (compactionTriggered && !orderedBlocks.some((b) => b.type === 'compaction')) {
-                orderedBlocks.push({ type: 'compaction' })
-              }
 
               flushAssistant(true)
               setRunState('idle')
@@ -375,6 +394,7 @@ export function useAgentStream() {
                 unsubscribeRef.current = null
               }
 
+              // Generate title for new threads
               if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
                 const titleText = promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200)
                 window.api
@@ -397,36 +417,37 @@ export function useAgentStream() {
 
         await window.api.streamAgent(promptText, resolvedThreadId, mode, selectedModel, attachments)
       } catch (err: any) {
-        if (err.name === 'AbortError') {
-          setRunState('idle')
-        } else {
-          console.error('[useAgentStream] Invocation Error:', err)
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id === assistantMsgId) {
-                const updatedBlocks = (m.orderedBlocks ?? []).map((b) =>
-                  b.type === 'tool' && b.status === 'pending'
-                    ? { ...b, status: 'error' as const }
-                    : b
-                )
-                return {
-                  ...m,
-                  content: `Error: ${err.message || 'Unknown stream invocation error'}`,
-                  orderedBlocks: updatedBlocks,
-                  isStreaming: false
-                }
+        // IPC-level error (not stream error)
+        console.error('[useAgentStream] Invocation Error:', err)
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id === assistantMsgId) {
+              const updatedBlocks = (m.orderedBlocks ?? []).map((b) =>
+                b.type === 'tool' && b.status === 'pending'
+                  ? { ...b, status: 'error' as const }
+                  : b
+              )
+              return {
+                ...m,
+                isStreaming: false,
+                orderedBlocks: [
+                  ...updatedBlocks,
+                  {
+                    type: 'error' as const,
+                    message: cleanErrorMessage(err?.message || err)
+                  }
+                ]
               }
-              return m
-            })
-          )
-          setRunState('error')
-        }
+            }
+            return m
+          })
+        )
+        setRunState('error')
         cleanupActiveStream()
       }
     },
     [
       activeThreadId,
-      conversationId,
       selectedModel,
       setActiveThreadId,
       setMessages,
@@ -442,7 +463,19 @@ export function useAgentStream() {
     const tid = activeStreamThreadIdRef.current
     cleanupActiveStream()
     setRunState('idle')
-    setMessages((prev) => prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)))
+    // Mark all pending tool blocks as error so they don't spin forever
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (!m.isStreaming) return m
+        return {
+          ...m,
+          isStreaming: false,
+          orderedBlocks: (m.orderedBlocks ?? []).map((b) =>
+            b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
+          )
+        }
+      })
+    )
     window.api.stopAgentStream(tid).catch(console.error)
   }, [cleanupActiveStream, setRunState, setMessages])
 

@@ -99,6 +99,21 @@ export function getThreads(): (ThreadEntry & { workspacePath?: string | null })[
     .all() as (ThreadEntry & { workspacePath?: string | null })[]
 }
 
+export function getThread(threadId: string): (ThreadEntry & { workspacePath?: string | null }) | null {
+  const db = getDB()
+  return db
+    .prepare(
+      `
+    SELECT t.*, tw.workspacePath FROM threads t
+    LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
+    WHERE t.id = ?
+  `
+    )
+    .get(threadId) as (ThreadEntry & { workspacePath?: string | null }) | null
+}
+
+
+
 export function getThreadMessages(threadId: string): ThreadMessage[] {
   const db = getDB()
   return db
@@ -246,27 +261,3 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   return threadIds
 }
 
-export function getThreadCompactionSummary(threadId: string): string | null {
-  const db = getDB()
-  const row = db.prepare('SELECT compactionSummary FROM threads WHERE id = ?').get(threadId) as any
-  return row?.compactionSummary ?? null
-}
-
-export function updateThreadCompactionSummary(threadId: string, summary: string | null): void {
-  const db = getDB()
-  db.prepare('UPDATE threads SET compactionSummary = ? WHERE id = ?').run(summary, threadId)
-}
-
-export function getLastCompactedMessageId(threadId: string): string | null {
-  const db = getDB()
-  const row = db
-    .prepare(
-      `
-    SELECT id FROM messages 
-    WHERE threadId = ? AND isCompactionAnchor = 1
-    ORDER BY createdAt DESC LIMIT 1
-  `
-    )
-    .get(threadId) as any
-  return row?.id ?? null
-}

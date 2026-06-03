@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import './OnboardingView.css'
+
 import { GoogleIcon } from '../lib/uiUtils'
 import { toast } from 'sonner'
 
@@ -10,6 +10,15 @@ export const OnboardingView: React.FC = () => {
     null
   )
 
+  // Transition to main window after successful sign-in, with cleanup on unmount
+  React.useEffect(() => {
+    if (!user) return
+    const timer = setTimeout(() => {
+      window.api.openMainAndCloseOnboarding()
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [user])
+
   const handleSignIn = async () => {
     setLoading(true)
     setAuthError(null)
@@ -17,9 +26,8 @@ export const OnboardingView: React.FC = () => {
       const profile = await window.api.startGoogleAuth()
       if (profile) {
         setUser(profile)
-        setTimeout(() => {
-          window.api.openMainAndCloseOnboarding()
-        }, 1200)
+        // Transition is handled in a useEffect below so it cleans up on unmount
+        setLoading(false)
       } else {
         setLoading(false)
         setAuthError('Sign-in was cancelled or no profile returned.')

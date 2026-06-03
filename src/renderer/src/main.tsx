@@ -24,7 +24,10 @@ try {
   console.error('[main] Telemetry bootstrap failed:', err)
 }
 
+// Google Fonts (must stay as CSS — no VE equivalent for @import url)
 import './assets/main.css'
+// Vanilla-extract global styles (replaces all old @import CSS files)
+import './assets/styles'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'

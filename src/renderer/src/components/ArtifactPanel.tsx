@@ -40,7 +40,7 @@ import type { ArtifactEntry } from '../../../preload/index.d'
 import Skeleton from 'react-loading-skeleton'
 import 'react-loading-skeleton/dist/skeleton.css'
 import { isAgentArtifact, getDisplayName } from '../lib/uiUtils'
-import './ArtifactPanel.css'
+
 import TerminalView from './TerminalView'
 import BrowserView from './BrowserView'
 import type { TerminalViewHandle } from './TerminalView'
@@ -606,11 +606,14 @@ const ArtifactPanel: React.FC = () => {
   }, [convId, setArtifacts])
 
   useEffect(() => {
-    const unsub = window.api.onArtifactsChanged((data) => {
-      setArtifacts(data ?? [])
+    const unsub = window.api.onArtifactsChanged(({ conversationId, artifacts }) => {
+      // Only update if the event is for the currently active conversation
+      if (conversationId === convId) {
+        setArtifacts(artifacts ?? [])
+      }
     })
     return unsub
-  }, [setArtifacts])
+  }, [convId, setArtifacts])
 
   const handleOpenFile = useCallback(
     (fileData: EditorFile) => {

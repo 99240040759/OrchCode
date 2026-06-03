@@ -24,8 +24,7 @@ import {
   generateText,
   ModelMessage,
   ToolCallPart,
-  ToolResultPart,
-  stepCountIs
+  ToolResultPart
 } from 'ai'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import {
@@ -34,10 +33,9 @@ import {
   startBrowserAgentWorker,
   stopBrowserAgentWorker
 } from './tools'
-import { triggerSemanticCompaction } from './agent/compaction'
-
 import {
   getThreads,
+  getThread,
   getThreadMessages,
   deleteThread,
   saveMessage,
@@ -48,10 +46,7 @@ import {
   deleteWorkspaceThreads,
   addOpenedWorkspace,
   deleteOpenedWorkspace,
-  getThreadCompactionSummary,
-  getLastCompactedMessageId,
-  updateThreadAccumulatedTokens,
-  getThreadAccumulatedTokens
+  updateThreadAccumulatedTokens
 } from './db'
 
 import pty from 'node-pty'
@@ -77,11 +72,16 @@ export const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: (url, options) => {
-    return geminiLimiter.schedule(() => {
+    return geminiLimiter.schedule(async () => {
+      const isCompaction = options?.headers && (options.headers as any)['x-in-flight-compaction']
+      let bodyText = options?.body
+      if (bodyText && typeof bodyText === 'string' && !isCompaction) {
+        bodyText = await compactClientPayloadIfNeeded(bodyText)
+      }
       const headers = new Headers(options?.headers || {})
       headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
       headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-      return fetch(url, { ...options, headers })
+      return fetch(url, { ...options, body: bodyText, headers })
     })
   }
 })
@@ -90,14 +90,140 @@ export const nvidia = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) => {
-    return nvidiaLimiter.schedule(() => {
+    return nvidiaLimiter.schedule(async () => {
+      const isCompaction = options?.headers && (options.headers as any)['x-in-flight-compaction']
+      let bodyText = options?.body
+      if (bodyText && typeof bodyText === 'string' && !isCompaction) {
+        bodyText = await compactClientPayloadIfNeeded(bodyText)
+      }
       const headers = new Headers(options?.headers || {})
       headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
       headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-      return fetch(url, { ...options, headers })
+      return fetch(url, { ...options, body: bodyText, headers })
     })
   }
 })
+
+async function compactClientPayloadIfNeeded(bodyText: string): Promise<string> {
+  if (!bodyText) return bodyText
+
+  try {
+    const json = JSON.parse(bodyText)
+    const THRESHOLD_CHARS = 400000 // ~100k tokens
+    if (bodyText.length < THRESHOLD_CHARS) {
+      return bodyText
+    }
+
+    log.info(`[client-compaction] Payload size (${bodyText.length} chars) exceeds threshold. Compacting in-flight...`)
+
+    let isGoogleFormat = false
+    let messages: any[] = []
+    let systemPrompt = ""
+
+    if (Array.isArray(json.contents)) {
+      isGoogleFormat = true
+      messages = json.contents
+      systemPrompt = json.systemInstruction?.parts?.[0]?.text || ""
+    } else if (Array.isArray(json.messages)) {
+      messages = json.messages
+      const systemMsg = messages.find((m: any) => m.role === 'system')
+      systemPrompt = systemMsg?.content || ""
+    } else {
+      return bodyText // Unknown format
+    }
+
+    if (messages.length < 8) {
+      return bodyText
+    }
+
+    const KEEP_RECENT = 4
+    const endIndex = messages.length - KEEP_RECENT
+    const startIndex = (isGoogleFormat ? 0 : (messages[0]?.role === 'system' ? 1 : 0))
+
+    if (endIndex <= startIndex) {
+      return bodyText
+    }
+
+    const messagesToCompact = messages.slice(startIndex, endIndex)
+    const recentMessages = messages.slice(endIndex)
+
+    const transcript = messagesToCompact
+      .map((m: any) => {
+        let role = m.role || 'user'
+        if (role === 'model') role = 'assistant'
+        
+        let contentStr = ""
+        if (typeof m.content === 'string') {
+          contentStr = m.content
+        } else if (Array.isArray(m.content)) {
+          contentStr = m.content
+            .map((part: any) => part.text || part.image || "")
+            .join("\n")
+        } else if (Array.isArray(m.parts)) {
+          contentStr = m.parts
+            .map((part: any) => part.text || "")
+            .join("\n")
+        }
+
+        let text = `[${role.toUpperCase()}] ${contentStr}`
+        return text
+      })
+      .join('\n\n')
+
+    const compactionPrompt = `Analyze the provided conversation history and compile a detailed, high-fidelity, high-density semantic state summary.
+Avoid vague generalizations. Do NOT sacrifice depth, detail, or file paths.
+
+Ensure you fully document:
+1. PRIMARY GOAL: What core problem or features did the user request?
+2. ARCHITECTURAL DECISIONS: What specific files, schemas, or styles were designed or modified?
+3. SUCCESSFUL MUTATIONS: What files were created or edited? List exact paths.
+4. REMAINING TASK STATE: Exact technical state, checklists, and next step.
+
+Conversation turns to summarize:
+${transcript}`
+
+    log.info(`[client-compaction] Calling local Gemini to compile compaction summary...`)
+    
+    const result = await generateText({
+      model: google('gemini-3.1-flash-lite'),
+      prompt: compactionPrompt,
+      headers: { 'x-in-flight-compaction': 'true' }
+    })
+
+    const summaryText = result.text?.trim()
+    if (!summaryText) {
+      throw new Error("Empty summary returned from local Gemini")
+    }
+
+    log.info(`[client-compaction] Compaction succeeded! Summary size: ${summaryText.length} chars`)
+
+    const compactionHeader = `\n\n── HISTORICAL CONVERSATION COMPACTION SUMMARY ──\nPrior conversation compacted to save context. Summary of what was accomplished:\n\n${summaryText}\n\nKeep this context in mind when handling the user's next request.`
+
+    const newSystemPrompt = systemPrompt + compactionHeader
+
+    if (isGoogleFormat) {
+      json.systemInstruction = {
+        parts: [{ text: newSystemPrompt }]
+      }
+      json.contents = recentMessages
+    } else {
+      let systemMsg = messages.find((m: any) => m.role === 'system')
+      if (systemMsg) {
+        systemMsg.content = newSystemPrompt
+      } else {
+        systemMsg = { role: 'system', content: newSystemPrompt }
+      }
+      
+      const cleanRecent = recentMessages.filter((m: any) => m.role !== 'system')
+      json.messages = [systemMsg, ...cleanRecent]
+    }
+
+    return JSON.stringify(json)
+  } catch (err) {
+    log.error(`[client-compaction] In-flight compaction failed:`, err)
+    return bodyText
+  }
+}
 
 export function resolveModel(modelId: string): {
   model: Parameters<typeof streamText>[0]['model']
@@ -202,7 +328,8 @@ async function pushArtifactsChanged(conversationId: string): Promise<void> {
           return { name: e.name, path: p, size: stat.size, modified: stat.mtime.toISOString() }
         })
     )
-    mainWindow.webContents.send('artifacts:changed', artifacts)
+    // Include conversationId so renderer can filter and only update the correct panel
+    mainWindow.webContents.send('artifacts:changed', { conversationId, artifacts })
   } catch {}
 }
 
@@ -561,6 +688,16 @@ ipcMain.handle('mastra:get-unique-workspaces', async () => {
   }
 })
 
+ipcMain.handle('mastra:get-thread', async (_event, threadId: string) => {
+  try {
+    return getThread(threadId)
+  } catch {
+    return null
+  }
+})
+
+
+
 ipcMain.handle(
   'dialog:confirm',
   async (
@@ -666,15 +803,7 @@ async function handleAgentStreamRequest(
       }
     }
 
-    let activeHistory = history
-    const lastCompactedId = getLastCompactedMessageId(convId)
-    let compactionIndex = -1
-    if (lastCompactedId) {
-      compactionIndex = history.findIndex((m) => m.id === lastCompactedId)
-      if (compactionIndex !== -1) {
-        activeHistory = history.slice(compactionIndex + 1)
-      }
-    }
+    const activeHistory = history
 
     const messages: ModelMessage[] = []
 
@@ -861,27 +990,13 @@ You have active browser control. Use these tools:
 4. browserMouseClickCoordinate(x, y, button?): Click absolute pixel coordinates.
 5. browserScreenshot(): ALWAYS capture a screenshot after navigation/typing to verify page state.`
     }
-
-    let compactionInstruction = ''
-    if (compactionIndex !== -1) {
-      const compactionSummary = getThreadCompactionSummary(convId)
-      if (compactionSummary) {
-        compactionInstruction = `\n── HISTORICAL CONVERSATION COMPACTION SUMMARY ──
-Prior conversation compacted to save context. Summary of what was accomplished:
-
-${compactionSummary}
-
-Keep this context in mind when handling the user's next request.`
-      }
-    }
-
     const systemInstruction = `You are Orch Code, a highly capable AI developer assistant. Active conversation ID: ${convId}.
 
 ── WORKSPACE ──
 Root path: ${ctx.rootPath || 'No workspace selected'}
 
 IMPORTANT: Use searchWorkspace(query) to find files or code by pattern. Use listDir(directoryPath) to explore directories. Do NOT assume file contents — always read before editing.
-${browserInstruction}${compactionInstruction ? '\n' + compactionInstruction : ''}
+${browserInstruction}
 
 ── ARTIFACT BOUNDARIES & WORKFLOW ──
 Use the sandboxed Artifacts system inside '.orch-artifacts/' folder of the active workspace.
@@ -926,7 +1041,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
       system: systemInstruction,
       messages,
       tools: activeTools,
-      stopWhen: stepCountIs(50),
+      // No step limit — agents run until the task is complete
       abortSignal: controller.signal,
 
       ...(Object.keys(modelProviderOptions).length > 0
@@ -939,6 +1054,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
     let currentReasoningStartMs = 0
     let turnPromptTokens = 0
     let turnCompletionTokens = 0
+    let textDeltaCount = 0
 
     const saveProgress = async () => {
       const blocksSnapshot = [...orderedBlocks]
@@ -991,6 +1107,11 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           payload: textDelta,
           threadId: convId
         })
+        // Live-save every 10 text deltas to preserve progress
+        textDeltaCount++
+        if (textDeltaCount % 10 === 0) {
+          await saveProgress()
+        }
       } else if (part.type === 'tool-call') {
         log.info(`[main] Tool: ${part.toolName} (${part.toolCallId})`)
         orderedBlocks.push({
@@ -1045,60 +1166,20 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         turnCompletionTokens = usage.outputTokens || 0
         const turnTotal = turnPromptTokens + turnCompletionTokens
 
-        let finalAccumulated = turnTotal
         try {
-          const currentAcc = getThreadAccumulatedTokens(convId)
-          finalAccumulated = currentAcc + turnTotal
+          updateThreadAccumulatedTokens(convId, turnTotal)
         } catch (dbErr) {
-          log.error('[main] Failed to read native accumulated tokens:', dbErr)
-        }
-
-        let compactionTriggered = false
-        if (finalAccumulated >= 200_000) {
-          compactionTriggered = true
-          log.info(`[main] Compaction triggered at ${finalAccumulated} tokens for thread ${convId}`)
-
-          triggerSemanticCompaction(convId, assistantMsgId)
-            .then(() => {
-              try {
-                updateThreadAccumulatedTokens(convId, 0)
-              } catch {}
-              log.info(`[main] Compaction succeeded — token counter reset for ${convId}`)
-            })
-            .catch((err) => {
-              log.error(
-                '[main] Asynchronous semantic compaction failed — token counter NOT reset:',
-                err
-              )
-
-              try {
-                updateThreadAccumulatedTokens(convId, finalAccumulated)
-              } catch {}
-
-              try {
-                event.sender.send('agent:stream-chunk', {
-                  type: 'compaction-failed',
-                  threadId: convId
-                })
-              } catch {}
-            })
+          log.error('[main] Failed to save active session token count:', dbErr)
         }
 
         const finishReason = (part as any).finishReason ?? (part as any).reason ?? ''
-        if (finishReason === 'max-steps' || finishReason === 'length') {
-          log.warn(`[main] Agent hit step limit for thread ${convId}`)
+        if (finishReason === 'length') {
+          // Model-level token length limit (not our step limit — we removed that)
+          log.warn(`[main] Model hit token length limit for thread ${convId}`)
           event.sender.send('agent:stream-chunk', { type: 'step-limit', threadId: convId })
         }
 
         log.info(`[main] Stream finish — turn: ${turnTotal} tokens`)
-
-        if (!compactionTriggered) {
-          try {
-            updateThreadAccumulatedTokens(convId, finalAccumulated)
-          } catch (dbErr) {
-            log.error('[main] Failed to save native accumulated tokens:', dbErr)
-          }
-        }
 
         event.sender.send('agent:stream-chunk', {
           type: 'finish',
@@ -1108,8 +1189,8 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
               completionTokens: turnCompletionTokens,
               totalTokens: turnTotal
             },
-            accumulatedTokens: compactionTriggered ? 0 : finalAccumulated,
-            compactionTriggered
+            accumulatedTokens: turnTotal,
+            compactionTriggered: false
           },
           threadId: convId
         })

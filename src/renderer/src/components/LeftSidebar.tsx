@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useAtom } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { PanelLeftClose, Plus } from 'lucide-react'
-import './Sidebar.css'
+
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 
@@ -24,21 +24,9 @@ const LeftSidebar: React.FC<SidebarProps> = ({
   const [localExpanded, setLocalExpanded] = useState(true)
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : localExpanded
 
-  const [authUser, setAuthUser] = useAtom(authUserAtom)
-
-  useEffect(() => {
-    window.api.getAuthUser().then((user) => {
-      setAuthUser(user)
-    })
-
-    const unsubscribeAuth = window.api.onAuthStatusChanged((user) => {
-      setAuthUser(user)
-    })
-
-    return () => {
-      unsubscribeAuth()
-    }
-  }, [setAuthUser])
+  // Auth state is managed globally in App.tsx (fetched once on mount + subscription).
+  // LeftSidebar just reads the atom — no duplicate fetch here.
+  const authUser = useAtomValue(authUserAtom)
 
   const handleLogin = async () => {
     try {
@@ -81,7 +69,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-        {}
+        {/* Drag region + collapse button */}
         <div
           className="sidebar-header-row"
           style={
@@ -108,7 +96,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {}
+        {/* New Conversation button */}
         <div
           className="sidebar-top-section"
           style={{
@@ -129,7 +117,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
           <div className="sidebar-divider" />
         </div>
 
-        {}
+        {/* Thread list */}
         <div
           className="sidebar-body"
           style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}
@@ -141,7 +129,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
           <div className="sidebar-divider" />
         </div>
 
-        {}
+        {/* User profile / sign-in */}
         <div
           className="sidebar-footer"
           style={{ padding: '8px 12px', flexShrink: 0, WebkitAppRegion: 'no-drag' } as any}

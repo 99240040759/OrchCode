@@ -17,16 +17,26 @@ export type {
   ModelInfo
 } from './types'
 
-export const conversationIdAtom = atom<string>('')
+/**
+ * Single source of truth for the active thread/conversation ID.
+ * Previously there were two separate atoms (conversationIdAtom + activeThreadIdAtom)
+ * kept in sync manually. Now unified into one atom.
+ * conversationIdAtom is kept as an alias for backward compatibility.
+ */
+export const activeThreadIdAtom = atom<string>('')
+// Alias — both refer to the same atom
+export const conversationIdAtom = activeThreadIdAtom
 
 export const threadListAtom = atom<ThreadEntry[]>([])
-export const activeThreadIdAtom = atom<string | null>(null)
 
 export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
   const threads = get(threadListAtom)
   const activeId = get(activeThreadIdAtom)
   return threads.find((t) => t.id === activeId)
 })
+
+/** True while thread messages/workspace are being loaded (thread switch in progress) */
+export const isThreadLoadingAtom = atom<boolean>(false)
 
 export const agentRunStateAtom = atom<import('./types').AgentRunState>('idle')
 
@@ -50,7 +60,7 @@ export const activeEditorFileAtom = atom<import('./types').EditorFile | null>(nu
 
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 
-export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string } | null>(null)
+export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string; threadId?: string } | null>(null)
 
 export const availableModelsAtom = atom<Record<string, import('./types').ModelInfo>>({})
 export const selectedModelAtom = atom<string>('')

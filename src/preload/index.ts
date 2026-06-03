@@ -29,6 +29,7 @@ const api = {
   getConversationId: () => ipcRenderer.invoke('mastra:get-conversation-id'),
   newConversation: () => ipcRenderer.invoke('mastra:new-conversation'),
   getThreads: () => ipcRenderer.invoke('mastra:get-threads'),
+  getThread: (threadId: string) => ipcRenderer.invoke('mastra:get-thread', threadId),
   getThreadMessages: (threadId: string) =>
     ipcRenderer.invoke('mastra:get-thread-messages', threadId),
   deleteThread: (threadId: string) => ipcRenderer.invoke('mastra:delete-thread', threadId),
@@ -45,8 +46,8 @@ const api = {
     ipcRenderer.invoke('file:read-original', filePath, conversationId),
   writeFile: (filePath: string, content: string, conversationId?: string) =>
     ipcRenderer.invoke('file:write', filePath, content, conversationId),
-  onArtifactsChanged: (callback: (artifacts: any[]) => void) => {
-    const listener = (_event: any, artifacts: any[]) => callback(artifacts)
+  onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: any[] }) => void) => {
+    const listener = (_event: any, data: { conversationId: string; artifacts: any[] }) => callback(data)
     ipcRenderer.on('artifacts:changed', listener)
     return () => ipcRenderer.removeListener('artifacts:changed', listener)
   },

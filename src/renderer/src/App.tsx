@@ -10,19 +10,23 @@ import { OnboardingView } from './components/OnboardingView'
 import { ChevronDown, Code } from 'lucide-react'
 import { Toaster } from 'sonner'
 import {
-  conversationIdAtom,
+  activeThreadIdAtom,
   sidebarExpandedAtom,
   activeWorkspaceAtom,
   isArtifactPanelOpenAtom,
+  isThreadLoadingAtom,
   activeThreadAtom,
   hasMessagesAtom,
   globalPromptTriggerAtom,
   availableModelsAtom,
-  selectedModelAtom
+  selectedModelAtom,
+  authUserAtom
 } from './store/agentStore'
 import { useAgentStream } from './hooks/useAgentStream'
 import { useThreads } from './hooks/useThreads'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
+
+// ─── Chat Pane ────────────────────────────────────────────────────────────────
 
 interface ChatPaneProps {
   fullWidth: boolean
@@ -44,6 +48,8 @@ const ChatPane = React.memo<ChatPaneProps>(
     workspaceName,
     hasMessages
   }) => {
+    const isLoading = useAtomValue(isThreadLoadingAtom)
+
     return (
       <div
         className="chat-pane"
@@ -57,6 +63,34 @@ const ChatPane = React.memo<ChatPaneProps>(
         }}
       >
         <TitleBar title="Orch Code" workspaceName={workspaceName} />
+
+        {/* Thread loading skeleton overlay */}
+        {isLoading && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              top: 'var(--titlebar-height)',
+              zIndex: 10,
+              backgroundColor: 'rgba(18,18,18,0.7)',
+              backdropFilter: 'blur(2px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <div
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                border: '2px solid var(--border-color)',
+                borderTopColor: 'var(--accent-blue)',
+                animation: 'spin 0.8s linear infinite'
+              }}
+            />
+          </div>
+        )}
 
         {hasMessages ? (
           <div
@@ -105,7 +139,7 @@ const ChatPane = React.memo<ChatPaneProps>(
                   <h2
                     className="home-prompt-title"
                     onClick={onOpenWorkspace}
-                    style={{ margin: 0, gap: 6 }}
+                    style={{ margin: 0, gap: 6, cursor: 'pointer' }}
                   >
                     <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
                     <ChevronDown
@@ -145,9 +179,12 @@ const ChatPane = React.memo<ChatPaneProps>(
 )
 ChatPane.displayName = 'ChatPane'
 
+// ─── App Inner ────────────────────────────────────────────────────────────────
+
 function AppInner(): React.JSX.Element {
-  const setConversationId = useSetAtom(conversationIdAtom)
+  const setActiveThreadId = useSetAtom(activeThreadIdAtom)
   const setAvailableModels = useSetAtom(availableModelsAtom)
+  const setAuthUser = useSetAtom(authUserAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const hasMessages = useAtomValue(hasMessagesAtom)
@@ -160,24 +197,30 @@ function AppInner(): React.JSX.Element {
   const { openWorkspace, newConversation, loadThreads } = useThreads()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
 
+  // Global prompt trigger (e.g., from new conversation or keyboard shortcut)
   useEffect(() => {
     if (globalPrompt) {
-      run(globalPrompt.prompt, globalPrompt.mode)
+      run(globalPrompt.prompt, globalPrompt.mode, undefined, globalPrompt.threadId)
       setGlobalPrompt(null)
     }
   }, [globalPrompt, run, setGlobalPrompt])
 
+  // One-time init: conversation ID, threads, models, auth user
   useEffect(() => {
     const init = async () => {
+      // Fetch current conversation ID from main process
       const convId = await window.api.getConversationId()
-      if (convId) setConversationId(convId)
+      if (convId) setActiveThreadId(convId)
+
+      // Load thread list
       await loadThreads()
+
+      // Load available models
       try {
         const models = await window.api.getAvailableModels()
         if (models) {
           setAvailableModels(models)
           const modelKeys = Object.keys(models)
-
           if (!selectedModel && modelKeys.length > 0) {
             setSelectedModel(modelKeys[0])
           }
@@ -185,9 +228,27 @@ function AppInner(): React.JSX.Element {
       } catch (err) {
         console.error('Failed to load available models:', err)
       }
+
+      // Load current auth user (single source — LeftSidebar reads from authUserAtom only)
+      try {
+        const user = await window.api.getAuthUser()
+        setAuthUser(user ?? null)
+      } catch {
+        setAuthUser(null)
+      }
     }
+
     init()
-  }, [setConversationId, loadThreads, setAvailableModels])
+
+    // Auth status subscription — runs once globally here, not duplicated in sidebar
+    const unsubAuth = window.api.onAuthStatusChanged((user) => {
+      setAuthUser(user ?? null)
+    })
+
+    return () => {
+      unsubAuth()
+    }
+  }, [setActiveThreadId, loadThreads, setAvailableModels, setAuthUser])
 
   const workspaceName = activeWorkspace
     ? `${activeWorkspace.name} / ${activeThreadTitle}`
@@ -283,6 +344,8 @@ function AppInner(): React.JSX.Element {
     </div>
   )
 }
+
+// ─── Root App ─────────────────────────────────────────────────────────────────
 
 function App(): React.JSX.Element {
   const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))

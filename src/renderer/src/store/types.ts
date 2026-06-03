@@ -8,10 +8,12 @@ export type StreamBlock =
       toolCallId: string
       toolName: string
       args: Record<string, unknown>
+      argsDelta?: string
       result?: unknown
       status: 'pending' | 'complete' | 'error'
     }
-  | { type: 'compaction' }
+  | { type: 'error'; message: string }
+
 
 export interface ChatMessage {
   id: string

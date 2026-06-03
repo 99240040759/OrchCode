@@ -3,27 +3,29 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import {
   threadListAtom,
   activeThreadIdAtom,
-  conversationIdAtom,
   chatMessagesAtom,
   activeWorkspaceAtom,
   sessionTokensAtom,
   filesChangedAtom,
+  isThreadLoadingAtom,
   type ChatMessage
 } from '../store/agentStore'
 import type { ThreadEntry } from '../../../preload/index.d'
 
 export function useThreads() {
-  const conversationId = useAtomValue(conversationIdAtom)
+  // activeThreadIdAtom is the single unified ID atom (conversationIdAtom is the same atom)
+  const activeThreadId = useAtomValue(activeThreadIdAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
-  const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
+  const setActiveThreadId = useSetAtom(activeThreadIdAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
-  const setConversationId = useSetAtom(conversationIdAtom)
   const setActiveWorkspace = useSetAtom(activeWorkspaceAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const setFilesChanged = useSetAtom(filesChangedAtom)
+  const setIsThreadLoading = useSetAtom(isThreadLoadingAtom)
 
-  const activeRef = useRef<string | null>(activeThreadId)
+  // Ref to track the active selection across async calls to cancel stale ones
+  const activeRef = useRef<string>('')
 
   useEffect(() => {
     activeRef.current = activeThreadId
@@ -40,17 +42,22 @@ export function useThreads() {
 
   const selectThread = useCallback(
     async (threadId: string) => {
-      setActiveThreadId(threadId)
-      setConversationId(threadId)
+      // Reset UI state immediately
       setMessages([])
       setSessionTokens(0)
       setFilesChanged([])
+      setIsThreadLoading(true)
+
+      // Track intent — any later stale callback will bail out
+      activeRef.current = threadId
 
       try {
         await window.api.setActiveSession(threadId)
       } catch (err) {
         console.error('[useThreads] Failed to sync session to backend:', err)
       }
+
+      if (activeRef.current !== threadId) return
 
       try {
         const workspacePath = await window.api.getThreadWorkspace(threadId)
@@ -65,6 +72,8 @@ export function useThreads() {
       } catch (err) {
         console.error('[useThreads] Failed to bind workspace for thread:', err)
       }
+
+      if (activeRef.current !== threadId) return
 
       try {
         const rawMessages = await window.api.getThreadMessages(threadId)
@@ -91,21 +100,36 @@ export function useThreads() {
               isStreaming: false
             }))
           setMessages(chatMsgs)
+        }
 
+        // Fetch fresh token count from DB — don't use stale atom
+        try {
+          const freshThread = await window.api.getThread(threadId)
+          if (freshThread && activeRef.current === threadId) {
+            setSessionTokens(freshThread.accumulatedTokens ?? 0)
+          }
+        } catch {
+          // Fall back to thread list atom if getThread fails
           const selectedThread = threads.find((t) => t.id === threadId)
-          const savedTokens = selectedThread?.accumulatedTokens ?? 0
-          setSessionTokens(savedTokens)
+          setSessionTokens(selectedThread?.accumulatedTokens ?? 0)
         }
       } catch (err) {
         console.error('[useThreads] Failed to load thread messages:', err)
       }
+
+      // Update the active thread ID only after everything is loaded
+      if (activeRef.current === threadId) {
+        setActiveThreadId(threadId)
+      }
+
+      setIsThreadLoading(false)
     },
     [
       setActiveThreadId,
-      setConversationId,
       setMessages,
       setSessionTokens,
       setFilesChanged,
+      setIsThreadLoading,
       setActiveWorkspace,
       threads
     ]
@@ -117,7 +141,7 @@ export function useThreads() {
       if (activeWorkspace?.path) {
         await window.api.setActiveWorkspace(newId, activeWorkspace.path)
       }
-      setConversationId(newId)
+      // Update atom immediately since we have the exact ID
       setActiveThreadId(newId)
       setMessages([])
       setSessionTokens(0)
@@ -130,7 +154,6 @@ export function useThreads() {
     }
   }, [
     activeWorkspace,
-    setConversationId,
     setActiveThreadId,
     setMessages,
     setSessionTokens,
@@ -144,7 +167,7 @@ export function useThreads() {
         await window.api.deleteThread(threadId)
         setThreads((prev: ThreadEntry[]) => prev.filter((t) => t.id !== threadId))
         if (activeThreadId === threadId) {
-          setActiveThreadId(null)
+          setActiveThreadId('')
           setMessages([])
           setSessionTokens(0)
         }
@@ -158,7 +181,7 @@ export function useThreads() {
   const switchWorkspace = useCallback(
     async (path: string) => {
       try {
-        const ctx = await window.api.setActiveWorkspace(conversationId, path)
+        const ctx = await window.api.setActiveWorkspace(activeThreadId, path)
         if (ctx) {
           setActiveWorkspace({
             name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
@@ -172,7 +195,7 @@ export function useThreads() {
         return null
       }
     },
-    [conversationId, setActiveWorkspace]
+    [activeThreadId, setActiveWorkspace]
   )
 
   const closeAndDeleteWorkspace = useCallback(
@@ -196,9 +219,9 @@ export function useThreads() {
 
   const openWorkspace = useCallback(async () => {
     try {
-      const ctx = await window.api.selectWorkspace(conversationId)
+      const ctx = await window.api.selectWorkspace(activeThreadId)
       if (ctx) {
-        await window.api.setActiveWorkspace(conversationId, ctx.rootPath)
+        await window.api.setActiveWorkspace(activeThreadId, ctx.rootPath)
         setActiveWorkspace({
           name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
           path: ctx.rootPath
@@ -211,7 +234,7 @@ export function useThreads() {
       console.error('[useThreads] Open workspace error:', err)
       return null
     }
-  }, [conversationId, setActiveWorkspace, loadThreads])
+  }, [activeThreadId, setActiveWorkspace, loadThreads])
 
   return {
     loadThreads,

@@ -18,11 +18,12 @@ serve(
 
     let isOpencodeModel = false
     let targetModelId = ""
+    let reqBodyText = ""
 
     if (req.method === 'POST' && subpath === '/v1/chat/completions') {
       try {
-        const clonedReq = req.clone()
-        const json = await clonedReq.json()
+        reqBodyText = await req.text()
+        const json = JSON.parse(reqBodyText)
         targetModelId = json.model
         if (
           targetModelId === 'deepseek-v4-flash-free' ||
@@ -61,7 +62,7 @@ serve(
     const res = await fetch(targetUrl, {
       method: req.method,
       headers: cleanHeaders,
-      body: req.body
+      body: reqBodyText || undefined
     })
 
     const resHeaders = new Headers(res.headers)

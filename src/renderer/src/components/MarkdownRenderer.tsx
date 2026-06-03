@@ -12,7 +12,7 @@ import {
   conversationIdAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import './MarkdownRenderer.css'
+
 
 interface MarkdownRendererProps {
   content: string

@@ -9,10 +9,10 @@ import {
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage } from '../store/agentStore'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import './ChatThread.css'
+
 
 const decodeBase64 = (base64Str: string): string => {
   try {
@@ -223,14 +223,11 @@ const AssistantMessage = React.memo(
             </div>
           )
         }
-        if (block.type === 'compaction') {
+        if (block.type === 'error') {
           return (
-            <div key={`compaction-${i}`} className="chat-compaction-container">
-              <div className="chat-compaction-line" />
-              <span className="chat-compaction-label">
-                — conversation compacted above this point —
-              </span>
-              <div className="chat-compaction-line" />
+            <div key={`error-${i}`} className="chat-error-container">
+              <AlertTriangle size={15} className="chat-error-icon" />
+              <span className="chat-error-message">{block.message}</span>
             </div>
           )
         }
@@ -274,6 +271,7 @@ const AssistantMessage = React.memo(
         if (p.type === 'tool' && n.type === 'tool') {
           if (p.status !== n.status || p.result !== n.result) return false
         }
+        if (p.type === 'error' && n.type === 'error' && p.message !== n.message) return false
       }
     }
     return true

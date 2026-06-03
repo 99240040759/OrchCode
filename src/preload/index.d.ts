@@ -64,6 +64,7 @@ export interface AppAPI {
   getConversationId: () => Promise<string>
   newConversation: () => Promise<{ conversationId: string }>
   getThreads: () => Promise<ThreadEntry[]>
+  getThread: (threadId: string) => Promise<ThreadEntry & { workspacePath?: string | null } | null>
   getThreadMessages: (threadId: string) => Promise<ThreadMessage[]>
   deleteThread: (threadId: string) => Promise<boolean>
   getThreadWorkspace: (threadId: string) => Promise<string | null>
@@ -76,7 +77,7 @@ export interface AppAPI {
   readFile: (filePath: string, conversationId?: string) => Promise<any>
   readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
   writeFile: (filePath: string, content: string, conversationId?: string) => Promise<boolean>
-  onArtifactsChanged: (callback: (artifacts: ArtifactEntry[]) => void) => () => void
+  onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: ArtifactEntry[] }) => void) => () => void
 
   createTerminal: (opts: {
     cols: number

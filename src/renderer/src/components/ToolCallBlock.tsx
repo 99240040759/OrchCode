@@ -17,11 +17,14 @@ import {
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
   artifactPanelModeAtom,
-  conversationIdAtom
+  activeThreadIdAtom
 } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/agentStore'
 import * as styles from './ToolCallBlock.css'
 import { isAgentArtifact } from '../lib/uiUtils'
+import { parseToolFileOp } from '../lib/parseToolFileOp'
+
+// ─── File Icon ────────────────────────────────────────────────────────────────
 
 interface FileIconProps {
   fileName: string
@@ -42,129 +45,63 @@ export const FileIcon: React.FC<FileIconProps> = ({ fileName, className = '', si
   )
 }
 
+// ─── Tool Icons ───────────────────────────────────────────────────────────────
+
 interface ToolCallBlockProps {
   toolCall: ToolCallEntry
 }
 
-function getToolDetails(toolCall: ToolCallEntry) {
-  let operation = 'Ran'
-  let target = 'tool'
-  let fullPath = ''
-  let isFile = false
-  let additions = 0
-  let deletions = 0
-  let lineRange = ''
-
-  const args = (toolCall.args ?? {}) as any
-  const result = (toolCall.result ?? {}) as any
-
-  switch (toolCall.toolName) {
-    case 'viewFile':
-      operation = 'Analyzed'
-      fullPath = (args.absolutePath as string) ?? ''
-      isFile = true
-      if (args.startLine !== undefined && args.endLine !== undefined) {
-        lineRange = `#L${args.startLine}-${args.endLine}`
-      } else if (result.readStart !== undefined && result.readEnd !== undefined) {
-        lineRange = `#L${result.readStart}-${result.readEnd}`
-      } else if (result.totalLines !== undefined) {
-        lineRange = `#L1-${result.totalLines}`
-      }
-      break
-    case 'writeToFile':
-      operation = 'Created'
-      fullPath = (args.targetFile as string) ?? ''
-      isFile = true
-      if (args.codeContent) additions = (args.codeContent as string).split('\n').length
-      break
-    case 'replaceFileContent':
-      operation = 'Edited'
-      fullPath = (args.targetFile as string) ?? ''
-      isFile = true
-      if (args.startLine !== undefined && args.endLine !== undefined) {
-        deletions = (args.endLine as number) - (args.startLine as number) + 1
-      }
-      if (args.replacementContent)
-        additions = (args.replacementContent as string).split('\n').length
-      break
-    case 'multiReplaceFileContent':
-      operation = 'Edited chunks in'
-      fullPath = (args.targetFile as string) ?? ''
-      isFile = true
-      if (args.replacementChunks && Array.isArray(args.replacementChunks)) {
-        additions = args.replacementChunks.reduce(
-          (acc: number, c: any) =>
-            acc + (c.replacementContent ? c.replacementContent.split('\n').length : 0),
-          0
-        )
-        deletions = args.replacementChunks.reduce(
-          (acc: number, c: any) => acc + ((c.endLine || 0) - (c.startLine || 0) + 1),
-          0
-        )
-      }
-      break
-    case 'runCommand':
-      operation = 'Ran command'
-      target = (args.commandLine as string) ?? ''
-      break
-    case 'searchWeb':
-      operation = 'Searched web'
-      target = (args.query as string) ?? ''
-      break
-    case 'listDir':
-      operation = 'Listed'
-      target = (args.directoryPath as string) || 'workspace root'
-      break
+function renderToolIcon(toolName: string, isFile: boolean, target: string) {
+  if (toolName === 'browserScreenshot') {
+    return <Camera size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
+  }
+  if (isFile) {
+    if (target === 'implementation_plan.md') {
+      return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+    }
+    if (target === 'walkthrough.md') {
+      return <BookOpen size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
+    }
+    return <FileIcon fileName={target} size={16} />
+  }
+  switch (toolName) {
     case 'browserNavigate':
-      operation = 'Navigated browser to'
-      target = (args.url as string) ?? ''
-      break
+      return <Globe size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
     case 'browserType':
-      operation = 'Typed in browser'
-      const typeLabel =
-        args.selector && args.text ? `${args.selector} ➔ "${args.text}"` : (args.selector ?? '')
-      target = args.frameSelector ? `[Frame: ${args.frameSelector}] ${typeLabel}` : typeLabel
-      break
+      return <Keyboard size={15} style={{ color: '#34d399', flexShrink: 0 }} />
     case 'browserScroll':
-      operation = 'Scrolled browser'
-      target = `${args.direction} by ${args.amount || 400}px`
-      break
+      return <ChevronsUpDown size={15} style={{ color: '#94a3b8', flexShrink: 0 }} />
     case 'browserMouseClickCoordinate':
-      operation = 'Clicked coordinate'
-      target = `(${args.x}, ${args.y}) using ${args.button || 'left'}`
-      break
-    case 'browserScreenshot':
-      operation = 'Captured screenshot'
-      target = result.filename ?? 'viewport'
-      if (result.filePath) {
-        fullPath = result.filePath.replace('file://', '')
-        isFile = true
-      }
-      break
+      return <MousePointerClick size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
+    case 'runCommand':
+      return <Terminal size={15} style={{ color: '#4ade80', flexShrink: 0 }} />
+    case 'listDir':
+      return <FolderOpen size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+    case 'searchWeb':
+      return <Globe size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
     default:
-      operation = 'Ran'
-      target = toolCall.toolName
+      return <Terminal size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
   }
-
-  if (isFile && toolCall.toolName !== 'browserScreenshot') {
-    target = fullPath.split(/[/\\]/).pop() ?? fullPath
-  }
-
-  return { operation, target, fullPath, isFile, additions, deletions, lineRange }
 }
 
+// ─── ToolCallBlock ────────────────────────────────────────────────────────────
+
 const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile, additions, deletions, lineRange } =
-    getToolDetails(toolCall)
+  const { operation, target, fullPath, isFile, additions, deletions, lineRange } = parseToolFileOp(
+    toolCall.toolName,
+    toolCall.args,
+    toolCall.result
+  )
+
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
-  const conversationId = useAtomValue(conversationIdAtom)
+  const activeThreadId = useAtomValue(activeThreadIdAtom)
 
   const handleClick = async () => {
     if (!isFile || !fullPath) return
     try {
-      const fileData = await window.api.readFile(fullPath, conversationId)
+      const fileData = await window.api.readFile(fullPath, activeThreadId)
       if (fileData) {
         setActiveEditorFile(fileData)
         setArtifactPanelMode('editor')
@@ -197,39 +134,6 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
     return null
   }
 
-  const renderIcon = () => {
-    if (toolCall.toolName === 'browserScreenshot') {
-      return <Camera size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
-    }
-    if (isFile) {
-      if (target === 'implementation_plan.md') {
-        return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
-      }
-      if (target === 'walkthrough.md') {
-        return <BookOpen size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
-      }
-      return <FileIcon fileName={target} size={16} />
-    }
-    switch (toolCall.toolName) {
-      case 'browserNavigate':
-        return <Globe size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
-      case 'browserType':
-        return <Keyboard size={15} style={{ color: '#34d399', flexShrink: 0 }} />
-      case 'browserScroll':
-        return <ChevronsUpDown size={15} style={{ color: '#94a3b8', flexShrink: 0 }} />
-      case 'browserMouseClickCoordinate':
-        return <MousePointerClick size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
-      case 'runCommand':
-        return <Terminal size={15} style={{ color: '#4ade80', flexShrink: 0 }} />
-      case 'listDir':
-        return <FolderOpen size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-      case 'searchWeb':
-        return <Globe size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
-      default:
-        return <Terminal size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-    }
-  }
-
   return (
     <button
       onClick={isFile ? handleClick : undefined}
@@ -241,7 +145,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       </span>
 
       <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>
-        {renderIcon()}
+        {renderToolIcon(toolCall.toolName, isFile, target)}
       </span>
 
       <span

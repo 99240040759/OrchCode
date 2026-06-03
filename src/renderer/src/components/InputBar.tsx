@@ -12,7 +12,7 @@ import {
   activeWorkspaceAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import './InputBar.css'
+
 
 interface InputBarProps {
   onSubmit?: (val: string, mode?: string, attachments?: any[]) => void
@@ -341,8 +341,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             checkSuggestions(target.value, target.selectionStart)
           }}
           onKeyDown={handleKeyDown}
-          disabled={isRunning}
-          style={{ opacity: isRunning ? 0.7 : 1 } as any}
+          // Textarea stays enabled during streaming so user can pre-type next message
+          // handleSend already guards against submitting while isRunning
         />
       </div>
 

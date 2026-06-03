@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
-import { ArrowLeft, ArrowRight, RotateCw, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom } from '../store/agentStore'
 
 const BrowserView: React.FC = () => {
@@ -9,6 +9,7 @@ const BrowserView: React.FC = () => {
   const [displayUrl, setDisplayUrl] = useState('')
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const isLoadedRef = useRef(false)
 
   const closedRef = useRef(false)
@@ -44,20 +45,27 @@ const BrowserView: React.FC = () => {
     setUrlInput(target)
   }, [])
 
+  const openBrowserWithBounds = useCallback(async () => {
+    setLoadError(null)
+    const bounds = getBounds()
+    try {
+      await window.api.openBrowser({ url: urlInput, bounds })
+      setIsLoaded(true)
+      isLoadedRef.current = true
+    } catch (err: any) {
+      console.error('[BrowserView] openBrowser failed:', err)
+      setLoadError(err?.message || 'Failed to open browser. Please try again.')
+    }
+  }, [getBounds, urlInput])
+
   useEffect(() => {
+    // Guard: only open if panel is in browser mode
+    if (panelMode !== 'browser' || !isOpen) return
+
     let active = true
     const rafId = requestAnimationFrame(() => {
       if (!active) return
-      const bounds = getBounds()
-      window.api
-        .openBrowser({ url: urlInput, bounds })
-        .then(() => {
-          if (active) {
-            setIsLoaded(true)
-            isLoadedRef.current = true
-          }
-        })
-        .catch(console.error)
+      openBrowserWithBounds()
     })
 
     const unsubTitle = window.api.onBrowserTitleUpdated((t) => {
@@ -91,7 +99,7 @@ const BrowserView: React.FC = () => {
       setIsLoaded(false)
       isLoadedRef.current = false
     }
-  }, [getBounds])
+  }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
 
   useEffect(() => {
     if (isLoadedRef.current) {
@@ -184,7 +192,38 @@ const BrowserView: React.FC = () => {
         ref={containerRef}
         style={{ flex: 1, backgroundColor: 'transparent', position: 'relative' }}
       >
-        {!isLoaded && (
+        {loadError ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              gap: 12,
+              color: 'var(--text-secondary)'
+            }}
+          >
+            <AlertCircle size={20} style={{ color: 'var(--accent-red)' }} />
+            <span style={{ fontSize: 'var(--font-size-sm)', textAlign: 'center', maxWidth: 280 }}>
+              {loadError}
+            </span>
+            <button
+              className="browser-nav-btn"
+              onClick={openBrowserWithBounds}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                fontSize: 'var(--font-size-sm)'
+              }}
+            >
+              <RefreshCw size={13} />
+              Retry
+            </button>
+          </div>
+        ) : !isLoaded ? (
           <div
             style={{
               display: 'flex',
@@ -197,7 +236,7 @@ const BrowserView: React.FC = () => {
           >
             Loading browser...
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )

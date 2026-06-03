@@ -27,8 +27,20 @@ const ThreadList: React.FC = () => {
 
   const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace } = useThreads()
 
-  const [workspacePaths, setWorkspacePaths] = useState<string[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
+
+  // Derive unique workspace paths directly from thread list — no API call needed
+  const allWorkspacePaths = useMemo(() => {
+    const fromThreads = threads
+      .map((t) => t.workspacePath)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+
+    const pathSet = new Set(fromThreads)
+    // Always include active workspace even if it has no threads yet
+    if (activeWorkspace?.path) pathSet.add(activeWorkspace.path)
+
+    return Array.from(pathSet)
+  }, [threads, activeWorkspace?.path])
 
   React.useEffect(() => {
     if (activeWorkspace?.path) {
@@ -38,25 +50,6 @@ const ThreadList: React.FC = () => {
       }))
     }
   }, [activeWorkspace?.path])
-
-  const loadWorkspacesList = useCallback(async () => {
-    try {
-      const paths = await window.api.getUniqueWorkspaces()
-      setWorkspacePaths(paths ?? [])
-    } catch (err) {
-      console.error('[ThreadList] Failed to load workspaces list:', err)
-    }
-  }, [])
-
-  React.useEffect(() => {
-    loadWorkspacesList()
-  }, [activeWorkspace?.path, loadWorkspacesList])
-
-  const allWorkspacePaths = useMemo(() => {
-    return Array.from(
-      new Set([...(activeWorkspace?.path ? [activeWorkspace.path] : []), ...workspacePaths])
-    )
-  }, [activeWorkspace?.path, workspacePaths])
 
   const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => ({ ...prev, [path]: !prev[path] }))
@@ -93,13 +86,10 @@ const ThreadList: React.FC = () => {
       })
 
       if (confirmDelete === 1) {
-        const success = await closeAndDeleteWorkspace(path)
-        if (success) {
-          await loadWorkspacesList()
-        }
+        await closeAndDeleteWorkspace(path)
       }
     },
-    [closeAndDeleteWorkspace, loadWorkspacesList]
+    [closeAndDeleteWorkspace]
   )
 
   return (
@@ -107,7 +97,6 @@ const ThreadList: React.FC = () => {
       className="sidebar-section"
       style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}
     >
-      {}
       <div
         className="sidebar-section-header"
         style={{
@@ -153,7 +142,6 @@ const ThreadList: React.FC = () => {
 
             return (
               <div key={path} style={{ display: 'flex', flexDirection: 'column' }}>
-                {}
                 <div className="workspace-node-row" onClick={() => toggleExpand(path)}>
                   <div
                     style={{
@@ -220,7 +208,6 @@ const ThreadList: React.FC = () => {
                   </div>
                 </div>
 
-                {}
                 {isExpanded && (
                   <div
                     style={{

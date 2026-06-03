@@ -1,9 +1,8 @@
+/* Google Fonts — must remain as CSS for the @import url() to work */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Outfit:wght@100..900&display=swap');
 
-@import './global.css';
-@import './layout.css';
-@import './titlebar.css';
-@import './components.css';
-@import './radix.css';
-
-/* Component styles are imported directly in their respective .tsx files */
+/*
+ * NOTE: All other styles previously imported here have been migrated to
+ * vanilla-extract .css.ts files. They are imported via src/assets/styles.ts.
+ * Do NOT add new CSS @imports here — use the VE pipeline instead.
+ */
