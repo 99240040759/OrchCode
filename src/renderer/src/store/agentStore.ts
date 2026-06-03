@@ -64,7 +64,7 @@ export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).leng
 export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string; threadId?: string } | null>(null)
 
 export const availableModelsAtom = atom<Record<string, import('./types').ModelInfo>>({})
-export const selectedModelAtom = atom<string>('')
+export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_model', '')
 
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 

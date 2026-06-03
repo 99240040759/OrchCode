@@ -4,13 +4,14 @@ import { extname, join } from 'node:path'
 import { ipcMain, dialog, app } from 'electron'
 import log from 'electron-log'
 import { execa } from 'execa'
-import mime from 'mime-types'
 import {
   getOrCreateWorkspaceContext,
   updateWorkspacePath,
   getWorkspaceContext,
   assertWithinWorkspace,
-  listWorkspaceFiles
+  listWorkspaceFiles,
+  isFileBinary,
+  getMimeType
 } from './workspace'
 import {
   addOpenedWorkspace,
@@ -18,6 +19,32 @@ import {
   deleteOpenedWorkspace,
   deleteWorkspaceThreads
 } from './db'
+
+const EXT_TO_LANGUAGE: Record<string, string> = {
+  '.ts': 'typescript',
+  '.tsx': 'typescript',
+  '.js': 'javascript',
+  '.jsx': 'javascript',
+  '.json': 'json',
+  '.css': 'css',
+  '.html': 'html',
+  '.md': 'markdown',
+  '.py': 'python',
+  '.rs': 'rust',
+  '.go': 'go',
+  '.sh': 'shell',
+  '.yaml': 'yaml',
+  '.yml': 'yaml',
+  '.toml': 'toml',
+  '.swift': 'swift',
+  '.kt': 'kotlin',
+  '.java': 'java',
+  '.c': 'c',
+  '.cpp': 'cpp',
+  '.cs': 'csharp',
+  '.rb': 'ruby',
+  '.php': 'php'
+}
 
 export function registerWorkspaceIpc() {
   ipcMain.handle('workspace:select', async (_event, conversationId: string) => {
@@ -89,39 +116,23 @@ export function registerWorkspaceIpc() {
   })
 
   ipcMain.handle('file:read', async (_event, filePath: string, conversationId?: string) => {
+    if (!conversationId) throw new Error('conversationId is required for file:read')
     try {
       const ctx =
-        getWorkspaceContext(conversationId!) || (await getOrCreateWorkspaceContext(conversationId!))
+        getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
       const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
 
       const rawBuffer = await fs.readFile(safePath)
-      const isBinary = rawBuffer.subarray(0, 512).includes(0x00)
       const filename = safePath.split(/[/\\]/).pop() ?? ''
       const ext = extname(safePath).toLowerCase()
+      const binary = isFileBinary(safePath, rawBuffer)
 
-      const languages: Record<string, string> = {
-        '.ts': 'typescript',
-        '.tsx': 'typescript',
-        '.js': 'javascript',
-        '.jsx': 'javascript',
-        '.json': 'json',
-        '.css': 'css',
-        '.html': 'html',
-        '.md': 'markdown',
-        '.py': 'python',
-        '.rs': 'rust',
-        '.go': 'go',
-        '.sh': 'shell',
-        '.yaml': 'yaml',
-        '.yml': 'yaml'
-      }
-
-      if (isBinary) {
+      if (binary) {
         return {
           name: filename,
           path: safePath,
           isBinary: true,
-          mimeType: mime.lookup(safePath) || 'application/octet-stream',
+          mimeType: getMimeType(safePath),
           base64: rawBuffer.toString('base64')
         }
       }
@@ -130,7 +141,7 @@ export function registerWorkspaceIpc() {
         path: safePath,
         isBinary: false,
         content: rawBuffer.toString('utf-8'),
-        language: languages[ext] || 'plaintext'
+        language: EXT_TO_LANGUAGE[ext] || 'plaintext'
       }
     } catch (err: any) {
       log.error('[main] file:read error:', err)
@@ -138,42 +149,44 @@ export function registerWorkspaceIpc() {
     }
   })
 
-  ipcMain.handle('file:read-original', async (_event, filePath: string, conversationId?: string) => {
-    try {
-      const ctx =
-        getWorkspaceContext(conversationId!) || (await getOrCreateWorkspaceContext(conversationId!))
-      const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
-      const workspaceRoot = ctx.rootPath
-
-      let relativePath = safePath
-      if (relativePath.startsWith(workspaceRoot)) {
-        relativePath = relativePath.slice(workspaceRoot.length)
-      }
-      if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
-        relativePath = relativePath.slice(1)
-      }
-
-      const gitRelativePath = relativePath.replace(/\\/g, '/')
-
+  ipcMain.handle(
+    'file:read-original',
+    async (_event, filePath: string, conversationId?: string) => {
+      if (!conversationId) return { content: '' }
       try {
-        const { stdout } = await execa('git', ['show', `HEAD:${gitRelativePath}`], {
-          cwd: workspaceRoot,
-          timeout: 5000,
-          reject: true
-        })
-        return { content: stdout }
-      } catch {
-        try {
-          const rawContent = await fs.readFile(safePath, 'utf-8')
-          return { content: rawContent }
-        } catch (err2) {
-          return { content: '' }
+        const ctx =
+          getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
+        const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
+        const workspaceRoot = ctx.rootPath
+
+        let relativePath = safePath.startsWith(workspaceRoot)
+          ? safePath.slice(workspaceRoot.length)
+          : safePath
+        if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
+          relativePath = relativePath.slice(1)
         }
+        const gitRelativePath = relativePath.replace(/\\/g, '/')
+
+        try {
+          const { stdout } = await execa('git', ['show', `HEAD:${gitRelativePath}`], {
+            cwd: workspaceRoot,
+            timeout: 5000,
+            reject: true
+          })
+          return { content: stdout }
+        } catch {
+          try {
+            const rawContent = await fs.readFile(safePath, 'utf-8')
+            return { content: rawContent }
+          } catch {
+            return { content: '' }
+          }
+        }
+      } catch (err: any) {
+        log.error('[main] file:read-original error:', err)
+        if (err.message?.includes('Path traversal')) throw err
+        return { content: '' }
       }
-    } catch (err: any) {
-      log.error('[main] file:read-original error:', err)
-      if (err.message && err.message.includes('Path traversal')) throw err
-      return { content: '' }
     }
-  })
+  )
 }

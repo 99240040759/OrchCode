@@ -7,16 +7,11 @@ import { execa } from 'execa'
 import log from 'electron-log'
 import { rgPath } from '@vscode/ripgrep'
 import { tavilyLimiter } from './limiters'
-import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
+import { getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType } from './workspace'
 import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
 import { wrap } from 'comlink'
-import mime from 'mime-types'
-
-// Natively register TypeScript extension mapping in the mime-types registry to override default MPEG-TS video mapping
-mime.types['ts'] = 'application/typescript'
-mime.types['tsx'] = 'application/typescript'
 
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
@@ -36,37 +31,6 @@ const BLOCKED_COMMAND_PATTERNS = [
 
 function isCommandBlocked(command: string): boolean {
   return BLOCKED_COMMAND_PATTERNS.some((pattern) => pattern.test(command))
-}
-
-const getMimeType = (filePath: string) => {
-  return mime.lookup(filePath) || 'application/octet-stream'
-}
-
-const BINARY_MIME_PREFIXES = [
-  'image/',
-  'video/',
-  'audio/',
-  'application/octet-stream',
-  'application/zip',
-  'application/x-tar',
-  'application/pdf'
-]
-const TEXT_MIME_PREFIXES = [
-  'text/',
-  'application/json',
-  'application/xml',
-  'application/javascript',
-  'application/typescript'
-]
-
-function isFileBinary(filePath: string, buf: Buffer): boolean {
-  const detectedMime = getMimeType(filePath)
-
-  if (TEXT_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return false
-
-  if (BINARY_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return true
-
-  return buf.subarray(0, 512).includes(0x00)
 }
 
 function sliceLines(allLines: string[], startLine: number, endLine: number) {

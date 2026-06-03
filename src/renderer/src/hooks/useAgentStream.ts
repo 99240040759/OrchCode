@@ -83,13 +83,15 @@ export function useAgentStream() {
       cleanupActiveStream()
 
       // Use explicit forceThreadId if provided (from newConversation or selectThread),
-      // otherwise fall back to the current atom value. This avoids async atom-read races.
-      const resolvedThreadId = forceThreadId ?? activeThreadId
+      // otherwise fall back to the current atom value.
+      // If neither exists, generate a UUID now so the IPC call always has a valid thread ID.
       const isNewThread = !activeThreadId && !forceThreadId
+      const resolvedThreadId =
+        forceThreadId ?? activeThreadId ?? `session-${crypto.randomUUID()}`
 
       activeStreamThreadIdRef.current = resolvedThreadId
 
-      if (resolvedThreadId && resolvedThreadId !== activeThreadId) {
+      if (resolvedThreadId !== activeThreadId) {
         setActiveThreadId(resolvedThreadId)
       }
 

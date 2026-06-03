@@ -1,8 +1,13 @@
 import { app } from 'electron'
-import { join, extname, relative, resolve, normalize, sep } from 'node:path'
+import { join, extname, relative, resolve, normalize, sep, isAbsolute } from 'node:path'
 import { promises as fs, existsSync, readFileSync } from 'node:fs'
 import Bottleneck from 'bottleneck'
-import ignore, { Ignore } from 'ignore'
+import ignore, { type Ignore } from 'ignore'
+import mime from 'mime-types'
+
+// Correct TypeScript/TSX mime types — override default MPEG-TS video mapping
+mime.types['ts'] = 'application/typescript'
+mime.types['tsx'] = 'application/typescript'
 
 const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
@@ -30,7 +35,7 @@ export async function getOrCreateWorkspaceContext(
   if (workspaceRegistry.has(conversationId)) {
     return workspaceRegistry.get(conversationId)!
   }
-  
+
   if (initPromises.has(conversationId)) {
     return initPromises.get(conversationId)!
   }
@@ -85,32 +90,72 @@ export async function updateWorkspacePath(
   return ctx
 }
 
+/**
+ * Validates that targetPath is inside rootPath.
+ * Handles both absolute paths and relative paths correctly on Windows and macOS.
+ */
 export function assertWithinWorkspace(
   rootPath: string,
   targetPath: string,
   _conversationId?: string
 ): string {
-  const cleanTarget = targetPath.replace(/^[/\\]+/, '')
+  // Resolve root to an absolute normalised path with trailing sep
   const normalizedRoot = normalize(resolve(rootPath)) + sep
-  const resolvedTarget = resolve(rootPath, cleanTarget)
-  const normalizedTarget = normalize(resolvedTarget)
+
+  // If targetPath is already absolute, resolve it directly.
+  // If it's relative (or has leading slash stripped), join with root first.
+  const resolvedTarget = normalize(
+    isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath)
+  )
 
   const isWindows = process.platform === 'win32'
   const rootCompare = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot
-  const targetCompare = isWindows ? normalizedTarget.toLowerCase() : normalizedTarget
-  const singleRootCompare = isWindows ? normalize(resolve(rootPath)).toLowerCase() : normalize(resolve(rootPath))
+  const targetCompare = isWindows ? resolvedTarget.toLowerCase() : resolvedTarget
 
-  if (
-    targetCompare !== singleRootCompare &&
-    !targetCompare.startsWith(rootCompare)
-  ) {
+  // Allow exact match (target === root) or target is inside root
+  const rootWithoutSep = rootCompare.slice(0, -1)
+  if (targetCompare !== rootWithoutSep && !targetCompare.startsWith(rootCompare)) {
     throw new Error(
       `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
     )
   }
 
-  return normalizedTarget
+  return resolvedTarget
 }
+
+// ─── Binary File Detection (shared single source of truth) ───────────────────
+
+const BINARY_MIME_PREFIXES = [
+  'image/',
+  'video/',
+  'audio/',
+  'application/octet-stream',
+  'application/zip',
+  'application/x-tar',
+  'application/pdf'
+]
+
+const TEXT_MIME_PREFIXES = [
+  'text/',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript'
+]
+
+export function getMimeType(filePath: string): string {
+  return mime.lookup(filePath) || 'application/octet-stream'
+}
+
+export function isFileBinary(filePath: string, buf: Buffer): boolean {
+  const detectedMime = getMimeType(filePath)
+  if (TEXT_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return false
+  if (BINARY_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return true
+  // Fallback: null-byte scan for unknown mime types
+  return buf.subarray(0, 512).includes(0x00)
+}
+
+// ─── HTML Escaping ────────────────────────────────────────────────────────────
 
 export function escapeHtml(str: string): string {
   return str
@@ -121,29 +166,14 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;')
 }
 
-// ─── Workspace file tree ─────────────────────────────────────────────────
+// ─── Workspace File Tree ──────────────────────────────────────────────────────
 
 const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
 const BINARY_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.ico',
-  '.mp4',
-  '.zip',
-  '.gz',
-  '.tar',
-  '.exe',
-  '.dll',
-  '.sqlite',
-  '.db',
-  '.bin',
-  '.wasm'
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico',
+  '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll',
+  '.sqlite', '.db', '.bin', '.wasm'
 ])
-
-
 
 interface TraverseOptions {
   onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
@@ -167,7 +197,7 @@ async function traverseDir(
   ig: Ignore,
   rootPath: string
 ): Promise<void> {
-  let entries: any[] = []
+  let entries: import('node:fs').Dirent[] = []
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
   } catch {
@@ -179,9 +209,7 @@ async function traverseDir(
     const name = entry.name
     const fullPath = join(dir, name)
     let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-    if (entry.isDirectory()) {
-      relPath += '/'
-    }
+    if (entry.isDirectory()) relPath += '/'
 
     if (ig.ignores(relPath)) continue
 
@@ -202,8 +230,6 @@ async function traverseDir(
   }
   await Promise.all(promises)
 }
-
-
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = []

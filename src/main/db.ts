@@ -28,7 +28,6 @@ function getDB(): Database.Database {
   log.info(`[db] Initializing better-sqlite3 database at: ${dbPath}`)
 
   dbInstance = new Database(dbPath)
-
   dbInstance.pragma('journal_mode = WAL')
   dbInstance.pragma('foreign_keys = ON')
 
@@ -39,8 +38,7 @@ function getDB(): Database.Database {
       resourceId TEXT NOT NULL,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
-      accumulatedTokens INTEGER NOT NULL DEFAULT 0,
-      compactionSummary TEXT
+      accumulatedTokens INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -49,7 +47,6 @@ function getDB(): Database.Database {
       content TEXT NOT NULL,
       data TEXT,
       createdAt TEXT NOT NULL,
-      isCompactionAnchor INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_messages_thread_created
@@ -65,28 +62,17 @@ function getDB(): Database.Database {
     );
   `)
 
-  const checkColumn = (table: string, column: string) => {
-    const cols = dbInstance!.pragma(`table_info(${table})`) as { name: string }[]
-    return cols.some((c) => c.name === column)
-  }
+  // Run any needed migrations for existing installs
+  const cols = (table: string) =>
+    (dbInstance!.pragma(`table_info(${table})`) as { name: string }[]).map((c) => c.name)
 
-  if (!checkColumn('threads', 'accumulatedTokens')) {
-    dbInstance!.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
+  const threadCols = cols('threads')
+  if (!threadCols.includes('accumulatedTokens')) {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
   }
-  if (!checkColumn('threads', 'compactionSummary')) {
-    dbInstance!.exec(`ALTER TABLE threads ADD COLUMN compactionSummary TEXT`)
-  }
-  if (!checkColumn('messages', 'isCompactionAnchor')) {
-    dbInstance!.exec(
-      `ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`
-    )
-  }
-
-  // Create messages compaction index AFTER migrations run to ensure isCompactionAnchor exists.
-  dbInstance.exec(`
-    CREATE INDEX IF NOT EXISTS idx_messages_compaction
-      ON messages(threadId, isCompactionAnchor);
-  `)
+  // Drop dead columns on existing installs if present — SQLite can't DROP COLUMN before 3.35
+  // so we leave them in place but never write/read them (they're nullable with no DEFAULT)
+  // New installs won't have them at all.
 
   return dbInstance
 }
@@ -101,33 +87,31 @@ export function checkpointDB() {
   }
 }
 
-export function getThreads(): (ThreadEntry & { workspacePath?: string | null })[] {
+export function getThreads(): (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })[] {
   const db = getDB()
   return db
     .prepare(
-      `
-    SELECT t.*, tw.workspacePath FROM threads t
-    LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
-    ORDER BY t.updatedAt DESC
-  `
+      `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath
+       FROM threads t
+       LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
+       ORDER BY t.updatedAt DESC`
     )
-    .all() as (ThreadEntry & { workspacePath?: string | null })[]
+    .all() as (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })[]
 }
 
-export function getThread(threadId: string): (ThreadEntry & { workspacePath?: string | null }) | null {
+export function getThread(
+  threadId: string
+): (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number }) | null {
   const db = getDB()
   return db
     .prepare(
-      `
-    SELECT t.*, tw.workspacePath FROM threads t
-    LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
-    WHERE t.id = ?
-  `
+      `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath
+       FROM threads t
+       LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
+       WHERE t.id = ?`
     )
-    .get(threadId) as (ThreadEntry & { workspacePath?: string | null }) | null
+    .get(threadId) as (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number }) | null
 }
-
-
 
 export function getThreadMessages(threadId: string): ThreadMessage[] {
   const db = getDB()
@@ -140,7 +124,7 @@ export function getThreadMessages(threadId: string): ThreadMessage[] {
 
 export function saveMessage(
   threadId: string,
-  message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string; isCompactionAnchor?: boolean }
+  message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }
 ): ThreadMessage {
   const db = getDB()
   const now = new Date().toISOString()
@@ -150,31 +134,23 @@ export function saveMessage(
     role: message.role,
     content: message.content,
     data: message.data || null,
-    createdAt: message.createdAt || now,
-    isCompactionAnchor: message.isCompactionAnchor ? 1 : 0
+    createdAt: message.createdAt || now
   }
 
   db.transaction(() => {
     const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
     if (!threadExists) {
       db.prepare(
-        `
-        INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
-        VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
-      `
+        `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
+         VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`
       ).run(threadId, now, now)
     } else {
       db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
     }
     db.prepare(
-      `
-      INSERT INTO messages (id, threadId, role, content, data, createdAt, isCompactionAnchor)
-      VALUES (@id, @threadId, @role, @content, @data, @createdAt, @isCompactionAnchor)
-      ON CONFLICT(id) DO UPDATE SET
-        content = excluded.content,
-        data = excluded.data,
-        isCompactionAnchor = excluded.isCompactionAnchor
-    `
+      `INSERT INTO messages (id, threadId, role, content, data, createdAt)
+       VALUES (@id, @threadId, @role, @content, @data, @createdAt)
+       ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data`
     ).run(msg)
   })()
 
@@ -201,11 +177,8 @@ export function updateThreadTitle(threadId: string, title: string): boolean {
   )
 }
 
-
-
 export function updateThreadAccumulatedTokens(threadId: string, tokens: number): void {
   const db = getDB()
-  // Add to existing total so context usage accumulates across all turns in the thread
   db.prepare(
     'UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?'
   ).run(tokens, threadId)
@@ -217,17 +190,12 @@ export function setThreadWorkspace(threadId: string, workspacePath: string): voi
   const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
   if (!threadExists) {
     db.prepare(
-      `
-      INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
-      VALUES (?, 'New Chat', 'local-user', ?, ?, 0)
-    `
+      `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
+       VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`
     ).run(threadId, now, now)
   }
   db.prepare(
-    `
-    INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath)
-    VALUES (?, ?)
-  `
+    `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`
   ).run(threadId, workspacePath)
 }
 
@@ -265,4 +233,3 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   })()
   return threadIds
 }
-

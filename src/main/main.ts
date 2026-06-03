@@ -25,10 +25,12 @@ log.transports.console.level = 'debug'
 log.info('[main] Orch-Code starting...')
 
 if (app.isPackaged) {
-  log.warn('[main] WARNING: remote-debugging-port 9222 is open in production.')
+  log.warn('[main] Running in production mode.')
+} else {
+  // Only open DevTools debugging port in development
+  app.commandLine.appendSwitch('remote-debugging-port', '9222')
+  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 }
-app.commandLine.appendSwitch('remote-debugging-port', '9222')
-app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
 let mainWindow: BrowserWindow | null = null
 let onboardingWindow: BrowserWindow | null = null

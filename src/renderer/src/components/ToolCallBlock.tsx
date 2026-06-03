@@ -200,6 +200,8 @@ export default React.memo(ToolCallBlock, (prev, next) => {
   return (
     prev.toolCall.id === next.toolCall.id &&
     prev.toolCall.status === next.toolCall.status &&
-    prev.toolCall.result === next.toolCall.result
+    prev.toolCall.result === next.toolCall.result &&
+    // Must re-render when args arrive during streaming (streaming-start → tool-call)
+    prev.toolCall.args === next.toolCall.args
   )
 })

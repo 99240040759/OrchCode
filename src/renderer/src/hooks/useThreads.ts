@@ -116,12 +116,11 @@ export function useThreads() {
         console.error('[useThreads] Failed to load thread messages:', err)
       }
 
-      // Update the active thread ID only after everything is loaded
+      // Update the active thread ID and clear loading in the same commit
       if (activeRef.current === threadId) {
         setActiveThreadId(threadId)
+        setIsThreadLoading(false)
       }
-
-      setIsThreadLoading(false)
     },
     [
       setActiveThreadId,

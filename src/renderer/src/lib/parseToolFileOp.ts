@@ -57,6 +57,21 @@ export function parseToolFileOp(
   let deletions = 0
   let lineRange = ''
 
+  // Streaming-start phase — args haven't arrived yet (args is still {})
+  // Return a meaningful label so the UI can show the tool name while waiting
+  const hasArgs = a && Object.keys(a).length > 0
+  if (!hasArgs) {
+    return {
+      operation: getDefaultOperation(toolName),
+      target: getDefaultTarget(toolName),
+      fullPath: '',
+      isFile: false,
+      additions: 0,
+      deletions: 0,
+      lineRange: ''
+    }
+  }
+
   switch (toolName) {
     case 'viewFile':
       operation = 'Analyzed'
@@ -174,6 +189,45 @@ export function parseToolFileOp(
   return { operation, target, fullPath, isFile, additions, deletions, lineRange }
 }
 
+/** Human-readable operation label for a tool name (before args arrive) */
+function getDefaultOperation(toolName: string): string {
+  const MAP: Record<string, string> = {
+    viewFile: 'Reading',
+    writeToFile: 'Writing',
+    replaceFileContent: 'Editing',
+    multiReplaceFileContent: 'Editing',
+    runCommand: 'Running command',
+    searchWeb: 'Searching web',
+    searchWorkspace: 'Searching workspace',
+    listDir: 'Listing directory',
+    browserNavigate: 'Navigating to',
+    browserType: 'Typing in browser',
+    browserScroll: 'Scrolling browser',
+    browserMouseClickCoordinate: 'Clicking',
+    browserScreenshot: 'Taking screenshot'
+  }
+  return MAP[toolName] ?? 'Running'
+}
+
+/** Human-readable target label for a tool name (before args arrive) */
+function getDefaultTarget(toolName: string): string {
+  const MAP: Record<string, string> = {
+    viewFile: 'file…',
+    writeToFile: 'file…',
+    replaceFileContent: 'file…',
+    multiReplaceFileContent: 'file…',
+    runCommand: 'command…',
+    searchWeb: 'web…',
+    searchWorkspace: 'workspace…',
+    listDir: 'directory…',
+    browserNavigate: 'page…',
+    browserType: 'element…',
+    browserScroll: 'page…',
+    browserMouseClickCoordinate: 'coordinate…',
+    browserScreenshot: 'viewport'
+  }
+  return MAP[toolName] ?? toolName
+}
 /**
  * Determines whether a tool result represents an error condition.
  * Checks multiple common error shapes to avoid silent failures.
