@@ -121,16 +121,25 @@ export function resolveModel(modelId: string): {
     }
   }
 
-  return {
-    model: google(modelId),
-    providerOptions: {
-      google: {
-        thinkingConfig: {
-          thinkingLevel: 'auto',
-          includeThoughts: true
+  const isThinkingModel = modelId.includes('thinking') || modelId.includes('pro')
+
+  if (isThinkingModel) {
+    return {
+      model: google(modelId),
+      providerOptions: {
+        google: {
+          thinkingConfig: {
+            thinkingLevel: 'auto',
+            includeThoughts: true
+          }
         }
       }
     }
+  }
+
+  return {
+    model: google(modelId),
+    providerOptions: {}
   }
 }
 
@@ -884,7 +893,12 @@ Use writeToFile, replaceFileContent tools to manage these artifact files:
 
 2. [NO WALKTHROUGHS]: Never create or edit walkthrough markdown files.
 
-Follow these boundaries strictly to manage your work professionally and transparently!`
+Follow these boundaries strictly to manage your work professionally and transparently!
+
+── CRITICAL TOOL SELECTION RULE ──
+You must ALWAYS use native function calling tools (e.g. viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for reading, writing, editing, or searching files. 
+Do NOT execute terminal/shell commands (like type, cat, Get-Content, gc, head, etc. via runCommand) for file operations. 
+Using runCommand to read/view files is STRICTLY forbidden and causes severe memory issues. Use runCommand ONLY for running tests, compilers, formatters, and environment setup.`
 
     const models = await getAvailableModels()
     const availableModelsList = Object.values(models)
@@ -901,6 +915,11 @@ Follow these boundaries strictly to manage your work professionally and transpar
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(
       rawModel.id
     )
+
+    log.info(`[vercel-ai-sdk] streamText request model: ${rawModel.id}`)
+    log.info(`[vercel-ai-sdk] providerOptions: ${JSON.stringify(modelProviderOptions)}`)
+    log.info(`[vercel-ai-sdk] systemInstruction length: ${systemInstruction.length}`)
+    log.info(`[vercel-ai-sdk] total messages count: ${messages.length}`)
 
     const result = streamText({
       model: resolvedModel,
@@ -940,6 +959,7 @@ Follow these boundaries strictly to manage your work professionally and transpar
 
     for await (const part of result.fullStream) {
       if (controller.signal.aborted) break
+      log.info(`[vercel-ai-sdk] part: ${JSON.stringify(part)}`)
 
       if (part.type === 'reasoning-start') {
         currentReasoningStartMs = Date.now()
