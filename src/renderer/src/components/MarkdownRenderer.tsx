@@ -9,7 +9,7 @@ import {
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
   artifactPanelModeAtom,
-  conversationIdAtom
+  activeThreadIdAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
@@ -32,7 +32,7 @@ function useMarkdownComponents(isArtifact: boolean) {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
-  const conversationId = useAtomValue(conversationIdAtom)
+  const conversationId = useAtomValue(activeThreadIdAtom)
 
   const stateRef = React.useRef({
     setArtifactPanelOpen,

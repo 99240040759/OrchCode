@@ -68,7 +68,6 @@ export interface AppAPI {
   getThreadMessages: (threadId: string) => Promise<ThreadMessage[]>
   deleteThread: (threadId: string) => Promise<boolean>
   getThreadWorkspace: (threadId: string) => Promise<string | null>
-  getUniqueWorkspaces: () => Promise<string[]>
   setActiveWorkspace: (conversationId: string, workspacePath: string) => Promise<any>
   closeAndDeleteWorkspace: (workspacePath: string) => Promise<boolean>
   generateTitle: (text: string, threadId: string) => Promise<string | null>
@@ -76,7 +75,6 @@ export interface AppAPI {
   listArtifacts: (conversationId: string) => Promise<ArtifactEntry[]>
   readFile: (filePath: string, conversationId?: string) => Promise<any>
   readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
-  writeFile: (filePath: string, content: string, conversationId?: string) => Promise<boolean>
   onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: ArtifactEntry[] }) => void) => () => void
 
   createTerminal: (opts: {

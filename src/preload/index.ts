@@ -35,7 +35,6 @@ const api = {
   deleteThread: (threadId: string) => ipcRenderer.invoke('mastra:delete-thread', threadId),
   getThreadWorkspace: (threadId: string) =>
     ipcRenderer.invoke('mastra:get-thread-workspace', threadId),
-  getUniqueWorkspaces: () => ipcRenderer.invoke('mastra:get-unique-workspaces'),
   generateTitle: (text: string, threadId: string) =>
     ipcRenderer.invoke('mastra:generate-title', { text, threadId }),
 
@@ -44,8 +43,6 @@ const api = {
     ipcRenderer.invoke('file:read', filePath, conversationId),
   readOriginalFile: (filePath: string, conversationId?: string) =>
     ipcRenderer.invoke('file:read-original', filePath, conversationId),
-  writeFile: (filePath: string, content: string, conversationId?: string) =>
-    ipcRenderer.invoke('file:write', filePath, content, conversationId),
   onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: any[] }) => void) => {
     const listener = (_event: any, data: { conversationId: string; artifacts: any[] }) => callback(data)
     ipcRenderer.on('artifacts:changed', listener)

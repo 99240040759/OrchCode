@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { join, extname, relative, resolve, normalize, sep } from 'path'
-import { promises as fs, existsSync, readFileSync } from 'fs'
+import { join, extname, relative, resolve, normalize, sep } from 'node:path'
+import { promises as fs, existsSync, readFileSync } from 'node:fs'
 import Bottleneck from 'bottleneck'
 import ignore, { Ignore } from 'ignore'
 
@@ -16,10 +16,17 @@ export interface WorkspaceContext {
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 
+function validateConversationId(conversationId: string) {
+  if (conversationId && !/^[a-zA-Z0-9-_]+$/.test(conversationId)) {
+    throw new Error(`Invalid conversationId format: ${conversationId}`)
+  }
+}
+
 export async function getOrCreateWorkspaceContext(
   conversationId: string,
   userSelectedPath?: string
 ): Promise<WorkspaceContext> {
+  validateConversationId(conversationId)
   if (workspaceRegistry.has(conversationId)) {
     return workspaceRegistry.get(conversationId)!
   }
@@ -54,6 +61,7 @@ export async function getOrCreateWorkspaceContext(
 }
 
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
+  validateConversationId(conversationId)
   return workspaceRegistry.get(conversationId)
 }
 
@@ -61,6 +69,7 @@ export async function updateWorkspacePath(
   conversationId: string,
   newPath: string
 ): Promise<WorkspaceContext> {
+  validateConversationId(conversationId)
   const artifactsPath = join(newPath, '.orch-artifacts')
 
   await fs.mkdir(newPath, { recursive: true })
@@ -81,13 +90,19 @@ export function assertWithinWorkspace(
   targetPath: string,
   _conversationId?: string
 ): string {
+  const cleanTarget = targetPath.replace(/^[/\\]+/, '')
   const normalizedRoot = normalize(resolve(rootPath)) + sep
-  const resolvedTarget = resolve(rootPath, targetPath)
+  const resolvedTarget = resolve(rootPath, cleanTarget)
   const normalizedTarget = normalize(resolvedTarget)
 
+  const isWindows = process.platform === 'win32'
+  const rootCompare = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot
+  const targetCompare = isWindows ? normalizedTarget.toLowerCase() : normalizedTarget
+  const singleRootCompare = isWindows ? normalize(resolve(rootPath)).toLowerCase() : normalize(resolve(rootPath))
+
   if (
-    normalizedTarget !== normalize(resolve(rootPath)) &&
-    !normalizedTarget.startsWith(normalizedRoot)
+    targetCompare !== singleRootCompare &&
+    !targetCompare.startsWith(rootCompare)
   ) {
     throw new Error(
       `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
@@ -128,9 +143,7 @@ const BINARY_EXTENSIONS = new Set([
   '.wasm'
 ])
 
-export function isBinaryBuffer(buf: Buffer): boolean {
-  return buf.subarray(0, 512).includes(0x00)
-}
+
 
 interface TraverseOptions {
   onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
@@ -163,66 +176,34 @@ async function traverseDir(
 
   const promises: Promise<void>[] = []
   for (const entry of entries) {
-    promises.push(
-      traverseLimiter.schedule(async () => {
-        const name = entry.name
-        const fullPath = join(dir, name)
-        let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-        if (entry.isDirectory()) {
-          relPath += '/'
-        }
+    const name = entry.name
+    const fullPath = join(dir, name)
+    let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
+    if (entry.isDirectory()) {
+      relPath += '/'
+    }
 
-        if (ig.ignores(relPath)) return
+    if (ig.ignores(relPath)) continue
 
-        if (entry.isDirectory()) {
-          await traverseDir(fullPath, options, ig, rootPath)
-        } else if (entry.isFile()) {
-          const ext = extname(name).toLowerCase()
-          if (BINARY_EXTENSIONS.has(ext)) return
+    if (entry.isDirectory()) {
+      promises.push(traverseDir(fullPath, options, ig, rootPath))
+    } else if (entry.isFile()) {
+      const ext = extname(name).toLowerCase()
+      if (BINARY_EXTENSIONS.has(ext)) continue
+      promises.push(
+        traverseLimiter.schedule(async () => {
           try {
             const stat = await fs.stat(fullPath)
             await options.onFile(fullPath, name, stat.size)
           } catch {}
-        }
-      })
-    )
+        })
+      )
+    }
   }
   await Promise.all(promises)
 }
 
-export async function buildWorkspaceIndex(rootPath: string): Promise<string> {
-  const entries: { relativePath: string; sizeBytes: number }[] = []
-  const ig = buildIgnore(rootPath)
 
-  await traverseDir(
-    rootPath,
-    {
-      onFile: async (fullPath, _name, sizeBytes) => {
-        const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-        entries.push({ relativePath: relPath, sizeBytes })
-      }
-    },
-    ig,
-    rootPath
-  )
-
-  entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
-
-  if (entries.length === 0) {
-    return 'Workspace is empty. No files found.'
-  }
-
-  const lines = entries.map((e) => {
-    const sizeStr = e.sizeBytes >= 1024 ? `${(e.sizeBytes / 1024).toFixed(1)}KB` : `${e.sizeBytes}B`
-    return `  ${e.relativePath} (${sizeStr})`
-  })
-
-  return `Workspace file tree (${entries.length} files):\n${lines.join('\n')}\n\nUse viewFile(absolutePath) or listDir(directoryPath) to read specific files.`
-}
-
-export async function serializeWorkspace(rootPath: string): Promise<string> {
-  return buildWorkspaceIndex(rootPath)
-}
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = []

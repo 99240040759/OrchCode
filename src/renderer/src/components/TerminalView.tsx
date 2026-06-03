@@ -4,7 +4,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { conversationIdAtom } from '../store/agentStore'
+import { activeThreadIdAtom } from '../store/agentStore'
 
 function createDebounce(fn: () => void, delay: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -28,7 +28,7 @@ interface TerminalViewProps {
 
 const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
   ({ workspacePath }, ref) => {
-    const conversationId = useAtomValue(conversationIdAtom)
+    const conversationId = useAtomValue(activeThreadIdAtom)
 
     const conversationIdRef = useRef(conversationId)
     conversationIdRef.current = conversationId

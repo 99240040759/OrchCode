@@ -1,7 +1,9 @@
-import { parentPort, workerData } from 'worker_threads'
+import { parentPort, workerData } from 'node:worker_threads'
 import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import { nodeAdapter } from './nodeAdapter'
+
+const { mainWindowUrl } = (workerData || {}) as { mainWindowUrl?: string }
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -27,26 +29,41 @@ const workerAPI = {
       context = browser.contexts()[0]
       const pages = context.pages()
 
-      const mainWindowUrl = workerData?.mainWindowUrl
-      const mainAppKeywords = ['chrome-extension://', 'app.html', 'index.html']
-      if (mainWindowUrl) {
-        const lowerUrl = mainWindowUrl.toLowerCase()
-        mainAppKeywords.push(lowerUrl)
-        if (lowerUrl.includes('localhost')) {
-          mainAppKeywords.push(lowerUrl.replace('localhost', '127.0.0.1'))
-        } else if (lowerUrl.includes('127.0.0.1')) {
-          mainAppKeywords.push(lowerUrl.replace('127.0.0.1', 'localhost'))
-        }
-      }
       const browserPages = pages.filter((p) => {
-        const u = p.url().toLowerCase()
-        if (
-          mainWindowUrl &&
-          (u === mainWindowUrl.toLowerCase() || u.startsWith(mainWindowUrl.toLowerCase()))
-        ) {
+        const u = p.url()
+        const lowerUrl = u.toLowerCase()
+        
+        // Exclude the main app window if we know its exact URL (including local ports / hosts)
+        if (mainWindowUrl) {
+          const mainUrlLower = mainWindowUrl.toLowerCase()
+          if (lowerUrl === mainUrlLower || lowerUrl.startsWith(mainUrlLower)) {
+            return false
+          }
+          // Handle localhost / 127.0.0.1 variations
+          if (mainUrlLower.includes('localhost') && lowerUrl.startsWith(mainUrlLower.replace('localhost', '127.0.0.1'))) {
+            return false
+          }
+          if (mainUrlLower.includes('127.0.0.1') && lowerUrl.startsWith(mainUrlLower.replace('127.0.0.1', 'localhost'))) {
+            return false
+          }
+        }
+
+        // Exclude Chrome extensions and local DevTools / onboarding/etc. inside the Electron sandbox itself
+        if (lowerUrl.startsWith('chrome-extension://') || lowerUrl.startsWith('devtools://')) {
           return false
         }
-        return !mainAppKeywords.some((kw) => u.startsWith(kw) || u.includes(kw))
+
+        // Only exclude local files of the app (loaded from package directory)
+        // If it starts with file:// and points to our built files or index.html/app.html locally, block it.
+        // But do not block public internet URLs that contain index.html or app.html!
+        if (u.startsWith('file://')) {
+          const filename = u.split(/[/\\]/).pop() || ''
+          if (['index.html', 'app.html'].includes(filename.toLowerCase()) || u.includes('/out/renderer/')) {
+            return false
+          }
+        }
+
+        return true
       })
 
       if (browserPages.length > 0) {
@@ -90,8 +107,8 @@ const workerAPI = {
         context = null
       }
     }
-    const res = await this.connect(url)
-    return { ok: res.success, error: (res as any).error }
+    const res: { success: boolean; error?: string } = await this.connect(url)
+    return { ok: res.success, error: res.error }
   },
 
   async navigate(url: string) {

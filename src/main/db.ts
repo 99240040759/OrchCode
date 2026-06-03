@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { join } from 'path'
+import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import log from 'electron-log'
 
@@ -39,7 +39,8 @@ function getDB(): Database.Database {
       resourceId TEXT NOT NULL,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
-      accumulatedTokens INTEGER NOT NULL DEFAULT 0
+      accumulatedTokens INTEGER NOT NULL DEFAULT 0,
+      compactionSummary TEXT
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -53,8 +54,6 @@ function getDB(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_messages_thread_created
       ON messages(threadId, createdAt);
-    CREATE INDEX IF NOT EXISTS idx_messages_compaction
-      ON messages(threadId, isCompactionAnchor);
     CREATE TABLE IF NOT EXISTS thread_workspaces (
       threadId TEXT PRIMARY KEY,
       workspacePath TEXT NOT NULL,
@@ -67,7 +66,7 @@ function getDB(): Database.Database {
   `)
 
   const checkColumn = (table: string, column: string) => {
-    const cols = dbInstance!.pragma(`table_info(${table})`) as any[]
+    const cols = dbInstance!.pragma(`table_info(${table})`) as { name: string }[]
     return cols.some((c) => c.name === column)
   }
 
@@ -82,6 +81,12 @@ function getDB(): Database.Database {
       `ALTER TABLE messages ADD COLUMN isCompactionAnchor INTEGER NOT NULL DEFAULT 0`
     )
   }
+
+  // Create messages compaction index AFTER migrations run to ensure isCompactionAnchor exists.
+  dbInstance.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_compaction
+      ON messages(threadId, isCompactionAnchor);
+  `)
 
   return dbInstance
 }
@@ -196,11 +201,7 @@ export function updateThreadTitle(threadId: string, title: string): boolean {
   )
 }
 
-export function getThreadAccumulatedTokens(threadId: string): number {
-  const db = getDB()
-  const row = db.prepare('SELECT accumulatedTokens FROM threads WHERE id = ?').get(threadId) as any
-  return row?.accumulatedTokens ?? 0
-}
+
 
 export function updateThreadAccumulatedTokens(threadId: string, tokens: number): void {
   const db = getDB()
@@ -234,17 +235,8 @@ export function getThreadWorkspace(threadId: string): string | null {
   const db = getDB()
   const row = db
     .prepare('SELECT workspacePath FROM thread_workspaces WHERE threadId = ?')
-    .get(threadId) as any
+    .get(threadId) as { workspacePath: string } | undefined
   return row?.workspacePath ?? null
-}
-
-export function getUniqueWorkspaces(): string[] {
-  const db = getDB()
-  return (
-    db.prepare('SELECT path FROM opened_workspaces ORDER BY lastOpenedAt DESC').all() as {
-      path: string
-    }[]
-  ).map((r) => r.path)
 }
 
 export function addOpenedWorkspace(path: string): void {

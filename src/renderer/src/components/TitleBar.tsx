@@ -178,7 +178,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
             width: isMac ? '108px' : '40px',
             flexShrink: 0,
             WebkitAppRegion: 'no-drag'
-          } as any
+          } as React.CSSProperties & { WebkitAppRegion?: string }
         }
       >
         {!sidebarExpanded && (
@@ -216,7 +216,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
             gap: '12px',
             flexShrink: 0,
             WebkitAppRegion: 'no-drag'
-          } as any
+          } as React.CSSProperties & { WebkitAppRegion?: string }
         }
       >
         {renderUpdateIndicator()}

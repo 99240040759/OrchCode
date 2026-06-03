@@ -25,8 +25,6 @@ export type {
  * conversationIdAtom is kept as an alias for backward compatibility.
  */
 export const activeThreadIdAtom = atom<string>('')
-// Alias — both refer to the same atom
-export const conversationIdAtom = activeThreadIdAtom
 
 export const threadListAtom = atom<ThreadEntry[]>([])
 

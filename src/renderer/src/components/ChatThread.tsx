@@ -9,7 +9,7 @@ import {
   artifactPanelModeAtom
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
-import type { ChatMessage } from '../store/agentStore'
+import type { ChatMessage } from '../store/types'
 import { ChevronDown, AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
@@ -51,8 +51,8 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
               {attachments.map((att, idx) => {
                 const handleOpenDoc = () => {
                   setActiveEditorFile({
-                    name: att.name,
-                    path: att.name,
+                    name: att.name || 'attachment',
+                    path: att.name || '',
                     isBinary: false,
                     mimeType: att.mimeType || 'text/plain',
                     content: decodeBase64(att.base64)
@@ -62,8 +62,8 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                 }
                 const handleOpenImg = () => {
                   setActiveEditorFile({
-                    name: att.name,
-                    path: att.name,
+                    name: att.name || 'attachment',
+                    path: att.name || '',
                     isBinary: true,
                     mimeType: att.mimeType || 'image/png',
                     base64: att.base64
@@ -77,16 +77,16 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                     key={idx}
                     className="message-attachment-chip"
                     onClick={att.type === 'image' ? handleOpenImg : handleOpenDoc}
-                    title={att.name}
+                    title={att.name || 'attachment'}
                   >
                     {att.type === 'image' ? (
                       <img
                         src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
-                        alt={att.name}
+                        alt={att.name || 'attachment'}
                       />
                     ) : (
                       <SymbolsFileIcon
-                        fileName={att.name.split('/').pop() || att.name}
+                        fileName={att.name ? (att.name.split('/').pop() || att.name) : 'attachment'}
                         autoAssign={true}
                         width={14}
                         height={14}
@@ -94,7 +94,7 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                       />
                     )}
                     <span className="chat-attachment-name">
-                      {att.name.split('/').pop() || att.name}
+                      {att.name ? (att.name.split('/').pop() || att.name) : 'attachment'}
                     </span>
                   </div>
                 )
@@ -190,7 +190,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
           )
         }
         if (block.type === 'tool') {
-          const toolCall = {
+          const toolCall: import('../store/types').ToolCallEntry = {
             id: block.toolCallId,
             toolName: block.toolName,
             args: block.args,
@@ -201,7 +201,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
           const isLastBlock = i === (message.orderedBlocks?.length ?? 0) - 1
           return (
             <div key={`tool-${i}`}>
-              <ToolCallBlock toolCall={toolCall as any} />
+              <ToolCallBlock toolCall={toolCall} />
               {message.isStreaming && isLastBlock && isPendingTool && (
                 <div className="chat-message-generating-container">
                   <span className="shimmer-text chat-message-generating-text">Working</span>

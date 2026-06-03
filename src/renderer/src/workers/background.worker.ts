@@ -26,7 +26,7 @@ const backgroundWorker = {
   },
 
   async sendTelemetryEvent(eventName: string, params: Record<string, string> = {}) {
-    const tid = (import.meta as any).env?.VITE_GA4_MEASUREMENT_ID ?? 'G-JSW00QYW8X'
+    const tid = (import.meta as unknown as { env?: { VITE_GA4_MEASUREMENT_ID?: string } }).env?.VITE_GA4_MEASUREMENT_ID ?? 'G-JSW00QYW8X'
     const queryParams = new URLSearchParams({
       v: '2',
       tid,

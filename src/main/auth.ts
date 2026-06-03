@@ -1,9 +1,8 @@
 import { app, ipcMain, shell, BrowserWindow, safeStorage } from 'electron'
-import http from 'http'
-import crypto from 'crypto'
-import https from 'https'
-import { join } from 'path'
-import { promises as fs } from 'fs'
+import http from 'node:http'
+import crypto from 'node:crypto'
+import { join } from 'node:path'
+import { promises as fs } from 'node:fs'
 import log from 'electron-log'
 import { escapeHtml } from './workspace'
 
@@ -39,67 +38,34 @@ function generatePKCE() {
   return { verifier, challenge }
 }
 
-function postHttpsRequest(
-  urlStr: string,
-  rawBody: string,
-  contentType: string,
-  parseError: (parsed: any, statusCode: number) => string
-): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlStr)
-    const req = https.request(
-      {
-        hostname: url.hostname,
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': contentType,
-          'Content-Length': Buffer.byteLength(rawBody)
-        }
-      },
-      (res) => {
-        let data = ''
-        res.on('data', (chunk) => {
-          data += chunk
-        })
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data)
-            if (res.statusCode && res.statusCode >= 400) {
-              reject(new Error(parseError(parsed, res.statusCode)))
-            } else {
-              resolve(parsed)
-            }
-          } catch {
-            reject(new Error(`Failed to parse response: ${data}`))
-          }
-        })
-      }
-    )
-    req.on('error', (err) => reject(err))
-    req.write(rawBody)
-    req.end()
+async function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
+  const response = await fetch(urlStr, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams(formParams).toString()
   })
+  const parsed = await response.json()
+  if (!response.ok) {
+    throw new Error(parsed.error_description || parsed.error || `HTTP ${response.status}`)
+  }
+  return parsed
 }
 
-function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
-  const rawBody = new URLSearchParams(formParams).toString()
-  return postHttpsRequest(
-    urlStr,
-    rawBody,
-    'application/x-www-form-urlencoded',
-    (parsed, statusCode) => parsed.error_description || parsed.error || `HTTP ${statusCode}`
-  )
-}
-
-function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
-  const rawBody = JSON.stringify(bodyObj)
-  return postHttpsRequest(
-    urlStr,
-    rawBody,
-    'application/json',
-    (parsed, statusCode) => parsed.error?.message || `HTTP ${statusCode}`
-  )
+async function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
+  const response = await fetch(urlStr, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(bodyObj)
+  })
+  const parsed = await response.json()
+  if (!response.ok) {
+    throw new Error(parsed.error?.message || `HTTP ${response.status}`)
+  }
+  return parsed
 }
 
 export function getCurrentSession(): AuthSession | null {
@@ -162,6 +128,20 @@ function broadcastUserStatus(user: UserProfile | null) {
   })
 }
 
+async function closeTempServer(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!tempServer) {
+      resolve()
+      return
+    }
+    const s = tempServer
+    tempServer = null
+    s.close(() => {
+      resolve()
+    })
+  })
+}
+
 export async function initAuth() {
   currentSession = await loadSession()
   if (currentSession) {
@@ -179,12 +159,7 @@ export async function initAuth() {
       pendingLoginReject(new Error('Login cancelled: new login initiated'))
       pendingLoginReject = null
     }
-    if (tempServer) {
-      try {
-        tempServer.close()
-      } catch {}
-      tempServer = null
-    }
+    await closeTempServer()
 
     const { verifier, challenge } = generatePKCE()
     const port = 9005
@@ -220,10 +195,7 @@ export async function initAuth() {
             res.end(
               `<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Sign In Cancelled</h1><p style="color:#9c9c9c; font-size:14px;">Reason: ${escapeHtml(reason)}. You can close this tab and try again.</p></div></body></html>`
             )
-            if (tempServer) {
-              tempServer.close()
-              tempServer = null
-            }
+            closeTempServer()
             pendingLoginReject = null
             reject(new Error(`Auth cancelled: ${reason}`))
             return
@@ -234,10 +206,7 @@ export async function initAuth() {
             '<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #272727; text-align:center; max-width:400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"><h1 style="color:#10b981; font-size:24px; margin-bottom:10px;">Login Successful</h1><p style="color:#9c9c9c; font-size:14px; margin-bottom:20px;">You have successfully signed in. You can close this tab and return to your app.</p></div></body></html>'
           )
 
-          if (tempServer) {
-            tempServer.close()
-            tempServer = null
-          }
+          closeTempServer()
 
           log.info('[auth] Received Google auth code, exchanging for tokens...')
 
@@ -294,10 +263,7 @@ export async function initAuth() {
           resolve(user)
         } catch (err: any) {
           log.error('[auth] Login flow failed:', err)
-          if (tempServer) {
-            tempServer.close()
-            tempServer = null
-          }
+          closeTempServer()
           if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'text/html' })
             res.end(
@@ -313,12 +279,7 @@ export async function initAuth() {
 
       tempServer.on('error', (err: any) => {
         log.error('[auth] Redirect server socket error:', err)
-        if (tempServer) {
-          try {
-            tempServer.close()
-          } catch {}
-          tempServer = null
-        }
+        closeTempServer()
         pendingLoginReject = null
         reject(new Error(`Local authentication server error: ${err.message}`))
       })

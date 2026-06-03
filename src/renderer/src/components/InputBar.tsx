@@ -8,10 +8,11 @@ import {
   sessionTokensAtom,
   selectedModelAtom,
   availableModelsAtom,
-  conversationIdAtom,
+  activeThreadIdAtom,
   activeWorkspaceAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import AutocompleteSuggestions from './AutocompleteSuggestions'
 
 
 interface InputBarProps {
@@ -58,7 +59,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const isRunning = runState !== 'idle' && runState !== 'error'
 
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
-  const conversationId = useAtomValue(conversationIdAtom)
+  const conversationId = useAtomValue(activeThreadIdAtom)
 
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
   const [showFileSuggestions, setShowFileSuggestions] = useState(false)
@@ -245,37 +246,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   return (
     <div className="input-bar-container" style={{ position: 'relative' }}>
-      {showFileSuggestions && filteredFiles.length > 0 && (
-        <div className="input-file-suggestions">
-          {filteredFiles.map((file, idx) => {
-            const isSelected = idx === suggestionIndex
-            const parts = file.split('/')
-            const name = parts[parts.length - 1]
-            const dir = parts.slice(0, -1).join('/')
-
-            return (
-              <div
-                key={file}
-                onClick={() => selectFileSuggestion(file)}
-                onMouseEnter={() => setSuggestionIndex(idx)}
-                className={`input-file-suggestion-item ${isSelected ? 'selected' : ''}`}
-              >
-                <SymbolsFileIcon
-                  fileName={name}
-                  autoAssign={true}
-                  width={14}
-                  height={14}
-                  className="input-file-icon"
-                />
-                <div className="input-file-details">
-                  <span className="input-file-name">{name}</span>
-                  {dir && <span className="input-file-dir">{dir}</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      <AutocompleteSuggestions
+        showFileSuggestions={showFileSuggestions}
+        filteredFiles={filteredFiles}
+        suggestionIndex={suggestionIndex}
+        setSuggestionIndex={setSuggestionIndex}
+        selectFileSuggestion={selectFileSuggestion}
+      />
       <input
         type="file"
         ref={fileInputRef}
@@ -320,6 +297,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               className="input-file-icon"
             />
             <span className="input-file-reference-name">{ref.name}</span>
+            <button
+              onClick={() => setFileReferences((prev) => prev.filter((_, i) => i !== idx))}
+              className="input-attachment-close"
+              style={{ marginLeft: 4 }}
+            >
+              ✕
+            </button>
           </div>
         ))}
 

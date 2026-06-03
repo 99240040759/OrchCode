@@ -83,14 +83,14 @@ const LeftSidebar: React.FC<SidebarProps> = ({
               gap: '14px',
               flexShrink: 0,
               WebkitAppRegion: 'drag'
-            } as any
+            } as React.CSSProperties & { WebkitAppRegion?: string }
           }
         >
           <div
             className="sidebar-collapse-btn"
             onClick={handleToggle}
             title="Collapse Sidebar"
-            style={{ WebkitAppRegion: 'no-drag' } as any}
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties & { WebkitAppRegion?: string }}
           >
             <PanelLeftClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
           </div>
@@ -132,7 +132,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
         {/* User profile / sign-in */}
         <div
           className="sidebar-footer"
-          style={{ padding: '8px 12px', flexShrink: 0, WebkitAppRegion: 'no-drag' } as any}
+          style={{ padding: '8px 12px', flexShrink: 0, WebkitAppRegion: 'no-drag' } as React.CSSProperties & { WebkitAppRegion?: string }}
         >
           {authUser ? (
             <DropdownMenu.Root>

@@ -19,7 +19,7 @@ import {
   artifactPanelModeAtom,
   activeThreadIdAtom
 } from '../store/agentStore'
-import type { ToolCallEntry } from '../store/agentStore'
+import type { ToolCallEntry } from '../store/types'
 import * as styles from './ToolCallBlock.css'
 import { isAgentArtifact } from '../lib/uiUtils'
 import { parseToolFileOp } from '../lib/parseToolFileOp'
@@ -124,7 +124,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
     return null
   }
 
-  const Component = isFile ? 'button' : 'div' as any
+  const Component = (isFile ? 'button' : 'div') as React.ElementType
   return (
     <Component
       onClick={isFile ? handleClick : undefined}

@@ -26,7 +26,7 @@ export default defineConfig({
       rollupOptions: {
         external: ['node-pty', 'playwright-core'],
         input: {
-          index: resolve(__dirname, 'src/main/index.ts'),
+          index: resolve(__dirname, 'src/main/main.ts'),
           browserWorker: resolve(__dirname, 'src/main/browserWorker.ts')
         }
       }

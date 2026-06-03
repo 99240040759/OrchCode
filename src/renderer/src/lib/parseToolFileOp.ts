@@ -19,8 +19,35 @@ export function parseToolFileOp(
   args: Record<string, unknown> | undefined | null,
   result?: unknown
 ): ToolFileOp {
-  const a = (args ?? {}) as any
-  const r = (result ?? {}) as any
+  const a = (args ?? {}) as {
+    absolutePath?: string
+    startLine?: number
+    endLine?: number
+    targetFile?: string
+    codeContent?: string
+    replacementContent?: string
+    replacementChunks?: Array<{ startLine?: number; endLine?: number; replacementContent?: string }>
+    commandLine?: string
+    query?: string
+    directoryPath?: string
+    url?: string
+    selector?: string
+    text?: string
+    frameSelector?: string
+    direction?: string
+    amount?: number
+    x?: number
+    y?: number
+    button?: string
+  }
+  const r = (result ?? {}) as {
+    readStart?: number
+    readEnd?: number
+    totalLines?: number
+    truncated?: boolean
+    filename?: string
+    filePath?: string
+  }
 
   let operation = 'Ran'
   let target = 'tool'
@@ -71,12 +98,12 @@ export function parseToolFileOp(
       isFile = true
       if (a.replacementChunks && Array.isArray(a.replacementChunks)) {
         additions = a.replacementChunks.reduce(
-          (acc: number, c: any) =>
-            acc + (c.replacementContent ? (c.replacementContent as string).split('\n').length : 0),
+          (acc: number, c) =>
+            acc + (c.replacementContent ? c.replacementContent.split('\n').length : 0),
           0
         )
         deletions = a.replacementChunks.reduce(
-          (acc: number, c: any) => acc + ((c.endLine || 0) - (c.startLine || 0) + 1),
+          (acc: number, c) => acc + ((c.endLine || 0) - (c.startLine || 0) + 1),
           0
         )
       }
@@ -165,8 +192,8 @@ export function isToolResultError(result: unknown): boolean {
     )
   }
 
-  if (typeof result === 'object') {
-    const r = result as any
+  if (typeof result === 'object' && result !== null) {
+    const r = result as { error?: unknown; success?: boolean; type?: string; message?: string }
     if ('error' in r && r.error) return true
     if (r.success === false) return true
     if (r.type === 'error-text' || r.type === 'error-json') return true

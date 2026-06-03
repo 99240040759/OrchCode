@@ -1,15 +1,16 @@
 import 'dotenv/config'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { promises as fs } from 'fs'
-import { join, relative, extname, dirname } from 'path'
+import { promises as fs } from 'node:fs'
+import { join, relative, extname, dirname } from 'node:path'
 import { execa } from 'execa'
 import log from 'electron-log'
+import { rgPath } from '@vscode/ripgrep'
 import { tavilyLimiter } from './limiters'
 import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
 import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
-import { Worker } from 'worker_threads'
+import { Worker } from 'node:worker_threads'
 import { wrap } from 'comlink'
 import mime from 'mime-types'
 
@@ -427,14 +428,15 @@ export function createCoreTools(convId: string) {
         const ctx = wctx()
         const runDir = ctx.rootPath
 
-        const args = ['-n', '-I', '--smart-case', query, runDir]
+        const args = ['-n', '-I', '--smart-case']
         if (includes && includes.length > 0) {
           for (const glob of includes) {
             args.push('-g', glob)
           }
         }
+        args.push('--', query, runDir)
 
-        const result = await execa('rg', args, {
+        const result = await execa(rgPath, args, {
           shell: false,
           cwd: runDir,
           reject: false,
@@ -444,7 +446,7 @@ export function createCoreTools(convId: string) {
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
           // Exit code 1 = no matches (not an error), exit code 2+ = actual error
           if (result.exitCode === 1) return { success: true, results: 'No matches found.' }
-          if ((result as any).code === 'ENOENT' || result.stderr?.includes('not found') || result.stderr?.includes('No such file')) {
+          if ((result as { code?: string }).code === 'ENOENT' || result.stderr?.includes('not found') || result.stderr?.includes('No such file')) {
             return { success: false, error: 'ripgrep (rg) not found. Install it via: winget install BurntSushi.ripgrep.MSVC or scoop install ripgrep' }
           }
           return { success: true, results: 'No matches found.' }
@@ -543,7 +545,7 @@ let workerInstance: Worker | null = null
 let automatedBrowser: any = null
 
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
-  const bv = (globalThis as any).browserView
+  const bv = (globalThis as unknown as { browserView?: Electron.WebContentsView }).browserView
   if (!bv) {
     return {
       success: false,
@@ -556,7 +558,7 @@ function checkBrowserViewActive(): { success: boolean; error?: string } | null {
 
 export function startBrowserAgentWorker() {
   if (workerInstance) return automatedBrowser
-  const mainWindow = (globalThis as any).mainWindow
+  const mainWindow = (globalThis as unknown as { mainWindow?: Electron.BrowserWindow }).mainWindow
   const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const workerPath = join(__dirname, 'browserWorker.js')
   log.info(`[tools] Spawning Playwright background worker at: ${workerPath}`)
