@@ -36,14 +36,30 @@ export function createHandler(fn: HandlerFn) {
       return errorResponse('Unauthorized', 401)
     }
 
-    // Build env map for handler
     const env: EnvMap = {}
     const envKeys = [
       'SUPABASE_ANON_KEY',
       'SUPABASE_URL',
       'GOOGLE_GENERATIVE_AI_API_KEY',
       'TAVILY_API_KEY',
-      'NVIDIA_API_KEY'
+      'NVIDIA_API_KEY',
+      'OPENCODE_API_KEY',
+      'GEMINI_MODEL_ID',
+      'GEMINI_MODEL_NAME',
+      'GEMMA_MODEL_ID',
+      'GEMMA_MODEL_NAME',
+      'KIMI_MODEL_ID',
+      'KIMI_MODEL_NAME',
+      'GLM_MODEL_ID',
+      'GLM_MODEL_NAME',
+      'DEEPSEEK_FLASH_MODEL_ID',
+      'DEEPSEEK_FLASH_MODEL_NAME',
+      'BIG_PICKLE_MODEL_ID',
+      'BIG_PICKLE_MODEL_NAME',
+      'MINIMAX_M25_MODEL_ID',
+      'MINIMAX_M25_MODEL_NAME',
+      'MINIMAX_M25_FREE_MODEL_ID',
+      'MINIMAX_M25_FREE_MODEL_NAME'
     ]
     for (const key of envKeys) {
       const val = Deno.env.get(key)

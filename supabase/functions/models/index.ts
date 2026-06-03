@@ -10,10 +10,16 @@ const DEFAULT_GEMMA_ID = 'gemma-4-31b-it'
 const DEFAULT_GEMMA_NAME = 'Gemma 4 31B (Thinking)'
 const DEFAULT_KIMI_ID = 'nvidia/moonshotai/kimi-k2.6'
 const DEFAULT_KIMI_NAME = 'Kimi K2.6 (Fast Think)'
-const DEFAULT_MINIMAX_ID = 'nvidia/minimaxai/minimax-m2.7'
-const DEFAULT_MINIMAX_NAME = 'Minimax M2.7 (Slowest)'
 const DEFAULT_GLM_ID = 'nvidia/z-ai/glm-5.1'
 const DEFAULT_GLM_NAME = 'GLM 5.1 (Slow)'
+const DEFAULT_DEEPSEEK_FLASH_ID = 'nvidia/deepseek-v4-flash-free'
+const DEFAULT_DEEPSEEK_FLASH_NAME = 'DeepSeek V4 Flash Free'
+const DEFAULT_BIG_PICKLE_ID = 'nvidia/big-pickle'
+const DEFAULT_BIG_PICKLE_NAME = 'Big Pickle'
+const DEFAULT_MIMO_FREE_ID = 'nvidia/mimo-v2.5-free'
+const DEFAULT_MIMO_FREE_NAME = 'MiMo V2.5 Free'
+const DEFAULT_MINIMAX_M25_FREE_ID = 'nvidia/minimax-m2.5-free'
+const DEFAULT_MINIMAX_M25_FREE_NAME = 'MiniMax M2.5 Free'
 
 serve(
   createHandler(async (_req, env) => {
@@ -29,15 +35,36 @@ serve(
       id: env['KIMI_MODEL_ID'] || DEFAULT_KIMI_ID,
       name: env['KIMI_MODEL_NAME'] || DEFAULT_KIMI_NAME
     }
-    const minimax = {
-      id: env['MINIMAX_MODEL_ID'] || DEFAULT_MINIMAX_ID,
-      name: env['MINIMAX_MODEL_NAME'] || DEFAULT_MINIMAX_NAME
-    }
     const glm = {
       id: env['GLM_MODEL_ID'] || DEFAULT_GLM_ID,
       name: env['GLM_MODEL_NAME'] || DEFAULT_GLM_NAME
     }
+    const deepseek_flash = {
+      id: env['DEEPSEEK_FLASH_MODEL_ID'] || DEFAULT_DEEPSEEK_FLASH_ID,
+      name: env['DEEPSEEK_FLASH_MODEL_NAME'] || DEFAULT_DEEPSEEK_FLASH_NAME
+    }
+    const big_pickle = {
+      id: env['BIG_PICKLE_MODEL_ID'] || DEFAULT_BIG_PICKLE_ID,
+      name: env['BIG_PICKLE_MODEL_NAME'] || DEFAULT_BIG_PICKLE_NAME
+    }
+    const mimo_free = {
+      id: env['MIMO_FREE_MODEL_ID'] || DEFAULT_MIMO_FREE_ID,
+      name: env['MIMO_FREE_MODEL_NAME'] || DEFAULT_MIMO_FREE_NAME
+    }
+    const minimax_m25_free = {
+      id: env['MINIMAX_M25_FREE_MODEL_ID'] || DEFAULT_MINIMAX_M25_FREE_ID,
+      name: env['MINIMAX_M25_FREE_MODEL_NAME'] || DEFAULT_MINIMAX_M25_FREE_NAME
+    }
 
-    return jsonResponse({ gemini, gemma, kimi, minimax, glm })
+    return jsonResponse({
+      gemini,
+      gemma,
+      kimi,
+      glm,
+      deepseek_flash,
+      big_pickle,
+      mimo_free,
+      minimax_m25_free
+    })
   })
 )

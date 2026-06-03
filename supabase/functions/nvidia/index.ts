@@ -9,11 +9,6 @@ function isAllowedPath(subpath: string): boolean {
 
 serve(
   createHandler(async (req, env) => {
-    const apiKey = env['NVIDIA_API_KEY']
-    if (!apiKey) {
-      return errorResponse('Server Configuration Error: NVIDIA_API_KEY is missing.', 500)
-    }
-
     const url = new URL(req.url)
     const subpath = url.pathname.replace(/^\/(functions\/v1\/)?nvidia/, '')
 
@@ -21,10 +16,44 @@ serve(
       return errorResponse(`Path not allowed: ${subpath}`, 403)
     }
 
-    const targetUrl = `https://integrate.api.nvidia.com${subpath}${url.search}`
+    let isOpencodeModel = false
+    let targetModelId = ""
+
+    if (req.method === 'POST' && subpath === '/v1/chat/completions') {
+      try {
+        const clonedReq = req.clone()
+        const json = await clonedReq.json()
+        targetModelId = json.model
+        if (
+          targetModelId === 'deepseek-v4-flash-free' ||
+          targetModelId === 'big-pickle' ||
+          targetModelId === 'mimo-v2.5-free' ||
+          targetModelId === 'minimax-m2.5-free'
+        ) {
+          isOpencodeModel = true
+        }
+      } catch (err) {
+        // Ignored, fallback to normal nvidia request
+      }
+    }
+
+    let targetUrl = `https://integrate.api.nvidia.com${subpath}${url.search}`
+    let activeApiKey = env['NVIDIA_API_KEY']
+
+    if (isOpencodeModel) {
+      activeApiKey = env['OPENCODE_API_KEY']
+      if (!activeApiKey) {
+        return errorResponse('Server Configuration Error: OPENCODE_API_KEY is missing.', 500)
+      }
+      targetUrl = `https://opencode.ai/zen/v1/chat/completions`
+    } else {
+      if (!activeApiKey) {
+        return errorResponse('Server Configuration Error: NVIDIA_API_KEY is missing.', 500)
+      }
+    }
 
     const cleanHeaders = new Headers()
-    cleanHeaders.set('Authorization', `Bearer ${apiKey}`)
+    cleanHeaders.set('Authorization', `Bearer ${activeApiKey}`)
     const contentType = req.headers.get('content-type')
     if (contentType) cleanHeaders.set('Content-Type', contentType)
     const accept = req.headers.get('accept')
