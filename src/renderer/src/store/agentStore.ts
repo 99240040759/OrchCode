@@ -1,4 +1,5 @@
 import { atom } from 'jotai'
+import { splitAtom } from 'jotai/utils'
 import type {
   ThreadEntry,
   ArtifactEntry,
@@ -41,6 +42,8 @@ export const isThreadLoadingAtom = atom<boolean>(false)
 export const agentRunStateAtom = atom<import('./types').AgentRunState>('idle')
 
 export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
+
+export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
 

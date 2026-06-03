@@ -86,6 +86,16 @@ function getDB(): Database.Database {
   return dbInstance
 }
 
+export function checkpointDB() {
+  try {
+    const db = getDB()
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    log.info('[db] WAL checkpoint complete.')
+  } catch (err) {
+    log.error('[db] Error checkpointing WAL:', err)
+  }
+}
+
 export function getThreads(): (ThreadEntry & { workspacePath?: string | null })[] {
   const db = getDB()
   return db

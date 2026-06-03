@@ -22,6 +22,7 @@ import {
 import {
   streamText,
   generateText,
+  stepCountIs,
   ModelMessage,
   ToolCallPart,
   ToolResultPart
@@ -43,6 +44,7 @@ import {
   setThreadWorkspace,
   getThreadWorkspace,
   getUniqueWorkspaces,
+  checkpointDB,
   deleteWorkspaceThreads,
   addOpenedWorkspace,
   deleteOpenedWorkspace,
@@ -597,7 +599,12 @@ ipcMain.handle('file:read-original', async (_event, filePath: string, conversati
       })
       return { content: originalContent }
     } catch {
-      return { content: '' }
+      try {
+        const rawContent = await fs.readFile(safePath, 'utf-8')
+        return { content: rawContent }
+      } catch (err2) {
+        return { content: '' }
+      }
     }
   } catch (err) {
     log.error('[main] file:read-original error:', err)
@@ -949,7 +956,7 @@ async function handleAgentStreamRequest(
           for (const call of pairedCalls) parts.push(call)
           finalAssistantContent = parts
         } else {
-          finalAssistantContent = textContent || '[Action Taken]'
+          finalAssistantContent = textContent || ''
         }
 
         messages.push({ role: 'assistant', content: finalAssistantContent })
@@ -1041,7 +1048,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
       system: systemInstruction,
       messages,
       tools: activeTools,
-      // No step limit — agents run until the task is complete
+      stopWhen: stepCountIs(100), // Agent will loop automatically up to 100 times
       abortSignal: controller.signal,
 
       ...(Object.keys(modelProviderOptions).length > 0
@@ -1064,7 +1071,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           await saveMessage(convId, {
             id: assistantMsgId,
             role: 'assistant',
-            content: contentSnapshot || '[Action Taken]',
+            content: contentSnapshot || '',
             data: JSON.stringify(blocksSnapshot)
           })
         } catch (saveErr) {
@@ -1537,4 +1544,5 @@ app.on('window-all-closed', async () => {
 
 app.on('before-quit', () => {
   cleanupAllPtys()
+  checkpointDB()
 })

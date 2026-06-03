@@ -1,7 +1,8 @@
 import React from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom, useAtom } from 'jotai'
+import type { PrimitiveAtom } from 'jotai'
 import {
-  chatMessagesAtom,
+  chatMessageAtomsAtom,
   agentRunStateAtom,
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
@@ -22,8 +23,8 @@ const decodeBase64 = (base64Str: string): string => {
   }
 }
 
-const UserMessage = React.memo(
-  ({ message }: { message: ChatMessage }) => {
+const UserMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
+    const [message] = useAtom(messageAtom)
     let attachments: Array<{
       type: 'image' | 'document'
       name: string
@@ -109,15 +110,7 @@ const UserMessage = React.memo(
         </div>
       </div>
     )
-  },
-  (prev, next) => {
-    return (
-      prev.message.id === next.message.id &&
-      prev.message.content === next.message.content &&
-      prev.message.data === next.message.data
-    )
   }
-)
 UserMessage.displayName = 'UserMessage'
 
 const ReasoningBlock = React.memo(
@@ -183,8 +176,9 @@ const ReasoningBlock = React.memo(
 )
 ReasoningBlock.displayName = 'ReasoningBlock'
 
-const AssistantMessage = React.memo(
-  ({ message }: { message: ChatMessage }) => (
+const AssistantMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
+    const [message] = useAtom(messageAtom)
+    return (
     <div className="chat-message-assistant-container">
       {message.orderedBlocks?.map((block: any, i: number) => {
         if (block.type === 'reasoning') {
@@ -250,41 +244,16 @@ const AssistantMessage = React.memo(
         </div>
       )}
     </div>
-  ),
-  (prev, next) => {
-    if (prev.message.id !== next.message.id) return false
-    if (next.message.isStreaming) return false
-    if (prev.message.isStreaming !== next.message.isStreaming) return false
-    if (prev.message.content !== next.message.content) return false
-    const pb = prev.message.orderedBlocks
-    const nb = next.message.orderedBlocks
-    if (pb?.length !== nb?.length) return false
-    if (pb && nb && pb.length > 0) {
-      for (let i = 0; i < pb.length; i++) {
-        const p = pb[i]
-        const n = nb[i]
-        if (p.type !== n.type) return false
-        if (p.type === 'text' && n.type === 'text' && p.content !== n.content) return false
-        if (p.type === 'reasoning' && n.type === 'reasoning') {
-          if (p.content !== n.content || p.isStreaming !== n.isStreaming) return false
-        }
-        if (p.type === 'tool' && n.type === 'tool') {
-          if (p.status !== n.status || p.result !== n.result) return false
-        }
-        if (p.type === 'error' && n.type === 'error' && p.message !== n.message) return false
-      }
-    }
-    return true
-  }
-)
+  )
+}
 AssistantMessage.displayName = 'AssistantMessage'
 
 const ChatThread: React.FC = () => {
-  const messages = useAtomValue(chatMessagesAtom)
+  const messageAtoms = useAtomValue(chatMessageAtomsAtom)
   const runState = useAtomValue(agentRunStateAtom)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
-  const prevLengthRef = React.useRef(messages.length)
+  const prevLengthRef = React.useRef(messageAtoms.length)
   const prevRunStateRef = React.useRef(runState)
 
   const handleScroll = () => {
@@ -297,9 +266,9 @@ const ChatThread: React.FC = () => {
     if (!containerRef.current) return
     const isStreaming = runState !== 'idle' && runState !== 'error'
     const wasStreaming = prevRunStateRef.current !== 'idle' && prevRunStateRef.current !== 'error'
-    const hasNewMessage = messages.length > prevLengthRef.current
+    const hasNewMessage = messageAtoms.length > prevLengthRef.current
 
-    prevLengthRef.current = messages.length
+    prevLengthRef.current = messageAtoms.length
     prevRunStateRef.current = runState
 
     if (hasNewMessage || (isStreaming && !wasStreaming)) {
@@ -317,24 +286,31 @@ const ChatThread: React.FC = () => {
       return () => cancelAnimationFrame(rafId)
     }
     return undefined
-  }, [messages, runState])
+  }, [messageAtoms, runState])
 
-  if (messages.length === 0) return null
+  if (messageAtoms.length === 0) return null
 
   return (
     <div ref={containerRef} onScroll={handleScroll} className="chat-thread-container">
       <div className="chat-thread-spacer-top" />
-      {messages.map((message) => (
-        <div key={message.id} className="chat-thread-message-wrapper">
-          {message.role === 'user' ? (
-            <UserMessage message={message} />
-          ) : (
-            <AssistantMessage message={message} />
-          )}
-        </div>
+      {messageAtoms.map((messageAtom) => (
+        <MessageWrapper key={`${messageAtom}`} messageAtom={messageAtom} />
       ))}
       <div className="chat-thread-spacer-bottom" />
       <div className="chat-thread-anchor" />
+    </div>
+  )
+}
+
+const MessageWrapper = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
+  const [message] = useAtom(messageAtom)
+  return (
+    <div className="chat-thread-message-wrapper">
+      {message.role === 'user' ? (
+        <UserMessage messageAtom={messageAtom} />
+      ) : (
+        <AssistantMessage messageAtom={messageAtom} />
+      )}
     </div>
   )
 }

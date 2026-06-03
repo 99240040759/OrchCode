@@ -131,7 +131,9 @@ const workerAPI = {
     const ready = await this.ensurePage()
     if (!ready.ok) return { success: false, error: ready.error }
     try {
-      await getTargetLocator(page!, selector, frameSelector).fill(text, { timeout: 15000 })
+      const locator = getTargetLocator(page!, selector, frameSelector)
+      await locator.waitFor({ state: 'visible', timeout: 15000 })
+      await locator.fill(text, { timeout: 15000 })
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
