@@ -27,8 +27,7 @@ serve(
         if (
           targetModelId === 'deepseek-v4-flash-free' ||
           targetModelId === 'big-pickle' ||
-          targetModelId === 'mimo-v2.5-free' ||
-          targetModelId === 'minimax-m2.5-free'
+          targetModelId === 'mimo-v2.5-free'
         ) {
           isOpencodeModel = true
         }
