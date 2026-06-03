@@ -115,17 +115,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   const renderStatus = () => {
     if (toolCall.status === 'pending') {
       return (
-        <div
-          style={{
-            width: 12,
-            height: 12,
-            borderRadius: '50%',
-            border: '1.5px solid var(--text-secondary)',
-            borderTopColor: 'transparent',
-            animation: 'spin 0.8s linear infinite',
-            flexShrink: 0
-          }}
-        />
+        <div className={styles.spinner} />
       )
     }
     if (toolCall.status === 'error') {
@@ -134,8 +124,9 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
     return null
   }
 
+  const Component = isFile ? 'button' : 'div' as any
   return (
-    <button
+    <Component
       onClick={isFile ? handleClick : undefined}
       className={`${styles.toolCallWrapper} ${isFile ? styles.interactive : styles.nonInteractive}`}
       title={isFile ? `Open ${fullPath}` : undefined}
@@ -201,7 +192,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
             {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
           </div>
         )}
-    </button>
+    </Component>
   )
 }
 

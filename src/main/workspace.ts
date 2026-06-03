@@ -14,6 +14,7 @@ export interface WorkspaceContext {
 }
 
 const workspaceRegistry = new Map<string, WorkspaceContext>()
+const initPromises = new Map<string, Promise<WorkspaceContext>>()
 
 export async function getOrCreateWorkspaceContext(
   conversationId: string,
@@ -22,21 +23,34 @@ export async function getOrCreateWorkspaceContext(
   if (workspaceRegistry.has(conversationId)) {
     return workspaceRegistry.get(conversationId)!
   }
-
-  const isUserWorkspace = !!userSelectedPath
-  const rootPath =
-    userSelectedPath ?? join(app.getPath('userData'), 'conversations', conversationId)
-
-  const artifactsPath = join(rootPath, '.orch-artifacts')
-
-  await fs.mkdir(rootPath, { recursive: true })
-  if (isUserWorkspace) {
-    await fs.mkdir(artifactsPath, { recursive: true })
+  
+  if (initPromises.has(conversationId)) {
+    return initPromises.get(conversationId)!
   }
 
-  const ctx: WorkspaceContext = { conversationId, rootPath, artifactsPath, isUserWorkspace }
-  workspaceRegistry.set(conversationId, ctx)
-  return ctx
+  const promise = (async () => {
+    try {
+      const isUserWorkspace = !!userSelectedPath
+      const rootPath =
+        userSelectedPath ?? join(app.getPath('userData'), 'conversations', conversationId)
+
+      const artifactsPath = join(rootPath, '.orch-artifacts')
+
+      await fs.mkdir(rootPath, { recursive: true })
+      if (isUserWorkspace) {
+        await fs.mkdir(artifactsPath, { recursive: true })
+      }
+
+      const ctx: WorkspaceContext = { conversationId, rootPath, artifactsPath, isUserWorkspace }
+      workspaceRegistry.set(conversationId, ctx)
+      return ctx
+    } finally {
+      initPromises.delete(conversationId)
+    }
+  })()
+
+  initPromises.set(conversationId, promise)
+  return promise
 }
 
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {

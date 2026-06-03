@@ -204,7 +204,10 @@ export function getThreadAccumulatedTokens(threadId: string): number {
 
 export function updateThreadAccumulatedTokens(threadId: string, tokens: number): void {
   const db = getDB()
-  db.prepare('UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
+  // Add to existing total so context usage accumulates across all turns in the thread
+  db.prepare(
+    'UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?'
+  ).run(tokens, threadId)
 }
 
 export function setThreadWorkspace(threadId: string, workspacePath: string): void {

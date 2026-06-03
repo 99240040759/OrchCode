@@ -34,3 +34,20 @@ export const interactive = style({
 export const nonInteractive = style({
   cursor: 'default'
 })
+
+export const spinner = style({
+  width: 12,
+  height: 12,
+  borderRadius: '50%',
+  border: '1.5px solid var(--text-secondary)',
+  borderTopColor: 'transparent',
+  animation: 'spin 0.8s linear infinite',
+  flexShrink: 0,
+  '@media': {
+    '(prefers-reduced-motion: reduce)': {
+      animation: 'none',
+      borderTopColor: 'var(--text-secondary)',
+      opacity: 0.5
+    }
+  }
+})

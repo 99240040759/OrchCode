@@ -196,14 +196,15 @@ function AppInner(): React.JSX.Element {
   const { run, stop } = useAgentStream()
   const { openWorkspace, newConversation, loadThreads } = useThreads()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
+  const availableModels = useAtomValue(availableModelsAtom)
 
   // Global prompt trigger (e.g., from new conversation or keyboard shortcut)
   useEffect(() => {
-    if (globalPrompt) {
+    if (globalPrompt && Object.keys(availableModels).length > 0) {
       run(globalPrompt.prompt, globalPrompt.mode, undefined, globalPrompt.threadId)
       setGlobalPrompt(null)
     }
-  }, [globalPrompt, run, setGlobalPrompt])
+  }, [globalPrompt, run, setGlobalPrompt, availableModels])
 
   // One-time init: conversation ID, threads, models, auth user
   useEffect(() => {

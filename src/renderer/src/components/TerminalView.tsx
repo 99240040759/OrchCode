@@ -4,8 +4,19 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { debounce } from 'lodash-es'
 import { conversationIdAtom } from '../store/agentStore'
+
+function createDebounce(fn: () => void, delay: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const debounced = () => {
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => fn(), delay)
+  }
+  debounced.cancel = () => {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+  return debounced
+}
 
 export interface TerminalViewHandle {
   fit: () => void
@@ -137,7 +148,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
           if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
         })
 
-      const debouncedResize = debounce(() => {
+      const debouncedResize = createDebounce(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
           try {
             fitAddon.fit()

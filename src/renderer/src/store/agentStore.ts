@@ -1,5 +1,5 @@
 import { atom } from 'jotai'
-import { splitAtom } from 'jotai/utils'
+import { splitAtom, atomWithStorage } from 'jotai/utils'
 import type {
   ThreadEntry,
   ArtifactEntry,
@@ -51,7 +51,7 @@ export const filesChangedAtom = atom<import('./types').FileChangeEntry[]>([])
 
 export const sessionTokensAtom = atom<number>(0)
 
-export const sidebarExpandedAtom = atom<boolean>(true)
+export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)
 
 export const activeWorkspaceAtom = atom<{ name: string; path: string } | null>(null)
 

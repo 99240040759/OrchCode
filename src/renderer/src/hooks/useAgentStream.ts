@@ -291,6 +291,38 @@ export function useAgentStream() {
                 ;(last as Extract<StreamBlock, { type: 'text' }>).content += textDelta
               }
               flushAssistant()
+            } else if (chunkType === 'tool-call-streaming-start') {
+              setRunState('tool-calling')
+
+              const rb = currentReasoningBlockRef.current
+              if (rb) {
+                rb.isStreaming = false
+                rb.durationMs = Date.now() - currentReasoningStartMs
+                currentReasoningBlockRef.current = null
+              }
+
+              const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
+              const tcName = chunkData?.toolName ?? 'unknown'
+              orderedBlocks.push({
+                type: 'tool',
+                toolCallId: tcId,
+                toolName: tcName,
+                args: {},
+                argsDelta: '',
+                status: 'pending'
+              })
+              flushAssistant()
+            } else if (chunkType === 'tool-call-delta') {
+              const tcId = chunkData?.toolCallId
+              const delta = chunkData?.delta ?? ''
+              const toolBlock = orderedBlocks.find(
+                (b): b is Extract<StreamBlock, { type: 'tool' }> =>
+                  b.type === 'tool' && b.toolCallId === tcId
+              )
+              if (toolBlock) {
+                toolBlock.argsDelta = (toolBlock.argsDelta || '') + delta
+                flushAssistant()
+              }
             } else if (chunkType === 'tool-call') {
               setRunState('tool-calling')
 
@@ -304,13 +336,22 @@ export function useAgentStream() {
               const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
               const tcName = chunkData?.toolName ?? 'unknown'
               const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
-              orderedBlocks.push({
-                type: 'tool',
-                toolCallId: tcId,
-                toolName: tcName,
-                args: tcArgs,
-                status: 'pending'
-              })
+              const toolBlock = orderedBlocks.find(
+                (b): b is Extract<StreamBlock, { type: 'tool' }> =>
+                  b.type === 'tool' && b.toolCallId === tcId
+              )
+              if (toolBlock) {
+                toolBlock.args = tcArgs
+                toolBlock.argsDelta = undefined
+              } else {
+                orderedBlocks.push({
+                  type: 'tool',
+                  toolCallId: tcId,
+                  toolName: tcName,
+                  args: tcArgs,
+                  status: 'pending'
+                })
+              }
               flushAssistant()
             } else if (chunkType === 'tool-result') {
               const tcId = chunkData?.toolCallId
@@ -379,6 +420,10 @@ export function useAgentStream() {
                   '\n\n> **⚠️ The model hit its context limit.** You can ask me to continue from where I left off.'
               })
               flushAssistant()
+            } else if (chunkType === 'token-update') {
+              // Live update between agent steps — keeps the token ring accurate during streaming
+              const liveTokens = Number(chunkData?.accumulatedTokens ?? 0)
+              if (liveTokens > 0) setSessionTokens(liveTokens)
             } else if (chunkType === 'finish') {
               assistantIsStreaming = false
               currentReasoningBlockRef.current = null

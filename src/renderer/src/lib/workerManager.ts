@@ -15,8 +15,13 @@ export function getSharedWorker(): any {
     sharedWorkerInstance = new BackgroundWorker()
     sharedWorkerApi = Comlink.wrap(sharedWorkerInstance as Worker)
 
-    const clientId =
+    let clientId =
       typeof localStorage !== 'undefined' ? localStorage.getItem('orchcode_client_id') : null
+
+    if (!clientId && typeof localStorage !== 'undefined') {
+      clientId = crypto.randomUUID()
+      localStorage.setItem('orchcode_client_id', clientId)
+    }
 
     if (clientId && sharedWorkerApi.init) {
       ;(sharedWorkerApi.init(clientId) as Promise<void>).catch((err: any) => {

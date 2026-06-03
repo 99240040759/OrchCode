@@ -40,7 +40,11 @@ export function parseToolFileOp(
       } else if (r.readStart !== undefined && r.readEnd !== undefined) {
         lineRange = `#L${r.readStart}-${r.readEnd}`
       } else if (r.totalLines !== undefined) {
-        lineRange = `#L1-${r.totalLines}`
+        if (r.truncated) {
+          lineRange = `#L1-800 (truncated)`
+        } else {
+          lineRange = `#L1-${r.totalLines}`
+        }
       }
       break
 
@@ -85,6 +89,11 @@ export function parseToolFileOp(
 
     case 'searchWeb':
       operation = 'Searched web'
+      target = (a.query as string) ?? ''
+      break
+
+    case 'searchWorkspace':
+      operation = 'Searched workspace for'
       target = (a.query as string) ?? ''
       break
 

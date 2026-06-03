@@ -427,7 +427,7 @@ export function createCoreTools(convId: string) {
         const ctx = wctx()
         const runDir = ctx.rootPath
 
-        const args = ['-n', '-I', query]
+        const args = ['-n', '-I', '--smart-case', query, runDir]
         if (includes && includes.length > 0) {
           for (const glob of includes) {
             args.push('-g', glob)
@@ -442,12 +442,26 @@ export function createCoreTools(convId: string) {
         })
 
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
+          // Exit code 1 = no matches (not an error), exit code 2+ = actual error
+          if (result.exitCode === 1) return { success: true, results: 'No matches found.' }
+          if ((result as any).code === 'ENOENT' || result.stderr?.includes('not found') || result.stderr?.includes('No such file')) {
+            return { success: false, error: 'ripgrep (rg) not found. Install it via: winget install BurntSushi.ripgrep.MSVC or scoop install ripgrep' }
+          }
           return { success: true, results: 'No matches found.' }
         }
 
         const output = result.stdout.trim()
-        const lines = output.split('\n')
+        // Strip the leading rootPath prefix from each match line for cleaner output
+        const rootPrefix = runDir.replace(/\\/g, '/') + '/'
+        const cleaned = output
+          .split('\n')
+          .map((line) => {
+            const normalized = line.replace(/\\/g, '/')
+            return normalized.startsWith(rootPrefix) ? normalized.slice(rootPrefix.length) : normalized
+          })
+          .join('\n')
 
+        const lines = cleaned.split('\n')
         if (lines.length > 200) {
           return {
             success: true,
@@ -457,9 +471,12 @@ export function createCoreTools(convId: string) {
           }
         }
 
-        return { success: true, results: output }
+        return { success: true, results: cleaned }
       } catch (err: any) {
         log.error('[tool:searchWorkspace] error:', err)
+        if (err.code === 'ENOENT') {
+          return { success: false, error: 'ripgrep (rg) not found in PATH. Install it via: winget install BurntSushi.ripgrep.MSVC' }
+        }
         return { success: false, error: err.message }
       }
     }

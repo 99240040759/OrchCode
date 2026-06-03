@@ -18,6 +18,7 @@ const BrowserView: React.FC = () => {
 
   const panelModeRef = useRef(panelMode)
   const isOpenRef = useRef(isOpen)
+  const urlInputRef = useRef(urlInput)
 
   useEffect(() => {
     panelModeRef.current = panelMode
@@ -25,6 +26,9 @@ const BrowserView: React.FC = () => {
   useEffect(() => {
     isOpenRef.current = isOpen
   }, [isOpen])
+  useEffect(() => {
+    urlInputRef.current = urlInput
+  }, [urlInput])
 
   const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
     if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) {
@@ -49,19 +53,20 @@ const BrowserView: React.FC = () => {
     setLoadError(null)
     const bounds = getBounds()
     try {
-      await window.api.openBrowser({ url: urlInput, bounds })
+      await window.api.openBrowser({ url: urlInputRef.current, bounds })
       setIsLoaded(true)
       isLoadedRef.current = true
     } catch (err: any) {
       console.error('[BrowserView] openBrowser failed:', err)
       setLoadError(err?.message || 'Failed to open browser. Please try again.')
     }
-  }, [getBounds, urlInput])
+  }, [getBounds])
 
   useEffect(() => {
     // Guard: only open if panel is in browser mode
     if (panelMode !== 'browser' || !isOpen) return
 
+    closedRef.current = false
     let active = true
     const rafId = requestAnimationFrame(() => {
       if (!active) return

@@ -67,7 +67,6 @@ export function useThreads() {
             name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
             path: workspacePath
           })
-          await window.api.setActiveWorkspace(threadId, workspacePath)
         }
       } catch (err) {
         console.error('[useThreads] Failed to bind workspace for thread:', err)

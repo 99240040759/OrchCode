@@ -113,7 +113,6 @@ const OverviewPanel: React.FC<{
               alignItems: 'start'
             }}
           >
-            {}
             <div
               style={{
                 borderRadius: '8px',
@@ -571,6 +570,7 @@ const ArtifactPanel: React.FC = () => {
 
   useEffect(() => {
     if (activeFile && isDiffMode) {
+      setOriginalContent(null)
       window.api
         .readOriginalFile(activeFile.path, convId)
         .then((res) => {
@@ -740,7 +740,6 @@ const ArtifactPanel: React.FC = () => {
         borderLeft: 'none'
       }}
     >
-      {}
       <div
         style={{
           display: 'flex',
@@ -763,7 +762,6 @@ const ArtifactPanel: React.FC = () => {
             scrollbarWidth: 'none'
           }}
         >
-          {}
           <Tabs.Trigger value="overview" className="tab-trigger">
             <ListTodo
               size={14}
@@ -774,7 +772,6 @@ const ArtifactPanel: React.FC = () => {
             <span>Overview</span>
           </Tabs.Trigger>
 
-          {}
           <Tabs.Trigger value="terminal" className="tab-trigger">
             <TerminalSquare
               size={14}
@@ -785,7 +782,6 @@ const ArtifactPanel: React.FC = () => {
             <span>Terminal</span>
           </Tabs.Trigger>
 
-          {}
           <Tabs.Trigger value="browser" className="tab-trigger">
             <Globe
               size={14}
@@ -796,7 +792,6 @@ const ArtifactPanel: React.FC = () => {
             <span>Browser</span>
           </Tabs.Trigger>
 
-          {}
           {openFiles.map((file) => {
             const isHovered = hoveredTabPath === file.path
             const isCloseVisible = isHovered
@@ -808,7 +803,6 @@ const ArtifactPanel: React.FC = () => {
                 onMouseEnter={() => setHoveredTabPath(file.path)}
                 onMouseLeave={() => setHoveredTabPath(null)}
               >
-                {}
                 <div
                   style={{
                     width: '14px',
@@ -843,13 +837,11 @@ const ArtifactPanel: React.FC = () => {
           })}
         </Tabs.List>
 
-        {}
         <div onClick={handleClose} title="Collapse Panel" className="artifact-panel-close-btn">
           <PanelRightClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
         </div>
       </div>
 
-      {}
       <div
         style={{
           flex: 1,
@@ -859,7 +851,6 @@ const ArtifactPanel: React.FC = () => {
           overflow: 'hidden'
         }}
       >
-        {}
         <Tabs.Content
           value="overview"
           style={{ height: '100%', width: '100%', overflow: 'hidden' }}
@@ -873,7 +864,6 @@ const ArtifactPanel: React.FC = () => {
           />
         </Tabs.Content>
 
-        {}
         <Tabs.Content
           value="terminal"
           style={{ height: '100%', width: '100%', overflow: 'hidden' }}
@@ -893,7 +883,6 @@ const ArtifactPanel: React.FC = () => {
           <BrowserView />
         </Tabs.Content>
 
-        {}
         <div
           style={{
             display: panelMode === 'editor' ? 'block' : 'none',
@@ -1244,28 +1233,53 @@ const ArtifactPanel: React.FC = () => {
               <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-app)' }}>
                 {themeLoaded ? (
                   isDiffMode ? (
-                    <DiffEditor
-                      height="100%"
-                      language={displayFile.language}
-                      theme="orch-dark"
-                      original={originalContent ?? ''}
-                      modified={displayFile.content ?? ''}
-                      onMount={handleDiffEditorMount}
-                      keepCurrentOriginalModel={true}
-                      keepCurrentModifiedModel={true}
-                      options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
-                        renderSideBySide: true,
-                        scrollbar: {
-                          vertical: 'visible',
-                          horizontal: 'visible',
-                          useShadows: false,
-                          verticalScrollbarSize: 8,
-                          horizontalScrollbarSize: 8
-                        }
-                      }}
-                    />
+                    originalContent === null ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          height: '100%',
+                          color: 'var(--text-secondary)'
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: '50%',
+                            border: '2px solid var(--text-secondary)',
+                            borderTopColor: 'transparent',
+                            animation: 'spin 0.8s linear infinite',
+                            marginRight: 8
+                          }}
+                        />
+                        Loading diff...
+                      </div>
+                    ) : (
+                      <DiffEditor
+                        height="100%"
+                        language={displayFile.language}
+                        theme="orch-dark"
+                        original={originalContent ?? ''}
+                        modified={displayFile.content ?? ''}
+                        onMount={handleDiffEditorMount}
+                        keepCurrentOriginalModel={true}
+                        keepCurrentModifiedModel={true}
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: false },
+                          renderSideBySide: true,
+                          scrollbar: {
+                            vertical: 'visible',
+                            horizontal: 'visible',
+                            useShadows: false,
+                            verticalScrollbarSize: 8,
+                            horizontalScrollbarSize: 8
+                          }
+                        }}
+                      />
+                    )
                   ) : (
                     <Editor
                       height="100%"

@@ -82,12 +82,12 @@ const workerAPI = {
   },
 
   async ensurePage(url?: string): Promise<{ ok: boolean; error?: string }> {
-    if (page) {
-      try {
-        await page.evaluate(() => true)
+    if (page && context) {
+      if (!page.isClosed()) {
         return { ok: true }
-      } catch {
+      } else {
         page = null
+        context = null
       }
     }
     const res = await this.connect(url)

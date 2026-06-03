@@ -23,8 +23,7 @@ const decodeBase64 = (base64Str: string): string => {
   }
 }
 
-const UserMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
-    const [message] = useAtom(messageAtom)
+const UserMessage = ({ message }: { message: ChatMessage }) => {
     let attachments: Array<{
       type: 'image' | 'document'
       name: string
@@ -176,8 +175,7 @@ const ReasoningBlock = React.memo(
 )
 ReasoningBlock.displayName = 'ReasoningBlock'
 
-const AssistantMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
-    const [message] = useAtom(messageAtom)
+const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
     return (
     <div className="chat-message-assistant-container">
       {message.orderedBlocks?.map((block: any, i: number) => {
@@ -199,9 +197,16 @@ const AssistantMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMess
             result: block.result,
             status: block.status
           }
+          const isPendingTool = block.status === 'pending'
+          const isLastBlock = i === (message.orderedBlocks?.length ?? 0) - 1
           return (
             <div key={`tool-${i}`}>
               <ToolCallBlock toolCall={toolCall as any} />
+              {message.isStreaming && isLastBlock && isPendingTool && (
+                <div className="chat-message-generating-container">
+                  <span className="shimmer-text chat-message-generating-text">Working</span>
+                </div>
+              )}
             </div>
           )
         }
@@ -245,7 +250,12 @@ const AssistantMessage = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMess
       )}
     </div>
   )
-}
+}, (prev, next) => {
+  if (prev.message.isStreaming !== next.message.isStreaming) return false
+  if (prev.message.orderedBlocks !== next.message.orderedBlocks) return false
+  if (prev.message.content !== next.message.content) return false
+  return true
+})
 AssistantMessage.displayName = 'AssistantMessage'
 
 const ChatThread: React.FC = () => {
@@ -302,17 +312,18 @@ const ChatThread: React.FC = () => {
   )
 }
 
-const MessageWrapper = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
+const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)
   return (
     <div className="chat-thread-message-wrapper">
       {message.role === 'user' ? (
-        <UserMessage messageAtom={messageAtom} />
+        <UserMessage message={message} />
       ) : (
-        <AssistantMessage messageAtom={messageAtom} />
+        <AssistantMessage message={message} />
       )}
     </div>
   )
-}
+})
+MessageWrapper.displayName = 'MessageWrapper'
 
 export default ChatThread
