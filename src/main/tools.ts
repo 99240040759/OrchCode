@@ -13,6 +13,10 @@ import { Worker } from 'worker_threads'
 import { wrap } from 'comlink'
 import mime from 'mime-types'
 
+// Natively register TypeScript extension mapping in the mime-types registry to override default MPEG-TS video mapping
+mime.types['ts'] = 'application/typescript'
+mime.types['tsx'] = 'application/typescript'
+
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
   if (!ctx)
