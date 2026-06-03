@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow, WebContentsView } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -13,7 +13,7 @@ import { registerWorkspaceIpc } from './workspaceIpc'
 import { registerThreadIpc } from './threadIpc'
 import { registerAgentIpc } from './agentIpc'
 import { registerBrowserTerminalIpc, cleanupAllPtys } from './browserTerminalIpc'
-
+import WindowManager from './windowManager'
 initSentry({
   dsn: process.env.SENTRY_DSN,
   enabled: !!process.env.SENTRY_DSN && (app.isPackaged || process.env.NODE_ENV === 'production'),
@@ -109,7 +109,7 @@ function createMainWindow(): BrowserWindow {
       webSecurity: true
     }
   })
-  ;(globalThis as unknown as { mainWindow?: BrowserWindow }).mainWindow = mainWindow
+  WindowManager.setMainWindow(mainWindow)
   mainWindowState.manage(mainWindow)
 
   mainWindow.on('ready-to-show', () => {
@@ -117,16 +117,16 @@ function createMainWindow(): BrowserWindow {
     log.info('[main] Window ready')
   })
   mainWindow.on('closed', () => {
-    const browserView = (globalThis as unknown as { browserView?: WebContentsView | null }).browserView
+    const browserView = WindowManager.getBrowserView()
     if (browserView) {
       try {
         browserView.webContents.close()
       } catch {}
-      ;(globalThis as unknown as { browserView?: WebContentsView | null }).browserView = null
+       WindowManager.setBrowserView(null)
     }
     cleanupAllPtys()
     mainWindow = null
-    ;(globalThis as unknown as { mainWindow?: BrowserWindow | undefined }).mainWindow = undefined
+    WindowManager.setMainWindow(null)
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

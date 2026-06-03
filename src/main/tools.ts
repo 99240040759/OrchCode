@@ -12,6 +12,7 @@ import { nodeAdapter } from './nodeAdapter'
 import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
 import { wrap } from 'comlink'
+import WindowManager from './windowManager'
 
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
@@ -509,7 +510,7 @@ let workerInstance: Worker | null = null
 let automatedBrowser: any = null
 
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
-  const bv = (globalThis as unknown as { browserView?: Electron.WebContentsView }).browserView
+  const bv = WindowManager.getBrowserView()
   if (!bv) {
     return {
       success: false,
@@ -522,7 +523,7 @@ function checkBrowserViewActive(): { success: boolean; error?: string } | null {
 
 export function startBrowserAgentWorker() {
   if (workerInstance) return automatedBrowser
-  const mainWindow = (globalThis as unknown as { mainWindow?: Electron.BrowserWindow }).mainWindow
+  const mainWindow = WindowManager.getMainWindow()
   const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const workerPath = join(__dirname, 'browserWorker.js')
   log.info(`[tools] Spawning Playwright background worker at: ${workerPath}`)

@@ -23,6 +23,7 @@ const sessionFilePath = join(app.getPath('userData'), 'session.bin')
 let currentSession: AuthSession | null = null
 let tempServer: http.Server | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
+let loginInProgress = false
 
 function base64URLEncode(buffer: Buffer): string {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -153,6 +154,12 @@ export async function initAuth() {
   })
 
   ipcMain.handle('auth:login', async () => {
+    if (loginInProgress) {
+      throw new Error('Login already in progress. Please wait or try again later.')
+    }
+    loginInProgress = true
+    try {
+      log.info('[auth] Triggering Google Sign-in flow...')
     log.info('[auth] Triggering Google Sign-in flow...')
 
     if (pendingLoginReject) {
@@ -173,7 +180,7 @@ export async function initAuth() {
       throw new Error('Authentication service configuration is missing.')
     }
 
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       pendingLoginReject = reject
       tempServer = http.createServer(async (req, res) => {
         try {
@@ -299,6 +306,9 @@ export async function initAuth() {
         shell.openExternal(redirectUrl)
       })
     })
+  } finally {
+      loginInProgress = false
+    }
   })
 
   ipcMain.handle('auth:logout', async () => {

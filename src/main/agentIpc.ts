@@ -2,7 +2,8 @@ import 'dotenv/config'
 import crypto from 'node:crypto'
 import { promises as fs, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
+import WindowManager from './windowManager'
 import log from 'electron-log'
 import {
   streamText,
@@ -65,13 +66,7 @@ export const activeAbortControllers = new Map<string, AbortController>()
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getMainWindow(): BrowserWindow | null {
-  return (globalThis as unknown as { mainWindow?: BrowserWindow }).mainWindow || null
-}
 
-function getBrowserView(): unknown {
-  return (globalThis as unknown as { browserView?: unknown }).browserView || null
-}
 
 function makeFetchWithAuth(extraHeaders?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
@@ -199,7 +194,7 @@ export function resolveModel(modelId: string): {
 // ─── Artifacts Push ───────────────────────────────────────────────────────────
 
 async function pushArtifactsChanged(conversationId: string): Promise<void> {
-  const mainWindow = getMainWindow()
+  const mainWindow = WindowManager.getMainWindow()
   if (!mainWindow) return
   const ctx = getWorkspaceContext(conversationId)
   if (!ctx) return
@@ -475,7 +470,7 @@ async function handleAgentStreamRequest(
     messages.push({ role: 'user', content: buildPromptContent(promptText, attachments) as string })
 
     // System instruction
-    const browserView = getBrowserView()
+    const browserView = WindowManager.getBrowserView()
     const browserInstruction = browserView
       ? `\n── BROWSER AUTOMATION ACTIVE ──
 You have active browser control. Use these tools:
