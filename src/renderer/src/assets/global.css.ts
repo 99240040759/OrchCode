@@ -94,6 +94,25 @@ globalStyle('a:hover', {
 globalStyle('details > summary::-webkit-details-marker', { display: 'none' })
 globalStyle('details > summary', { listStyle: 'none' })
 
+globalStyle(
+  'button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible',
+  {
+    outline: '2px solid var(--accent-blue)',
+    outlineOffset: '2px'
+  }
+)
+
+globalStyle('*', {
+  '@media': {
+    '(prefers-reduced-motion: reduce)': {
+      animationDuration: '0.01ms !important',
+      animationIterationCount: '1 !important',
+      scrollBehavior: 'auto',
+      transitionDuration: '0.01ms !important'
+    }
+  }
+})
+
 // ─── Scrollbars ───────────────────────────────────────────────────────────────
 
 globalStyle('::-webkit-scrollbar', { width: '5px', height: '5px' })
@@ -134,7 +153,8 @@ globalKeyframes('dropdown-fade-in', {
 // ─── Utility Classes ─────────────────────────────────────────────────────────
 
 globalStyle('.shimmer-text', {
-  background: 'linear-gradient(90deg, var(--text-muted) 25%, var(--text-secondary) 50%, var(--text-muted) 75%)',
+  background:
+    'linear-gradient(90deg, var(--text-muted) 25%, var(--text-secondary) 50%, var(--text-muted) 75%)',
   backgroundSize: '200% auto',
   color: 'transparent',
   WebkitBackgroundClip: 'text',
@@ -158,6 +178,3 @@ globalStyle('.font-semibold', {
 globalStyle('.font-medium', {
   fontWeight: 500
 })
-
-
-

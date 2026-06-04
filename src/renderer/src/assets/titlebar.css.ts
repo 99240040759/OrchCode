@@ -65,22 +65,6 @@ export const titlebarRightWin = style({
   paddingRight: '16px'
 })
 
-export const titlebarAction = style({
-  fontSize: 'var(--font-size-sm)',
-  color: 'var(--text-secondary)',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '4px 8px',
-  borderRadius: '4px',
-  transition: 'all 0.2s ease',
-  ':hover': {
-    color: 'var(--text-primary)',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)'
-  }
-})
-
 // ─── Toggle Button ─────────────────────────────────────────────────────────────
 
 export const titlebarToggleBtn = style({
@@ -193,26 +177,6 @@ export const titlebarUpdateProgressBar = style({
 })
 
 // ─── Google Button ────────────────────────────────────────────────────────────
-
-export const googleBtn = style({
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  backgroundColor: 'rgba(255, 255, 255, 0.03)',
-  border: '1px solid var(--border-color)',
-  color: 'var(--text-primary)',
-  borderRadius: '4px',
-  padding: '4px 10px',
-  fontSize: 'var(--font-size-xs)',
-  fontWeight: 600,
-  transition: 'all 0.2s ease',
-  cursor: 'pointer',
-  ':hover': {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    transform: 'translateY(-1px)'
-  }
-})
 
 // ─── Profile Avatar ───────────────────────────────────────────────────────────
 

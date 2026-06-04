@@ -4,7 +4,12 @@ import { toast } from 'sonner'
 import { Copy } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { globalPromptTriggerAtom } from '../store/agentStore'
-import { isAgentArtifact, getArtifactIcon, getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
+import {
+  isAgentArtifact,
+  getArtifactIcon,
+  getDisplayName,
+  getRelativeDirPath
+} from '../lib/uiUtils'
 import MarkdownRenderer from './MarkdownRenderer'
 import * as styles from './MarkdownView.css'
 
@@ -17,10 +22,7 @@ interface MarkdownViewProps {
   activeWorkspace: { path: string } | null
 }
 
-export const MarkdownView: React.FC<MarkdownViewProps> = ({
-  displayFile,
-  activeWorkspace
-}) => {
+const MarkdownView: React.FC<MarkdownViewProps> = ({ displayFile, activeWorkspace }) => {
   const setGlobalPrompt = useSetAtom(globalPromptTriggerAtom)
 
   return (
@@ -38,9 +40,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
               className={styles.fileIcon}
             />
           )}
-          <span className={styles.fileName}>
-            {getDisplayName(displayFile.name)}
-          </span>
+          <span className={styles.fileName}>{getDisplayName(displayFile.name)}</span>
           <span className={styles.fileDir}>
             {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
           </span>
@@ -65,8 +65,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
                 className={styles.proceedBtn}
                 onClick={() => {
                   setGlobalPrompt({
-                    prompt:
-                      'I approve the implementation plan. Please proceed with execution.'
+                    prompt: 'I approve the implementation plan. Please proceed with execution.'
                   })
                   toast.success('Approved plan. Proceeding with execution.')
                 }}

@@ -11,7 +11,7 @@ interface MediaPreviewProps {
   }
 }
 
-export const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
+const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
   const { mimeType, base64, name } = displayFile
   const src = `data:${mimeType};base64,${base64}`
 
@@ -54,9 +54,7 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
       {!mimeType?.startsWith('image/') &&
         !mimeType?.startsWith('video/') &&
         !mimeType?.startsWith('audio/') && (
-          <div className={styles.mediaUnsupported}>
-            Unsupported preview format ({mimeType})
-          </div>
+          <div className={styles.mediaUnsupported}>Unsupported preview format ({mimeType})</div>
         )}
     </div>
   )

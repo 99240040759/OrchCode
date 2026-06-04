@@ -49,15 +49,6 @@ export const threadGroupActions = style({
   flexShrink: 0
 })
 
-export const threadGroupBadge = style({
-  fontSize: '10px',
-  backgroundColor: 'rgba(255,255,255,0.08)',
-  color: 'var(--text-secondary)',
-  padding: '2px 6px',
-  borderRadius: '10px',
-  fontWeight: 600
-})
-
 export const threadItem = style({
   display: 'flex',
   flexDirection: 'column',

@@ -22,7 +22,7 @@ import ArtifactPanelHeader from './ArtifactPanelHeader'
 import ArtifactPanelContent from './ArtifactPanelContent'
 import * as styles from './ArtifactPanel.css'
 
-const isMac = navigator.userAgent.toLowerCase().includes('mac')
+const isMac = window.updaterBridge.platform === 'darwin'
 
 const ArtifactPanel: React.FC = () => {
   const [isOpen, setIsOpen] = useAtom(isArtifactPanelOpenAtom)
@@ -34,8 +34,11 @@ const ArtifactPanel: React.FC = () => {
   useEffect(() => {
     if (activeFile) {
       setOpenFiles((prev) => {
-        if (prev.some((f) => f.path === activeFile.path)) return prev
-        return [...prev, activeFile]
+        const existingIndex = prev.findIndex((f) => f.path === activeFile.path)
+        if (existingIndex === -1) return [...prev, activeFile]
+        const next = [...prev]
+        next[existingIndex] = activeFile
+        return next
       })
     }
   }, [activeFile, setOpenFiles])
@@ -133,9 +136,11 @@ const ArtifactPanel: React.FC = () => {
   const handleOpenFile = useCallback(
     (fileData: EditorFile) => {
       setOpenFiles((prev) => {
-        const exists = prev.find((f) => f.path === fileData.path)
-        if (!exists) return [...prev, fileData]
-        return prev
+        const existingIndex = prev.findIndex((f) => f.path === fileData.path)
+        if (existingIndex === -1) return [...prev, fileData]
+        const next = [...prev]
+        next[existingIndex] = fileData
+        return next
       })
       setActiveFile(fileData)
       setPanelMode('editor')

@@ -14,7 +14,7 @@ export type AgentStreamChunkType =
 
 export interface AgentStreamChunk {
   type: AgentStreamChunkType
-  payload?: any
+  payload?: unknown
   threadId: string
 }
 
@@ -44,10 +44,17 @@ export interface AgentStreamToolCallDeltaPayload {
 export interface AgentStreamToolCallPayload {
   toolCallId: string
   toolName: string
-  args: any
+  args: Record<string, unknown>
 }
 
 export interface AgentStreamToolResultPayload {
   toolCallId: string
-  result: any
+  result: unknown
+}
+
+export interface AgentAttachment {
+  type: 'image' | 'document'
+  name: string
+  mimeType?: string
+  base64: string
 }

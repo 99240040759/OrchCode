@@ -2,15 +2,16 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { app } from 'electron'
 import { Worker } from 'node:worker_threads'
-import { wrap } from 'comlink'
+import { wrap, type Remote } from 'comlink'
 import log from 'electron-log'
 import WindowManager from '../windowManager'
 import { nodeAdapter } from '../nodeAdapter'
+import type { WorkerAPI } from '../browserWorker'
+import { getConversationScreenshotsPath } from '../paths'
 
 let workerInstance: Worker | null = null
-let automatedBrowser: any = null
+let automatedBrowser: Remote<WorkerAPI> | null = null
 
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
   const bv = WindowManager.getBrowserView()
@@ -30,9 +31,11 @@ export function startBrowserAgentWorker() {
   const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const debuggingPort = WindowManager.getDebuggingPort()
   const workerPath = join(__dirname, '../browserWorker.js') // Note: __dirname is tools subfolder, so we go up to find browserWorker.js
-  log.info(`[tools:browser] Spawning Playwright background worker at: ${workerPath} using port: ${debuggingPort}`)
+  log.info(
+    `[tools:browser] Spawning Playwright background worker at: ${workerPath} using port: ${debuggingPort}`
+  )
   workerInstance = new Worker(workerPath, { workerData: { mainWindowUrl, debuggingPort } })
-  automatedBrowser = wrap(nodeAdapter(workerInstance))
+  automatedBrowser = wrap<WorkerAPI>(nodeAdapter(workerInstance))
   return automatedBrowser
 }
 
@@ -58,6 +61,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
         return await agent.navigate(url)
       } catch (err: any) {
@@ -83,6 +87,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
         return await agent.type(selector, text, frameSelector)
       } catch (err: any) {
@@ -103,6 +108,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
         return await agent.scroll(direction, amount)
       } catch (err: any) {
@@ -120,8 +126,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
-        const screenshotDir = join(app.getPath('userData'), 'conversations', convId, 'screenshots')
+        const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
 
         try {
@@ -156,7 +163,10 @@ export function browserTools(convId: string, modelSupportsVision = true) {
             return {
               type: 'content',
               value: [
-                { type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted from tool output because this model does not support vision. Note: Rely on DOM analysis or text feedback.` }
+                {
+                  type: 'text',
+                  text: `Screenshot captured and saved to ${output.filePath}. Image content omitted from tool output because this model does not support vision. Note: Rely on DOM analysis or text feedback.`
+                }
               ]
             }
           }
@@ -195,6 +205,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
         return await agent.mouseClickCoordinate(x, y, button)
       } catch (err: any) {
@@ -213,6 +224,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       const check = checkBrowserViewActive()
       if (check) return check
       const agent = startBrowserAgentWorker()
+      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
       try {
         return await agent.getPageContent()
       } catch (err: any) {

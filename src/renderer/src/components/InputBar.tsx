@@ -15,8 +15,8 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import AutocompleteSuggestions from './AutocompleteSuggestions'
 import { workspaceService } from '../services/workspaceService'
 import { TokenIndicator } from './ui/TokenIndicator'
+import { toast } from 'sonner'
 import * as styles from './InputBar.css'
-
 
 interface InputBarProps {
   onSubmit?: (val: string, mode?: string, attachments?: any[]) => void
@@ -24,6 +24,9 @@ interface InputBarProps {
 }
 
 const MAX_TOKENS = 200_000
+const MAX_ATTACHMENTS = 8
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
@@ -132,32 +135,60 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     }
   }, [])
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
-    const type =
-      (fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document') || 'document'
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files
+      if (!files || files.length === 0) return
+      const type =
+        (fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document') ||
+        'document'
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const result = event.target?.result as string
-        const base64 = result.split(',')[1] || result
-        setAttachments((prev) => [
-          ...prev,
-          {
-            type,
-            name: file.name,
-            mimeType: file.type || (type === 'image' ? 'image/png' : 'text/plain'),
-            base64
-          }
-        ])
+      const selectedFiles = Array.from(files)
+      const existingBytes = attachments.reduce((total, attachment) => {
+        return total + Math.ceil((attachment.base64.length * 3) / 4)
+      }, 0)
+      const accepted: File[] = []
+      let totalBytes = existingBytes
+
+      for (const file of selectedFiles) {
+        if (attachments.length + accepted.length >= MAX_ATTACHMENTS) {
+          toast.error(`You can attach up to ${MAX_ATTACHMENTS} files.`)
+          break
+        }
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          toast.error(`${file.name} exceeds the 10 MB attachment limit.`)
+          continue
+        }
+        if (totalBytes + file.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+          toast.error('Attachments exceed the 25 MB total limit.')
+          break
+        }
+        accepted.push(file)
+        totalBytes += file.size
       }
-      reader.readAsDataURL(file)
-    })
 
-    e.target.value = ''
-  }, [])
+      accepted.forEach((file) => {
+        const reader = new FileReader()
+        reader.onload = (event) => {
+          const result = event.target?.result as string
+          const base64 = result.split(',')[1] || result
+          setAttachments((prev) => [
+            ...prev,
+            {
+              type,
+              name: file.name,
+              mimeType: file.type || (type === 'image' ? 'image/png' : 'text/plain'),
+              base64
+            }
+          ])
+        }
+        reader.readAsDataURL(file)
+      })
+
+      e.target.value = ''
+    },
+    [attachments]
+  )
 
   const displayTotal = sessionTokens
 
@@ -243,7 +274,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           {attachments.map((att, idx) => (
             <div key={`att-${idx}`} className={styles.inputAttachmentChip} title={att.name}>
               {att.type === 'image' ? (
-                <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} className={styles.inputAttachmentChipImg} />
+                <img
+                  src={`data:${att.mimeType};base64,${att.base64}`}
+                  alt={att.name}
+                  className={styles.inputAttachmentChipImg}
+                />
               ) : (
                 <SymbolsFileIcon
                   fileName={att.name.split('/').pop() || att.name}
@@ -253,7 +288,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   className={styles.inputFileIcon}
                 />
               )}
-              <span className={styles.inputAttachmentName}>{att.name.split('/').pop() || att.name}</span>
+              <span className={styles.inputAttachmentName}>
+                {att.name.split('/').pop() || att.name}
+              </span>
               <button
                 onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
                 className={styles.inputAttachmentClose}

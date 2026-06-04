@@ -16,7 +16,7 @@ interface SidebarProps {
   threadListContent?: React.ReactNode
 }
 
-const isMac = navigator.userAgent.toLowerCase().includes('mac')
+const isMac = window.updaterBridge.platform === 'darwin'
 
 const LeftSidebar: React.FC<SidebarProps> = ({
   expanded: controlledExpanded,
@@ -59,7 +59,9 @@ const LeftSidebar: React.FC<SidebarProps> = ({
     <aside className={`${styles.sidebarRoot} ${styles.sidebarExpanded}`}>
       <div className={styles.sidebarInner}>
         {/* Drag region + collapse button */}
-        <div className={`${styles.sidebarHeaderRow} app-region-drag ${isMac ? styles.sidebarHeaderRowMac : styles.sidebarHeaderRowWin}`}>
+        <div
+          className={`${styles.sidebarHeaderRow} app-region-drag ${isMac ? styles.sidebarHeaderRowMac : styles.sidebarHeaderRowWin}`}
+        >
           <div
             className={`${styles.sidebarCollapseBtn} app-region-no-drag`}
             onClick={handleToggle}
@@ -82,9 +84,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Thread list */}
-        <div className={styles.sidebarBody}>
-          {threadListContent}
-        </div>
+        <div className={styles.sidebarBody}>{threadListContent}</div>
 
         <div className={styles.sidebarDividerContainer}>
           <div className={styles.sidebarDivider} />
@@ -110,17 +110,19 @@ const LeftSidebar: React.FC<SidebarProps> = ({
                         : authUser.email.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <span className="text-ellipsis flex-1">
-                    {authUser.name || authUser.email}
-                  </span>
+                  <span className="text-ellipsis flex-1">{authUser.name || authUser.email}</span>
                 </button>
               </DropdownMenu.Trigger>
 
               <DropdownMenu.Portal>
                 <DropdownMenu.Content asChild align="start" side="right" sideOffset={12}>
-                  <div className={`${titlebarStyles.profileDropdown} ${titlebarStyles.nativeDropdownContent}`}>
+                  <div
+                    className={`${titlebarStyles.profileDropdown} ${titlebarStyles.nativeDropdownContent}`}
+                  >
                     <div className={titlebarStyles.profileInfo}>
-                      <div className={titlebarStyles.profileName}>{authUser.name || 'Google User'}</div>
+                      <div className={titlebarStyles.profileName}>
+                        {authUser.name || 'Google User'}
+                      </div>
                       <div className={titlebarStyles.profileEmail}>{authUser.email}</div>
                     </div>
                     <DropdownMenu.Separator className={titlebarStyles.profileSeparator} />
@@ -135,11 +137,12 @@ const LeftSidebar: React.FC<SidebarProps> = ({
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
           ) : (
-            <button className={`${styles.sidebarFooterItem} ${styles.googleBtn}`} onClick={handleLogin}>
+            <button
+              className={`${styles.sidebarFooterItem} ${styles.googleBtn}`}
+              onClick={handleLogin}
+            >
               <GoogleIcon size={14} />
-              <span className="text-ellipsis">
-                Sign In
-              </span>
+              <span className="text-ellipsis">Sign In</span>
             </button>
           )}
         </div>

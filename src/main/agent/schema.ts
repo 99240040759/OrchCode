@@ -1,18 +1,18 @@
 import { z } from 'zod'
 
-export const TextBlockSchema = z.object({
+const TextBlockSchema = z.object({
   type: z.literal('text'),
   content: z.string()
 })
 
-export const ReasoningBlockSchema = z.object({
+const ReasoningBlockSchema = z.object({
   type: z.literal('reasoning'),
   content: z.string(),
   durationMs: z.number().optional(),
   isStreaming: z.boolean().optional()
 })
 
-export const ToolBlockSchema = z.object({
+const ToolBlockSchema = z.object({
   type: z.literal('tool'),
   toolCallId: z.string(),
   toolName: z.string(),
@@ -22,25 +22,29 @@ export const ToolBlockSchema = z.object({
   status: z.enum(['pending', 'complete', 'error'])
 })
 
-export const ErrorBlockSchema = z.object({
+const ErrorBlockSchema = z.object({
   type: z.literal('error'),
   message: z.string()
 })
 
-export const StreamBlockSchema = z.discriminatedUnion('type', [
+const StreamBlockSchema = z.discriminatedUnion('type', [
   TextBlockSchema,
   ReasoningBlockSchema,
   ToolBlockSchema,
   ErrorBlockSchema
 ])
 
-export const UserMessageDataSchema = z.object({
-  attachments: z.array(z.object({
-    type: z.enum(['image', 'document']),
-    name: z.string(),
-    mimeType: z.string().optional(),
-    base64: z.string()
-  })).optional()
+const UserMessageDataSchema = z.object({
+  attachments: z
+    .array(
+      z.object({
+        type: z.enum(['image', 'document']),
+        name: z.string(),
+        mimeType: z.string().optional(),
+        base64: z.string()
+      })
+    )
+    .optional()
 })
 
 export type StreamBlock = z.infer<typeof StreamBlockSchema>

@@ -95,8 +95,7 @@ export function useAgentStream() {
       // - No existing active thread (first ever message), OR
       // - The conversation currently has no messages (freshly created thread)
       const isNewThread = !activeThreadId || messagesLengthRef.current === 0
-      const resolvedThreadId =
-        forceThreadId ?? activeThreadId ?? `session-${crypto.randomUUID()}`
+      const resolvedThreadId = forceThreadId || activeThreadId || `session-${crypto.randomUUID()}`
 
       activeStreamThreadIdRef.current = resolvedThreadId
 
@@ -194,7 +193,18 @@ export function useAgentStream() {
             if (!chunk || chunk.threadId !== streamThreadId) return
 
             const chunkType = chunk.type
-            const chunkData = chunk.payload
+            const chunkData =
+              chunk.payload && typeof chunk.payload === 'object'
+                ? (chunk.payload as {
+                    toolCallId?: string
+                    toolName?: string
+                    delta?: string
+                    args?: Record<string, unknown>
+                    result?: unknown
+                    accumulatedTokens?: number
+                  })
+                : undefined
+            const chunkText = typeof chunk.payload === 'string' ? chunk.payload : ''
 
             if (chunkType === 'reasoning-start') {
               currentReasoningStartMs = Date.now()
@@ -208,7 +218,7 @@ export function useAgentStream() {
               currentReasoningBlockRef.current = block
               flushAssistant()
             } else if (chunkType === 'reasoning-delta') {
-              const textDelta = typeof chunkData === 'string' ? chunkData : ''
+              const textDelta = chunkText
               const lastIdx = orderedBlocks.length - 1
               if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
                 const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
@@ -234,7 +244,7 @@ export function useAgentStream() {
               currentReasoningBlockRef.current = null
               flushAssistant()
             } else if (chunkType === 'text-delta') {
-              const textDelta = typeof chunkData === 'string' ? chunkData : ''
+              const textDelta = chunkText
               fullContent += textDelta
 
               const lastIdx = orderedBlocks.length - 1
@@ -287,9 +297,7 @@ export function useAgentStream() {
             } else if (chunkType === 'tool-call-delta') {
               const tcId = chunkData?.toolCallId
               const delta = chunkData?.delta ?? ''
-              const idx = orderedBlocks.findIndex(
-                (b) => b.type === 'tool' && b.toolCallId === tcId
-              )
+              const idx = orderedBlocks.findIndex((b) => b.type === 'tool' && b.toolCallId === tcId)
               if (idx !== -1) {
                 const oldBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
                 orderedBlocks[idx] = {
@@ -315,9 +323,7 @@ export function useAgentStream() {
               const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
               const tcName = chunkData?.toolName ?? 'unknown'
               const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
-              const idx = orderedBlocks.findIndex(
-                (b) => b.type === 'tool' && b.toolCallId === tcId
-              )
+              const idx = orderedBlocks.findIndex((b) => b.type === 'tool' && b.toolCallId === tcId)
               if (idx !== -1) {
                 const oldBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
                 orderedBlocks[idx] = {
@@ -337,9 +343,7 @@ export function useAgentStream() {
               flushAssistant()
             } else if (chunkType === 'tool-result') {
               const tcId = chunkData?.toolCallId
-              const idx = orderedBlocks.findIndex(
-                (b) => b.type === 'tool' && b.toolCallId === tcId
-              )
+              const idx = orderedBlocks.findIndex((b) => b.type === 'tool' && b.toolCallId === tcId)
 
               if (idx !== -1) {
                 const toolBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
@@ -390,7 +394,7 @@ export function useAgentStream() {
 
               orderedBlocks.push({
                 type: 'error',
-                message: cleanErrorMessage(chunkData)
+                message: cleanErrorMessage(chunk.payload)
               })
 
               flushAssistant(true)
@@ -436,7 +440,10 @@ export function useAgentStream() {
                       const threads = await window.threadsBridge.getThreads()
                       setThreads(threads ?? [])
                     } catch (err) {
-                      console.error('[useAgentStream] Failed to refresh threads after title generation:', err)
+                      console.error(
+                        '[useAgentStream] Failed to refresh threads after title generation:',
+                        err
+                      )
                     }
                   })
                   .catch(console.error)
@@ -449,7 +456,13 @@ export function useAgentStream() {
           }
         })
 
-        await window.agentBridge.streamAgent(promptText, resolvedThreadId, mode, selectedModel, attachments)
+        await window.agentBridge.streamAgent(
+          promptText,
+          resolvedThreadId,
+          mode,
+          selectedModel,
+          attachments
+        )
       } catch (err: any) {
         // IPC-level error (not stream error)
         console.error('[useAgentStream] Invocation Error:', err)
@@ -457,9 +470,7 @@ export function useAgentStream() {
           prev.map((m) => {
             if (m.id === assistantMsgId) {
               const updatedBlocks = (m.orderedBlocks ?? []).map((b) =>
-                b.type === 'tool' && b.status === 'pending'
-                  ? { ...b, status: 'error' as const }
-                  : b
+                b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
               )
               return {
                 ...m,

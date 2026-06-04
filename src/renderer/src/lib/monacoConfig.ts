@@ -1,9 +1,11 @@
-export function isMonacoAlreadyInitialized(): boolean {
-  return !!(window as unknown as { __orchcodeMonacoInitialized?: boolean }).__orchcodeMonacoInitialized
+function isMonacoAlreadyInitialized(): boolean {
+  return !!(window as unknown as { __orchcodeMonacoInitialized?: boolean })
+    .__orchcodeMonacoInitialized
 }
 
-export function markMonacoInitialized(): void {
-  ;(window as unknown as { __orchcodeMonacoInitialized?: boolean }).__orchcodeMonacoInitialized = true
+function markMonacoInitialized(): void {
+  ;(window as unknown as { __orchcodeMonacoInitialized?: boolean }).__orchcodeMonacoInitialized =
+    true
 }
 
 export async function setupMonaco(): Promise<void> {
@@ -13,13 +15,33 @@ export async function setupMonaco(): Promise<void> {
 
   const rootStyle = getComputedStyle(document.documentElement)
   const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
-  const accentBlue = (rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6').replace('#', '')
-  const accentGreen = (rootStyle.getPropertyValue('--accent-green').trim() || '#10b981').replace('#', '')
-  const accentOrange = (rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b').replace('#', '')
-  const accentPurple = (rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6').replace('#', '')
-  const accentRed = (rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444').replace('#', '')
-  const textSecondary = (rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa').replace('#', '')
-  const textMuted = (rootStyle.getPropertyValue('--text-muted').trim() || '#71717a').replace('#', '')
+  const accentBlue = (rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6').replace(
+    '#',
+    ''
+  )
+  const accentGreen = (rootStyle.getPropertyValue('--accent-green').trim() || '#10b981').replace(
+    '#',
+    ''
+  )
+  const accentOrange = (rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b').replace(
+    '#',
+    ''
+  )
+  const accentPurple = (rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6').replace(
+    '#',
+    ''
+  )
+  const accentRed = (rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444').replace(
+    '#',
+    ''
+  )
+  const textSecondary = (
+    rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa'
+  ).replace('#', '')
+  const textMuted = (rootStyle.getPropertyValue('--text-muted').trim() || '#71717a').replace(
+    '#',
+    ''
+  )
 
   const { loader } = await import('@monaco-editor/react')
   const monaco = await loader.init()

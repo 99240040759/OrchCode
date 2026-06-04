@@ -7,16 +7,14 @@ import type {
   UserProfile
 } from '../../../preload/index.d'
 
-export type {
-  AgentRunState,
-  StreamBlock,
-  ChatMessage,
-  ToolCallEntry,
-  FileChangeEntry,
-  ArtifactPanelMode,
-  EditorFile,
-  ModelInfo
-} from './types'
+export type { StreamBlock, ChatMessage, FileChangeEntry, EditorFile } from './types'
+
+type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
+type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
+interface ModelInfo {
+  id: string
+  name: string
+}
 
 /**
  * Single source of truth for the active thread/conversation ID.
@@ -37,7 +35,7 @@ export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
 /** True while thread messages/workspace are being loaded (thread switch in progress) */
 export const isThreadLoadingAtom = atom<boolean>(false)
 
-export const agentRunStateAtom = atom<import('./types').AgentRunState>('idle')
+export const agentRunStateAtom = atom<AgentRunState>('idle')
 
 export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
 
@@ -54,16 +52,20 @@ export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_ex
 export const activeWorkspaceAtom = atom<{ name: string; path: string } | null>(null)
 
 export const isArtifactPanelOpenAtom = atom<boolean>(false)
-export const artifactPanelModeAtom = atom<import('./types').ArtifactPanelMode>('overview')
+export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
 export const openFilesAtom = atom<import('./types').EditorFile[]>([])
 
 export const activeEditorFileAtom = atom<import('./types').EditorFile | null>(null)
 
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 
-export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string; threadId?: string } | null>(null)
+export const globalPromptTriggerAtom = atom<{
+  prompt: string
+  mode?: string
+  threadId?: string
+} | null>(null)
 
-export const availableModelsAtom = atom<Record<string, import('./types').ModelInfo>>({})
+export const availableModelsAtom = atom<Record<string, ModelInfo>>({})
 export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_model', '')
 
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })

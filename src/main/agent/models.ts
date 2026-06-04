@@ -5,7 +5,7 @@ import type { ProviderOptions } from '@ai-sdk/provider-utils'
 import type { streamText } from 'ai'
 import { globalApiLimiter } from '../limiters'
 
-export interface ModelInfo {
+interface ModelInfo {
   id: string
   name: string
 }
@@ -40,67 +40,75 @@ function makeFetchWithAuth(extraHeaders?: Record<string, string>) {
 }
 
 // Main Gemini provider — rate-limited via globalApiLimiter
-export const google = createGoogleGenerativeAI({
+const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: (url, options) =>
-    globalApiLimiter.schedule(() => fetch(url, {
-      ...options,
-      headers: (() => {
-        const h = new Headers(options?.headers || {})
-        h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-        h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-        return h
-      })()
-    }))
+    globalApiLimiter.schedule(() =>
+      fetch(url, {
+        ...options,
+        headers: (() => {
+          const h = new Headers(options?.headers || {})
+          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+          return h
+        })()
+      })
+    )
 })
 
 // Nvidia provider — rate-limited via globalApiLimiter
-export const nvidia = createOpenAI({
+const nvidia = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) =>
-    globalApiLimiter.schedule(() => fetch(url, {
-      ...options,
-      headers: (() => {
-        const h = new Headers(options?.headers || {})
-        h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-        h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-        return h
-      })()
-    }))
+    globalApiLimiter.schedule(() =>
+      fetch(url, {
+        ...options,
+        headers: (() => {
+          const h = new Headers(options?.headers || {})
+          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+          return h
+        })()
+      })
+    )
 })
 
 // OpenCode provider — rate-limited via globalApiLimiter
-export const opencode = createOpenAI({
+const opencode = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/opencode/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) =>
-    globalApiLimiter.schedule(() => fetch(url, {
-      ...options,
-      headers: (() => {
-        const h = new Headers(options?.headers || {})
-        h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-        h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-        return h
-      })()
-    }))
+    globalApiLimiter.schedule(() =>
+      fetch(url, {
+        ...options,
+        headers: (() => {
+          const h = new Headers(options?.headers || {})
+          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+          return h
+        })()
+      })
+    )
 })
 
 // Z.AI provider — rate-limited via globalApiLimiter
-export const zai = createOpenAI({
+const zai = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/z-ai/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) =>
-    globalApiLimiter.schedule(() => fetch(url, {
-      ...options,
-      headers: (() => {
-        const h = new Headers(options?.headers || {})
-        h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-        h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-        return h
-      })()
-    }))
+    globalApiLimiter.schedule(() =>
+      fetch(url, {
+        ...options,
+        headers: (() => {
+          const h = new Headers(options?.headers || {})
+          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+          return h
+        })()
+      })
+    )
 })
 
 // Bypass provider for summarisation & title — no limiter, no compaction re-entry
@@ -129,7 +137,9 @@ export function resolveModel(modelId: string): {
   if (modelId.includes('gemma-4')) {
     return {
       model: google(modelId),
-      providerOptions: { google: { chatTemplateKwargs: { enable_thinking: true } } } as ProviderOptions
+      providerOptions: {
+        google: { chatTemplateKwargs: { enable_thinking: true } }
+      } as ProviderOptions
     }
   }
 

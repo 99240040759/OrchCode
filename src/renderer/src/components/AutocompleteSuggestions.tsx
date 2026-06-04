@@ -10,7 +10,7 @@ interface AutocompleteSuggestionsProps {
   selectFileSuggestion: (file: string) => void
 }
 
-export const AutocompleteSuggestions: React.FC<AutocompleteSuggestionsProps> = ({
+const AutocompleteSuggestions: React.FC<AutocompleteSuggestionsProps> = ({
   showFileSuggestions,
   filteredFiles,
   suggestionIndex,

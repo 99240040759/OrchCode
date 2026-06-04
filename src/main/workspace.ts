@@ -1,9 +1,9 @@
-import { app } from 'electron'
-import { join, extname, relative, resolve, normalize, sep, isAbsolute } from 'node:path'
-import { promises as fs, existsSync, readFileSync } from 'node:fs'
+import { join, extname, relative, resolve, normalize, sep, isAbsolute, dirname } from 'node:path'
+import { promises as fs, existsSync, readFileSync, realpathSync } from 'node:fs'
 import Bottleneck from 'bottleneck'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
+import { getConversationPath } from './paths'
 
 // Correct TypeScript/TSX mime types — override default MPEG-TS video mapping
 mime.types['ts'] = 'application/typescript'
@@ -22,7 +22,11 @@ const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 
 function validateConversationId(conversationId: string) {
-  if (!conversationId || typeof conversationId !== 'string' || !/^[a-zA-Z0-9-_]+$/.test(conversationId)) {
+  if (
+    !conversationId ||
+    typeof conversationId !== 'string' ||
+    !/^[a-zA-Z0-9-_]+$/.test(conversationId)
+  ) {
     throw new Error(`Invalid conversationId format: ${conversationId}`)
   }
 }
@@ -43,8 +47,7 @@ export async function getOrCreateWorkspaceContext(
   const promise = (async () => {
     try {
       const isUserWorkspace = !!userSelectedPath
-      const rootPath =
-        userSelectedPath ?? join(app.getPath('userData'), 'conversations', conversationId)
+      const rootPath = userSelectedPath ?? getConversationPath(conversationId)
 
       const artifactsPath = join(rootPath, '.orch-artifacts')
 
@@ -70,14 +73,24 @@ export function getWorkspaceContext(conversationId: string): WorkspaceContext | 
   return workspaceRegistry.get(conversationId)
 }
 
+export function clearWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
+  validateConversationId(conversationId)
+  const context = workspaceRegistry.get(conversationId)
+  workspaceRegistry.delete(conversationId)
+  initPromises.delete(conversationId)
+  return context
+}
+
 export async function updateWorkspacePath(
   conversationId: string,
   newPath: string
 ): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
+  if (!isAbsolute(newPath)) throw new Error('Workspace path must be absolute.')
+  const stat = await fs.stat(newPath)
+  if (!stat.isDirectory()) throw new Error('Workspace path must point to a directory.')
   const artifactsPath = join(newPath, '.orch-artifacts')
 
-  await fs.mkdir(newPath, { recursive: true })
   await fs.mkdir(artifactsPath, { recursive: true })
 
   const ctx: WorkspaceContext = {
@@ -100,7 +113,8 @@ export function assertWithinWorkspace(
   _conversationId?: string
 ): string {
   // Resolve root to an absolute normalised path with trailing sep
-  const normalizedRoot = normalize(resolve(rootPath)) + sep
+  const resolvedRoot = normalize(resolve(rootPath))
+  const normalizedRoot = resolvedRoot + sep
 
   // If targetPath is already absolute, resolve it directly.
   // If it's relative (or has leading slash stripped), join with root first.
@@ -118,6 +132,26 @@ export function assertWithinWorkspace(
     throw new Error(
       `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
     )
+  }
+
+  // Resolve existing symlinks for the target or its nearest existing parent.
+  // A lexical path can be inside the workspace while a symlink points outside it.
+  let existingPath = resolvedTarget
+  while (!existsSync(existingPath)) {
+    const parent = dirname(existingPath)
+    if (parent === existingPath) break
+    existingPath = parent
+  }
+  const realRoot = normalize(realpathSync(resolvedRoot))
+  const realExisting = normalize(realpathSync(existingPath))
+  const realRootWithSep = realRoot + sep
+  const realRootCompare = isWindows ? realRootWithSep.toLowerCase() : realRootWithSep
+  const realExistingCompare = isWindows ? realExisting.toLowerCase() : realExisting
+  if (
+    realExistingCompare !== realRootCompare.slice(0, -1) &&
+    !realExistingCompare.startsWith(realRootCompare)
+  ) {
+    throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
   }
 
   return resolvedTarget
@@ -170,9 +204,22 @@ export function escapeHtml(str: string): string {
 
 const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
 const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico',
-  '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll',
-  '.sqlite', '.db', '.bin', '.wasm'
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.mp4',
+  '.zip',
+  '.gz',
+  '.tar',
+  '.exe',
+  '.dll',
+  '.sqlite',
+  '.db',
+  '.bin',
+  '.wasm'
 ])
 
 interface TraverseOptions {

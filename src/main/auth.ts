@@ -1,10 +1,10 @@
 import { app, ipcMain, shell, BrowserWindow, safeStorage } from 'electron'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { join } from 'node:path'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
 import { escapeHtml } from './workspace'
+import { getFallbackKeyPath, getSessionPath } from './paths'
 
 export interface UserProfile {
   uid: string
@@ -19,11 +19,12 @@ export interface AuthSession {
   user: UserProfile
 }
 
-const sessionFilePath = join(app.getPath('userData'), 'session.bin')
+const sessionFilePath = getSessionPath()
 let currentSession: AuthSession | null = null
 let tempServer: http.Server | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
 let loginInProgress = false
+let loginTimeout: NodeJS.Timeout | null = null
 
 function base64URLEncode(buffer: Buffer): string {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -74,7 +75,7 @@ export function getCurrentSession(): AuthSession | null {
 }
 
 async function getFallbackEncryptionKey(): Promise<Buffer> {
-  const keyPath = join(app.getPath('userData'), '.key')
+  const keyPath = getFallbackKeyPath()
   try {
     const key = await fs.readFile(keyPath)
     if (key.length === 32) return key
@@ -104,7 +105,7 @@ async function fallbackDecrypt(buf: Buffer): Promise<string> {
   return decipher.update(encrypted) + decipher.final('utf8')
 }
 
-export async function loadSession(): Promise<AuthSession | null> {
+async function loadSession(): Promise<AuthSession | null> {
   try {
     const exists = await fs
       .stat(sessionFilePath)
@@ -114,8 +115,8 @@ export async function loadSession(): Promise<AuthSession | null> {
 
     const encrypted = await fs.readFile(sessionFilePath)
     if (safeStorage.isEncryptionAvailable()) {
-      const rawString = safeStorage.decryptString(encrypted)
-      currentSession = JSON.parse(rawString)
+      const result = safeStorage.decryptString(encrypted)
+      currentSession = JSON.parse(result)
       return currentSession
     } else {
       log.warn(
@@ -163,6 +164,10 @@ function broadcastUserStatus(user: UserProfile | null) {
 }
 
 async function closeTempServer(): Promise<void> {
+  if (loginTimeout) {
+    clearTimeout(loginTimeout)
+    loginTimeout = null
+  }
   return new Promise((resolve) => {
     if (!tempServer) {
       resolve()
@@ -335,7 +340,22 @@ export async function initAuth() {
               code_challenge_method: 'S256'
             }).toString()
 
-          shell.openExternal(redirectUrl)
+          loginTimeout = setTimeout(
+            () => {
+              const rejectPending = pendingLoginReject
+              pendingLoginReject = null
+              void closeTempServer()
+              rejectPending?.(new Error('Sign-in timed out. Please try again.'))
+            },
+            5 * 60 * 1000
+          )
+
+          void shell.openExternal(redirectUrl).catch((error) => {
+            const rejectPending = pendingLoginReject
+            pendingLoginReject = null
+            void closeTempServer()
+            rejectPending?.(error instanceof Error ? error : new Error(String(error)))
+          })
         })
       })
     } finally {

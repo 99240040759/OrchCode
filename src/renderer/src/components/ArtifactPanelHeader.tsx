@@ -1,12 +1,6 @@
 import React from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
-import {
-  X,
-  Globe,
-  TerminalSquare,
-  ListTodo,
-  PanelRightClose
-} from 'lucide-react'
+import { X, Globe, TerminalSquare, ListTodo, PanelRightClose } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import type { EditorFile } from '../store/agentStore'
 import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
@@ -22,7 +16,7 @@ interface ArtifactPanelHeaderProps {
   isMac: boolean
 }
 
-export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
+const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
   panelMode,
   openFiles,
   hoveredTabPath,
@@ -35,9 +29,7 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
     <div
       className={`${styles.artifactPanelHeader} ${isMac ? styles.artifactPanelHeaderMac : styles.artifactPanelHeaderWin}`}
     >
-      <Tabs.List
-        className={styles.artifactPanelTabsList}
-      >
+      <Tabs.List className={styles.artifactPanelTabsList}>
         <Tabs.Trigger value="overview" className={styles.tabTrigger}>
           <ListTodo
             size={14}

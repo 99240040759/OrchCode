@@ -32,6 +32,17 @@ export const tabContentVisible = style({
   display: 'block'
 })
 
+export const editorLoading = style({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100%',
+  height: '100%',
+  color: 'var(--text-secondary)',
+  backgroundColor: 'var(--bg-app)',
+  fontSize: 'var(--font-size-sm)'
+})
+
 // ─── Media Preview ────────────────────────────────────────────────────────────
 
 export const mediaPreviewContainer = style({
@@ -159,36 +170,6 @@ export const tabCloseBtn = style({
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     color: 'var(--text-primary)'
   }
-})
-
-export const editorToolbarAction = style({
-  cursor: 'pointer',
-  color: 'var(--text-muted)',
-  display: 'flex',
-  alignItems: 'center',
-  transition: 'color 0.15s ease',
-  ':hover': {
-    color: 'var(--text-primary)'
-  }
-})
-
-export const editorToolbarActionActive = style({
-  color: 'var(--accent-blue)'
-})
-
-export const artifactIconPurple = style({
-  flexShrink: 0,
-  color: 'var(--accent-purple)'
-})
-
-export const artifactIconGreen = style({
-  flexShrink: 0,
-  color: 'var(--accent-green)'
-})
-
-export const artifactIconSecondary = style({
-  flexShrink: 0,
-  color: 'var(--text-secondary)'
 })
 
 // ─── Media Preview ────────────────────────────────────────────────────────────

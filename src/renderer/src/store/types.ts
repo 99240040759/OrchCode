@@ -1,5 +1,3 @@
-export type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
-
 export type StreamBlock =
   | { type: 'text'; content: string }
   | { type: 'reasoning'; content: string; durationMs?: number; isStreaming?: boolean }
@@ -13,7 +11,6 @@ export type StreamBlock =
       status: 'pending' | 'complete' | 'error'
     }
   | { type: 'error'; message: string }
-
 
 export interface ChatMessage {
   id: string
@@ -43,8 +40,6 @@ export interface FileChangeEntry {
   timestamp: number
 }
 
-export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
-
 export interface EditorFile {
   name: string
   path: string
@@ -53,9 +48,4 @@ export interface EditorFile {
   isBinary?: boolean
   mimeType?: string
   base64?: string
-}
-
-export interface ModelInfo {
-  id: string
-  name: string
 }

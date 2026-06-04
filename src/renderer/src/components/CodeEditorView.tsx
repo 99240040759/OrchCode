@@ -24,7 +24,7 @@ interface CodeEditorViewProps {
   handleSearchClick: () => void
 }
 
-export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
+const CodeEditorView: React.FC<CodeEditorViewProps> = ({
   displayFile,
   activeWorkspace,
   themeLoaded,
@@ -46,9 +46,7 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
             height={16}
             className={styles.fileIcon}
           />
-          <span className={styles.fileName}>
-            {getDisplayName(displayFile.name)}
-          </span>
+          <span className={styles.fileName}>{getDisplayName(displayFile.name)}</span>
           <span className={styles.fileDir}>
             {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
           </span>

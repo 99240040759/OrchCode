@@ -6,6 +6,22 @@ import { handleAgentStreamRequest, activeAbortControllers } from './agent/stream
 import { listArtifacts } from './agent/artifacts'
 import { updateThreadTitle } from './db'
 import { getCurrentSession } from './auth'
+import { z } from 'zod'
+
+const AttachmentSchema = z.object({
+  type: z.enum(['image', 'document']),
+  name: z.string().min(1).max(255),
+  mimeType: z.string().max(255).optional(),
+  base64: z.string().max(14_000_000)
+})
+
+const StreamRequestSchema = z.object({
+  promptText: z.string().max(200_000),
+  threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/),
+  mode: z.string().max(50).optional(),
+  modelType: z.string().max(255).optional(),
+  attachments: z.array(AttachmentSchema).max(8).optional()
+})
 
 export function registerAgentIpc() {
   ipcMain.handle(
@@ -16,11 +32,36 @@ export function registerAgentIpc() {
       threadId: string,
       _mode: string | undefined, // reserved, currently unused
       modelType?: string,
-      attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }>
+      attachments?: Array<{
+        type: 'image' | 'document'
+        name: string
+        mimeType?: string
+        base64: string
+      }>
     ) => {
       const session = getCurrentSession()
       if (!session) throw new Error('Unauthorized: Please sign in to use agents.')
-      return handleAgentStreamRequest(event, promptText, threadId, modelType, attachments)
+      const request = StreamRequestSchema.parse({
+        promptText,
+        threadId,
+        mode: _mode,
+        modelType,
+        attachments
+      })
+      const totalAttachmentBytes = (request.attachments ?? []).reduce(
+        (total, attachment) => total + Math.ceil((attachment.base64.length * 3) / 4),
+        0
+      )
+      if (totalAttachmentBytes > 25 * 1024 * 1024) {
+        throw new Error('Attachments exceed the 25 MB total limit.')
+      }
+      return handleAgentStreamRequest(
+        event,
+        request.promptText,
+        request.threadId,
+        request.modelType,
+        request.attachments
+      )
     }
   )
 
@@ -50,7 +91,7 @@ export function registerAgentIpc() {
       const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/generate-title`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+          Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ text })

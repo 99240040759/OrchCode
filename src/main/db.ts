@@ -1,8 +1,7 @@
-import { app } from 'electron'
-import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import log from 'electron-log'
 import crypto from 'node:crypto'
+import { getDatabasePath } from './paths'
 
 export interface ThreadEntry {
   id: string
@@ -25,7 +24,7 @@ let dbInstance: Database.Database | null = null
 function getDB(): Database.Database {
   if (dbInstance) return dbInstance
 
-  const dbPath = join(app.getPath('userData'), 'orch_db.sqlite')
+  const dbPath = getDatabasePath()
   log.info(`[db] Initializing better-sqlite3 database at: ${dbPath}`)
 
   dbInstance = new Database(dbPath)
@@ -88,7 +87,10 @@ export function checkpointDB() {
   }
 }
 
-export function getThreads(): (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })[] {
+export function getThreads(): (ThreadEntry & {
+  workspacePath?: string | null
+  accumulatedTokens?: number
+})[] {
   const db = getDB()
   return db
     .prepare(
@@ -111,7 +113,9 @@ export function getThread(
        LEFT JOIN thread_workspaces tw ON tw.threadId = t.id
        WHERE t.id = ?`
     )
-    .get(threadId) as (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number }) | null
+    .get(threadId) as
+    | (ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })
+    | null
 }
 
 export function getThreadMessages(threadId: string): ThreadMessage[] {
@@ -180,9 +184,15 @@ export function updateThreadTitle(threadId: string, title: string): boolean {
 
 export function updateThreadAccumulatedTokens(threadId: string, tokens: number): void {
   const db = getDB()
-  db.prepare(
-    'UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?'
-  ).run(tokens, threadId)
+  db.prepare('UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?').run(
+    tokens,
+    threadId
+  )
+}
+
+export function setThreadAccumulatedTokens(threadId: string, tokens: number): void {
+  const db = getDB()
+  db.prepare('UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
 }
 
 export function setThreadWorkspace(threadId: string, workspacePath: string): void {
@@ -239,7 +249,9 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
   const db = getDB()
   db.transaction(() => {
     // 1. Get all messages for this thread sorted by createdAt
-    const msgs = db.prepare('SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as { id: string; createdAt: string }[]
+    const msgs = db
+      .prepare('SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC')
+      .all(threadId) as { id: string; createdAt: string }[]
     if (msgs.length <= keepCount) return // nothing to compact
 
     const deleteCount = msgs.length - keepCount
@@ -257,10 +269,12 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
     const summaryDate = new Date(keptDate.getTime() - 1000).toISOString()
     const summaryId = crypto.randomUUID()
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO messages (id, threadId, role, content, data, createdAt)
       VALUES (?, ?, 'system', ?, NULL, ?)
-    `).run(
+    `
+    ).run(
       summaryId,
       threadId,
       `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`,
@@ -268,7 +282,9 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
     )
 
     // 4. Update the thread's updatedAt to reflect the change
-    db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
+    db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      threadId
+    )
   })()
 }
-

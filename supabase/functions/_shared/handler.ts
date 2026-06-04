@@ -51,16 +51,16 @@ export function createHandler(fn: HandlerFn) {
       'GEMMA_MODEL_NAME',
       'KIMI_MODEL_ID',
       'KIMI_MODEL_NAME',
-      'GLM_MODEL_ID',
-      'GLM_MODEL_NAME',
+      'GLM_4_5_FLASH_MODEL_ID',
+      'GLM_4_5_FLASH_MODEL_NAME',
+      'GLM_4_6V_FLASH_MODEL_ID',
+      'GLM_4_6V_FLASH_MODEL_NAME',
       'DEEPSEEK_FLASH_MODEL_ID',
       'DEEPSEEK_FLASH_MODEL_NAME',
       'BIG_PICKLE_MODEL_ID',
       'BIG_PICKLE_MODEL_NAME',
-      'MINIMAX_M25_MODEL_ID',
-      'MINIMAX_M25_MODEL_NAME',
-      'MINIMAX_M25_FREE_MODEL_ID',
-      'MINIMAX_M25_FREE_MODEL_NAME'
+      'MIMO_FREE_MODEL_ID',
+      'MIMO_FREE_MODEL_NAME'
     ]
     for (const key of envKeys) {
       const val = Deno.env.get(key)

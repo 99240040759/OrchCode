@@ -13,8 +13,7 @@ export {
   fileName,
   fileDir,
   toolbarGroup,
-  editorToolbarAction,
-  editorToolbarActionActive
+  editorToolbarAction
 } from './FileViewHeader.css'
 
 // ─── Markdown-specific ────────────────────────────────────────────────────────

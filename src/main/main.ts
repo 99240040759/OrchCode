@@ -1,10 +1,10 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
-import { initAuth, loadSession, getCurrentSession } from './auth'
+import { initAuth, getCurrentSession } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
@@ -14,6 +14,8 @@ import { registerThreadIpc } from './threadIpc'
 import { registerAgentIpc } from './agentIpc'
 import { registerBrowserTerminalIpc, cleanupAllPtys } from './browserTerminalIpc'
 import WindowManager from './windowManager'
+import { stopBrowserAgentWorker } from './tools'
+import { APP_ID } from './paths'
 initSentry({
   dsn: process.env.SENTRY_DSN,
   enabled: !!process.env.SENTRY_DSN && (app.isPackaged || process.env.NODE_ENV === 'production'),
@@ -37,6 +39,11 @@ let mainWindow: BrowserWindow | null = null
 let onboardingWindow: BrowserWindow | null = null
 
 function createOnboardingWindow(): BrowserWindow {
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.show()
+    onboardingWindow.focus()
+    return onboardingWindow
+  }
   onboardingWindow = new BrowserWindow({
     width: 480,
     height: 680,
@@ -79,6 +86,11 @@ function createOnboardingWindow(): BrowserWindow {
 }
 
 function createMainWindow(): BrowserWindow {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    return mainWindow
+  }
   const mainWindowState = windowStateKeeper({ defaultWidth: 1280, defaultHeight: 800 })
 
   mainWindow = new BrowserWindow({
@@ -123,9 +135,10 @@ function createMainWindow(): BrowserWindow {
       try {
         browserView.webContents.close()
       } catch {}
-       WindowManager.setBrowserView(null)
+      WindowManager.setBrowserView(null)
     }
     cleanupAllPtys()
+    void stopBrowserAgentWorker()
     mainWindow = null
     WindowManager.setMainWindow(null)
   })
@@ -139,10 +152,22 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.orchcode.app')
+  electronApp.setAppUserModelId(APP_ID)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+          void shell.openExternal(parsed.toString())
+        }
+      } catch {}
+      return { action: 'deny' }
+    })
   })
 
   log.info('[main] App ready — initializing modules')
@@ -154,9 +179,8 @@ app.whenReady().then(async () => {
   registerBrowserTerminalIpc()
 
   initUpdater()
-  initAuth()
-
-  const session = await loadSession()
+  await initAuth()
+  const session = getCurrentSession()
   if (session) {
     createMainWindow()
   } else {
@@ -201,5 +225,6 @@ app.on('window-all-closed', async () => {
 
 app.on('before-quit', () => {
   cleanupAllPtys()
+  void stopBrowserAgentWorker()
   checkpointDB()
 })

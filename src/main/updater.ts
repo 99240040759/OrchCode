@@ -34,11 +34,6 @@ export function initUpdater() {
   ipcMain.handle('updater:get-status', () => currentStatus)
   ipcMain.handle('app:get-version', () => app.getVersion())
 
-  if (!app.isPackaged) {
-    log.info('[updater] Dev environment detected. Skipping update checks.')
-    return
-  }
-
   ipcMain.handle('updater:check', () => {
     log.info('[updater] Manual check requested')
     if (process.platform === 'win32') {
@@ -61,39 +56,44 @@ export function initUpdater() {
     }
   })
 
-  if (process.platform === 'win32') {
-    autoUpdater.logger = log
-    autoUpdater.autoDownload = true
-
-    autoUpdater.on('checking-for-update', () => {
-      sendStatus({ status: 'checking' })
-    })
-
-    autoUpdater.on('update-available', (info) => {
-      sendStatus({ status: 'available', version: info.version })
-    })
-
-    autoUpdater.on('update-not-available', (info) => {
-      sendStatus({ status: 'idle', version: info.version })
-    })
-
-    autoUpdater.on('download-progress', (progressObj) => {
-      sendStatus({
-        status: 'downloading',
-        version: currentStatus.version || 'latest',
-        progress: Math.round(progressObj.percent)
-      })
-    })
-
-    autoUpdater.on('update-downloaded', (info) => {
-      sendStatus({ status: 'downloaded', version: info.version })
-    })
-
-    autoUpdater.on('error', (err) => {
-      log.error('[updater] electron-updater error:', err)
-      sendStatus({ status: 'error', error: err.message })
-    })
+  if (!app.isPackaged) {
+    log.info('[updater] Dev environment detected. Skipping update checks.')
+    return
   }
+
+  if (process.platform !== 'win32') return
+
+  autoUpdater.logger = log
+  autoUpdater.autoDownload = true
+
+  autoUpdater.on('checking-for-update', () => {
+    sendStatus({ status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    sendStatus({ status: 'available', version: info.version })
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    sendStatus({ status: 'idle', version: info.version })
+  })
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    sendStatus({
+      status: 'downloading',
+      version: currentStatus.version || 'latest',
+      progress: Math.round(progressObj.percent)
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    sendStatus({ status: 'downloaded', version: info.version })
+  })
+
+  autoUpdater.on('error', (err) => {
+    log.error('[updater] electron-updater error:', err)
+    sendStatus({ status: 'error', error: err.message })
+  })
 
   setTimeout(() => {
     log.info('[updater] Initial background update check')

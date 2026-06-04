@@ -1,6 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { IpcRendererEvent } from 'electron'
+import type {
+  AgentBridge,
+  ArtifactsBridge,
+  AuthBridge,
+  BrowserBridge,
+  DialogBridge,
+  TerminalBridge,
+  ThreadsBridge,
+  UpdaterBridge,
+  WorkspaceBridge
+} from './index.d'
+import type { AgentAttachment, AgentStreamChunk } from './sharedTypes'
 
-const workspaceBridge = {
+const workspaceBridge: WorkspaceBridge = {
   selectWorkspace: (conversationId: string) =>
     ipcRenderer.invoke('workspace:select', conversationId),
   setActiveWorkspace: (conversationId: string, workspacePath: string) =>
@@ -15,25 +28,25 @@ const workspaceBridge = {
     ipcRenderer.invoke('file:read-original', filePath, conversationId)
 }
 
-const agentBridge = {
+const agentBridge: AgentBridge = {
   streamAgent: (
     promptText: string,
     threadId: string,
     mode?: string,
     modelType?: string,
-    attachments?: any[]
+    attachments?: AgentAttachment[]
   ) =>
     ipcRenderer.invoke('agent:stream-request', promptText, threadId, mode, modelType, attachments),
   stopAgentStream: (threadId?: string) => ipcRenderer.invoke('agent:stream-stop', threadId),
-  onAgentChunk: (callback: (chunk: any) => void) => {
-    const listener = (_event: any, chunk: any) => callback(chunk)
+  onAgentChunk: (callback: (chunk: AgentStreamChunk) => void) => {
+    const listener = (_event: IpcRendererEvent, chunk: AgentStreamChunk) => callback(chunk)
     ipcRenderer.on('agent:stream-chunk', listener)
     return () => ipcRenderer.removeListener('agent:stream-chunk', listener)
   },
   getAvailableModels: () => ipcRenderer.invoke('models:get-available')
 }
 
-const threadsBridge = {
+const threadsBridge: ThreadsBridge = {
   getConversationId: () => ipcRenderer.invoke('mastra:get-conversation-id'),
   newConversation: () => ipcRenderer.invoke('mastra:new-conversation'),
   getThreads: () => ipcRenderer.invoke('mastra:get-threads'),
@@ -48,16 +61,17 @@ const threadsBridge = {
   setActiveSession: (threadId: string) => ipcRenderer.invoke('session:set-active', threadId)
 }
 
-const artifactsBridge = {
+const artifactsBridge: ArtifactsBridge = {
   listArtifacts: (conversationId: string) => ipcRenderer.invoke('artifacts:list', conversationId),
-  onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: any[] }) => void) => {
-    const listener = (_event: any, data: { conversationId: string; artifacts: any[] }) => callback(data)
+  onArtifactsChanged: (callback) => {
+    const listener = (_event: IpcRendererEvent, data: Parameters<typeof callback>[0]) =>
+      callback(data)
     ipcRenderer.on('artifacts:changed', listener)
     return () => ipcRenderer.removeListener('artifacts:changed', listener)
   }
 }
 
-const terminalBridge = {
+const terminalBridge: TerminalBridge = {
   createTerminal: (opts: { cols: number; rows: number; cwd?: string; conversationId?: string }) =>
     ipcRenderer.invoke('terminal:create', opts),
   terminalInput: (opts: { id: string; data: string }) => ipcRenderer.invoke('terminal:input', opts),
@@ -65,18 +79,20 @@ const terminalBridge = {
     ipcRenderer.invoke('terminal:resize', opts),
   closeTerminal: (opts: { id: string }) => ipcRenderer.invoke('terminal:close', opts),
   onTerminalData: (callback: (payload: { id: string; data: string }) => void) => {
-    const listener = (_event: any, payload: any) => callback(payload)
+    const listener = (_event: IpcRendererEvent, payload: Parameters<typeof callback>[0]) =>
+      callback(payload)
     ipcRenderer.on('terminal:data', listener)
     return () => ipcRenderer.removeListener('terminal:data', listener)
   },
   onTerminalExit: (callback: (payload: { id: string; exitCode: number }) => void) => {
-    const listener = (_event: any, payload: any) => callback(payload)
+    const listener = (_event: IpcRendererEvent, payload: Parameters<typeof callback>[0]) =>
+      callback(payload)
     ipcRenderer.on('terminal:exit', listener)
     return () => ipcRenderer.removeListener('terminal:exit', listener)
   }
 }
 
-const browserBridge = {
+const browserBridge: BrowserBridge = {
   openBrowser: (opts: {
     url: string
     bounds: { x: number; y: number; width: number; height: number }
@@ -89,18 +105,18 @@ const browserBridge = {
     ipcRenderer.invoke('browser:resize', bounds),
   closeBrowser: () => ipcRenderer.invoke('browser:close'),
   onBrowserTitleUpdated: (callback: (title: string) => void) => {
-    const listener = (_event: any, title: string) => callback(title)
+    const listener = (_event: IpcRendererEvent, title: string) => callback(title)
     ipcRenderer.on('browser:title-updated', listener)
     return () => ipcRenderer.removeListener('browser:title-updated', listener)
   },
   onBrowserUrlChanged: (callback: (url: string) => void) => {
-    const listener = (_event: any, url: string) => callback(url)
+    const listener = (_event: IpcRendererEvent, url: string) => callback(url)
     ipcRenderer.on('browser:url-changed', listener)
     return () => ipcRenderer.removeListener('browser:url-changed', listener)
   }
 }
 
-const dialogBridge = {
+const dialogBridge: DialogBridge = {
   showConfirmDialog: (opts: {
     message: string
     detail?: string
@@ -110,26 +126,29 @@ const dialogBridge = {
   }) => ipcRenderer.invoke('dialog:confirm', opts)
 }
 
-const updaterBridge = {
+const updaterBridge: UpdaterBridge = {
+  platform: process.platform as UpdaterBridge['platform'],
   getUpdateStatus: () => ipcRenderer.invoke('updater:get-status'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
   openMacRelease: () => ipcRenderer.invoke('updater:open-mac-release'),
-  onUpdateStatusChanged: (callback: (status: any) => void) => {
-    const listener = (_event: any, status: any) => callback(status)
+  onUpdateStatusChanged: (callback) => {
+    const listener = (_event: IpcRendererEvent, status: Parameters<typeof callback>[0]) =>
+      callback(status)
     ipcRenderer.on('updater:status-changed', listener)
     return () => ipcRenderer.removeListener('updater:status-changed', listener)
   },
   getAppVersion: () => ipcRenderer.invoke('app:get-version')
 }
 
-const authBridge = {
+const authBridge: AuthBridge = {
   startGoogleAuth: () => ipcRenderer.invoke('auth:login'),
   logout: () => ipcRenderer.invoke('auth:logout'),
   getAuthUser: () => ipcRenderer.invoke('auth:get-user'),
   openMainAndCloseOnboarding: () => ipcRenderer.invoke('auth:open-main-and-close-onboarding'),
-  onAuthStatusChanged: (callback: (user: any) => void) => {
-    const listener = (_event: any, user: any) => callback(user)
+  onAuthStatusChanged: (callback) => {
+    const listener = (_event: IpcRendererEvent, user: Parameters<typeof callback>[0]) =>
+      callback(user)
     ipcRenderer.on('auth:status-changed', listener)
     return () => ipcRenderer.removeListener('auth:status-changed', listener)
   }

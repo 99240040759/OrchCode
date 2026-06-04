@@ -23,7 +23,7 @@ globalStyle('.app-content-wrapper', {
 
 globalStyle('.app-container', {
   display: 'flex',
-  height: 'calc(100vh - var(--titlebar-height))',
+  height: '100vh',
   width: '100vw',
   position: 'relative'
 })

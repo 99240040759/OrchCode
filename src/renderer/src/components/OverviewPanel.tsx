@@ -1,11 +1,7 @@
 import React from 'react'
 import * as ScrollArea from '@radix-ui/react-scroll-area'
 import Skeleton from 'react-loading-skeleton'
-import {
-  Info,
-  Package,
-  FileCode
-} from 'lucide-react'
+import { Info, Package, FileCode } from 'lucide-react'
 import { FileIcon } from './ToolCallBlock'
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../../preload/index.d'
@@ -21,7 +17,7 @@ interface OverviewPanelProps {
   handleFileChangeClick: (fc: FileChangeEntry) => void
 }
 
-export const OverviewPanel: React.FC<OverviewPanelProps> = ({
+const OverviewPanel: React.FC<OverviewPanelProps> = ({
   artifacts,
   userFiles,
   loading,
@@ -34,9 +30,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
         <div className={styles.overviewContainer}>
           <div className={styles.overviewHeader}>
             <Info size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            <h2 className={styles.overviewTitle}>
-              Session Overview
-            </h2>
+            <h2 className={styles.overviewTitle}>Session Overview</h2>
           </div>
 
           <div className={styles.overviewGrid}>
@@ -57,9 +51,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                     style={{ marginBottom: 6, borderRadius: 4 }}
                   />
                 ) : artifacts.length === 0 ? (
-                  <div className={styles.emptyText}>
-                    No artifacts created yet.
-                  </div>
+                  <div className={styles.emptyText}>No artifacts created yet.</div>
                 ) : (
                   artifacts.map((art) => (
                     <div
@@ -68,9 +60,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                       className={styles.overviewItem}
                     >
                       {getArtifactIcon(art.name, 15)}
-                      <span className={styles.itemText}>
-                        {getDisplayName(art.name)}
-                      </span>
+                      <span className={styles.itemText}>{getDisplayName(art.name)}</span>
                     </div>
                   ))
                 )}
@@ -86,9 +76,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
               </div>
               <div className={styles.panelContent}>
                 {userFiles.length === 0 ? (
-                  <div className={styles.emptyText}>
-                    No workspace files modified.
-                  </div>
+                  <div className={styles.emptyText}>No workspace files modified.</div>
                 ) : (
                   userFiles.map((fc) => (
                     <div
@@ -97,24 +85,14 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                       className={styles.overviewItem}
                     >
                       <FileIcon fileName={fc.name} size={13} />
-                      <span className={styles.itemText}>
-                        {fc.name}
-                      </span>
-                      {fc.lineRange && (
-                        <span className={styles.itemLineRange}>
-                          {fc.lineRange}
-                        </span>
-                      )}
+                      <span className={styles.itemText}>{fc.name}</span>
+                      {fc.lineRange && <span className={styles.itemLineRange}>{fc.lineRange}</span>}
                       <div className={styles.diffStats}>
                         {fc.additions > 0 && (
-                          <span className={styles.diffAdd}>
-                            +{fc.additions}
-                          </span>
+                          <span className={styles.diffAdd}>+{fc.additions}</span>
                         )}
                         {fc.deletions > 0 && (
-                          <span className={styles.diffSub}>
-                            -{fc.deletions}
-                          </span>
+                          <span className={styles.diffSub}>-{fc.deletions}</span>
                         )}
                       </div>
                     </div>

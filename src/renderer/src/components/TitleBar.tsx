@@ -10,7 +10,7 @@ interface TitleBarProps {
   workspaceName?: string
 }
 
-const isMac = navigator.userAgent.toLowerCase().includes('mac')
+const isMac = window.updaterBridge.platform === 'darwin'
 
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
@@ -159,7 +159,10 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
         title={status === 'error' && error ? error : undefined}
       >
         {status === 'downloading' && (
-          <div className={styles.titlebarUpdateProgressBar} style={{ width: `${progress ?? 0}%` }} />
+          <div
+            className={styles.titlebarUpdateProgressBar}
+            style={{ width: `${progress ?? 0}%` }}
+          />
         )}
         <span className={styles.titlebarUpdateText}>{text}</span>
       </div>
@@ -182,9 +185,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
         )}
       </div>
 
-      <div className={styles.titlebarCenter}>
-        {workspaceName ? workspaceName : title}
-      </div>
+      <div className={styles.titlebarCenter}>{workspaceName ? workspaceName : title}</div>
 
       <div
         className={`${styles.titlebarRight} ${isMac ? styles.titlebarRightMac : styles.titlebarRightWin}`}

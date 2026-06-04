@@ -1,15 +1,21 @@
 import 'dotenv/config'
 import crypto from 'node:crypto'
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog } from 'electron'
+import { promises as fs } from 'node:fs'
 import log from 'electron-log'
-import { getOrCreateWorkspaceContext, updateWorkspacePath } from './workspace'
 import {
-  getThreads,
-  getThread,
-  getThreadMessages,
-  deleteThread,
-  getThreadWorkspace
-} from './db'
+  clearWorkspaceContext,
+  getOrCreateWorkspaceContext,
+  updateWorkspacePath
+} from './workspace'
+import { getThreads, getThread, getThreadMessages, deleteThread, getThreadWorkspace } from './db'
+import WindowManager from './windowManager'
+import { getConversationPath } from './paths'
+import {
+  parseAssistantMessageData,
+  parseUserMessageData,
+  serializeMessageData
+} from './agent/schema'
 
 export function registerThreadIpc() {
   ipcMain.handle('mastra:get-conversation-id', () => {
@@ -52,7 +58,18 @@ export function registerThreadIpc() {
 
   ipcMain.handle('mastra:get-thread-messages', async (_event, threadId: string) => {
     try {
-      return await getThreadMessages(threadId)
+      return getThreadMessages(threadId).map((message) => {
+        const parsed =
+          message.role === 'assistant'
+            ? parseAssistantMessageData(message.data)
+            : message.role === 'user'
+              ? parseUserMessageData(message.data)
+              : undefined
+        return {
+          ...message,
+          data: parsed ? serializeMessageData(parsed) : undefined
+        }
+      })
     } catch (err) {
       log.error('[main] getThreadMessages:', err)
       return []
@@ -61,7 +78,16 @@ export function registerThreadIpc() {
 
   ipcMain.handle('mastra:delete-thread', async (_event, threadId: string) => {
     try {
-      return await deleteThread(threadId)
+      const workspacePath = getThreadWorkspace(threadId)
+      const context = clearWorkspaceContext(threadId)
+      const deleted = deleteThread(threadId)
+      if (!workspacePath && context?.isUserWorkspace !== true) {
+        await fs.rm(getConversationPath(threadId), {
+          recursive: true,
+          force: true
+        })
+      }
+      return deleted
     } catch (err) {
       log.error('[main] deleteThread:', err)
       return false
@@ -96,8 +122,8 @@ export function registerThreadIpc() {
         cancelId?: number
       }
     ) => {
-      const mainWindow = (globalThis as unknown as { mainWindow?: BrowserWindow }).mainWindow
-      if (!mainWindow) return null
+      const mainWindow = WindowManager.getMainWindow()
+      if (!mainWindow || mainWindow.isDestroyed()) return opts.cancelId ?? 0
       const result = await dialog.showMessageBox(mainWindow, {
         type: 'question',
         buttons: opts.buttons || ['Cancel', 'OK'],

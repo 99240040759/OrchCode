@@ -8,9 +8,15 @@ import {
   sessionTokensAtom,
   filesChangedAtom,
   isThreadLoadingAtom,
-  type ChatMessage
+  openFilesAtom,
+  activeEditorFileAtom,
+  artifactsAtom,
+  artifactPanelModeAtom,
+  agentRunStateAtom,
+  type ChatMessage,
+  type StreamBlock
 } from '../store/agentStore'
-import type { ThreadEntry } from '../../../preload/index.d'
+import type { ThreadEntry, ThreadMessage } from '../../../preload/index.d'
 
 export function useThreads() {
   // activeThreadIdAtom is the single unified ID atom (conversationIdAtom is the same atom)
@@ -23,6 +29,19 @@ export function useThreads() {
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const setFilesChanged = useSetAtom(filesChangedAtom)
   const setIsThreadLoading = useSetAtom(isThreadLoadingAtom)
+  const setOpenFiles = useSetAtom(openFilesAtom)
+  const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
+  const setArtifacts = useSetAtom(artifactsAtom)
+  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  const setAgentRunState = useSetAtom(agentRunStateAtom)
+
+  const resetThreadScopedPanels = useCallback(() => {
+    setFilesChanged([])
+    setOpenFiles([])
+    setActiveEditorFile(null)
+    setArtifacts([])
+    setArtifactPanelMode('overview')
+  }, [setFilesChanged, setOpenFiles, setActiveEditorFile, setArtifacts, setArtifactPanelMode])
 
   // Ref to track the active selection across async calls to cancel stale ones
   const activeRef = useRef<string>('')
@@ -43,11 +62,15 @@ export function useThreads() {
   const selectThread = useCallback(
     async (threadId: string) => {
       if (!threadId) return
+      if (activeThreadId && activeThreadId !== threadId) {
+        await window.agentBridge.stopAgentStream(activeThreadId).catch(() => {})
+        setAgentRunState('idle')
+      }
 
       // Reset UI state immediately
       setMessages([])
       setSessionTokens(0)
-      setFilesChanged([])
+      resetThreadScopedPanels()
       setIsThreadLoading(true)
 
       // Track intent — any later stale callback will bail out
@@ -86,15 +109,19 @@ export function useThreads() {
 
         if (rawMessages && rawMessages.length > 0) {
           const chatMsgs: ChatMessage[] = rawMessages
-            .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-            .map((m: any, idx: number) => ({
+            .filter(
+              (m): m is ThreadMessage & { role: 'user' | 'assistant' } =>
+                m.role === 'user' || m.role === 'assistant'
+            )
+            .map((m, idx: number) => ({
               id: m.id ?? `msg-${idx}`,
               role: m.role as 'user' | 'assistant',
               content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
               orderedBlocks: m.data
                 ? (() => {
                     try {
-                      return JSON.parse(m.data)
+                      const parsed: unknown = JSON.parse(m.data)
+                      return Array.isArray(parsed) ? (parsed as StreamBlock[]) : undefined
                     } catch {
                       return undefined
                     }
@@ -131,9 +158,11 @@ export function useThreads() {
       setActiveThreadId,
       setMessages,
       setSessionTokens,
-      setFilesChanged,
+      resetThreadScopedPanels,
       setIsThreadLoading,
       setActiveWorkspace,
+      activeThreadId,
+      setAgentRunState,
       threads
     ]
   )
@@ -141,6 +170,8 @@ export function useThreads() {
   const newConversation = useCallback(async () => {
     try {
       const { conversationId: newId } = await window.threadsBridge.newConversation()
+      if (activeThreadId) await window.agentBridge.stopAgentStream(activeThreadId).catch(() => {})
+      setAgentRunState('idle')
       if (activeWorkspace?.path) {
         await window.workspaceBridge.setActiveWorkspace(newId, activeWorkspace.path)
       }
@@ -148,7 +179,7 @@ export function useThreads() {
       setActiveThreadId(newId)
       setMessages([])
       setSessionTokens(0)
-      setFilesChanged([])
+      resetThreadScopedPanels()
       await loadThreads()
       return newId
     } catch (err) {
@@ -157,10 +188,12 @@ export function useThreads() {
     }
   }, [
     activeWorkspace,
+    activeThreadId,
     setActiveThreadId,
     setMessages,
     setSessionTokens,
-    setFilesChanged,
+    resetThreadScopedPanels,
+    setAgentRunState,
     loadThreads
   ])
 
@@ -170,16 +203,28 @@ export function useThreads() {
         await window.threadsBridge.deleteThread(threadId)
         setThreads((prev: ThreadEntry[]) => prev.filter((t) => t.id !== threadId))
         if (activeThreadId === threadId) {
+          await window.agentBridge.stopAgentStream(threadId).catch(() => {})
+          setAgentRunState('idle')
           setActiveThreadId('')
           setMessages([])
           setSessionTokens(0)
           setActiveWorkspace(null)
+          resetThreadScopedPanels()
         }
       } catch (err) {
         console.error('[useThreads] Delete thread error:', err)
       }
     },
-    [activeThreadId, setThreads, setActiveThreadId, setMessages, setSessionTokens, setActiveWorkspace]
+    [
+      activeThreadId,
+      setThreads,
+      setActiveThreadId,
+      setMessages,
+      setSessionTokens,
+      setActiveWorkspace,
+      resetThreadScopedPanels,
+      setAgentRunState
+    ]
   )
 
   const switchWorkspace = useCallback(
@@ -193,6 +238,7 @@ export function useThreads() {
         }
         const ctx = await window.workspaceBridge.setActiveWorkspace(currentId, path)
         if (ctx) {
+          resetThreadScopedPanels()
           setActiveWorkspace({
             name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
             path: ctx.rootPath
@@ -205,7 +251,7 @@ export function useThreads() {
         return null
       }
     },
-    [activeThreadId, newConversation, setActiveWorkspace]
+    [activeThreadId, newConversation, setActiveWorkspace, resetThreadScopedPanels]
   )
 
   const closeAndDeleteWorkspace = useCallback(
@@ -214,11 +260,15 @@ export function useThreads() {
         const success = await window.workspaceBridge.closeAndDeleteWorkspace(path)
         if (success) {
           if (activeWorkspace?.path === path) {
+            if (activeThreadId) {
+              await window.agentBridge.stopAgentStream(activeThreadId).catch(() => {})
+            }
+            setAgentRunState('idle')
             setActiveWorkspace(null)
             setActiveThreadId('')
             setMessages([])
             setSessionTokens(0)
-            setFilesChanged([])
+            resetThreadScopedPanels()
           }
           await loadThreads()
         }
@@ -228,7 +278,17 @@ export function useThreads() {
         return false
       }
     },
-    [activeWorkspace, setActiveWorkspace, loadThreads, setActiveThreadId, setMessages, setSessionTokens, setFilesChanged]
+    [
+      activeWorkspace,
+      setActiveWorkspace,
+      loadThreads,
+      setActiveThreadId,
+      setMessages,
+      setSessionTokens,
+      resetThreadScopedPanels,
+      activeThreadId,
+      setAgentRunState
+    ]
   )
 
   const openWorkspace = useCallback(async () => {
@@ -241,7 +301,7 @@ export function useThreads() {
       }
       const ctx = await window.workspaceBridge.selectWorkspace(currentId)
       if (ctx) {
-        await window.workspaceBridge.setActiveWorkspace(currentId, ctx.rootPath)
+        resetThreadScopedPanels()
         setActiveWorkspace({
           name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
           path: ctx.rootPath
@@ -254,7 +314,7 @@ export function useThreads() {
       console.error('[useThreads] Open workspace error:', err)
       return null
     }
-  }, [activeThreadId, newConversation, setActiveWorkspace, loadThreads])
+  }, [activeThreadId, newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels])
 
   return {
     loadThreads,

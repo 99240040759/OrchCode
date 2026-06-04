@@ -7,6 +7,8 @@ import { rgPath } from '@vscode/ripgrep'
 import log from 'electron-log'
 import { getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType } from '../workspace'
 
+const MAX_TOOL_FILE_READ_BYTES = 25 * 1024 * 1024
+
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
   if (!ctx)
@@ -17,6 +19,14 @@ function resolveWorkspace(convId: string) {
 }
 
 function sliceLines(allLines: string[], startLine: number, endLine: number) {
+  if (endLine < startLine) {
+    throw new Error(`Invalid line range: endLine (${endLine}) is before startLine (${startLine}).`)
+  }
+  if (startLine > allLines.length || endLine > allLines.length) {
+    throw new Error(
+      `Invalid line range ${startLine}-${endLine}: file contains ${allLines.length} lines.`
+    )
+  }
   const start = Math.max(1, startLine)
   const end = Math.min(allLines.length, endLine)
   const beforeLines = allLines.slice(0, start - 1)
@@ -103,6 +113,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         const safePath = safe(absolutePath)
         const stat = await fs.stat(safePath)
         if (!stat.isFile()) throw new Error(`Not a file: "${safePath}"`)
+        if (stat.size > MAX_TOOL_FILE_READ_BYTES) {
+          throw new Error('File exceeds the 25 MB tool read limit.')
+        }
 
         const rawBuffer = await fs.readFile(safePath)
 
@@ -151,7 +164,10 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
           return {
             type: 'content',
             value: [
-              { type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Image data omitted from tool result because this model does not support vision.` }
+              {
+                type: 'text',
+                text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Image data omitted from tool result because this model does not support vision.`
+              }
             ]
           }
         }
@@ -283,6 +299,14 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         let normalizedRaw = raw.replace(/\r\n/g, '\n')
 
         const sorted = [...replacementChunks].sort((a, b) => b.startLine - a.startLine)
+        const ascending = [...replacementChunks].sort((a, b) => a.startLine - b.startLine)
+        for (let i = 1; i < ascending.length; i++) {
+          if (ascending[i].startLine <= ascending[i - 1].endLine) {
+            throw new Error(
+              `Replacement chunks overlap at lines ${ascending[i - 1].startLine}-${ascending[i - 1].endLine} and ${ascending[i].startLine}-${ascending[i].endLine}.`
+            )
+          }
+        }
         const results: { startLine: number; endLine: number }[] = []
 
         for (const chunk of sorted) {
@@ -344,10 +368,17 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
 
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
           if (result.exitCode === 1) return { success: true, results: 'No matches found.' }
-          if ((result as { code?: string }).code === 'ENOENT' || result.stderr?.includes('not found') || result.stderr?.includes('No such file')) {
+          if (
+            (result as { code?: string }).code === 'ENOENT' ||
+            result.stderr?.includes('not found') ||
+            result.stderr?.includes('No such file')
+          ) {
             return { success: false, error: 'ripgrep (rg) not found.' }
           }
-          return { success: false, error: result.stderr || `ripgrep execution failed with exit code ${result.exitCode}` }
+          return {
+            success: false,
+            error: result.stderr || `ripgrep execution failed with exit code ${result.exitCode}`
+          }
         }
 
         const output = result.stdout.trim()
@@ -356,7 +387,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
           .split('\n')
           .map((line) => {
             const normalized = line.replace(/\\/g, '/')
-            return normalized.startsWith(rootPrefix) ? normalized.slice(rootPrefix.length) : normalized
+            return normalized.startsWith(rootPrefix)
+              ? normalized.slice(rootPrefix.length)
+              : normalized
           })
           .join('\n')
 

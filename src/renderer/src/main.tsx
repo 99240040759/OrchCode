@@ -17,7 +17,7 @@ try {
   const workerApi = getSharedWorker()
   if (workerApi) {
     workerApi.sendTelemetryEvent('app_launch', {
-      platform: navigator.userAgent.includes('Mac') ? 'macos' : 'windows'
+      platform: window.updaterBridge.platform
     })
   }
 } catch (err) {

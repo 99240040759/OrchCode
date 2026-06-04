@@ -12,16 +12,14 @@ import log from 'electron-log'
 import WindowManager from '../windowManager'
 import { getAvailableModels, resolveModel } from './models'
 import { checkModelVisionSupport, checkModelNativeFileSupport } from '../vision'
-import {
-  getOrCreateWorkspaceContext,
-  getWorkspaceContext,
-  updateWorkspacePath
-} from '../workspace'
+import { getOrCreateWorkspaceContext, getWorkspaceContext, updateWorkspacePath } from '../workspace'
 import { createCoreTools, browserTools } from '../tools'
 import {
   getThreadMessages,
+  getThread,
   saveMessage,
   updateThreadAccumulatedTokens,
+  setThreadAccumulatedTokens,
   getThreadWorkspace,
   setThreadWorkspace,
   addOpenedWorkspace
@@ -50,15 +48,22 @@ function buildMessagesFromHistory(
             const parts: unknown[] = [{ type: 'text', text: m.content }]
             for (const att of dataObj.attachments) {
               const mime = att.mimeType || 'application/octet-stream'
-              const isText = mime.startsWith('text/') || mime.endsWith('/json') || mime.endsWith('+json') || mime.endsWith('/xml') || mime.endsWith('/javascript')
-              
+              const isText =
+                mime.startsWith('text/') ||
+                mime.endsWith('/json') ||
+                mime.endsWith('+json') ||
+                mime.endsWith('/xml') ||
+                mime.endsWith('/javascript')
+
               if (isText) {
                 try {
                   const textContent = Buffer.from(att.base64, 'base64').toString('utf-8')
-                  ;(parts[0] as { text: string }).text += `\n\n── Attachment Text: ${att.name} ──\n${textContent}`
+                  ;(parts[0] as { text: string }).text +=
+                    `\n\n── Attachment Text: ${att.name} ──\n${textContent}`
                 } catch (decodeErr) {
                   log.error(`[main] Failed to decode attachment text:`, decodeErr)
-                  ;(parts[0] as { text: string }).text += `\n\n[Attachment: ${att.name} - Failed to decode text]`
+                  ;(parts[0] as { text: string }).text +=
+                    `\n\n[Attachment: ${att.name} - Failed to decode text]`
                 }
               } else if (mime.startsWith('image/')) {
                 if (modelSupportsVision) {
@@ -68,7 +73,8 @@ function buildMessagesFromHistory(
                     mimeType: mime
                   })
                 } else {
-                  ;(parts[0] as { text: string }).text += `\n\n[Attachment (Image): ${att.name} - Omitted from context because this model does not support vision]`
+                  ;(parts[0] as { text: string }).text +=
+                    `\n\n[Attachment (Image): ${att.name} - Omitted from context because this model does not support vision]`
                 }
               } else {
                 if (modelSupportsNativeFiles) {
@@ -78,7 +84,8 @@ function buildMessagesFromHistory(
                     mimeType: mime
                   })
                 } else {
-                  ;(parts[0] as { text: string }).text += `\n\n[Attachment (File): ${att.name} - Omitted because this model does not support file attachments]`
+                  ;(parts[0] as { text: string }).text +=
+                    `\n\n[Attachment (File): ${att.name} - Omitted because this model does not support file attachments]`
                 }
               }
             }
@@ -116,9 +123,14 @@ function buildMessagesFromHistory(
                   outputVal &&
                   typeof outputVal === 'object' &&
                   'type' in outputVal &&
-                  ['text', 'json', 'execution-denied', 'error-text', 'error-json', 'content'].includes(
-                    (outputVal as { type?: string }).type || ''
-                  )
+                  [
+                    'text',
+                    'json',
+                    'execution-denied',
+                    'error-text',
+                    'error-json',
+                    'content'
+                  ].includes((outputVal as { type?: string }).type || '')
                 ) {
                   formattedOutput = outputVal
                 } else if (
@@ -127,19 +139,30 @@ function buildMessagesFromHistory(
                   (outputVal as { filePath?: string })?.filePath
                 ) {
                   try {
-                    const cleanPath = (outputVal as { filePath: string }).filePath.replace('file://', '')
+                    const cleanPath = (outputVal as { filePath: string }).filePath.replace(
+                      'file://',
+                      ''
+                    )
                     const base64Image = readFileSync(cleanPath).toString('base64')
                     formattedOutput = {
                       type: 'content',
                       value: [
                         { type: 'image-data', data: base64Image, mediaType: 'image/png' },
-                        { type: 'text', text: `Screenshot: ${(outputVal as { filePath: string }).filePath}` }
+                        {
+                          type: 'text',
+                          text: `Screenshot: ${(outputVal as { filePath: string }).filePath}`
+                        }
                       ]
                     }
                   } catch (err: unknown) {
                     formattedOutput = {
                       type: 'content',
-                      value: [{ type: 'text', text: `Failed to read screenshot: ${(err as Error).message}` }]
+                      value: [
+                        {
+                          type: 'text',
+                          text: `Failed to read screenshot: ${(err as Error).message}`
+                        }
+                      ]
                     }
                   }
                 } else if (
@@ -195,26 +218,16 @@ function buildMessagesFromHistory(
         pairedCalls.some((c) => c.toolCallId === r.toolCallId)
       )
 
-      let finalAssistantContent: string | unknown[]
       if (pairedCalls.length > 0) {
-        const parts: unknown[] = []
-        if (textContent) parts.push({ type: 'text', text: textContent })
-        for (const call of pairedCalls) parts.push(call)
-        finalAssistantContent = parts
+        for (let index = 0; index < pairedCalls.length; index++) {
+          const parts: unknown[] = []
+          if (index === 0 && textContent) parts.push({ type: 'text', text: textContent })
+          parts.push(pairedCalls[index])
+          messages.push({ role: 'assistant', content: parts } as ModelMessage)
+          messages.push({ role: 'tool', content: [pairedResults[index]] } as ModelMessage)
+        }
       } else {
-        finalAssistantContent = textContent || ''
-      }
-
-      messages.push({ role: 'assistant', content: finalAssistantContent as any })
-
-      if (
-        pairedResults.length > 0 &&
-        Array.isArray(finalAssistantContent) &&
-        (finalAssistantContent as unknown[]).some(
-          (p) => (p as { type?: string }).type === 'tool-call'
-        )
-      ) {
-        messages.push({ role: 'tool', content: pairedResults as any })
+        messages.push({ role: 'assistant', content: textContent || '' })
       }
     } else if (m.role === 'system') {
       messages.push({ role: 'system', content: m.content })
@@ -229,7 +242,12 @@ export async function handleAgentStreamRequest(
   promptText: string,
   threadId: string,
   modelType?: string,
-  attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }>
+  attachments?: Array<{
+    type: 'image' | 'document'
+    name: string
+    mimeType?: string
+    base64: string
+  }>
 ) {
   log.info(`[main] Stream request: "${promptText.slice(0, 80)}" thread: "${threadId}"`)
 
@@ -257,6 +275,7 @@ export async function handleAgentStreamRequest(
 
   try {
     const history = await getThreadMessages(threadId)
+    let persistedAccumulatedTokens = getThread(threadId)?.accumulatedTokens ?? 0
 
     // Save user message
     const userMsgId = crypto.randomUUID()
@@ -297,15 +316,22 @@ export async function handleAgentStreamRequest(
       const parts: unknown[] = [{ type: 'text', text: promptText }]
       for (const att of attachments) {
         const mime = att.mimeType || 'application/octet-stream'
-        const isText = mime.startsWith('text/') || mime.endsWith('/json') || mime.endsWith('+json') || mime.endsWith('/xml') || mime.endsWith('/javascript')
-        
+        const isText =
+          mime.startsWith('text/') ||
+          mime.endsWith('/json') ||
+          mime.endsWith('+json') ||
+          mime.endsWith('/xml') ||
+          mime.endsWith('/javascript')
+
         if (isText) {
           try {
             const textContent = Buffer.from(att.base64, 'base64').toString('utf-8')
-            ;(parts[0] as { text: string }).text += `\n\n── Attachment Text: ${att.name} ──\n${textContent}`
+            ;(parts[0] as { text: string }).text +=
+              `\n\n── Attachment Text: ${att.name} ──\n${textContent}`
           } catch (decodeErr) {
             log.error(`[main] Failed to decode attachment text:`, decodeErr)
-            ;(parts[0] as { text: string }).text += `\n\n[Attachment: ${att.name} - Failed to decode text]`
+            ;(parts[0] as { text: string }).text +=
+              `\n\n[Attachment: ${att.name} - Failed to decode text]`
           }
         } else if (mime.startsWith('image/')) {
           if (modelSupportsVision) {
@@ -315,7 +341,8 @@ export async function handleAgentStreamRequest(
               mimeType: mime
             })
           } else {
-            ;(parts[0] as { text: string }).text += `\n\n[Attachment (Image): ${att.name} - Omitted from context because this model does not support vision]`
+            ;(parts[0] as { text: string }).text +=
+              `\n\n[Attachment (Image): ${att.name} - Omitted from context because this model does not support vision]`
           }
         } else {
           if (modelSupportsNativeFiles) {
@@ -325,14 +352,19 @@ export async function handleAgentStreamRequest(
               mimeType: mime
             })
           } else {
-            ;(parts[0] as { text: string }).text += `\n\n[Attachment (File): ${att.name} - Omitted because this model does not support file attachments]`
+            ;(parts[0] as { text: string }).text +=
+              `\n\n[Attachment (File): ${att.name} - Omitted because this model does not support file attachments]`
           }
         }
       }
       userContent = parts
     }
 
-    const messages = buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
+    const messages = buildMessagesFromHistory(
+      history,
+      modelSupportsVision,
+      modelSupportsNativeFiles
+    )
     messages.push({ role: 'user', content: userContent as any })
 
     // System instruction
@@ -381,7 +413,9 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
       ...(browserView ? browserTools(threadId, modelSupportsVision) : {})
     }
 
-    const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
+    const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(
+      rawModel.id
+    )
 
     log.info(`[main] streamText model: ${rawModel.id}, messages: ${messages.length}`)
 
@@ -413,6 +447,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
       tools: activeTools,
       stopWhen: stepCountIs(100),
       abortSignal: controller.signal,
+      timeout: { totalMs: 30 * 60 * 1000, stepMs: 5 * 60 * 1000, chunkMs: 90 * 1000 },
       ...(Object.keys(modelProviderOptions).length > 0
         ? { providerOptions: modelProviderOptions }
         : {}),
@@ -420,11 +455,12 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
       // Fires after each agentic step — emit live token update to renderer
       onStepFinish: async ({ usage }) => {
         if (usage) {
-          const stepTokens = usage.totalTokens || (usage.inputTokens || 0) + (usage.outputTokens || 0)
+          const stepTokens =
+            usage.totalTokens || (usage.inputTokens || 0) + (usage.outputTokens || 0)
           sessionAccumulatedTokens += stepTokens
           event.sender.send('agent:stream-chunk', {
             type: 'token-update',
-            payload: { accumulatedTokens: sessionAccumulatedTokens },
+            payload: { accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens },
             threadId
           })
         }
@@ -432,17 +468,20 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
 
       // Fires before each step — auto-summarise context and compact history
       prepareStep: async ({ messages: currentMessages }) => {
-        if (sessionAccumulatedTokens < SUMMARISE_THRESHOLD) return undefined
+        if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD) {
+          return undefined
+        }
 
-        log.info(
-          `[main] Context at ${sessionAccumulatedTokens} tokens — triggering auto-summarise`
-        )
+        log.info(`[main] Context at ${sessionAccumulatedTokens} tokens — triggering auto-summarise`)
         const summary = await summariseContext(currentMessages as ModelMessage[])
         if (!summary) return undefined
 
         // Persist context compaction to SQLite!
         try {
           compactThreadHistory(threadId, summary)
+          setThreadAccumulatedTokens(threadId, 0)
+          persistedAccumulatedTokens = 0
+          sessionAccumulatedTokens = 0
           log.info(`[main] Compacted history persisted for thread ${threadId}`)
         } catch (compactErr) {
           log.error('[main] Database compaction execution failed:', compactErr)
@@ -464,6 +503,11 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         const recentMessages = (currentMessages as ModelMessage[]).slice(-4)
 
         return { system: compactedSystem, messages: recentMessages }
+      },
+      onAbort: saveProgress,
+      onError: async ({ error }) => {
+        log.error('[main] AI SDK stream error:', error)
+        await saveProgress()
       }
     })
 
@@ -506,7 +550,7 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           threadId
         })
         textDeltaCount++
-        if (textDeltaCount % 10 === 0) await saveProgress()
+        if (textDeltaCount % 100 === 0) await saveProgress()
       } else if (
         part.type === 'tool-input-start' ||
         (part as { type?: string }).type === 'tool-call-streaming-start'
@@ -532,12 +576,17 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         part.type === 'tool-input-delta' ||
         (part as { type?: string }).type === 'tool-call-delta'
       ) {
-        const p = part as { toolCallId?: string; id?: string; argsTextDelta?: string; delta?: string }
+        const p = part as {
+          toolCallId?: string
+          id?: string
+          argsTextDelta?: string
+          delta?: string
+        }
         const tid = p.toolCallId || p.id || ''
         const delta = p.argsTextDelta || p.delta || ''
-        const block = orderedBlocks.find(
-          (b) => b.type === 'tool' && b.toolCallId === tid
-        ) as { argsDelta?: string } | undefined
+        const block = orderedBlocks.find((b) => b.type === 'tool' && b.toolCallId === tid) as
+          | { argsDelta?: string }
+          | undefined
         if (block) block.argsDelta = (block.argsDelta || '') + delta
         event.sender.send('agent:stream-chunk', {
           type: 'tool-call-delta',
@@ -593,6 +642,30 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         const writingTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
         if (writingTools.includes(part.toolName)) pushArtifactsChanged(threadId)
         await saveProgress()
+      } else if ((part as { type?: string }).type === 'tool-error') {
+        const toolError = part as {
+          toolCallId: string
+          toolName: string
+          error: unknown
+        }
+        const errorMessage =
+          toolError.error instanceof Error ? toolError.error.message : String(toolError.error)
+        const block = orderedBlocks.find(
+          (b) => b.type === 'tool' && b.toolCallId === toolError.toolCallId
+        ) as Record<string, unknown> | undefined
+        if (block) {
+          block.result = { success: false, error: errorMessage }
+          block.status = 'error'
+        }
+        event.sender.send('agent:stream-chunk', {
+          type: 'tool-result',
+          payload: {
+            toolCallId: toolError.toolCallId,
+            result: { success: false, error: errorMessage }
+          },
+          threadId
+        })
+        await saveProgress()
       } else if (part.type === 'error') {
         const errorMsg =
           part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
@@ -606,13 +679,16 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           threadId
         })
       } else if (part.type === 'finish') {
-        const usage = (part as { totalUsage?: { inputTokens?: number; outputTokens?: number } }).totalUsage || {}
+        const usage =
+          (part as { totalUsage?: { inputTokens?: number; outputTokens?: number } }).totalUsage ||
+          {}
         const turnPromptTokens = usage.inputTokens || 0
         const turnCompletionTokens = usage.outputTokens || 0
         const turnTotal = turnPromptTokens + turnCompletionTokens
 
         try {
-          updateThreadAccumulatedTokens(threadId, turnTotal)
+          const tokensToPersist = sessionAccumulatedTokens || turnTotal
+          updateThreadAccumulatedTokens(threadId, tokensToPersist)
         } catch (dbErr) {
           log.error('[main] Failed to save session token count:', dbErr)
         }
@@ -626,20 +702,23 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
               completionTokens: turnCompletionTokens,
               totalTokens: turnTotal
             },
-            accumulatedTokens: sessionAccumulatedTokens
+            accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || turnTotal)
           },
           threadId
         })
 
-        const finishReason = (
-          part as { finishReason?: string; reason?: string }
-        ).finishReason ?? (part as { reason?: string }).reason ?? ''
+        const finishReason =
+          (part as { finishReason?: string; reason?: string }).finishReason ??
+          (part as { reason?: string }).reason ??
+          ''
         if (finishReason === 'length') {
           log.warn(`[main] Model hit token length limit for thread ${threadId}`)
           event.sender.send('agent:stream-chunk', { type: 'step-limit', threadId })
         }
 
-        log.info(`[main] Stream finish — turn: ${turnTotal} tokens, session: ${sessionAccumulatedTokens}`)
+        log.info(
+          `[main] Stream finish — turn: ${turnTotal} tokens, session: ${sessionAccumulatedTokens}`
+        )
         await saveProgress()
       }
     }

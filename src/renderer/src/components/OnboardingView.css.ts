@@ -1,6 +1,6 @@
 import { style, keyframes } from '@vanilla-extract/css'
 
-export const pulseRing = keyframes({
+const pulseRing = keyframes({
   '0%, 100%': { opacity: '0.6', transform: 'scale(1)' },
   '50%': { opacity: '1', transform: 'scale(1.02)' }
 })
@@ -102,7 +102,8 @@ export const onboardingBtn = style({
   backgroundColor: 'rgba(255, 255, 255, 0.03)',
   cursor: 'pointer',
   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-  transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
+  transition:
+    'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
   ':hover': {
     backgroundColor: 'rgba(255, 255, 255, 0.07)',
     borderColor: 'rgba(255, 255, 255, 0.15)',

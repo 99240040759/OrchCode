@@ -3,7 +3,10 @@ import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import { nodeAdapter } from './nodeAdapter'
 
-const { mainWindowUrl, debuggingPort } = (workerData || {}) as { mainWindowUrl?: string; debuggingPort?: number }
+const { mainWindowUrl, debuggingPort } = (workerData || {}) as {
+  mainWindowUrl?: string
+  debuggingPort?: number
+}
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -20,11 +23,9 @@ function getTargetLocator(page: Page, selector: string, frameSelector?: string) 
 const workerAPI = {
   async connect(url?: string) {
     try {
-      if (browser) {
-        try {
-          await browser.close()
-        } catch {}
-      }
+      browser = null
+      context = null
+      page = null
       const port = debuggingPort || 9222
       browser = await chromium.connectOverCDP(`http://localhost:${port}`)
       context = browser.contexts()[0]
@@ -33,7 +34,7 @@ const workerAPI = {
       const browserPages = pages.filter((p) => {
         const u = p.url()
         const lowerUrl = u.toLowerCase()
-        
+
         // Exclude the main app window if we know its exact URL (including local ports / hosts)
         if (mainWindowUrl) {
           const mainUrlLower = mainWindowUrl.toLowerCase()
@@ -41,10 +42,16 @@ const workerAPI = {
             return false
           }
           // Handle localhost / 127.0.0.1 variations
-          if (mainUrlLower.includes('localhost') && lowerUrl.startsWith(mainUrlLower.replace('localhost', '127.0.0.1'))) {
+          if (
+            mainUrlLower.includes('localhost') &&
+            lowerUrl.startsWith(mainUrlLower.replace('localhost', '127.0.0.1'))
+          ) {
             return false
           }
-          if (mainUrlLower.includes('127.0.0.1') && lowerUrl.startsWith(mainUrlLower.replace('127.0.0.1', 'localhost'))) {
+          if (
+            mainUrlLower.includes('127.0.0.1') &&
+            lowerUrl.startsWith(mainUrlLower.replace('127.0.0.1', 'localhost'))
+          ) {
             return false
           }
         }
@@ -59,7 +66,10 @@ const workerAPI = {
         // But do not block public internet URLs that contain index.html or app.html!
         if (u.startsWith('file://')) {
           const filename = u.split(/[/\\]/).pop() || ''
-          if (['index.html', 'app.html'].includes(filename.toLowerCase()) || u.includes('/out/renderer/')) {
+          if (
+            ['index.html', 'app.html'].includes(filename.toLowerCase()) ||
+            u.includes('/out/renderer/')
+          ) {
             return false
           }
         }
@@ -228,7 +238,9 @@ const workerAPI = {
 
       const elements = await page!.evaluate(() => {
         const interactive: any[] = []
-        const select = document.querySelectorAll('button, input, select, textarea, a, [role="button"]')
+        const select = document.querySelectorAll(
+          'button, input, select, textarea, a, [role="button"]'
+        )
         select.forEach((el) => {
           if (interactive.length >= 100) return
 
@@ -267,12 +279,11 @@ const workerAPI = {
 
   async disconnect() {
     try {
-      if (browser) {
-        await browser.close()
-        browser = null
-        context = null
-        page = null
-      }
+      // The worker owns only a CDP client connection, not the Electron browser.
+      // Terminating the worker tears down that transport without closing app pages.
+      browser = null
+      context = null
+      page = null
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }

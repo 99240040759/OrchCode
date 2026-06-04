@@ -1,4 +1,4 @@
-import type { AgentStreamChunk } from './sharedTypes'
+import type { AgentAttachment, AgentStreamChunk } from './sharedTypes'
 
 export interface WorkspaceContext {
   conversationId: string
@@ -46,13 +46,29 @@ export interface UserProfile {
   photoUrl: string
 }
 
+export type FileReadResult =
+  | {
+      name: string
+      path: string
+      isBinary: true
+      mimeType: string
+      base64: string
+    }
+  | {
+      name: string
+      path: string
+      isBinary: false
+      content: string
+      language: string
+    }
+
 export interface WorkspaceBridge {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
-  setActiveWorkspace: (conversationId: string, workspacePath: string) => Promise<any>
+  setActiveWorkspace: (conversationId: string, workspacePath: string) => Promise<WorkspaceContext>
   closeAndDeleteWorkspace: (workspacePath: string) => Promise<boolean>
   listWorkspaceFiles: (conversationId: string) => Promise<string[]>
-  readFile: (filePath: string, conversationId?: string) => Promise<any>
-  readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
+  readFile: (filePath: string, conversationId?: string) => Promise<FileReadResult>
+  readOriginalFile: (filePath: string, conversationId?: string) => Promise<{ content: string }>
 }
 
 export interface AgentBridge {
@@ -61,12 +77,10 @@ export interface AgentBridge {
     threadId: string,
     mode?: string,
     modelType?: string,
-    attachments?: any[]
+    attachments?: AgentAttachment[]
   ) => Promise<void>
   stopAgentStream: (threadId?: string) => Promise<void>
-  onAgentChunk: (
-    callback: (chunk: AgentStreamChunk) => void
-  ) => () => void
+  onAgentChunk: (callback: (chunk: AgentStreamChunk) => void) => () => void
   getAvailableModels: () => Promise<Record<string, { id: string; name: string }>>
 }
 
@@ -129,6 +143,7 @@ export interface DialogBridge {
 }
 
 export interface UpdaterBridge {
+  platform: 'darwin' | 'win32' | 'linux'
   getUpdateStatus: () => Promise<UpdateStatus>
   checkForUpdates: () => Promise<void>
   installUpdate: () => Promise<void>

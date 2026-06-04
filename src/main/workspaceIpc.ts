@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { promises as fs } from 'node:fs'
-import { extname, join } from 'node:path'
-import { ipcMain, dialog, app } from 'electron'
+import { extname } from 'node:path'
+import { ipcMain, dialog } from 'electron'
 import log from 'electron-log'
 import { execa } from 'execa'
 import {
@@ -11,7 +11,8 @@ import {
   assertWithinWorkspace,
   listWorkspaceFiles,
   isFileBinary,
-  getMimeType
+  getMimeType,
+  clearWorkspaceContext
 } from './workspace'
 import {
   addOpenedWorkspace,
@@ -19,6 +20,7 @@ import {
   deleteOpenedWorkspace,
   deleteWorkspaceThreads
 } from './db'
+import { getConversationPath } from './paths'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   '.ts': 'typescript',
@@ -45,6 +47,8 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   '.rb': 'ruby',
   '.php': 'php'
 }
+
+const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
 
 export function registerWorkspaceIpc() {
   ipcMain.handle('workspace:select', async (_event, conversationId: string) => {
@@ -104,7 +108,8 @@ export function registerWorkspaceIpc() {
       const affectedThreadIds = await deleteWorkspaceThreads(workspacePath)
 
       for (const threadId of affectedThreadIds) {
-        const targetDir = join(app.getPath('userData'), 'conversations', threadId)
+        clearWorkspaceContext(threadId)
+        const targetDir = getConversationPath(threadId)
         try {
           await fs.rm(targetDir, { recursive: true, force: true })
         } catch (err) {
@@ -124,6 +129,10 @@ export function registerWorkspaceIpc() {
       const ctx =
         getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
       const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
+      const stat = await fs.stat(safePath)
+      if (stat.size > MAX_FILE_READ_BYTES) {
+        throw new Error('File exceeds the 25 MB preview limit.')
+      }
 
       const rawBuffer = await fs.readFile(safePath)
       const filename = safePath.split(/[/\\]/).pop() ?? ''

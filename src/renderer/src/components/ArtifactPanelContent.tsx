@@ -5,12 +5,13 @@ import TerminalView from './TerminalView'
 import BrowserView from './BrowserView'
 import MediaPreview from './MediaPreview'
 import MarkdownView from './MarkdownView'
-import CodeEditorView from './CodeEditorView'
 import type { EditorFile, FileChangeEntry } from '../store/agentStore'
 import type { ArtifactEntry } from '../../../preload/index.d'
 import type { TerminalViewHandle } from './TerminalView'
 import { EmptyState } from './Primitives'
 import * as styles from './ArtifactPanel.css'
+
+const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
 
 interface ArtifactPanelContentProps {
   panelMode: string
@@ -31,7 +32,7 @@ interface ArtifactPanelContentProps {
   handleSearchClick: () => void
 }
 
-export const ArtifactPanelContent: React.FC<ArtifactPanelContentProps> = ({
+const ArtifactPanelContent: React.FC<ArtifactPanelContentProps> = ({
   panelMode,
   displayFile,
   artifacts,
@@ -53,10 +54,7 @@ export const ArtifactPanelContent: React.FC<ArtifactPanelContentProps> = ({
 
   return (
     <div className={styles.artifactPanelContent}>
-      <Tabs.Content
-        value="overview"
-        className={styles.artifactPanelTabContent}
-      >
+      <Tabs.Content value="overview" className={styles.artifactPanelTabContent}>
         <OverviewPanel
           artifacts={artifacts}
           userFiles={userFiles}
@@ -68,10 +66,11 @@ export const ArtifactPanelContent: React.FC<ArtifactPanelContentProps> = ({
 
       <Tabs.Content
         value="terminal"
-        forceMount
         className={`${styles.artifactPanelTabContent} ${panelMode === 'terminal' ? styles.tabContentVisible : styles.tabContentHidden}`}
       >
-        <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
+        {panelMode === 'terminal' && (
+          <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
+        )}
       </Tabs.Content>
 
       <Tabs.Content
@@ -97,22 +96,21 @@ export const ArtifactPanelContent: React.FC<ArtifactPanelContentProps> = ({
         ) : displayFile.isBinary ? (
           <MediaPreview displayFile={displayFile} />
         ) : isMarkdown ? (
-          <MarkdownView
-            displayFile={displayFile}
-            activeWorkspace={activeWorkspace}
-          />
+          <MarkdownView displayFile={displayFile} activeWorkspace={activeWorkspace} />
         ) : (
-          <CodeEditorView
-            displayFile={displayFile}
-            activeWorkspace={activeWorkspace}
-            themeLoaded={themeLoaded}
-            isDiffMode={isDiffMode}
-            setIsDiffMode={setIsDiffMode}
-            originalContent={originalContent}
-            handleDiffEditorMount={handleDiffEditorMount}
-            handleEditorMount={handleEditorMount}
-            handleSearchClick={handleSearchClick}
-          />
+          <React.Suspense fallback={<div className={styles.editorLoading}>Loading editor...</div>}>
+            <CodeEditorView
+              displayFile={displayFile}
+              activeWorkspace={activeWorkspace}
+              themeLoaded={themeLoaded}
+              isDiffMode={isDiffMode}
+              setIsDiffMode={setIsDiffMode}
+              originalContent={originalContent}
+              handleDiffEditorMount={handleDiffEditorMount}
+              handleEditorMount={handleEditorMount}
+              handleSearchClick={handleSearchClick}
+            />
+          </React.Suspense>
         )}
       </Tabs.Content>
     </div>
