@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-const api = {
+const workspaceBridge = {
   selectWorkspace: (conversationId: string) =>
     ipcRenderer.invoke('workspace:select', conversationId),
   setActiveWorkspace: (conversationId: string, workspacePath: string) =>
@@ -9,7 +9,13 @@ const api = {
     ipcRenderer.invoke('workspace:close-and-delete', workspacePath),
   listWorkspaceFiles: (conversationId: string) =>
     ipcRenderer.invoke('workspace:list-files', conversationId),
+  readFile: (filePath: string, conversationId?: string) =>
+    ipcRenderer.invoke('file:read', filePath, conversationId),
+  readOriginalFile: (filePath: string, conversationId?: string) =>
+    ipcRenderer.invoke('file:read-original', filePath, conversationId)
+}
 
+const agentBridge = {
   streamAgent: (
     promptText: string,
     threadId: string,
@@ -24,8 +30,10 @@ const api = {
     ipcRenderer.on('agent:stream-chunk', listener)
     return () => ipcRenderer.removeListener('agent:stream-chunk', listener)
   },
-  getAvailableModels: () => ipcRenderer.invoke('models:get-available'),
+  getAvailableModels: () => ipcRenderer.invoke('models:get-available')
+}
 
+const threadsBridge = {
   getConversationId: () => ipcRenderer.invoke('mastra:get-conversation-id'),
   newConversation: () => ipcRenderer.invoke('mastra:new-conversation'),
   getThreads: () => ipcRenderer.invoke('mastra:get-threads'),
@@ -37,18 +45,19 @@ const api = {
     ipcRenderer.invoke('mastra:get-thread-workspace', threadId),
   generateTitle: (text: string, threadId: string) =>
     ipcRenderer.invoke('mastra:generate-title', { text, threadId }),
+  setActiveSession: (threadId: string) => ipcRenderer.invoke('session:set-active', threadId)
+}
 
+const artifactsBridge = {
   listArtifacts: (conversationId: string) => ipcRenderer.invoke('artifacts:list', conversationId),
-  readFile: (filePath: string, conversationId?: string) =>
-    ipcRenderer.invoke('file:read', filePath, conversationId),
-  readOriginalFile: (filePath: string, conversationId?: string) =>
-    ipcRenderer.invoke('file:read-original', filePath, conversationId),
   onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: any[] }) => void) => {
     const listener = (_event: any, data: { conversationId: string; artifacts: any[] }) => callback(data)
     ipcRenderer.on('artifacts:changed', listener)
     return () => ipcRenderer.removeListener('artifacts:changed', listener)
-  },
+  }
+}
 
+const terminalBridge = {
   createTerminal: (opts: { cols: number; rows: number; cwd?: string; conversationId?: string }) =>
     ipcRenderer.invoke('terminal:create', opts),
   terminalInput: (opts: { id: string; data: string }) => ipcRenderer.invoke('terminal:input', opts),
@@ -64,8 +73,10 @@ const api = {
     const listener = (_event: any, payload: any) => callback(payload)
     ipcRenderer.on('terminal:exit', listener)
     return () => ipcRenderer.removeListener('terminal:exit', listener)
-  },
+  }
+}
 
+const browserBridge = {
   openBrowser: (opts: {
     url: string
     bounds: { x: number; y: number; width: number; height: number }
@@ -86,16 +97,20 @@ const api = {
     const listener = (_event: any, url: string) => callback(url)
     ipcRenderer.on('browser:url-changed', listener)
     return () => ipcRenderer.removeListener('browser:url-changed', listener)
-  },
+  }
+}
 
+const dialogBridge = {
   showConfirmDialog: (opts: {
     message: string
     detail?: string
     buttons?: string[]
     defaultId?: number
     cancelId?: number
-  }) => ipcRenderer.invoke('dialog:confirm', opts),
+  }) => ipcRenderer.invoke('dialog:confirm', opts)
+}
 
+const updaterBridge = {
   getUpdateStatus: () => ipcRenderer.invoke('updater:get-status'),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
@@ -105,8 +120,10 @@ const api = {
     ipcRenderer.on('updater:status-changed', listener)
     return () => ipcRenderer.removeListener('updater:status-changed', listener)
   },
-  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version')
+}
 
+const authBridge = {
   startGoogleAuth: () => ipcRenderer.invoke('auth:login'),
   logout: () => ipcRenderer.invoke('auth:logout'),
   getAuthUser: () => ipcRenderer.invoke('auth:get-user'),
@@ -115,13 +132,20 @@ const api = {
     const listener = (_event: any, user: any) => callback(user)
     ipcRenderer.on('auth:status-changed', listener)
     return () => ipcRenderer.removeListener('auth:status-changed', listener)
-  },
-  setActiveSession: (threadId: string) => ipcRenderer.invoke('session:set-active', threadId)
+  }
 }
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('workspaceBridge', workspaceBridge)
+    contextBridge.exposeInMainWorld('agentBridge', agentBridge)
+    contextBridge.exposeInMainWorld('threadsBridge', threadsBridge)
+    contextBridge.exposeInMainWorld('artifactsBridge', artifactsBridge)
+    contextBridge.exposeInMainWorld('terminalBridge', terminalBridge)
+    contextBridge.exposeInMainWorld('browserBridge', browserBridge)
+    contextBridge.exposeInMainWorld('dialogBridge', dialogBridge)
+    contextBridge.exposeInMainWorld('updaterBridge', updaterBridge)
+    contextBridge.exposeInMainWorld('authBridge', authBridge)
   } catch (error) {
     console.error(error)
   }

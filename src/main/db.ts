@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import log from 'electron-log'
+import crypto from 'node:crypto'
 
 export interface ThreadEntry {
   id: string
@@ -233,3 +234,41 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   })()
   return threadIds
 }
+
+export function compactThreadHistory(threadId: string, summary: string, keepCount = 4): void {
+  const db = getDB()
+  db.transaction(() => {
+    // 1. Get all messages for this thread sorted by createdAt
+    const msgs = db.prepare('SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as { id: string; createdAt: string }[]
+    if (msgs.length <= keepCount) return // nothing to compact
+
+    const deleteCount = msgs.length - keepCount
+    const toDelete = msgs.slice(0, deleteCount)
+    const keptFirst = msgs[deleteCount]
+
+    // 2. Delete old messages
+    const deleteStmt = db.prepare('DELETE FROM messages WHERE id = ?')
+    for (const msg of toDelete) {
+      deleteStmt.run(msg.id)
+    }
+
+    // 3. Insert system summary message. Use a timestamp slightly before the first kept message's createdAt.
+    const keptDate = new Date(keptFirst.createdAt)
+    const summaryDate = new Date(keptDate.getTime() - 1000).toISOString()
+    const summaryId = crypto.randomUUID()
+
+    db.prepare(`
+      INSERT INTO messages (id, threadId, role, content, data, createdAt)
+      VALUES (?, ?, 'system', ?, NULL, ?)
+    `).run(
+      summaryId,
+      threadId,
+      `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`,
+      summaryDate
+    )
+
+    // 4. Update the thread's updatedAt to reflect the change
+    db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
+  })()
+}
+

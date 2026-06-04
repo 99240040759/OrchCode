@@ -44,6 +44,7 @@ export function createHandler(fn: HandlerFn) {
       'TAVILY_API_KEY',
       'NVIDIA_API_KEY',
       'OPENCODE_API_KEY',
+      'Z_AI_API_KEY',
       'GEMINI_MODEL_ID',
       'GEMINI_MODEL_NAME',
       'GEMMA_MODEL_ID',

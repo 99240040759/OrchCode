@@ -14,12 +14,13 @@ import {
   type FileChangeEntry
 } from '../store/agentStore'
 import type { ArtifactEntry } from '../../../preload/index.d'
-import { isAgentArtifact, getDisplayName } from '../lib/uiUtils'
+import { isAgentArtifact } from '../lib/uiUtils'
 import { setupMonaco } from '../lib/monacoConfig'
 
 import type { TerminalViewHandle } from './TerminalView'
 import ArtifactPanelHeader from './ArtifactPanelHeader'
 import ArtifactPanelContent from './ArtifactPanelContent'
+import * as styles from './ArtifactPanel.css'
 
 const isMac = navigator.userAgent.toLowerCase().includes('mac')
 
@@ -62,7 +63,7 @@ const ArtifactPanel: React.FC = () => {
     diffEditorRef.current = editor
   }, [])
 
-  const handleSearchClick = () => {
+  const handleSearchClick = useCallback(() => {
     if (isDiffMode) {
       const modifiedEditor = diffEditorRef.current?.getModifiedEditor()
       modifiedEditor?.focus()
@@ -71,12 +72,10 @@ const ArtifactPanel: React.FC = () => {
       editorRef.current?.focus()
       editorRef.current?.trigger('actions', 'actions.find', null)
     }
-  }
+  }, [isDiffMode])
 
   const terminalRef = useRef<TerminalViewHandle | null>(null)
-
   const browserWasOpenedRef = useRef(false)
-
   const displayFile = activeFile
 
   useEffect(() => {
@@ -88,7 +87,7 @@ const ArtifactPanel: React.FC = () => {
   useEffect(() => {
     if (activeFile && isDiffMode) {
       setOriginalContent(null)
-      window.api
+      window.workspaceBridge
         .readOriginalFile(activeFile.path, convId)
         .then((res) => {
           setOriginalContent(res?.content ?? '')
@@ -106,7 +105,7 @@ const ArtifactPanel: React.FC = () => {
     if (!convId) return
     let active = true
     setLoading(true)
-    window.api
+    window.artifactsBridge
       .listArtifacts(convId)
       .then((data) => {
         if (active) {
@@ -123,7 +122,7 @@ const ArtifactPanel: React.FC = () => {
   }, [convId, setArtifacts])
 
   useEffect(() => {
-    const unsub = window.api.onArtifactsChanged(({ conversationId, artifacts }) => {
+    const unsub = window.artifactsBridge.onArtifactsChanged(({ conversationId, artifacts }) => {
       if (conversationId === convId) {
         setArtifacts(artifacts ?? [])
       }
@@ -147,7 +146,7 @@ const ArtifactPanel: React.FC = () => {
   const handleArtifactClick = useCallback(
     async (artifact: ArtifactEntry) => {
       try {
-        const fileData = await window.api.readFile(artifact.path, convId)
+        const fileData = await window.workspaceBridge.readFile(artifact.path, convId)
         if (fileData) {
           setIsDiffMode(false)
           handleOpenFile(fileData)
@@ -162,7 +161,7 @@ const ArtifactPanel: React.FC = () => {
   const handleFileChangeClick = useCallback(
     async (fc: FileChangeEntry) => {
       try {
-        const fileData = await window.api.readFile(fc.path, convId)
+        const fileData = await window.workspaceBridge.readFile(fc.path, convId)
         if (fileData) {
           setIsDiffMode(true)
           handleOpenFile(fileData)
@@ -207,7 +206,7 @@ const ArtifactPanel: React.FC = () => {
 
   useEffect(() => {
     if (!isOpen && browserWasOpenedRef.current) {
-      window.api.closeBrowser().catch(() => {})
+      window.browserBridge.closeBrowser().catch(() => {})
       browserWasOpenedRef.current = false
     }
   }, [isOpen])
@@ -247,14 +246,7 @@ const ArtifactPanel: React.FC = () => {
     <Tabs.Root
       value={activeTabValue}
       onValueChange={handleTabChange}
-      className="artifact-pane"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        overflow: 'hidden',
-        borderLeft: 'none'
-      }}
+      className={styles.artifactPane}
     >
       <ArtifactPanelHeader
         panelMode={panelMode}
@@ -264,8 +256,6 @@ const ArtifactPanel: React.FC = () => {
         handleCloseFile={handleCloseFile}
         handleClose={handleClose}
         isMac={isMac}
-        isAgentArtifact={isAgentArtifact}
-        getDisplayName={getDisplayName}
       />
       <ArtifactPanelContent
         panelMode={panelMode}
@@ -284,8 +274,6 @@ const ArtifactPanel: React.FC = () => {
         handleDiffEditorMount={handleDiffEditorMount}
         handleEditorMount={handleEditorMount}
         handleSearchClick={handleSearchClick}
-        isAgentArtifact={isAgentArtifact}
-        getDisplayName={getDisplayName}
       />
     </Tabs.Root>
   )

@@ -48,6 +48,7 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 
 export function registerWorkspaceIpc() {
   ipcMain.handle('workspace:select', async (_event, conversationId: string) => {
+    if (!conversationId) throw new Error('conversationId is required')
     const result = await dialog.showOpenDialog({
       title: 'Select Workspace Folder',
       properties: ['openDirectory', 'createDirectory']
@@ -69,6 +70,7 @@ export function registerWorkspaceIpc() {
   })
 
   ipcMain.handle('workspace:set-active', async (_event, { conversationId, workspacePath }) => {
+    if (!conversationId) throw new Error('conversationId is required')
     const ctx = await updateWorkspacePath(conversationId, workspacePath)
     addOpenedWorkspace(workspacePath)
 
@@ -83,6 +85,7 @@ export function registerWorkspaceIpc() {
   })
 
   ipcMain.handle('workspace:list-files', async (_event, conversationId: string) => {
+    if (!conversationId) throw new Error('conversationId is required')
     const ctx =
       getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
     if (!ctx?.rootPath) return []

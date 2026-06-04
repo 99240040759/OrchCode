@@ -13,7 +13,15 @@ import {
 
 export function registerThreadIpc() {
   ipcMain.handle('mastra:get-conversation-id', () => {
-    return `session-${crypto.randomUUID()}`
+    try {
+      const threads = getThreads()
+      if (threads && threads.length > 0) {
+        return threads[0].id
+      }
+    } catch (err) {
+      log.error('[main] get-conversation-id error:', err)
+    }
+    return ''
   })
 
   ipcMain.handle('session:set-active', async (_event, threadId: string) => {

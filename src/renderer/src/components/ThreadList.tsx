@@ -10,6 +10,7 @@ import {
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
 import { formatDistanceToNow } from 'date-fns'
+import * as styles from './ThreadList.css'
 
 function formatRelativeTime(dateStr: string): string {
   try {
@@ -58,7 +59,7 @@ const ThreadList: React.FC = () => {
   const handleDeleteThread = useCallback(
     async (e: React.MouseEvent, threadId: string) => {
       e.stopPropagation()
-      const confirmed = await window.api.showConfirmDialog({
+      const confirmed = await window.dialogBridge.showConfirmDialog({
         message: 'Delete this conversation?',
         detail: 'This will permanently remove the conversation and all its messages.',
         buttons: ['Cancel', 'Delete'],
@@ -77,7 +78,7 @@ const ThreadList: React.FC = () => {
       e.stopPropagation()
       const name = path.split(/[/\\]/).pop() ?? 'Workspace'
 
-      const confirmDelete = await window.api.showConfirmDialog({
+      const confirmDelete = await window.dialogBridge.showConfirmDialog({
         message: `Delete workspace data for "${name}"?`,
         detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts from disk. Real codebase files inside the directory itself will NOT be touched.`,
         buttons: ['Cancel', 'Delete Data'],
@@ -93,44 +94,21 @@ const ThreadList: React.FC = () => {
   )
 
   return (
-    <div
-      className="sidebar-section"
-      style={{ padding: '12px 0', gap: '8px', display: 'flex', flexDirection: 'column' }}
-    >
-      <div
-        className="sidebar-section-header"
-        style={{
-          padding: '0 12px 4px 12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          color: 'var(--text-secondary)',
-          fontSize: '11px',
-          fontWeight: 600,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase'
-        }}
-      >
+    <div className={`${styles.sidebarSection} ${styles.threadListContainer}`}>
+      <div className={`${styles.sidebarSectionHeader} ${styles.threadListHeader}`}>
         <span>Projects</span>
         <span
           title="Add Project Folder"
-          className="sidebar-section-header-action"
+          className={styles.sidebarSectionHeaderAction}
           onClick={() => openWorkspace()}
         >
           <FolderPlus size={14} />
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <div className={styles.threadListGroup}>
         {allWorkspacePaths.length === 0 ? (
-          <div
-            style={{
-              padding: '0 12px',
-              color: 'var(--text-muted)',
-              fontSize: '13px',
-              fontStyle: 'italic'
-            }}
-          >
+          <div className={`${styles.emptyStateDesc} ${styles.threadListHeader}`}>
             No projects opened yet.
           </div>
         ) : (
@@ -141,67 +119,30 @@ const ThreadList: React.FC = () => {
             const workspaceThreads = threads.filter((t) => t.workspacePath === path)
 
             return (
-              <div key={path} style={{ display: 'flex', flexDirection: 'column' }}>
-                <div className="workspace-node-row" onClick={() => toggleExpand(path)}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      minWidth: 0,
-                      flex: 1
-                    }}
-                  >
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggleExpand(path)
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        cursor: 'pointer',
-                        padding: 2
-                      }}
-                    >
-                      {isExpanded ? (
-                        <ChevronDown size={14} style={{ color: 'var(--text-secondary)' }} />
-                      ) : (
-                        <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />
-                      )}
-                    </div>
-
-                    <Folder size={14} color="var(--text-secondary)" style={{ flexShrink: 0 }} />
-
-                    <span
-                      style={{
-                        fontSize: '13px',
-                        fontWeight: isActive ? 600 : 500,
-                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}
-                      title={path}
-                    >
-                      {name}
-                    </span>
+              <div key={path} className={styles.threadListGroup}>
+                <div className={styles.threadGroupHeader} onClick={() => toggleExpand(path)}>
+                  <div className={styles.threadGroupActions}>
+                    {isExpanded ? (
+                      <ChevronDown size={14} className="text-secondary" />
+                    ) : (
+                      <ChevronRight size={14} className="text-secondary" />
+                    )}
                   </div>
 
-                  <div
-                    className="workspace-node-actions"
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+                  <Folder size={14} className="text-secondary" />
+
+                  <span
+                    className={`${styles.threadGroupTitle} ${isActive ? styles.threadItemActiveTitle : ''}`}
+                    title={path}
                   >
+                    {name}
+                  </span>
+
+                  <div className={styles.threadGroupActions}>
                     <div
-                      className="sidebar-section-header-action"
+                      className={styles.sidebarSectionHeaderAction}
                       onClick={(e) => handleCloseWorkspace(e, path)}
                       title="Close project folder"
-                      style={{
-                        padding: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
                     >
                       <X size={13} />
                     </div>
@@ -209,23 +150,9 @@ const ThreadList: React.FC = () => {
                 </div>
 
                 {isExpanded && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '2px',
-                      padding: '2px 0 2px 24px'
-                    }}
-                  >
+                  <div className={styles.threadListGroup}>
                     {workspaceThreads.length === 0 ? (
-                      <span
-                        style={{
-                          padding: '6px 12px',
-                          color: 'var(--text-dim)',
-                          fontSize: '12px',
-                          fontStyle: 'italic'
-                        }}
-                      >
+                      <span className={`${styles.emptyStateDesc} ${styles.threadListHeader}`}>
                         No chats yet
                       </span>
                     ) : (
@@ -236,66 +163,26 @@ const ThreadList: React.FC = () => {
                         return (
                           <div
                             key={thread.id}
-                            className="sidebar-tree-node"
-                            style={{ cursor: 'pointer', padding: 0 }}
+                            className={`${styles.threadItem} ${isThreadActive ? styles.threadItemActive : ''}`}
+                            onClick={() => selectThread(thread.id)}
                           >
-                            <div
-                              className={`sidebar-tree-node-title${isThreadActive ? ' active' : ''}`}
-                              onClick={() => selectThread(thread.id)}
-                              style={{ justifyContent: 'space-between' }}
-                            >
-                              <span
-                                style={{
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  fontSize: '13px',
-                                  color: isThreadActive
-                                    ? 'var(--text-primary)'
-                                    : 'var(--text-secondary)',
-                                  fontWeight: isThreadActive ? 500 : 400,
-                                  flex: 1
-                                }}
-                              >
-                                {thread.title ?? 'New conversation'}
-                              </span>
-
+                            <span className={`${styles.threadItemTitle} ${isThreadActive ? styles.threadItemActiveTitle : ''}`}>
+                              {thread.title ?? 'New conversation'}
+                            </span>
+                            
+                            <div className={styles.threadItemMeta}>
+                              {isRunning ? (
+                                <Loader2 size={12} className="spin text-accent" />
+                              ) : (
+                                <span>{formatRelativeTime(thread.updatedAt ?? thread.createdAt)}</span>
+                              )}
+                              
                               <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  flexShrink: 0,
-                                  marginLeft: '8px'
-                                }}
+                                className={styles.sidebarSectionHeaderAction}
+                                onClick={(e) => handleDeleteThread(e, thread.id)}
+                                title="Delete conversation"
                               >
-                                {isRunning ? (
-                                  <Loader2
-                                    size={12}
-                                    style={{
-                                      color: 'var(--accent-blue)',
-                                      animation: 'spin 1s linear infinite'
-                                    }}
-                                  />
-                                ) : (
-                                  <span
-                                    style={{
-                                      fontSize: '11px',
-                                      color: 'var(--text-muted)',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                  >
-                                    {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
-                                  </span>
-                                )}
-                                <div
-                                  className="sidebar-section-header-action"
-                                  onClick={(e) => handleDeleteThread(e, thread.id)}
-                                  title="Delete conversation"
-                                  style={{ display: 'flex', alignItems: 'center' }}
-                                >
-                                  <Trash2 size={12} />
-                                </div>
+                                <Trash2 size={12} />
                               </div>
                             </div>
                           </div>

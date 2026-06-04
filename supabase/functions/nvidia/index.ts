@@ -16,40 +16,21 @@ serve(
       return errorResponse(`Path not allowed: ${subpath}`, 403)
     }
 
-    let isOpencodeModel = false
-    let targetModelId = ""
     let reqBodyText = ""
 
     if (req.method === 'POST' && subpath === '/v1/chat/completions') {
       try {
         reqBodyText = await req.text()
-        const json = JSON.parse(reqBodyText)
-        targetModelId = json.model
-        if (
-          targetModelId === 'deepseek-v4-flash-free' ||
-          targetModelId === 'big-pickle' ||
-          targetModelId === 'mimo-v2.5-free'
-        ) {
-          isOpencodeModel = true
-        }
       } catch (err) {
-        // Ignored, fallback to normal nvidia request
+        // Ignored, fallback to empty body if missing
       }
     }
 
-    let targetUrl = `https://integrate.api.nvidia.com${subpath}${url.search}`
-    let activeApiKey = env['NVIDIA_API_KEY']
+    const targetUrl = `https://integrate.api.nvidia.com${subpath}${url.search}`
+    const activeApiKey = env['NVIDIA_API_KEY']
 
-    if (isOpencodeModel) {
-      activeApiKey = env['OPENCODE_API_KEY']
-      if (!activeApiKey) {
-        return errorResponse('Server Configuration Error: OPENCODE_API_KEY is missing.', 500)
-      }
-      targetUrl = `https://opencode.ai/zen/v1/chat/completions`
-    } else {
-      if (!activeApiKey) {
-        return errorResponse('Server Configuration Error: NVIDIA_API_KEY is missing.', 500)
-      }
+    if (!activeApiKey) {
+      return errorResponse('Server Configuration Error: NVIDIA_API_KEY is missing.', 500)
     }
 
     const cleanHeaders = new Headers()

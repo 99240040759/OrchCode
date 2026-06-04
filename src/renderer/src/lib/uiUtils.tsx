@@ -1,4 +1,7 @@
 import React from 'react'
+import { ClipboardList, BookOpen, FileText } from 'lucide-react'
+
+// ─── Artifact Helpers ─────────────────────────────────────────────────────────
 
 export function isAgentArtifact(fileName: string): boolean {
   return (
@@ -12,6 +15,40 @@ export function getDisplayName(fileName: string): string {
   if (fileName === 'task.md') return 'Task List'
   return fileName
 }
+
+/** Single source of truth for artifact icons — uses Lucide. */
+export function getArtifactIcon(name: string, size = 15): React.ReactNode {
+  if (name === 'implementation_plan.md') {
+    return <ClipboardList size={size} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />
+  }
+  if (name === 'walkthrough.md') {
+    return <BookOpen size={size} style={{ flexShrink: 0, color: 'var(--accent-green)' }} />
+  }
+  return <FileText size={size} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
+}
+
+// ─── Path Utilities ───────────────────────────────────────────────────────────
+
+/**
+ * Returns the relative directory path of a file within a workspace.
+ * e.g. getRelativeDirPath('/proj/src/foo.ts', '/proj') => 'src'
+ */
+export function getRelativeDirPath(filePath: string, workspacePath?: string): string {
+  let path = filePath
+  if (workspacePath && path.startsWith(workspacePath)) {
+    path = path.slice(workspacePath.length)
+  }
+  if (path.startsWith('/') || path.startsWith('\\')) {
+    path = path.slice(1)
+  }
+  const parts = path.split(/[/\\]/)
+  if (parts.length > 1) {
+    return parts.slice(0, -1).join('/')
+  }
+  return ''
+}
+
+// ─── Google Icon ──────────────────────────────────────────────────────────────
 
 export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
   <svg

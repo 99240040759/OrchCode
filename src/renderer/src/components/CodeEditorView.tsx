@@ -3,6 +3,8 @@ import { Editor, DiffEditor } from '@monaco-editor/react'
 import { FileDiff, Search, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import { getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
+import * as styles from './CodeEditorView.css'
 
 interface CodeEditorViewProps {
   displayFile: {
@@ -13,8 +15,6 @@ interface CodeEditorViewProps {
     isBinary?: boolean
   }
   activeWorkspace: { path: string } | null
-  getDisplayName: (name: string) => string
-  getRelativeDirPath: (filePath: string, workspacePath?: string) => string
   themeLoaded: boolean
   isDiffMode: boolean
   setIsDiffMode: (val: boolean) => void
@@ -27,8 +27,6 @@ interface CodeEditorViewProps {
 export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
   displayFile,
   activeWorkspace,
-  getDisplayName,
-  getRelativeDirPath,
   themeLoaded,
   isDiffMode,
   setIsDiffMode,
@@ -38,67 +36,32 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
   handleSearchClick
 }) => {
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        overflow: 'hidden',
-        flex: 1
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          height: '34px',
-          padding: '0 16px',
-          backgroundColor: 'var(--bg-app)',
-          borderBottom: '1px solid var(--border-color)',
-          flexShrink: 0
-        }}
-      >
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}
-        >
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <div className={styles.fileInfoContainer}>
           <SymbolsFileIcon
             fileName={displayFile.name}
             autoAssign={true}
             width={16}
             height={16}
-            style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+            className={styles.fileIcon}
           />
-          <span
-            style={{
-              color: 'var(--text-primary)',
-              fontWeight: 500,
-              fontSize: 'var(--font-size-sm)',
-              whiteSpace: 'nowrap'
-            }}
-          >
+          <span className={styles.fileName}>
             {getDisplayName(displayFile.name)}
           </span>
-          <span
-            style={{
-              color: 'var(--text-muted)',
-              fontSize: 'var(--font-size-xs)',
-              marginLeft: '4px',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis'
-            }}
-          >
+          <span className={styles.fileDir}>
             {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        <div className={styles.toolbarGroup}>
           <div
             title={isDiffMode ? 'Show Code Editor' : 'Show File Diff (vs git HEAD)'}
             onClick={() => setIsDiffMode(!isDiffMode)}
             className={
-              isDiffMode ? 'editor-toolbar-action active' : 'editor-toolbar-action'
+              isDiffMode
+                ? `${styles.editorToolbarAction} ${styles.editorToolbarActionActive}`
+                : styles.editorToolbarAction
             }
           >
             <FileDiff size={13} />
@@ -106,7 +69,7 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
           <div
             title="Find in file (native)"
             onClick={handleSearchClick}
-            className="editor-toolbar-action"
+            className={styles.editorToolbarAction}
           >
             <Search size={13} />
           </div>
@@ -116,36 +79,18 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
               navigator.clipboard.writeText(displayFile.content ?? '')
               toast.success('File content copied!')
             }}
-            className="editor-toolbar-action"
+            className={styles.editorToolbarAction}
           >
             <Copy size={13} />
           </div>
         </div>
       </div>
-      <div style={{ flex: 1, overflow: 'hidden', backgroundColor: 'var(--bg-app)' }}>
+      <div className={styles.editorContainer}>
         {themeLoaded ? (
           isDiffMode ? (
             originalContent === null ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  height: '100%',
-                  color: 'var(--text-secondary)'
-                }}
-              >
-                <div
-                  style={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    border: '2px solid var(--text-secondary)',
-                    borderTopColor: 'transparent',
-                    animation: 'spin 0.8s linear infinite',
-                    marginRight: 8
-                  }}
-                />
+              <div className={styles.loadingContainer}>
+                <div className={styles.loadingSpinner} />
                 Loading diff...
               </div>
             ) : (
@@ -212,9 +157,7 @@ export const CodeEditorView: React.FC<CodeEditorViewProps> = ({
             />
           )
         ) : (
-          <div
-            style={{ width: '100%', height: '100%', backgroundColor: 'var(--bg-app)' }}
-          />
+          <div className={styles.emptyThemePlaceholder} />
         )}
       </div>
     </div>

@@ -10,13 +10,15 @@ const DEFAULT_GEMMA_ID = 'gemma-4-31b-it'
 const DEFAULT_GEMMA_NAME = 'Gemma 4 31B (Thinking)'
 const DEFAULT_KIMI_ID = 'nvidia/moonshotai/kimi-k2.6'
 const DEFAULT_KIMI_NAME = 'Kimi K2.6 (Fast Think)'
-const DEFAULT_GLM_ID = 'nvidia/z-ai/glm-5.1'
-const DEFAULT_GLM_NAME = 'GLM 5.1 (Slow)'
-const DEFAULT_DEEPSEEK_FLASH_ID = 'nvidia/deepseek-v4-flash-free'
+const DEFAULT_GLM_4_5_FLASH_ID = 'zai/GLM-4.5-Flash'
+const DEFAULT_GLM_4_5_FLASH_NAME = 'GLM 4.5 Flash (Thinking)'
+const DEFAULT_GLM_4_6V_FLASH_ID = 'zai/GLM-4.6V-Flash'
+const DEFAULT_GLM_4_6V_FLASH_NAME = 'GLM 4.6V Flash (Vision)'
+const DEFAULT_DEEPSEEK_FLASH_ID = 'opencode/deepseek-v4-flash-free'
 const DEFAULT_DEEPSEEK_FLASH_NAME = 'DeepSeek V4 Pro (Thinking)'
-const DEFAULT_BIG_PICKLE_ID = 'nvidia/big-pickle'
+const DEFAULT_BIG_PICKLE_ID = 'opencode/big-pickle'
 const DEFAULT_BIG_PICKLE_NAME = 'Big Pickle (Unlimited)'
-const DEFAULT_MIMO_FREE_ID = 'nvidia/mimo-v2.5-free'
+const DEFAULT_MIMO_FREE_ID = 'opencode/mimo-v2.5-free'
 const DEFAULT_MIMO_FREE_NAME = 'MiMo V2.5 (Fast)'
 
 serve(
@@ -33,9 +35,13 @@ serve(
       id: env['KIMI_MODEL_ID'] || DEFAULT_KIMI_ID,
       name: env['KIMI_MODEL_NAME'] || DEFAULT_KIMI_NAME
     }
-    const glm = {
-      id: env['GLM_MODEL_ID'] || DEFAULT_GLM_ID,
-      name: env['GLM_MODEL_NAME'] || DEFAULT_GLM_NAME
+    const glm_4_5_flash = {
+      id: env['GLM_4_5_FLASH_MODEL_ID'] || DEFAULT_GLM_4_5_FLASH_ID,
+      name: env['GLM_4_5_FLASH_MODEL_NAME'] || DEFAULT_GLM_4_5_FLASH_NAME
+    }
+    const glm_4_6v_flash = {
+      id: env['GLM_4_6V_FLASH_MODEL_ID'] || DEFAULT_GLM_4_6V_FLASH_ID,
+      name: env['GLM_4_6V_FLASH_MODEL_NAME'] || DEFAULT_GLM_4_6V_FLASH_NAME
     }
     const deepseek_flash = {
       id: env['DEEPSEEK_FLASH_MODEL_ID'] || DEFAULT_DEEPSEEK_FLASH_ID,
@@ -54,7 +60,8 @@ serve(
       gemini,
       gemma,
       kimi,
-      glm,
+      glm_4_5_flash,
+      glm_4_6v_flash,
       deepseek_flash,
       big_pickle,
       mimo_free

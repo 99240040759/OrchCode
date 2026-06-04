@@ -115,7 +115,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       const { cols, rows } = term
 
-      window.api
+      window.terminalBridge
         .createTerminal({
           cols,
           rows,
@@ -124,16 +124,16 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         })
         .then(({ id }) => {
           if (!active) {
-            window.api.closeTerminal({ id }).catch(console.error)
+            window.terminalBridge.closeTerminal({ id }).catch(console.error)
             return
           }
           ptyIdRef.current = id
 
-          unsubDataRef.current = window.api.onTerminalData(({ id: dataId, data }) => {
+          unsubDataRef.current = window.terminalBridge.onTerminalData(({ id: dataId, data }) => {
             if (dataId === id) term.write(data)
           })
 
-          unsubExitRef.current = window.api.onTerminalExit(({ id: exitId }) => {
+          unsubExitRef.current = window.terminalBridge.onTerminalExit(({ id: exitId }) => {
             if (exitId === id) {
               term.write('\r\n\x1b[2m[Process exited]\x1b[0m\r\n')
               ptyIdRef.current = null
@@ -141,7 +141,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
           })
 
           term.onData((data) => {
-            if (ptyIdRef.current) window.api.terminalInput({ id: ptyIdRef.current, data })
+            if (ptyIdRef.current) window.terminalBridge.terminalInput({ id: ptyIdRef.current, data })
           })
         })
         .catch((err) => {
@@ -154,7 +154,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
             fitAddon.fit()
           } catch {}
           if (ptyIdRef.current) {
-            window.api
+            window.terminalBridge
               .terminalResize({ id: ptyIdRef.current, cols: term.cols, rows: term.rows })
               .catch(() => {})
           }
@@ -174,7 +174,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         if (unsubDataRef.current) unsubDataRef.current()
         if (unsubExitRef.current) unsubExitRef.current()
         if (ptyIdRef.current) {
-          window.api.closeTerminal({ id: ptyIdRef.current }).catch(() => {})
+          window.terminalBridge.closeTerminal({ id: ptyIdRef.current }).catch(() => {})
           ptyIdRef.current = null
         }
         term.dispose()

@@ -5,6 +5,9 @@ import { PanelLeftClose, Plus } from 'lucide-react'
 
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
+import { authService } from '../services/authService'
+import * as styles from './Sidebar.css'
+import * as titlebarStyles from '../assets/titlebar.css'
 
 interface SidebarProps {
   expanded?: boolean
@@ -24,13 +27,11 @@ const LeftSidebar: React.FC<SidebarProps> = ({
   const [localExpanded, setLocalExpanded] = useState(true)
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : localExpanded
 
-  // Auth state is managed globally in App.tsx (fetched once on mount + subscription).
-  // LeftSidebar just reads the atom — no duplicate fetch here.
   const authUser = useAtomValue(authUserAtom)
 
   const handleLogin = async () => {
     try {
-      await window.api.startGoogleAuth()
+      await authService.startGoogleAuth()
     } catch (err) {
       console.error('Google Sign-in failed:', err)
     }
@@ -38,7 +39,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({
 
   const handleLogout = async () => {
     try {
-      await window.api.logout()
+      await authService.logout()
     } catch (err) {
       console.error('Logout failed:', err)
     }
@@ -55,131 +56,61 @@ const LeftSidebar: React.FC<SidebarProps> = ({
   if (!isExpanded) return null
 
   return (
-    <aside
-      className="sidebar expanded"
-      style={{
-        position: 'relative',
-        overflow: 'hidden',
-        width: '250px',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        backgroundColor: 'var(--bg-sidebar)',
-        flexShrink: 0
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+    <aside className={`${styles.sidebarRoot} ${styles.sidebarExpanded}`}>
+      <div className={styles.sidebarInner}>
         {/* Drag region + collapse button */}
-        <div
-          className="sidebar-header-row"
-          style={
-            {
-              display: 'flex',
-              alignItems: 'center',
-              height: '38px',
-              paddingLeft: isMac ? '80px' : '12px',
-              paddingRight: '12px',
-              marginTop: 0,
-              gap: '14px',
-              flexShrink: 0,
-              WebkitAppRegion: 'drag'
-            } as React.CSSProperties & { WebkitAppRegion?: string }
-          }
-        >
+        <div className={`${styles.sidebarHeaderRow} app-region-drag ${isMac ? styles.sidebarHeaderRowMac : styles.sidebarHeaderRowWin}`}>
           <div
-            className="sidebar-collapse-btn"
+            className={`${styles.sidebarCollapseBtn} app-region-no-drag`}
             onClick={handleToggle}
             title="Collapse Sidebar"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties & { WebkitAppRegion?: string }}
           >
-            <PanelLeftClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
+            <PanelLeftClose size={16} strokeWidth={1.5} className="text-secondary" />
           </div>
         </div>
 
         {/* New Conversation button */}
-        <div
-          className="sidebar-top-section"
-          style={{
-            padding: '8px 12px',
-            gap: '4px',
-            display: 'flex',
-            flexDirection: 'column',
-            flexShrink: 0
-          }}
-        >
-          <div className="sidebar-start-conv" onClick={onStartConversation}>
-            <Plus size={16} strokeWidth={2} color="var(--text-secondary)" />
+        <div className={styles.sidebarTopSection}>
+          <div className={styles.sidebarStartConv} onClick={onStartConversation}>
+            <Plus size={16} strokeWidth={2} className="text-secondary" />
             <span>New Conversation</span>
           </div>
         </div>
 
-        <div style={{ padding: '0 12px', flexShrink: 0 }}>
-          <div className="sidebar-divider" />
+        <div className={styles.sidebarDividerContainer}>
+          <div className={styles.sidebarDivider} />
         </div>
 
         {/* Thread list */}
-        <div
-          className="sidebar-body"
-          style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}
-        >
+        <div className={styles.sidebarBody}>
           {threadListContent}
         </div>
 
-        <div style={{ padding: '0 12px', flexShrink: 0 }}>
-          <div className="sidebar-divider" />
+        <div className={styles.sidebarDividerContainer}>
+          <div className={styles.sidebarDivider} />
         </div>
 
         {/* User profile / sign-in */}
-        <div
-          className="sidebar-footer"
-          style={{ padding: '8px 12px', flexShrink: 0, WebkitAppRegion: 'no-drag' } as React.CSSProperties & { WebkitAppRegion?: string }}
-        >
+        <div className={`${styles.sidebarFooter} app-region-no-drag`}>
           {authUser ? (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
-                <button className="sidebar-footer-item">
+                <button className={styles.sidebarFooterItem}>
                   {authUser.photoUrl ? (
                     <img
                       src={authUser.photoUrl}
                       alt={authUser.name}
-                      style={{
-                        width: '20px',
-                        height: '20px',
-                        borderRadius: '50%',
-                        objectFit: 'cover',
-                        flexShrink: 0
-                      }}
+                      className={titlebarStyles.profileAvatarImg}
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <div
-                      style={{
-                        width: '20px',
-                        height: '20px',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        backgroundColor: 'rgba(255,255,255,0.1)',
-                        color: 'var(--text-primary)',
-                        flexShrink: 0
-                      }}
-                    >
+                    <div className={titlebarStyles.profileAvatarFallback}>
                       {authUser.name
                         ? authUser.name.charAt(0).toUpperCase()
                         : authUser.email.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <span
-                    style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: 1
-                    }}
-                  >
+                  <span className="text-ellipsis flex-1">
                     {authUser.name || authUser.email}
                   </span>
                 </button>
@@ -187,17 +118,14 @@ const LeftSidebar: React.FC<SidebarProps> = ({
 
               <DropdownMenu.Portal>
                 <DropdownMenu.Content asChild align="start" side="right" sideOffset={12}>
-                  <div
-                    className="titlebar-profile-dropdown native-dropdown-content"
-                    style={{ transformOrigin: 'bottom left' }}
-                  >
-                    <div className="profile-dropdown-info">
-                      <div className="profile-name">{authUser.name || 'Google User'}</div>
-                      <div className="profile-email">{authUser.email}</div>
+                  <div className={`${titlebarStyles.profileDropdown} ${titlebarStyles.nativeDropdownContent}`}>
+                    <div className={titlebarStyles.profileInfo}>
+                      <div className={titlebarStyles.profileName}>{authUser.name || 'Google User'}</div>
+                      <div className={titlebarStyles.profileEmail}>{authUser.email}</div>
                     </div>
-                    <DropdownMenu.Separator className="profile-dropdown-separator" />
+                    <DropdownMenu.Separator className={titlebarStyles.profileSeparator} />
                     <DropdownMenu.Item
-                      className="profile-dropdown-item logout"
+                      className={`${titlebarStyles.profileItem} ${titlebarStyles.profileItemLogout}`}
                       onSelect={handleLogout}
                     >
                       Log Out
@@ -207,9 +135,9 @@ const LeftSidebar: React.FC<SidebarProps> = ({
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
           ) : (
-            <button className="sidebar-footer-item google-btn" onClick={handleLogin}>
+            <button className={`${styles.sidebarFooterItem} ${styles.googleBtn}`} onClick={handleLogin}>
               <GoogleIcon size={14} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="text-ellipsis">
                 Sign In
               </span>
             </button>

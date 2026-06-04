@@ -4,15 +4,14 @@ import Skeleton from 'react-loading-skeleton'
 import {
   Info,
   Package,
-  FileCode,
-  ClipboardList,
-  BookOpen,
-  FileText
+  FileCode
 } from 'lucide-react'
 import { FileIcon } from './ToolCallBlock'
-import { getDisplayName } from '../lib/uiUtils'
+import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../../preload/index.d'
 import type { FileChangeEntry } from '../store/agentStore'
+import { Panel } from './Primitives'
+import * as styles from './OverviewPanel.css'
 
 interface OverviewPanelProps {
   artifacts: ArtifactEntry[]
@@ -20,31 +19,6 @@ interface OverviewPanelProps {
   loading: boolean
   handleArtifactClick: (art: ArtifactEntry) => void
   handleFileChangeClick: (fc: FileChangeEntry) => void
-}
-
-const getArtifactIcon = (name: string) => {
-  if (name === 'implementation_plan.md') {
-    return <ClipboardList size={15} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />
-  }
-  if (name === 'walkthrough.md') {
-    return <BookOpen size={15} style={{ flexShrink: 0, color: 'var(--accent-green)' }} />
-  }
-  return <FileText size={15} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
-}
-
-export const getRelativeDirPath = (filePath: string, workspacePath?: string) => {
-  let path = filePath
-  if (workspacePath && path.startsWith(workspacePath)) {
-    path = path.slice(workspacePath.length)
-  }
-  if (path.startsWith('/') || path.startsWith('\\')) {
-    path = path.slice(1)
-  }
-  const parts = path.split(/[/\\]/)
-  if (parts.length > 1) {
-    return parts.slice(0, -1).join('/')
-  }
-  return ''
 }
 
 export const OverviewPanel: React.FC<OverviewPanelProps> = ({
@@ -57,79 +31,23 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
   return (
     <ScrollArea.Root className="ScrollAreaRoot">
       <ScrollArea.Viewport className="ScrollAreaViewport">
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px',
-            padding: '24px 32px',
-            backgroundColor: 'var(--bg-app)',
-            minHeight: '100%'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div className={styles.overviewContainer}>
+          <div className={styles.overviewHeader}>
             <Info size={18} strokeWidth={1.5} color="var(--text-secondary)" />
-            <h2
-              style={{
-                fontSize: 'var(--font-size-lg)',
-                fontWeight: 600,
-                color: 'var(--text-primary)',
-                margin: 0,
-                fontFamily: 'var(--font-display)'
-              }}
-            >
+            <h2 className={styles.overviewTitle}>
               Session Overview
             </h2>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '24px',
-              alignItems: 'start'
-            }}
-          >
-            <div
-              style={{
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-app)',
-                display: 'flex',
-                flexDirection: 'column',
-                padding: '16px',
-                gap: '12px',
-                minHeight: '260px'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 'var(--font-size-xs)',
-                  fontWeight: 600,
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-secondary)',
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                  paddingBottom: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className={styles.overviewGrid}>
+            <Panel className={styles.overviewPanel}>
+              <div className={styles.panelHeader}>
+                <div className={styles.panelHeaderLeft}>
                   <Package size={14} style={{ color: 'var(--text-secondary)' }} />
                   <span>Artifacts</span>
                 </div>
               </div>
-              <div
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  overflowY: 'auto'
-                }}
-              >
+              <div className={styles.panelContent}>
                 {loading ? (
                   <Skeleton
                     count={3}
@@ -139,13 +57,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                     style={{ marginBottom: 6, borderRadius: 4 }}
                   />
                 ) : artifacts.length === 0 ? (
-                  <div
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--font-size-sm)',
-                      padding: '8px 4px'
-                    }}
-                  >
+                  <div className={styles.emptyText}>
                     No artifacts created yet.
                   </div>
                 ) : (
@@ -153,83 +65,28 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                     <div
                       key={art.name}
                       onClick={() => handleArtifactClick(art)}
-                      className="overview-item"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 10px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: 'var(--font-size-sm)',
-                        color: 'var(--text-primary)',
-                        transition: 'background-color 0.15s ease'
-                      }}
+                      className={styles.overviewItem}
                     >
-                      {getArtifactIcon(art.name)}
-                      <span
-                        style={{
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
+                      {getArtifactIcon(art.name, 15)}
+                      <span className={styles.itemText}>
                         {getDisplayName(art.name)}
                       </span>
                     </div>
                   ))
                 )}
               </div>
-            </div>
+            </Panel>
 
-            <div
-              style={{
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-app)',
-                display: 'flex',
-                flexDirection: 'column',
-                padding: '16px',
-                gap: '12px',
-                minHeight: '260px'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: 'var(--font-size-xs)',
-                  fontWeight: 600,
-                  letterSpacing: '0.05em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-secondary)',
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                  paddingBottom: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Panel className={styles.overviewPanel}>
+              <div className={styles.panelHeader}>
+                <div className={styles.panelHeaderLeft}>
                   <FileCode size={14} style={{ color: 'var(--text-secondary)' }} />
                   <span>Files Changed</span>
                 </div>
               </div>
-              <div
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  overflowY: 'auto'
-                }}
-              >
+              <div className={styles.panelContent}>
                 {userFiles.length === 0 ? (
-                  <div
-                    style={{
-                      color: 'var(--text-secondary)',
-                      fontSize: 'var(--font-size-sm)',
-                      padding: '8px 4px'
-                    }}
-                  >
+                  <div className={styles.emptyText}>
                     No workspace files modified.
                   </div>
                 ) : (
@@ -237,65 +94,25 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                     <div
                       key={fc.path}
                       onClick={() => handleFileChangeClick(fc)}
-                      className="overview-item"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 10px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: 'var(--font-size-sm)',
-                        color: 'var(--text-primary)',
-                        transition: 'background-color 0.15s ease'
-                      }}
+                      className={styles.overviewItem}
                     >
                       <FileIcon fileName={fc.name} size={13} />
-                      <span
-                        style={{
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          flex: 1
-                        }}
-                      >
+                      <span className={styles.itemText}>
                         {fc.name}
                       </span>
                       {fc.lineRange && (
-                        <span
-                          style={{
-                            color: 'var(--text-muted)',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: 'var(--font-size-xs)',
-                            flexShrink: 0,
-                            marginRight: '4px'
-                          }}
-                        >
+                        <span className={styles.itemLineRange}>
                           {fc.lineRange}
                         </span>
                       )}
-                      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                      <div className={styles.diffStats}>
                         {fc.additions > 0 && (
-                          <span
-                            style={{
-                              color: 'var(--accent-green)',
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 'var(--font-size-xs)',
-                              fontWeight: 700
-                            }}
-                          >
+                          <span className={styles.diffAdd}>
                             +{fc.additions}
                           </span>
                         )}
                         {fc.deletions > 0 && (
-                          <span
-                            style={{
-                              color: 'var(--accent-red)',
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 'var(--font-size-xs)',
-                              fontWeight: 700
-                            }}
-                          >
+                          <span className={styles.diffSub}>
                             -{fc.deletions}
                           </span>
                         )}
@@ -304,7 +121,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({
                   ))
                 )}
               </div>
-            </div>
+            </Panel>
           </div>
         </div>
       </ScrollArea.Viewport>

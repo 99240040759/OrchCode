@@ -13,6 +13,9 @@ import {
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import AutocompleteSuggestions from './AutocompleteSuggestions'
+import { workspaceService } from '../services/workspaceService'
+import { TokenIndicator } from './ui/TokenIndicator'
+import * as styles from './InputBar.css'
 
 
 interface InputBarProps {
@@ -21,26 +24,6 @@ interface InputBarProps {
 }
 
 const MAX_TOKENS = 200_000
-const RING_RADIUS = 9
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
-
-function ringColor(fraction: number): string {
-  if (fraction >= 0.95) return '#ef4444'
-  if (fraction >= 0.8) return '#f59e0b'
-  if (fraction >= 0.5) return '#10b981'
-  return '#5e5e5e'
-}
-
-const getDropdownStyle = (minWidth: number): React.CSSProperties => ({
-  background: 'var(--bg-sidebar)',
-  border: '1px solid var(--border-color)',
-  borderRadius: 6,
-  padding: '4px 0',
-  minWidth,
-  zIndex: 1000,
-  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-  transformOrigin: 'top left'
-})
 
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
@@ -72,7 +55,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const fetchWorkspaceFiles = useCallback(async () => {
     if (!conversationId) return
     try {
-      const files = await window.api.listWorkspaceFiles(conversationId)
+      const files = await workspaceService.listWorkspaceFiles(conversationId)
       setWorkspaceFiles(files)
     } catch (err) {
       console.error('Failed to load workspace files:', err)
@@ -177,11 +160,6 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   }, [])
 
   const displayTotal = sessionTokens
-  const fraction = Math.min(displayTotal / MAX_TOKENS, 1)
-  const dashOffset = RING_CIRCUMFERENCE * (1 - fraction)
-  const color = ringColor(fraction)
-  const formattedTokens =
-    displayTotal >= 1000 ? `${(displayTotal / 1000).toFixed(1)}k` : String(displayTotal)
 
   const handleSend = useCallback(() => {
     let val = inputValue.trim()
@@ -245,7 +223,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   )
 
   return (
-    <div className="input-bar-container" style={{ position: 'relative' }}>
+    <div className={styles.inputBarContainer}>
       <AutocompleteSuggestions
         showFileSuggestions={showFileSuggestions}
         filteredFiles={filteredFiles}
@@ -258,27 +236,27 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         ref={fileInputRef}
         onChange={handleFileChange}
         multiple
-        style={{ display: 'none' }}
+        className="hidden-input"
       />
       {attachments.length > 0 && (
-        <div className="input-attachments-container">
+        <div className={styles.inputAttachmentsContainer}>
           {attachments.map((att, idx) => (
-            <div key={`att-${idx}`} className="input-attachment-chip" title={att.name}>
+            <div key={`att-${idx}`} className={styles.inputAttachmentChip} title={att.name}>
               {att.type === 'image' ? (
-                <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} />
+                <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} className={styles.inputAttachmentChipImg} />
               ) : (
                 <SymbolsFileIcon
                   fileName={att.name.split('/').pop() || att.name}
                   autoAssign={true}
                   width={14}
                   height={14}
-                  className="input-file-icon"
+                  className={styles.inputFileIcon}
                 />
               )}
-              <span className="input-attachment-name">{att.name.split('/').pop() || att.name}</span>
+              <span className={styles.inputAttachmentName}>{att.name.split('/').pop() || att.name}</span>
               <button
                 onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
-                className="input-attachment-close"
+                className={styles.inputAttachmentClose}
               >
                 ✕
               </button>
@@ -286,21 +264,20 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ))}
         </div>
       )}
-      <div className="input-bar-text-container input-bar-text-container-inner">
+      <div className={styles.inputBarTextContainerInner}>
         {fileReferences.map((ref, idx) => (
-          <div key={`ref-${idx}`} title={ref.path} className="input-file-reference">
+          <div key={`ref-${idx}`} title={ref.path} className={styles.inputFileReference}>
             <SymbolsFileIcon
               fileName={ref.name}
               autoAssign={true}
               width={14}
               height={14}
-              className="input-file-icon"
+              className={styles.inputFileIcon}
             />
-            <span className="input-file-reference-name">{ref.name}</span>
+            <span className={styles.inputFileReferenceName}>{ref.name}</span>
             <button
               onClick={() => setFileReferences((prev) => prev.filter((_, i) => i !== idx))}
-              className="input-attachment-close"
-              style={{ marginLeft: 4 }}
+              className={styles.inputAttachmentClose}
             >
               ✕
             </button>
@@ -311,7 +288,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ref={textareaRef}
           minRows={1}
           maxRows={8}
-          className="input-bar-text-area input-bar-text-area-override"
+          className={`${styles.inputBarTextArea} ${styles.inputBarTextAreaOverride}`}
           placeholder={
             attachments.length > 0 || fileReferences.length > 0 ? '' : 'Ask anything, @ to mention'
           }
@@ -325,22 +302,20 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             checkSuggestions(target.value, target.selectionStart)
           }}
           onKeyDown={handleKeyDown}
-          // Textarea stays enabled during streaming so user can pre-type next message
-          // handleSend already guards against submitting while isRunning
         />
       </div>
 
-      <div className="input-bar-toolbar">
-        <div className="input-bar-toolbar-left">
+      <div className={styles.inputBarToolbar}>
+        <div className={styles.inputBarToolbarLeft}>
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <div className="toolbar-icon-btn" title="Add file or image">
+              <div className={styles.toolbarIconBtn} title="Add file or image">
                 <Plus size={16} />
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="native-dropdown-content" style={getDropdownStyle(160)}>
+                <div className="native-dropdown-content dropdown-menu-content dropdown-menu-content-sm">
                   <DropdownMenu.Item
                     onSelect={() => triggerFileSelect('image')}
                     className="profile-dropdown-item"
@@ -363,7 +338,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild disabled={Object.keys(availableModels).length === 0}>
               <div
-                className="toolbar-selector"
+                className={styles.toolbarSelector}
                 title={
                   Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model'
                 }
@@ -378,14 +353,14 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="native-dropdown-content" style={getDropdownStyle(200)}>
+                <div className="native-dropdown-content dropdown-menu-content dropdown-menu-content-md">
                   {Object.entries(availableModels).map(([key, model]) => (
                     <DropdownMenu.Item
                       key={key}
                       onSelect={() => setSelectedModel(key)}
                       className={`profile-dropdown-item ${selectedModel === key ? 'selected' : ''}`}
                     >
-                      <span style={{ fontWeight: 500 }}>{model.name}</span>
+                      <span className="font-medium">{model.name}</span>
                     </DropdownMenu.Item>
                   ))}
                 </div>
@@ -394,68 +369,28 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           </DropdownMenu.Root>
         </div>
 
-        <div className="input-bar-toolbar-right">
-          <div
-            className="token-ring-wrapper"
-            title={`${displayTotal.toLocaleString()} / ${MAX_TOKENS.toLocaleString()} tokens\n(${(fraction * 100).toFixed(1)}% context filled)`}
-          >
-            <svg
-              width={RING_RADIUS * 2 + 4}
-              height={RING_RADIUS * 2 + 4}
-              viewBox={`0 0 ${RING_RADIUS * 2 + 4} ${RING_RADIUS * 2 + 4}`}
-              className="token-ring-svg"
-            >
-              <circle
-                cx={RING_RADIUS + 2}
-                cy={RING_RADIUS + 2}
-                r={RING_RADIUS}
-                fill="none"
-                stroke="rgba(255,255,255,0.07)"
-                strokeWidth={2}
-              />
-              <circle
-                cx={RING_RADIUS + 2}
-                cy={RING_RADIUS + 2}
-                r={RING_RADIUS}
-                fill="none"
-                stroke={color}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeDasharray={RING_CIRCUMFERENCE}
-                strokeDashoffset={dashOffset}
-                className="token-ring-circle"
-              />
-            </svg>
-            {fraction > 0.05 && (
-              <span className="token-ring-label" style={{ color }}>
-                {formattedTokens}
-              </span>
-            )}
-          </div>
+        <div className={styles.inputBarToolbarRight}>
+          <TokenIndicator current={displayTotal} max={MAX_TOKENS} />
 
           {isRunning ? (
             <button
-              className="toolbar-submit-btn"
+              className={styles.toolbarSubmitBtn}
               onClick={handleStop}
               title="Stop generation"
               style={{ background: '#3a3a3a' }}
             >
-              <Square size={11} strokeWidth={3} style={{ color: 'var(--text-primary)' }} />
+              <Square size={11} strokeWidth={3} />
             </button>
           ) : (
             <button
-              className="toolbar-submit-btn"
+              className={styles.toolbarSubmitBtn}
               onClick={handleSend}
               title="Submit"
               disabled={
                 !inputValue.trim() && attachments.length === 0 && fileReferences.length === 0
               }
-              style={{
-                opacity:
-                  inputValue.trim() || attachments.length > 0 || fileReferences.length > 0 ? 1 : 0.4
-              }}
             >
-              <ArrowRight size={14} strokeWidth={2.5} style={{ color: 'var(--text-primary)' }} />
+              <ArrowRight size={14} strokeWidth={2.5} />
             </button>
           )}
         </div>

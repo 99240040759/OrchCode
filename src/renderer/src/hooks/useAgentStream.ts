@@ -46,10 +46,16 @@ export function useAgentStream() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const setRunState = useSetAtom(agentRunStateAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
+  const messages = useAtomValue(chatMessagesAtom)
   const setThreads = useSetAtom(threadListAtom)
   const setFilesChanged = useSetAtom(filesChangedAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
+
+  // Ref to capture current messages.length without adding messages to run's dep array
+  // (messages in deps would recreate run() on every streaming update → re-subscription races)
+  const messagesLengthRef = useRef(messages.length)
+  messagesLengthRef.current = messages.length
 
   // Removed: abortRef — the abort controller was wired to nothing (streamAgent doesn't
   // accept a signal through the IPC bridge). Stop is handled exclusively via stopAgentStream IPC.
@@ -85,7 +91,10 @@ export function useAgentStream() {
       // Use explicit forceThreadId if provided (from newConversation or selectThread),
       // otherwise fall back to the current atom value.
       // If neither exists, generate a UUID now so the IPC call always has a valid thread ID.
-      const isNewThread = !activeThreadId && !forceThreadId
+      // Determine if this is a new thread:
+      // - No existing active thread (first ever message), OR
+      // - The conversation currently has no messages (freshly created thread)
+      const isNewThread = !activeThreadId || messagesLengthRef.current === 0
       const resolvedThreadId =
         forceThreadId ?? activeThreadId ?? `session-${crypto.randomUUID()}`
 
@@ -180,10 +189,9 @@ export function useAgentStream() {
           unsubscribeRef.current = null
         }
 
-        unsubscribeRef.current = window.api.onAgentChunk((chunk) => {
+        unsubscribeRef.current = window.agentBridge.onAgentChunk((chunk) => {
           try {
-            if (!chunk) return
-            if (chunk.threadId && chunk.threadId !== streamThreadId) return
+            if (!chunk || chunk.threadId !== streamThreadId) return
 
             const chunkType = chunk.type
             const chunkData = chunk.payload
@@ -201,17 +209,27 @@ export function useAgentStream() {
               flushAssistant()
             } else if (chunkType === 'reasoning-delta') {
               const textDelta = typeof chunkData === 'string' ? chunkData : ''
-              const rb = currentReasoningBlockRef.current
-              if (rb) {
-                rb.content += textDelta
-                rb.durationMs = Date.now() - currentReasoningStartMs
+              const lastIdx = orderedBlocks.length - 1
+              if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
+                const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
+                const updated = {
+                  ...old,
+                  content: old.content + textDelta,
+                  durationMs: Date.now() - currentReasoningStartMs
+                }
+                orderedBlocks[lastIdx] = updated
+                currentReasoningBlockRef.current = updated
               }
               flushAssistant()
             } else if (chunkType === 'reasoning-end') {
-              const rb = currentReasoningBlockRef.current
-              if (rb) {
-                rb.durationMs = Date.now() - currentReasoningStartMs
-                rb.isStreaming = false
+              const lastIdx = orderedBlocks.length - 1
+              if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
+                const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
+                orderedBlocks[lastIdx] = {
+                  ...old,
+                  durationMs: Date.now() - currentReasoningStartMs,
+                  isStreaming: false
+                }
               }
               currentReasoningBlockRef.current = null
               flushAssistant()
@@ -219,29 +237,41 @@ export function useAgentStream() {
               const textDelta = typeof chunkData === 'string' ? chunkData : ''
               fullContent += textDelta
 
-              const rb = currentReasoningBlockRef.current
-              if (rb) {
-                rb.isStreaming = false
-                rb.durationMs = Date.now() - currentReasoningStartMs
-                currentReasoningBlockRef.current = null
+              const lastIdx = orderedBlocks.length - 1
+              if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
+                const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
+                orderedBlocks[lastIdx] = {
+                  ...old,
+                  isStreaming: false,
+                  durationMs: Date.now() - currentReasoningStartMs
+                }
               }
+              currentReasoningBlockRef.current = null
 
-              const last = orderedBlocks[orderedBlocks.length - 1]
+              const newLastIdx = orderedBlocks.length - 1
+              const last = newLastIdx >= 0 ? orderedBlocks[newLastIdx] : null
               if (!last || last.type !== 'text') {
                 orderedBlocks.push({ type: 'text', content: textDelta })
               } else {
-                ;(last as Extract<StreamBlock, { type: 'text' }>).content += textDelta
+                orderedBlocks[newLastIdx] = {
+                  ...last,
+                  content: last.content + textDelta
+                }
               }
               flushAssistant()
             } else if (chunkType === 'tool-call-streaming-start') {
               setRunState('tool-calling')
 
-              const rb = currentReasoningBlockRef.current
-              if (rb) {
-                rb.isStreaming = false
-                rb.durationMs = Date.now() - currentReasoningStartMs
-                currentReasoningBlockRef.current = null
+              const lastIdx = orderedBlocks.length - 1
+              if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
+                const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
+                orderedBlocks[lastIdx] = {
+                  ...old,
+                  isStreaming: false,
+                  durationMs: Date.now() - currentReasoningStartMs
+                }
               }
+              currentReasoningBlockRef.current = null
 
               const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
               const tcName = chunkData?.toolName ?? 'unknown'
@@ -257,34 +287,44 @@ export function useAgentStream() {
             } else if (chunkType === 'tool-call-delta') {
               const tcId = chunkData?.toolCallId
               const delta = chunkData?.delta ?? ''
-              const toolBlock = orderedBlocks.find(
-                (b): b is Extract<StreamBlock, { type: 'tool' }> =>
-                  b.type === 'tool' && b.toolCallId === tcId
+              const idx = orderedBlocks.findIndex(
+                (b) => b.type === 'tool' && b.toolCallId === tcId
               )
-              if (toolBlock) {
-                toolBlock.argsDelta = (toolBlock.argsDelta || '') + delta
-                flushAssistant()
+              if (idx !== -1) {
+                const oldBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
+                orderedBlocks[idx] = {
+                  ...oldBlock,
+                  argsDelta: (oldBlock.argsDelta || '') + delta
+                }
               }
+              flushAssistant()
             } else if (chunkType === 'tool-call') {
               setRunState('tool-calling')
 
-              const rb = currentReasoningBlockRef.current
-              if (rb) {
-                rb.isStreaming = false
-                rb.durationMs = Date.now() - currentReasoningStartMs
-                currentReasoningBlockRef.current = null
+              const lastIdx = orderedBlocks.length - 1
+              if (lastIdx >= 0 && orderedBlocks[lastIdx].type === 'reasoning') {
+                const old = orderedBlocks[lastIdx] as Extract<StreamBlock, { type: 'reasoning' }>
+                orderedBlocks[lastIdx] = {
+                  ...old,
+                  isStreaming: false,
+                  durationMs: Date.now() - currentReasoningStartMs
+                }
               }
+              currentReasoningBlockRef.current = null
 
               const tcId = chunkData?.toolCallId ?? crypto.randomUUID()
               const tcName = chunkData?.toolName ?? 'unknown'
               const tcArgs = (chunkData?.args as Record<string, unknown>) ?? {}
-              const toolBlock = orderedBlocks.find(
-                (b): b is Extract<StreamBlock, { type: 'tool' }> =>
-                  b.type === 'tool' && b.toolCallId === tcId
+              const idx = orderedBlocks.findIndex(
+                (b) => b.type === 'tool' && b.toolCallId === tcId
               )
-              if (toolBlock) {
-                toolBlock.args = tcArgs
-                toolBlock.argsDelta = undefined
+              if (idx !== -1) {
+                const oldBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
+                orderedBlocks[idx] = {
+                  ...oldBlock,
+                  args: tcArgs,
+                  argsDelta: undefined
+                }
               } else {
                 orderedBlocks.push({
                   type: 'tool',
@@ -297,13 +337,12 @@ export function useAgentStream() {
               flushAssistant()
             } else if (chunkType === 'tool-result') {
               const tcId = chunkData?.toolCallId
-
-              const toolBlock = orderedBlocks.find(
-                (b): b is Extract<StreamBlock, { type: 'tool' }> =>
-                  b.type === 'tool' && b.toolCallId === tcId
+              const idx = orderedBlocks.findIndex(
+                (b) => b.type === 'tool' && b.toolCallId === tcId
               )
 
-              if (toolBlock) {
+              if (idx !== -1) {
+                const toolBlock = orderedBlocks[idx] as Extract<StreamBlock, { type: 'tool' }>
                 const fileChange = extractFileChange(toolBlock.toolName, toolBlock.args)
                 if (fileChange) {
                   setFilesChanged((prev) => {
@@ -324,10 +363,12 @@ export function useAgentStream() {
                 }
 
                 const res = chunkData?.result
-                toolBlock.result = res
-                toolBlock.status = isToolResultError(res) ? 'error' : 'complete'
-                // Clear argsDelta once result arrives
-                toolBlock.argsDelta = undefined
+                orderedBlocks[idx] = {
+                  ...toolBlock,
+                  result: res,
+                  status: isToolResultError(res) ? 'error' : 'complete',
+                  argsDelta: undefined
+                }
               }
 
               flushAssistant()
@@ -337,9 +378,13 @@ export function useAgentStream() {
               assistantIsStreaming = false
 
               // Mark all pending tool blocks as errored
-              for (const block of orderedBlocks) {
+              for (let i = 0; i < orderedBlocks.length; i++) {
+                const block = orderedBlocks[i]
                 if (block.type === 'tool' && block.status === 'pending') {
-                  block.status = 'error'
+                  orderedBlocks[i] = {
+                    ...block,
+                    status: 'error'
+                  }
                 }
               }
 
@@ -384,13 +429,15 @@ export function useAgentStream() {
               // Generate title for new threads
               if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
                 const titleText = promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200)
-                window.api
+                window.threadsBridge
                   .generateTitle(titleText, streamThreadId)
                   .then(async () => {
                     try {
-                      const threads = await window.api.getThreads()
+                      const threads = await window.threadsBridge.getThreads()
                       setThreads(threads ?? [])
-                    } catch {}
+                    } catch (err) {
+                      console.error('[useAgentStream] Failed to refresh threads after title generation:', err)
+                    }
                   })
                   .catch(console.error)
               }
@@ -402,7 +449,7 @@ export function useAgentStream() {
           }
         })
 
-        await window.api.streamAgent(promptText, resolvedThreadId, mode, selectedModel, attachments)
+        await window.agentBridge.streamAgent(promptText, resolvedThreadId, mode, selectedModel, attachments)
       } catch (err: any) {
         // IPC-level error (not stream error)
         console.error('[useAgentStream] Invocation Error:', err)
@@ -463,7 +510,7 @@ export function useAgentStream() {
         }
       })
     )
-    window.api.stopAgentStream(tid).catch(console.error)
+    window.agentBridge.stopAgentStream(tid).catch(console.error)
   }, [cleanupActiveStream, setRunState, setMessages])
 
   return { run, stop }

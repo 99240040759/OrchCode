@@ -4,7 +4,9 @@ import { toast } from 'sonner'
 import { Copy } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { globalPromptTriggerAtom } from '../store/agentStore'
+import { isAgentArtifact, getArtifactIcon, getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
 import MarkdownRenderer from './MarkdownRenderer'
+import * as styles from './MarkdownView.css'
 
 interface MarkdownViewProps {
   displayFile: {
@@ -13,47 +15,18 @@ interface MarkdownViewProps {
     content?: string
   }
   activeWorkspace: { path: string } | null
-  isAgentArtifact: (name: string) => boolean
-  getArtifactIcon: (name: string) => React.ReactNode
-  getDisplayName: (name: string) => string
-  getRelativeDirPath: (filePath: string, workspacePath?: string) => string
 }
 
 export const MarkdownView: React.FC<MarkdownViewProps> = ({
   displayFile,
-  activeWorkspace,
-  isAgentArtifact,
-  getArtifactIcon,
-  getDisplayName,
-  getRelativeDirPath
+  activeWorkspace
 }) => {
   const setGlobalPrompt = useSetAtom(globalPromptTriggerAtom)
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        overflow: 'hidden',
-        flex: 1
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          height: '34px',
-          padding: '0 16px',
-          backgroundColor: 'var(--bg-app)',
-          borderBottom: '1px solid var(--border-color)',
-          flexShrink: 0
-        }}
-      >
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}
-        >
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <div className={styles.fileInfoContainer}>
           {isAgentArtifact(displayFile.name) ? (
             getArtifactIcon(displayFile.name)
           ) : (
@@ -62,44 +35,22 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
               autoAssign={true}
               width={16}
               height={16}
-              style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+              className={styles.fileIcon}
             />
           )}
-          <span
-            style={{
-              color: 'var(--text-primary)',
-              fontWeight: 500,
-              fontSize: 'var(--font-size-sm)',
-              whiteSpace: 'nowrap'
-            }}
-          >
+          <span className={styles.fileName}>
             {getDisplayName(displayFile.name)}
           </span>
-          <span
-            style={{
-              color: 'var(--text-muted)',
-              fontSize: 'var(--font-size-xs)',
-              marginLeft: '4px',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis'
-            }}
-          >
+          <span className={styles.fileDir}>
             {getRelativeDirPath(displayFile.path, activeWorkspace?.path)}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        <div className={styles.toolbarGroup}>
           {displayFile.name === 'implementation_plan.md' && (
-            <div style={{ display: 'flex', gap: 6, marginRight: '8px' }}>
+            <div className={styles.actionButtonGroup}>
               <button
-                className="btn"
-                style={{
-                  padding: '2px 8px',
-                  fontSize: 'var(--font-size-xxs)',
-                  height: '22px',
-                  border: '1px solid rgba(255,255,255,0.12)'
-                }}
+                className={styles.rejectBtn}
                 onClick={() => {
                   setGlobalPrompt({
                     prompt:
@@ -111,12 +62,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
                 Reject
               </button>
               <button
-                className="btn primary"
-                style={{
-                  padding: '2px 8px',
-                  fontSize: 'var(--font-size-xxs)',
-                  height: '22px'
-                }}
+                className={styles.proceedBtn}
                 onClick={() => {
                   setGlobalPrompt({
                     prompt:
@@ -136,26 +82,14 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
               navigator.clipboard.writeText(displayFile.content ?? '')
               toast.success('File content copied!')
             }}
-            className="editor-toolbar-action"
+            className={styles.editorToolbarAction}
           >
             <Copy size={13} />
           </div>
         </div>
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '24px 32px',
-          backgroundColor: 'var(--bg-app)',
-          color: 'var(--text-primary)',
-          lineHeight: 1.6,
-          fontSize: 'var(--font-size-md-plus)',
-          userSelect: 'text'
-        }}
-        className="assistant-content markdown-body"
-      >
+      <div className={`assistant-content ${styles.contentContainer}`}>
         <MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} />
       </div>
     </div>

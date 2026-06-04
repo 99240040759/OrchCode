@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom } from '../store/agentStore'
+import * as styles from './BrowserView.css'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -45,7 +46,7 @@ const BrowserView: React.FC = () => {
 
   const navigate = useCallback((url: string) => {
     const target = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
-    window.api.navigateBrowser(target)
+    window.browserBridge.navigateBrowser(target)
     setUrlInput(target)
   }, [])
 
@@ -53,7 +54,7 @@ const BrowserView: React.FC = () => {
     setLoadError(null)
     const bounds = getBounds()
     try {
-      await window.api.openBrowser({ url: urlInputRef.current, bounds })
+      await window.browserBridge.openBrowser({ url: urlInputRef.current, bounds })
       setIsLoaded(true)
       isLoadedRef.current = true
     } catch (err: any) {
@@ -73,10 +74,10 @@ const BrowserView: React.FC = () => {
       openBrowserWithBounds()
     })
 
-    const unsubTitle = window.api.onBrowserTitleUpdated((t) => {
+    const unsubTitle = window.browserBridge.onBrowserTitleUpdated((t) => {
       if (active) setTitle(t)
     })
-    const unsubUrl = window.api.onBrowserUrlChanged((u) => {
+    const unsubUrl = window.browserBridge.onBrowserUrlChanged((u) => {
       if (active) {
         setDisplayUrl(u)
         setUrlInput(u)
@@ -85,7 +86,7 @@ const BrowserView: React.FC = () => {
 
     const resizeObs = new ResizeObserver(() => {
       if (active && isLoadedRef.current) {
-        window.api.resizeBrowser(getBounds()).catch(() => {})
+        window.browserBridge.resizeBrowser(getBounds()).catch(() => {})
       }
     })
     if (containerRef.current) resizeObs.observe(containerRef.current)
@@ -99,7 +100,7 @@ const BrowserView: React.FC = () => {
 
       if (!closedRef.current) {
         closedRef.current = true
-        window.api.closeBrowser().catch(() => {})
+        window.browserBridge.closeBrowser().catch(() => {})
       }
       setIsLoaded(false)
       isLoadedRef.current = false
@@ -109,45 +110,27 @@ const BrowserView: React.FC = () => {
   useEffect(() => {
     if (isLoadedRef.current) {
       const bounds = getBounds()
-      window.api.resizeBrowser(bounds).catch(() => {})
+      window.browserBridge.resizeBrowser(bounds).catch(() => {})
     }
   }, [panelMode, isOpen, getBounds])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden'
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
-          backgroundColor: 'var(--bg-sidebar)',
-          borderBottom: '1px solid var(--border-color)',
-          flexShrink: 0
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button className="browser-nav-btn" onClick={() => window.api.browserBack()} title="Back">
+    <div className={styles.browserContainer}>
+      <div className={styles.browserHeader}>
+        <div className={styles.browserNavGroup}>
+          <button className={styles.browserNavBtn} onClick={() => window.browserBridge.browserBack()} title="Back">
             <ArrowLeft size={14} />
           </button>
           <button
-            className="browser-nav-btn"
-            onClick={() => window.api.browserForward()}
+            className={styles.browserNavBtn}
+            onClick={() => window.browserBridge.browserForward()}
             title="Forward"
           >
             <ArrowRight size={14} />
           </button>
           <button
-            className="browser-nav-btn"
-            onClick={() => window.api.browserReload()}
+            className={styles.browserNavBtn}
+            onClick={() => window.browserBridge.browserReload()}
             title="Reload"
           >
             <RotateCw size={13} />
@@ -155,7 +138,7 @@ const BrowserView: React.FC = () => {
         </div>
 
         <input
-          className="browser-url-bar"
+          className={styles.browserUrlBar}
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
           onKeyDown={(e) => {
@@ -166,26 +149,16 @@ const BrowserView: React.FC = () => {
         />
 
         <button
-          className="browser-nav-btn"
+          className={`${styles.browserNavBtn} ${styles.browserGoBtn}`}
           onClick={() => navigate(urlInput)}
           title="Go"
-          style={{ color: 'var(--accent-blue)' }}
         >
           <ExternalLink size={13} />
         </button>
 
         {title && (
           <div
-            style={{
-              fontSize: 'var(--font-size-xxs)',
-              color: 'var(--text-secondary)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: 180,
-              marginLeft: 'auto',
-              paddingLeft: 8
-            }}
+            className={styles.browserTitle}
             title={displayUrl || urlInput}
           >
             {title}
@@ -195,50 +168,24 @@ const BrowserView: React.FC = () => {
 
       <div
         ref={containerRef}
-        style={{ flex: 1, backgroundColor: 'transparent', position: 'relative' }}
+        className={styles.browserContent}
       >
         {loadError ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              gap: 12,
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <AlertCircle size={20} style={{ color: 'var(--accent-red)' }} />
-            <span style={{ fontSize: 'var(--font-size-sm)', textAlign: 'center', maxWidth: 280 }}>
+          <div className={styles.browserErrorState}>
+            <AlertCircle size={20} className={styles.browserErrorIcon} />
+            <span className={styles.browserErrorText}>
               {loadError}
             </span>
             <button
-              className="browser-nav-btn"
+              className={`${styles.browserNavBtn} ${styles.browserRetryBtn}`}
               onClick={openBrowserWithBounds}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 12px',
-                fontSize: 'var(--font-size-sm)'
-              }}
             >
               <RefreshCw size={13} />
               Retry
             </button>
           </div>
         ) : !isLoaded ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: 'var(--text-secondary)',
-              fontSize: 'var(--font-size-sm)'
-            }}
-          >
+          <div className={styles.browserLoadingState}>
             Loading browser...
           </div>
         ) : null}

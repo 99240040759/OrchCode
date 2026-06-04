@@ -13,7 +13,7 @@ import type { ChatMessage } from '../store/types'
 import { ChevronDown, AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-
+import * as styles from './ChatThread.css'
 
 const decodeBase64 = (base64Str: string): string => {
   try {
@@ -44,10 +44,10 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
     const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
 
     return (
-      <div className="chat-message-user-container">
-        <div className="chat-message-user chat-message-user-content">
+      <div className={styles.chatMessageUserContainer}>
+        <div className={`${styles.chatMessageUser} ${styles.chatMessageUserContent}`}>
           {attachments.length > 0 && (
-            <div className="message-attachments">
+            <div className={styles.messageAttachments}>
               {attachments.map((att, idx) => {
                 const handleOpenDoc = () => {
                   setActiveEditorFile({
@@ -75,7 +75,7 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                 return (
                   <div
                     key={idx}
-                    className="message-attachment-chip"
+                    className={styles.messageAttachmentChip}
                     onClick={att.type === 'image' ? handleOpenImg : handleOpenDoc}
                     title={att.name || 'attachment'}
                   >
@@ -83,6 +83,7 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                       <img
                         src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`}
                         alt={att.name || 'attachment'}
+                        className={styles.messageAttachmentChipImg}
                       />
                     ) : (
                       <SymbolsFileIcon
@@ -90,10 +91,10 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
                         autoAssign={true}
                         width={14}
                         height={14}
-                        className="chat-attachment-icon"
+                        className={styles.chatAttachmentIcon}
                       />
                     )}
-                    <span className="chat-attachment-name">
+                    <span className={styles.chatAttachmentName}>
                       {att.name ? (att.name.split('/').pop() || att.name) : 'attachment'}
                     </span>
                   </div>
@@ -152,14 +153,14 @@ const ReasoningBlock = React.memo(
             setIsOpen(targetOpen)
           }
         }}
-        className="chat-reasoning-details"
+        className={styles.chatReasoningDetails}
       >
-        <summary className="chat-reasoning-summary chat-reasoning-summary-content">
+        <summary className={styles.chatReasoningSummary}>
           <span>{title}</span>
-          <ChevronDown size={14} className="chat-reasoning-chevron" />
+          <ChevronDown size={14} className={styles.chatReasoningChevron} />
         </summary>
 
-        <div ref={scrollRef} className="assistant-content chat-reasoning-body">
+        <div ref={scrollRef} className={`assistant-content ${styles.chatReasoningBody}`}>
           <MarkdownRenderer content={content || 'Thinking...'} />
         </div>
       </details>
@@ -177,7 +178,7 @@ ReasoningBlock.displayName = 'ReasoningBlock'
 
 const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
     return (
-    <div className="chat-message-assistant-container">
+    <div className={styles.chatMessageAssistantContainer}>
       {message.orderedBlocks?.map((block: any, i: number) => {
         if (block.type === 'reasoning') {
           return (
@@ -203,8 +204,8 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
             <div key={`tool-${i}`}>
               <ToolCallBlock toolCall={toolCall} />
               {message.isStreaming && isLastBlock && isPendingTool && (
-                <div className="chat-message-generating-container">
-                  <span className="shimmer-text chat-message-generating-text">Working</span>
+                <div className={styles.chatMessageGeneratingContainer}>
+                  <span className={`shimmer-text ${styles.chatMessageGeneratingText}`}>Working</span>
                 </div>
               )}
             </div>
@@ -212,11 +213,11 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
         }
         if (block.type === 'text') {
           return (
-            <div key={`text-${i}`} className="assistant-content chat-message-assistant">
+            <div key={`text-${i}`} className={`assistant-content ${styles.chatMessageAssistant}`}>
               <MarkdownRenderer content={block.content} />
               {message.isStreaming && i === (message.orderedBlocks?.length ?? 0) - 1 && (
-                <div className="chat-message-generating-container">
-                  <span className="shimmer-text chat-message-generating-text">Generating</span>
+                <div className={styles.chatMessageGeneratingContainer}>
+                  <span className={`shimmer-text ${styles.chatMessageGeneratingText}`}>Generating</span>
                 </div>
               )}
             </div>
@@ -224,9 +225,9 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
         }
         if (block.type === 'error') {
           return (
-            <div key={`error-${i}`} className="chat-error-container">
-              <AlertTriangle size={15} className="chat-error-icon" />
-              <span className="chat-error-message">{block.message}</span>
+            <div key={`error-${i}`} className={styles.chatErrorContainer}>
+              <AlertTriangle size={15} className={styles.chatErrorIcon} />
+              <span className={styles.chatErrorMessage}>{block.message}</span>
             </div>
           )
         }
@@ -236,7 +237,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
       {!message.orderedBlocks && (
         <>
           {message.content && (
-            <div className="assistant-content chat-message-assistant">
+            <div className={`assistant-content ${styles.chatMessageAssistant}`}>
               <MarkdownRenderer content={message.content} />
             </div>
           )}
@@ -244,8 +245,8 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
       )}
 
       {message.isStreaming && (!message.orderedBlocks || message.orderedBlocks.length === 0) && (
-        <div className="chat-message-generating-container">
-          <span className="shimmer-text chat-message-generating-text">Thinking</span>
+        <div className={styles.chatMessageGeneratingContainer}>
+          <span className={`shimmer-text ${styles.chatMessageGeneratingText}`}>Thinking</span>
         </div>
       )}
     </div>
@@ -301,13 +302,13 @@ const ChatThread: React.FC = () => {
   if (messageAtoms.length === 0) return null
 
   return (
-    <div ref={containerRef} onScroll={handleScroll} className="chat-thread-container">
-      <div className="chat-thread-spacer-top" />
+    <div ref={containerRef} onScroll={handleScroll} className={styles.chatThreadContainer}>
+      <div className={styles.chatThreadSpacerTop} />
       {messageAtoms.map((messageAtom) => (
         <MessageWrapper key={`${messageAtom}`} messageAtom={messageAtom} />
       ))}
-      <div className="chat-thread-spacer-bottom" />
-      <div className="chat-thread-anchor" />
+      <div className={styles.chatThreadSpacerBottom} />
+      <div className={styles.chatThreadAnchor} />
     </div>
   )
 }
@@ -315,7 +316,7 @@ const ChatThread: React.FC = () => {
 const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)
   return (
-    <div className="chat-thread-message-wrapper">
+    <div className={styles.chatThreadMessageWrapper}>
       {message.role === 'user' ? (
         <UserMessage message={message} />
       ) : (

@@ -1,4 +1,5 @@
 import React from 'react'
+import * as styles from './ArtifactPanel.css'
 
 interface MediaPreviewProps {
   displayFile: {
@@ -11,24 +12,16 @@ interface MediaPreviewProps {
 }
 
 export const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
+  const { mimeType, base64, name } = displayFile
+  const src = `data:${mimeType};base64,${base64}`
+
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'auto',
-        backgroundColor: 'var(--bg-app)',
-        padding: '24px'
-      }}
-      className="media-preview-container"
-    >
-      {displayFile.mimeType?.startsWith('image/') && (
-        <div className="media-image-wrapper">
+    <div className={`${styles.mediaPreviewOuter} ${styles.mediaPreviewContainer}`}>
+      {mimeType?.startsWith('image/') && (
+        <div className={styles.mediaImageWrapper}>
           <img
-            src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
-            alt={displayFile.name}
+            src={src}
+            alt={name}
             style={{
               maxWidth: '100%',
               maxHeight: '100%',
@@ -39,11 +32,11 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
           />
         </div>
       )}
-      {displayFile.mimeType?.startsWith('video/') && (
+      {mimeType?.startsWith('video/') && (
         <video
           controls
           autoPlay
-          src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
+          src={src}
           style={{
             maxWidth: '100%',
             maxHeight: '100%',
@@ -52,41 +45,17 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
           }}
         />
       )}
-      {displayFile.mimeType?.startsWith('audio/') && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 16,
-            padding: 32,
-            borderRadius: 8,
-            backgroundColor: 'var(--bg-app)',
-            border: '1px solid var(--border-color)'
-          }}
-        >
-          <span
-            style={{
-              color: 'var(--text-secondary)',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'var(--font-mono)'
-            }}
-          >
-            {displayFile.name}
-          </span>
-          <audio
-            controls
-            autoPlay
-            src={`data:${displayFile.mimeType};base64,${displayFile.base64}`}
-            style={{ width: '320px' }}
-          />
+      {mimeType?.startsWith('audio/') && (
+        <div className={styles.mediaAudioWrapper}>
+          <span className={styles.mediaAudioLabel}>{name}</span>
+          <audio controls autoPlay src={src} style={{ width: '320px' }} />
         </div>
       )}
-      {!displayFile.mimeType?.startsWith('image/') &&
-        !displayFile.mimeType?.startsWith('video/') &&
-        !displayFile.mimeType?.startsWith('audio/') && (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-            Unsupported preview format ({displayFile.mimeType})
+      {!mimeType?.startsWith('image/') &&
+        !mimeType?.startsWith('video/') &&
+        !mimeType?.startsWith('audio/') && (
+          <div className={styles.mediaUnsupported}>
+            Unsupported preview format ({mimeType})
           </div>
         )}
     </div>

@@ -26,11 +26,12 @@ log.info('[main] Orch-Code starting...')
 
 if (app.isPackaged) {
   log.warn('[main] Running in production mode.')
-} else {
-  // Only open DevTools debugging port in development
-  app.commandLine.appendSwitch('remote-debugging-port', '9222')
-  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 }
+// Choose a random debugging port to prevent predictable port scanning exploits
+const debuggingPort = Math.floor(Math.random() * 18000) + 12000
+WindowManager.setDebuggingPort(debuggingPort)
+app.commandLine.appendSwitch('remote-debugging-port', String(debuggingPort))
+app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 
 let mainWindow: BrowserWindow | null = null
 let onboardingWindow: BrowserWindow | null = null

@@ -4,14 +4,13 @@ import {
   X,
   Globe,
   TerminalSquare,
-  ClipboardList,
-  BookOpen,
-  FileText,
   ListTodo,
   PanelRightClose
 } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import type { EditorFile } from '../store/agentStore'
+import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
+import * as styles from './ArtifactPanel.css'
 
 interface ArtifactPanelHeaderProps {
   panelMode: string
@@ -21,18 +20,6 @@ interface ArtifactPanelHeaderProps {
   handleCloseFile: (file: EditorFile, e: React.MouseEvent) => void
   handleClose: () => void
   isMac: boolean
-  isAgentArtifact: (name: string) => boolean
-  getDisplayName: (name: string) => string
-}
-
-const getArtifactIcon = (name: string) => {
-  if (name === 'implementation_plan.md') {
-    return <ClipboardList size={15} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />
-  }
-  if (name === 'walkthrough.md') {
-    return <BookOpen size={15} style={{ flexShrink: 0, color: 'var(--accent-green)' }} />
-  }
-  return <FileText size={15} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
 }
 
 export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
@@ -42,34 +29,16 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
   setHoveredTabPath,
   handleCloseFile,
   handleClose,
-  isMac,
-  isAgentArtifact,
-  getDisplayName
+  isMac
 }) => {
   return (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        height: '38px',
-        backgroundColor: 'var(--bg-sidebar)',
-        flexShrink: 0,
-        paddingRight: isMac ? '12px' : '140px',
-        overflowX: 'auto',
-        scrollbarWidth: 'none'
-      }}
+      className={`${styles.artifactPanelHeader} ${isMac ? styles.artifactPanelHeaderMac : styles.artifactPanelHeaderWin}`}
     >
       <Tabs.List
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          height: '100%',
-          overflowX: 'auto',
-          scrollbarWidth: 'none'
-        }}
+        className={styles.artifactPanelTabsList}
       >
-        <Tabs.Trigger value="overview" className="tab-trigger">
+        <Tabs.Trigger value="overview" className={styles.tabTrigger}>
           <ListTodo
             size={14}
             style={{
@@ -79,7 +48,7 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
           <span>Overview</span>
         </Tabs.Trigger>
 
-        <Tabs.Trigger value="terminal" className="tab-trigger">
+        <Tabs.Trigger value="terminal" className={styles.tabTrigger}>
           <TerminalSquare
             size={14}
             style={{
@@ -89,7 +58,7 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
           <span>Terminal</span>
         </Tabs.Trigger>
 
-        <Tabs.Trigger value="browser" className="tab-trigger">
+        <Tabs.Trigger value="browser" className={styles.tabTrigger}>
           <Globe
             size={14}
             style={{
@@ -101,28 +70,17 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
 
         {openFiles.map((file) => {
           const isHovered = hoveredTabPath === file.path
-          const isCloseVisible = isHovered
           return (
             <Tabs.Trigger
               key={file.path}
               value={file.path}
-              className="tab-trigger"
+              className={styles.tabTrigger}
               onMouseEnter={() => setHoveredTabPath(file.path)}
               onMouseLeave={() => setHoveredTabPath(null)}
             >
-              <div
-                style={{
-                  width: '14px',
-                  height: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  position: 'relative'
-                }}
-              >
-                {isCloseVisible ? (
-                  <span onClick={(e) => handleCloseFile(file, e)} className="tab-close-btn">
+              <div className={styles.tabIconWrapper}>
+                {isHovered ? (
+                  <span onClick={(e) => handleCloseFile(file, e)} className={styles.tabCloseBtn}>
                     <X size={10} />
                   </span>
                 ) : isAgentArtifact(file.name) ? (
@@ -144,7 +102,7 @@ export const ArtifactPanelHeader: React.FC<ArtifactPanelHeaderProps> = ({
         })}
       </Tabs.List>
 
-      <div onClick={handleClose} title="Collapse Panel" className="artifact-panel-close-btn">
+      <div onClick={handleClose} title="Collapse Panel" className={styles.artifactPanelCloseBtn}>
         <PanelRightClose size={16} strokeWidth={1.5} color="var(--text-secondary)" />
       </div>
     </div>

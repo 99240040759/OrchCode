@@ -3,7 +3,7 @@ import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import { nodeAdapter } from './nodeAdapter'
 
-const { mainWindowUrl } = (workerData || {}) as { mainWindowUrl?: string }
+const { mainWindowUrl, debuggingPort } = (workerData || {}) as { mainWindowUrl?: string; debuggingPort?: number }
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -25,7 +25,8 @@ const workerAPI = {
           await browser.close()
         } catch {}
       }
-      browser = await chromium.connectOverCDP('http://localhost:9222')
+      const port = debuggingPort || 9222
+      browser = await chromium.connectOverCDP(`http://localhost:${port}`)
       context = browser.contexts()[0]
       const pages = context.pages()
 
@@ -100,9 +101,28 @@ const workerAPI = {
 
   async ensurePage(url?: string): Promise<{ ok: boolean; error?: string }> {
     if (page && context) {
-      if (!page.isClosed()) {
-        return { ok: true }
-      } else {
+      try {
+        if (!page.isClosed()) {
+          await page.url() // Verify connectivity
+          if (url) {
+            const currentUrl = page.url()
+            if (currentUrl !== url && !currentUrl.startsWith(url.split('?')[0])) {
+              const pages = context.pages()
+              const found = pages.find((p) => {
+                const u = p.url()
+                return u === url || u.startsWith(url.split('?')[0])
+              })
+              if (found) {
+                page = found
+              }
+            }
+          }
+          return { ok: true }
+        } else {
+          page = null
+          context = null
+        }
+      } catch {
         page = null
         context = null
       }
@@ -193,6 +213,53 @@ const workerAPI = {
     try {
       await page!.mouse.click(x, y, { button: button || 'left' })
       return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  },
+
+  async getPageContent() {
+    const ready = await this.ensurePage()
+    if (!ready.ok) return { success: false, error: ready.error }
+    try {
+      const url = page!.url()
+      const title = await page!.title()
+      const text = await page!.evaluate(() => document.body.innerText || '')
+
+      const elements = await page!.evaluate(() => {
+        const interactive: any[] = []
+        const select = document.querySelectorAll('button, input, select, textarea, a, [role="button"]')
+        select.forEach((el) => {
+          if (interactive.length >= 100) return
+
+          const rect = el.getBoundingClientRect()
+          const isVisible = rect.width > 0 && rect.height > 0
+          if (!isVisible) return
+
+          const tagName = el.tagName.toLowerCase()
+          const textContent = (el.textContent || '').trim().slice(0, 80)
+
+          interactive.push({
+            tagName,
+            id: el.id || undefined,
+            className: el.className || undefined,
+            text: textContent || undefined,
+            placeholder: (el as any).placeholder || undefined,
+            name: (el as any).name || undefined,
+            type: (el as any).type || undefined,
+            value: (el as any).value || undefined
+          })
+        })
+        return interactive
+      })
+
+      return {
+        success: true,
+        url,
+        title,
+        text: text.slice(0, 15000),
+        interactiveElements: elements
+      }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

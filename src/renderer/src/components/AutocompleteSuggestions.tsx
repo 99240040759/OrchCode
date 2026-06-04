@@ -1,5 +1,6 @@
 import React from 'react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import * as styles from './InputBar.css'
 
 interface AutocompleteSuggestionsProps {
   showFileSuggestions: boolean
@@ -19,7 +20,7 @@ export const AutocompleteSuggestions: React.FC<AutocompleteSuggestionsProps> = (
   if (!showFileSuggestions || filteredFiles.length === 0) return null
 
   return (
-    <div className="input-file-suggestions">
+    <div className={styles.inputFileSuggestions}>
       {filteredFiles.map((file, idx) => {
         const isSelected = idx === suggestionIndex
         const parts = file.split('/')
@@ -31,18 +32,18 @@ export const AutocompleteSuggestions: React.FC<AutocompleteSuggestionsProps> = (
             key={file}
             onClick={() => selectFileSuggestion(file)}
             onMouseEnter={() => setSuggestionIndex(idx)}
-            className={`input-file-suggestion-item ${isSelected ? 'selected' : ''}`}
+            className={`${styles.inputFileSuggestionItem} ${isSelected ? styles.inputFileSuggestionItemSelected : ''}`}
           >
             <SymbolsFileIcon
               fileName={name}
               autoAssign={true}
               width={14}
               height={14}
-              className="input-file-icon"
+              className={styles.inputFileIcon}
             />
-            <div className="input-file-details">
-              <span className="input-file-name">{name}</span>
-              {dir && <span className="input-file-dir">{dir}</span>}
+            <div className={styles.inputFileDetails}>
+              <span className={styles.inputFileName}>{name}</span>
+              {dir && <span className={styles.inputFileDir}>{dir}</span>}
             </div>
           </div>
         )

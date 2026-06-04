@@ -66,3 +66,55 @@ globalStyle('.ScrollAreaThumb:hover', {
 globalStyle('.ScrollAreaCorner', {
   background: 'rgba(0, 0, 0, 0.2)'
 })
+
+// ─── Dropdown Menus ───────────────────────────────────────────────────────────
+
+globalStyle('.native-dropdown-content', {
+  backgroundColor: 'var(--bg-sidebar)',
+  border: '1px solid var(--border-color)',
+  borderRadius: '8px',
+  padding: '4px',
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+  animation: 'dropdown-fade-in 0.15s ease',
+  zIndex: 100,
+  outline: 'none'
+})
+
+globalStyle('.dropdown-menu-content', {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '2px'
+})
+
+globalStyle('.dropdown-menu-content-sm', {
+  minWidth: '160px'
+})
+
+globalStyle('.dropdown-menu-content-md', {
+  minWidth: '220px'
+})
+
+globalStyle('.profile-dropdown-item', {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '6px 10px',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontSize: 'var(--font-size-sm)',
+  color: 'var(--text-secondary)',
+  transition: 'background-color 0.1s ease, color 0.1s ease',
+  outline: 'none',
+  userSelect: 'none'
+})
+
+globalStyle('.profile-dropdown-item:hover, .profile-dropdown-item[data-highlighted]', {
+  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  color: 'var(--text-primary)'
+})
+
+globalStyle('.profile-dropdown-item.selected', {
+  color: 'var(--text-primary)',
+  fontWeight: 500
+})
+

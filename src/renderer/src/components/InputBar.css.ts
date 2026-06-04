@@ -1,21 +1,10 @@
-import { globalStyle } from '@vanilla-extract/css'
+import { style } from '@vanilla-extract/css'
 
 // ─── InputBar Layout ──────────────────────────────────────────────────────────
 
-globalStyle('.workspace-main', {
-  flex: 1,
-  minWidth: 0,
-  backgroundColor: 'var(--bg-app)',
-  display: 'flex',
-  flexDirection: 'column',
-  height: '100%',
-  position: 'relative',
-  contain: 'layout paint'
-})
-
-globalStyle('.input-bar-container', {
+export const inputBarContainer = style({
   width: '100%',
-  maxWidth: '685px',
+  maxWidth: '720px',
   backgroundColor: 'rgba(24, 24, 27, 0.85)',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: '12px',
@@ -23,14 +12,15 @@ globalStyle('.input-bar-container', {
   flexDirection: 'column',
   backdropFilter: 'blur(10px)',
   boxShadow: '0 12px 40px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1)',
-  transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
-})
-globalStyle('.input-bar-container:focus-within', {
-  borderColor: 'rgba(255, 255, 255, 0.18)',
-  boxShadow: '0 16px 48px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.15)'
+  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+  position: 'relative',
+  ':focus-within': {
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    boxShadow: '0 16px 48px rgba(0, 0, 0, 0.45), 0 0 1px rgba(255, 255, 255, 0.15)'
+  }
 })
 
-globalStyle('.input-bar-text-area', {
+export const inputBarTextArea = style({
   width: '100%',
   background: 'transparent',
   border: 'none',
@@ -39,14 +29,14 @@ globalStyle('.input-bar-text-area', {
   fontFamily: 'var(--font-display)',
   fontSize: 'var(--font-size-md-plus)',
   color: 'var(--text-primary)',
-  lineHeight: 1.5
-})
-globalStyle('.input-bar-text-area::placeholder', {
-  color: 'var(--text-secondary)',
-  opacity: 0.5
+  lineHeight: 1.5,
+  '::placeholder': {
+    color: 'var(--text-secondary)',
+    opacity: 0.5
+  }
 })
 
-globalStyle('.input-bar-text-container-inner', {
+export const inputBarTextContainerInner = style({
   display: 'flex',
   flexWrap: 'wrap',
   alignItems: 'center',
@@ -56,7 +46,7 @@ globalStyle('.input-bar-text-container-inner', {
   boxSizing: 'border-box'
 })
 
-globalStyle('.input-bar-text-area-override', {
+export const inputBarTextAreaOverride = style({
   flex: 1,
   minWidth: '150px',
   background: 'transparent',
@@ -71,18 +61,20 @@ globalStyle('.input-bar-text-area-override', {
   fontSize: 'var(--font-size-md-plus)'
 })
 
-globalStyle('.input-bar-toolbar', {
+export const inputBarToolbar = style({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '6px 12px 12px 12px'
 })
-globalStyle('.input-bar-toolbar-left', {
+
+export const inputBarToolbarLeft = style({
   display: 'flex',
   alignItems: 'center',
   gap: '12px'
 })
-globalStyle('.input-bar-toolbar-right', {
+
+export const inputBarToolbarRight = style({
   display: 'flex',
   alignItems: 'center',
   gap: '8px'
@@ -90,7 +82,7 @@ globalStyle('.input-bar-toolbar-right', {
 
 // ─── Toolbar Elements ─────────────────────────────────────────────────────────
 
-globalStyle('.toolbar-selector', {
+export const toolbarSelector = style({
   display: 'flex',
   alignItems: 'center',
   gap: '6px',
@@ -102,17 +94,15 @@ globalStyle('.toolbar-selector', {
   fontWeight: 500,
   padding: '4px 10px',
   cursor: 'pointer',
-  transition: 'all 0.2s ease'
+  transition: 'all 0.2s ease',
+  ':hover': {
+    color: 'var(--text-primary)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.12)'
+  }
 })
-globalStyle('.toolbar-selector:hover', {
-  color: 'var(--text-primary)',
-  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  borderColor: 'rgba(255, 255, 255, 0.12)'
-})
-globalStyle('.toolbar-selector.warning', { color: '#fbbf24' })
-globalStyle('.toolbar-selector.warning:hover', { color: '#fcd34d' })
 
-globalStyle('.toolbar-icon-btn', {
+export const toolbarIconBtn = style({
   color: 'var(--text-secondary)',
   cursor: 'pointer',
   padding: '4px',
@@ -120,14 +110,14 @@ globalStyle('.toolbar-icon-btn', {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  transition: 'color 0.2s ease, background-color 0.2s ease'
-})
-globalStyle('.toolbar-icon-btn:hover', {
-  color: 'var(--text-primary)',
-  backgroundColor: 'rgba(255, 255, 255, 0.05)'
+  transition: 'color 0.2s ease, background-color 0.2s ease',
+  ':hover': {
+    color: 'var(--text-primary)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)'
+  }
 })
 
-globalStyle('.toolbar-submit-btn', {
+export const toolbarSubmitBtn = style({
   backgroundColor: 'rgba(255, 255, 255, 0.08)',
   color: 'var(--text-primary)',
   border: 'none',
@@ -138,20 +128,26 @@ globalStyle('.toolbar-submit-btn', {
   alignItems: 'center',
   justifyContent: 'center',
   cursor: 'pointer',
-  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+  ':hover': {
+    backgroundColor: 'var(--text-primary)',
+    color: 'var(--bg-app)',
+    transform: 'scale(1.05)'
+  },
+  ':active': {
+    transform: 'scale(0.95)'
+  },
+  ':disabled': {
+    opacity: 0.35,
+    cursor: 'not-allowed',
+    transform: 'none'
+  }
 })
-globalStyle('.toolbar-submit-btn:hover', {
-  backgroundColor: 'var(--text-primary)',
-  color: 'var(--bg-app)',
-  transform: 'scale(1.05)'
-})
-globalStyle('.toolbar-submit-btn:active', {
-  transform: 'scale(0.95)'
-})
+
 
 // ─── File Suggestions ─────────────────────────────────────────────────────────
 
-globalStyle('.input-file-suggestions', {
+export const inputFileSuggestions = style({
   position: 'absolute',
   bottom: 'calc(100% + 8px)',
   left: 0,
@@ -171,7 +167,7 @@ globalStyle('.input-file-suggestions', {
   color: 'var(--text-primary)'
 })
 
-globalStyle('.input-file-suggestion-item', {
+export const inputFileSuggestionItem = style({
   display: 'flex',
   alignItems: 'center',
   gap: '8px',
@@ -181,36 +177,39 @@ globalStyle('.input-file-suggestion-item', {
   backgroundColor: 'transparent',
   transition: 'background-color 0.15s ease'
 })
-globalStyle('.input-file-suggestion-item.selected', {
+
+export const inputFileSuggestionItemSelected = style({
   backgroundColor: 'rgba(255, 255, 255, 0.08)'
 })
 
-globalStyle('.input-file-icon', {
+export const inputFileIcon = style({
   display: 'inline-block',
   verticalAlign: 'middle',
   flexShrink: 0
 })
 
-globalStyle('.input-file-details', {
+export const inputFileDetails = style({
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
   flex: 1
 })
 
-globalStyle('.input-file-name', {
+export const inputFileName = style({
   fontSize: '13px',
   fontWeight: 500,
   color: 'var(--text-secondary)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap'
-})
-globalStyle('.input-file-suggestion-item.selected .input-file-name', {
-  color: 'var(--text-primary)'
+  whiteSpace: 'nowrap',
+  selectors: {
+    [`${inputFileSuggestionItemSelected} &`]: {
+      color: 'var(--text-primary)'
+    }
+  }
 })
 
-globalStyle('.input-file-dir', {
+export const inputFileDir = style({
   fontSize: '11px',
   color: 'var(--text-muted)',
   overflow: 'hidden',
@@ -218,7 +217,7 @@ globalStyle('.input-file-dir', {
   whiteSpace: 'nowrap'
 })
 
-globalStyle('.input-file-reference', {
+export const inputFileReference = style({
   display: 'inline-flex',
   alignItems: 'center',
   gap: '4px',
@@ -230,7 +229,7 @@ globalStyle('.input-file-reference', {
   verticalAlign: 'middle'
 })
 
-globalStyle('.input-file-reference-name', {
+export const inputFileReferenceName = style({
   maxWidth: '150px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -240,7 +239,7 @@ globalStyle('.input-file-reference-name', {
 
 // ─── Attachments ──────────────────────────────────────────────────────────────
 
-globalStyle('.input-attachments-container', {
+export const inputAttachmentsContainer = style({
   display: 'flex',
   flexWrap: 'wrap',
   gap: '8px',
@@ -251,7 +250,7 @@ globalStyle('.input-attachments-container', {
   overflowY: 'auto'
 })
 
-globalStyle('.input-attachment-chip', {
+export const inputAttachmentChip = style({
   display: 'flex',
   alignItems: 'center',
   gap: '6px',
@@ -263,21 +262,22 @@ globalStyle('.input-attachment-chip', {
   color: 'var(--text-primary)',
   fontFamily: 'var(--font-display)'
 })
-globalStyle('.input-attachment-chip img', {
+
+export const inputAttachmentChipImg = style({
   width: '16px',
   height: '16px',
   borderRadius: '2px',
   objectFit: 'cover'
 })
 
-globalStyle('.input-attachment-name', {
+export const inputAttachmentName = style({
   maxWidth: '150px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap'
 })
 
-globalStyle('.input-attachment-close', {
+export const inputAttachmentClose = style({
   background: 'none',
   border: 'none',
   cursor: 'pointer',
@@ -286,94 +286,8 @@ globalStyle('.input-attachment-close', {
   alignItems: 'center',
   color: 'var(--text-secondary)',
   fontSize: 'var(--font-size-xxs)',
-  transition: 'color 0.15s ease'
-})
-globalStyle('.input-attachment-close:hover', {
-  color: 'var(--accent-red)'
-})
-
-// ─── Token Ring ───────────────────────────────────────────────────────────────
-
-globalStyle('.token-ring-wrapper', {
-  position: 'relative',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'default',
-  flexShrink: 0
-})
-globalStyle('.token-ring-svg', { transform: 'rotate(-90deg)' })
-globalStyle('.token-ring-circle', {
-  transition: 'stroke-dashoffset 0.3s ease, stroke 0.3s ease'
-})
-globalStyle('.token-ring-label', {
-  position: 'absolute',
-  fontSize: 'var(--font-size-micro)',
-  fontWeight: 700,
-  fontFamily: 'var(--font-mono)',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
-  pointerEvents: 'none',
-  lineHeight: 1,
-  letterSpacing: '-0.03em',
-  opacity: 0,
-  transition: 'opacity 0.15s ease'
-})
-globalStyle('.token-ring-wrapper:hover .token-ring-label', { opacity: 1 })
-
-// ─── Home Prompt ──────────────────────────────────────────────────────────────
-
-globalStyle('.home-prompt-header', {
-  marginBottom: '24px',
-  textAlign: 'center'
-})
-
-globalStyle('.home-prompt-title', {
-  fontSize: 'var(--font-size-3xl)',
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: '8px',
-  cursor: 'pointer'
-})
-globalStyle('.home-prompt-title-selector', {
-  color: 'var(--text-secondary)',
-  fontSize: 'var(--font-size-3xl)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  cursor: 'pointer'
-})
-globalStyle('.home-prompt-title-selector:hover', {
-  color: 'var(--text-primary)'
-})
-
-globalStyle('.prompt-sub-links', {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '16px',
-  marginTop: '10px',
-  fontSize: 'var(--font-size-sm)',
-  width: '100%',
-  maxWidth: '685px',
-  justifyContent: 'flex-start'
-})
-globalStyle('.prompt-sub-link', {
-  color: 'var(--text-secondary)',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  transition: 'color 0.2s ease',
-  textDecoration: 'none'
-})
-globalStyle('.prompt-sub-link:hover', { color: 'var(--text-primary)' })
-
-// ─── Dropdown Selected State ──────────────────────────────────────────────────
-
-globalStyle('.profile-dropdown-item.selected', {
-  background: 'rgba(255, 255, 255, 0.05)',
-  color: 'var(--text-primary)'
+  transition: 'color 0.15s ease',
+  ':hover': {
+    color: 'var(--accent-red)'
+  }
 })

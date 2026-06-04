@@ -1,5 +1,24 @@
 import { globalStyle } from '@vanilla-extract/css'
 
+// ─── App Root Layout ──────────────────────────────────────────────────────────
+
+globalStyle('.app-root', {
+  display: 'flex',
+  height: '100vh',
+  overflow: 'hidden',
+  position: 'relative',
+  width: '100%'
+})
+
+globalStyle('.app-content-wrapper', {
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  height: '100vh',
+  minWidth: 0,
+  flex: 1
+})
+
 // ─── Main Window & Split-View Layout ─────────────────────────────────────────
 
 globalStyle('.app-container', {
@@ -7,6 +26,15 @@ globalStyle('.app-container', {
   height: 'calc(100vh - var(--titlebar-height))',
   width: '100vw',
   position: 'relative'
+})
+
+globalStyle('.workspace-main', {
+  display: 'flex',
+  flex: 1,
+  minWidth: 0,
+  position: 'relative',
+  overflow: 'hidden',
+  height: '100%'
 })
 
 globalStyle('.app-glow-border', {
@@ -21,30 +49,12 @@ globalStyle('.app-glow-border', {
   zIndex: 999
 })
 
+// Single definition — was duplicated before
 globalStyle('.split-view-container', {
   display: 'flex',
   width: '100%',
   height: '100%',
   overflow: 'hidden'
-})
-
-globalStyle('.chat-pane', {
-  flex: 1,
-  minWidth: '300px',
-  display: 'flex',
-  flexDirection: 'column',
-  position: 'relative',
-  backgroundColor: 'var(--bg-app)'
-})
-
-globalStyle('.artifact-pane', {
-  width: '100%',
-  height: '100%',
-  backgroundColor: 'var(--bg-app)',
-  borderLeft: 'none',
-  display: 'flex',
-  flexDirection: 'column',
-  contain: 'layout paint'
 })
 
 globalStyle('.panel-resize-handle', {
@@ -70,21 +80,24 @@ globalStyle('.panel-resize-handle:hover, .panel-resize-handle[data-resize-handle
   backgroundColor: 'var(--border-focus)'
 })
 
-globalStyle('.sidebar-collapsed-rail', {
-  width: '40px',
-  flexShrink: 0,
-  height: '100vh',
-  backgroundColor: 'var(--bg-sidebar)',
-  borderRight: '1px solid var(--border-color)',
+// ─── Thread Loading Overlay ───────────────────────────────────────────────────
+// Used by ChatPane for the thread switch skeleton
+
+globalStyle('.thread-loading-overlay', {
+  position: 'absolute',
+  inset: 0,
   display: 'flex',
-  alignItems: 'flex-start',
+  alignItems: 'center',
   justifyContent: 'center',
-  paddingTop: 'calc(var(--titlebar-height) + 12px)',
-  cursor: 'pointer',
-  transition: 'background-color 0.15s ease',
-  userSelect: 'none'
+  backgroundColor: 'rgba(18, 18, 18, 0.6)',
+  zIndex: 50
 })
 
-globalStyle('.sidebar-collapsed-rail:hover', {
-  backgroundColor: 'rgba(255, 255, 255, 0.04)'
+globalStyle('.thread-loading-spinner', {
+  width: '20px',
+  height: '20px',
+  borderRadius: '50%',
+  border: '2px solid rgba(255,255,255,0.1)',
+  borderTopColor: 'var(--accent-blue)',
+  animation: 'spin 0.7s linear infinite'
 })

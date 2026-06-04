@@ -12,6 +12,7 @@ import {
   activeThreadIdAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import * as styles from './MarkdownRenderer.css'
 
 
 interface MarkdownRendererProps {
@@ -67,7 +68,7 @@ function useMarkdownComponents(isArtifact: boolean) {
                 setArtifactPanelOpen: sapo,
                 conversationId: cid
               } = stateRef.current
-              const fileData = await window.api.readFile(filePath, cid)
+              const fileData = await window.workspaceBridge.readFile(filePath, cid)
               if (fileData) {
                 sae(fileData)
                 spm('editor')
@@ -83,34 +84,16 @@ function useMarkdownComponents(isArtifact: boolean) {
             <span
               onClick={handleFileClick}
               title={`Open ${filePath}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                color: 'var(--text-primary)',
-                fontSize: '13px',
-                userSelect: 'none',
-                cursor: 'pointer',
-                margin: '0 2px',
-                verticalAlign: 'middle'
-              }}
+              className={styles.fileLink}
             >
               <SymbolsFileIcon
                 fileName={filename}
                 autoAssign={true}
                 width={14}
                 height={14}
-                style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+                className={styles.fileIconWrapper}
               />
-              <span
-                style={{
-                  maxWidth: 150,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontSize: '13px'
-                }}
-              >
+              <span className={styles.fileNameWrapper}>
                 {children}
               </span>
             </span>
@@ -137,10 +120,10 @@ function useMarkdownComponents(isArtifact: boolean) {
 
         if (language) {
           return (
-            <pre className={className} {...props} style={{ position: 'relative' }}>
-              <span className="code-block-lang">{language}</span>
+            <pre className={`${className} ${styles.preWrapper}`} {...props}>
+              <span className={styles.codeBlockLang}>{language}</span>
               <button
-                className="code-block-copy-btn"
+                className={styles.codeBlockCopyBtn}
                 onClick={(e) => {
                   e.preventDefault()
                   navigator.clipboard.writeText(codeString)
@@ -171,7 +154,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact
   const components = useMarkdownComponents(isArtifact)
 
   return (
-    <div className={`markdown-content ${isArtifact ? 'is-artifact' : 'is-chat'}`}>
+    <div className={`${styles.markdownContent} ${isArtifact ? styles.markdownArtifact : ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}

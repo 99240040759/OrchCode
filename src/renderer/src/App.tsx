@@ -1,20 +1,15 @@
 import React, { useState, useEffect } from 'react'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
-import TitleBar from './components/TitleBar'
 import LeftSidebar from './components/LeftSidebar'
-import InputBar from './components/InputBar'
-import ChatThread from './components/ChatThread'
 import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
-import { ChevronDown, Code } from 'lucide-react'
 import { Toaster } from 'sonner'
 import {
   activeThreadIdAtom,
   sidebarExpandedAtom,
   activeWorkspaceAtom,
   isArtifactPanelOpenAtom,
-  isThreadLoadingAtom,
   activeThreadAtom,
   hasMessagesAtom,
   globalPromptTriggerAtom,
@@ -25,159 +20,9 @@ import {
 import { useAgentStream } from './hooks/useAgentStream'
 import { useThreads } from './hooks/useThreads'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
-
-// ─── Chat Pane ────────────────────────────────────────────────────────────────
-
-interface ChatPaneProps {
-  fullWidth: boolean
-  onSubmit: (prompt: string, mode?: string, attachments?: any[]) => void
-  onStop: () => void
-  onOpenArtifacts: () => void
-  onOpenWorkspace: () => void
-  workspaceName: string
-  hasMessages: boolean
-}
-
-const ChatPane = React.memo<ChatPaneProps>(
-  ({
-    fullWidth,
-    onSubmit,
-    onStop,
-    onOpenArtifacts,
-    onOpenWorkspace,
-    workspaceName,
-    hasMessages
-  }) => {
-    const isLoading = useAtomValue(isThreadLoadingAtom)
-
-    return (
-      <div
-        className="chat-pane"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '100%',
-          height: '100%',
-          position: 'relative',
-          contain: 'layout'
-        }}
-      >
-        <TitleBar title="Orch Code" workspaceName={workspaceName} />
-
-        {/* Thread loading skeleton overlay */}
-        {isLoading && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              top: 'var(--titlebar-height)',
-              zIndex: 10,
-              backgroundColor: 'rgba(18,18,18,0.7)',
-              backdropFilter: 'blur(2px)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <div
-              style={{
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                border: '2px solid var(--border-color)',
-                borderTopColor: 'var(--accent-blue)',
-                animation: 'spin 0.8s linear infinite'
-              }}
-            />
-          </div>
-        )}
-
-        {hasMessages ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              width: '100%',
-              maxWidth: fullWidth ? '720px' : '100%',
-              height: 'calc(100% - var(--titlebar-height))',
-              minWidth: 0,
-              margin: '0 auto',
-              flex: 1
-            }}
-          >
-            <ChatThread />
-            <div style={{ padding: '0 24px 20px', flexShrink: 0 }}>
-              <InputBar onSubmit={onSubmit} onStop={onStop} />
-            </div>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              flex: 1,
-              width: '100%',
-              height: 'calc(100% - var(--titlebar-height))',
-              overflowY: 'auto'
-            }}
-          >
-            <div
-              className="home-prompt-view"
-              style={{ width: '100%', maxWidth: '720px', margin: '0 auto' }}
-            >
-              {fullWidth && (
-                <div
-                  className="home-prompt-header"
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-end',
-                    marginBottom: 12
-                  }}
-                >
-                  <h2
-                    className="home-prompt-title"
-                    onClick={onOpenWorkspace}
-                    style={{ margin: 0, gap: 6, cursor: 'pointer' }}
-                  >
-                    <span style={{ color: 'var(--text-primary)' }}>Start new conversation in</span>
-                    <ChevronDown
-                      size={14}
-                      style={{ color: 'var(--text-secondary)', marginTop: 2 }}
-                    />
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
-                    </span>
-                  </h2>
-                </div>
-              )}
-
-              <InputBar onSubmit={onSubmit} onStop={onStop} />
-
-              {fullWidth && (
-                <div className="prompt-sub-links" style={{ marginTop: 16, gap: 16 }}>
-                  <a
-                    href="#"
-                    className="prompt-sub-link"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      onOpenArtifacts()
-                    }}
-                  >
-                    <Code size={14} strokeWidth={2} />
-                    <span>Open editor</span>
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-)
-ChatPane.displayName = 'ChatPane'
+import { ChatPane } from './components/ChatPane'
+import { authService } from './services/authService'
+import { threadService } from './services/threadService'
 
 // ─── App Inner ────────────────────────────────────────────────────────────────
 
@@ -194,7 +39,7 @@ function AppInner(): React.JSX.Element {
   const activeThreadTitle = activeThread ? activeThread.title || 'New Chat' : 'New Chat'
 
   const { run, stop } = useAgentStream()
-  const { openWorkspace, newConversation, loadThreads } = useThreads()
+  const { openWorkspace, newConversation, loadThreads, selectThread } = useThreads()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
   const availableModels = useAtomValue(availableModelsAtom)
 
@@ -210,15 +55,17 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     const init = async () => {
       // Fetch current conversation ID from main process
-      const convId = await window.api.getConversationId()
-      if (convId) setActiveThreadId(convId)
+      const convId = await threadService.getConversationId()
+      if (convId) {
+        await selectThread(convId)
+      }
 
       // Load thread list
       await loadThreads()
 
       // Load available models
       try {
-        const models = await window.api.getAvailableModels()
+        const models = await window.agentBridge.getAvailableModels()
         if (models) {
           setAvailableModels(models)
           const modelKeys = Object.keys(models)
@@ -230,9 +77,9 @@ function AppInner(): React.JSX.Element {
         console.error('Failed to load available models:', err)
       }
 
-      // Load current auth user (single source — LeftSidebar reads from authUserAtom only)
+      // Load current auth user
       try {
-        const user = await window.api.getAuthUser()
+        const user = await authService.getAuthUser()
         setAuthUser(user ?? null)
       } catch {
         setAuthUser(null)
@@ -241,8 +88,8 @@ function AppInner(): React.JSX.Element {
 
     init()
 
-    // Auth status subscription — runs once globally here, not duplicated in sidebar
-    const unsubAuth = window.api.onAuthStatusChanged((user) => {
+    // Auth status subscription
+    const unsubAuth = authService.onAuthStatusChanged((user) => {
       setAuthUser(user ?? null)
     })
 
@@ -260,15 +107,7 @@ function AppInner(): React.JSX.Element {
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        overflow: 'hidden',
-        position: 'relative',
-        width: '100%'
-      }}
-    >
+    <div className="app-root">
       <Toaster
         position="bottom-right"
         theme="dark"
@@ -292,25 +131,15 @@ function AppInner(): React.JSX.Element {
         />
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: '100%',
-          height: '100vh',
-          minWidth: 0,
-          flex: 1
-        }}
-      >
-        <div className="app-container" style={{ height: '100%', width: '100%', flex: 1 }}>
-          <main className="workspace-main" style={{ width: '100%', height: '100%' }}>
+      <div className="app-content-wrapper">
+        <div className="app-container">
+          <main className="workspace-main">
             <div className="app-glow-border" />
 
             {isArtifactPanelOpen ? (
               <PanelGroup
                 direction="horizontal"
                 className="split-view-container"
-                style={{ width: '100%', height: '100%', overflow: 'hidden' }}
               >
                 <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
                   <ChatPane

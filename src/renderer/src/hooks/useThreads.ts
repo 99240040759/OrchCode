@@ -33,7 +33,7 @@ export function useThreads() {
 
   const loadThreads = useCallback(async () => {
     try {
-      const data = await window.api.getThreads()
+      const data = await window.threadsBridge.getThreads()
       setThreads(data ?? [])
     } catch (err) {
       console.error('[useThreads] Failed to load threads:', err)
@@ -42,6 +42,8 @@ export function useThreads() {
 
   const selectThread = useCallback(
     async (threadId: string) => {
+      if (!threadId) return
+
       // Reset UI state immediately
       setMessages([])
       setSessionTokens(0)
@@ -52,7 +54,7 @@ export function useThreads() {
       activeRef.current = threadId
 
       try {
-        await window.api.setActiveSession(threadId)
+        await window.threadsBridge.setActiveSession(threadId)
       } catch (err) {
         console.error('[useThreads] Failed to sync session to backend:', err)
       }
@@ -60,22 +62,25 @@ export function useThreads() {
       if (activeRef.current !== threadId) return
 
       try {
-        const workspacePath = await window.api.getThreadWorkspace(threadId)
+        const workspacePath = await window.threadsBridge.getThreadWorkspace(threadId)
         if (activeRef.current !== threadId) return
         if (workspacePath) {
           setActiveWorkspace({
             name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
             path: workspacePath
           })
+        } else {
+          setActiveWorkspace(null)
         }
       } catch (err) {
         console.error('[useThreads] Failed to bind workspace for thread:', err)
+        setActiveWorkspace(null)
       }
 
       if (activeRef.current !== threadId) return
 
       try {
-        const rawMessages = await window.api.getThreadMessages(threadId)
+        const rawMessages = await window.threadsBridge.getThreadMessages(threadId)
 
         if (activeRef.current !== threadId) return
 
@@ -103,7 +108,7 @@ export function useThreads() {
 
         // Fetch fresh token count from DB — don't use stale atom
         try {
-          const freshThread = await window.api.getThread(threadId)
+          const freshThread = await window.threadsBridge.getThread(threadId)
           if (freshThread && activeRef.current === threadId) {
             setSessionTokens(freshThread.accumulatedTokens ?? 0)
           }
@@ -135,9 +140,9 @@ export function useThreads() {
 
   const newConversation = useCallback(async () => {
     try {
-      const { conversationId: newId } = await window.api.newConversation()
+      const { conversationId: newId } = await window.threadsBridge.newConversation()
       if (activeWorkspace?.path) {
-        await window.api.setActiveWorkspace(newId, activeWorkspace.path)
+        await window.workspaceBridge.setActiveWorkspace(newId, activeWorkspace.path)
       }
       // Update atom immediately since we have the exact ID
       setActiveThreadId(newId)
@@ -162,24 +167,31 @@ export function useThreads() {
   const deleteThread = useCallback(
     async (threadId: string) => {
       try {
-        await window.api.deleteThread(threadId)
+        await window.threadsBridge.deleteThread(threadId)
         setThreads((prev: ThreadEntry[]) => prev.filter((t) => t.id !== threadId))
         if (activeThreadId === threadId) {
           setActiveThreadId('')
           setMessages([])
           setSessionTokens(0)
+          setActiveWorkspace(null)
         }
       } catch (err) {
         console.error('[useThreads] Delete thread error:', err)
       }
     },
-    [activeThreadId, setThreads, setActiveThreadId, setMessages, setSessionTokens]
+    [activeThreadId, setThreads, setActiveThreadId, setMessages, setSessionTokens, setActiveWorkspace]
   )
 
   const switchWorkspace = useCallback(
     async (path: string) => {
       try {
-        const ctx = await window.api.setActiveWorkspace(activeThreadId, path)
+        let currentId = activeThreadId
+        if (!currentId) {
+          const newId = await newConversation()
+          if (!newId) return null
+          currentId = newId
+        }
+        const ctx = await window.workspaceBridge.setActiveWorkspace(currentId, path)
         if (ctx) {
           setActiveWorkspace({
             name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
@@ -193,16 +205,20 @@ export function useThreads() {
         return null
       }
     },
-    [activeThreadId, setActiveWorkspace]
+    [activeThreadId, newConversation, setActiveWorkspace]
   )
 
   const closeAndDeleteWorkspace = useCallback(
     async (path: string) => {
       try {
-        const success = await window.api.closeAndDeleteWorkspace(path)
+        const success = await window.workspaceBridge.closeAndDeleteWorkspace(path)
         if (success) {
           if (activeWorkspace?.path === path) {
             setActiveWorkspace(null)
+            setActiveThreadId('')
+            setMessages([])
+            setSessionTokens(0)
+            setFilesChanged([])
           }
           await loadThreads()
         }
@@ -212,14 +228,20 @@ export function useThreads() {
         return false
       }
     },
-    [activeWorkspace, setActiveWorkspace, loadThreads]
+    [activeWorkspace, setActiveWorkspace, loadThreads, setActiveThreadId, setMessages, setSessionTokens, setFilesChanged]
   )
 
   const openWorkspace = useCallback(async () => {
     try {
-      const ctx = await window.api.selectWorkspace(activeThreadId)
+      let currentId = activeThreadId
+      if (!currentId) {
+        const newId = await newConversation()
+        if (!newId) return null
+        currentId = newId
+      }
+      const ctx = await window.workspaceBridge.selectWorkspace(currentId)
       if (ctx) {
-        await window.api.setActiveWorkspace(activeThreadId, ctx.rootPath)
+        await window.workspaceBridge.setActiveWorkspace(currentId, ctx.rootPath)
         setActiveWorkspace({
           name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace',
           path: ctx.rootPath
@@ -232,7 +254,7 @@ export function useThreads() {
       console.error('[useThreads] Open workspace error:', err)
       return null
     }
-  }, [activeThreadId, setActiveWorkspace, loadThreads])
+  }, [activeThreadId, newConversation, setActiveWorkspace, loadThreads])
 
   return {
     loadThreads,

@@ -35,7 +35,7 @@ export function registerBrowserTerminalIpc() {
       }: { cols: number; rows: number; cwd?: string; conversationId?: string }
     ) => {
       const id = `pty-${crypto.randomUUID()}`
-      const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/zsh')
+      const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash')
 
       const convCtx = conversationId ? getWorkspaceContext(conversationId) : undefined
       const workingDir =

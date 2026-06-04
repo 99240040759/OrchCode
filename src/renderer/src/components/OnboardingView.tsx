@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 
 import { GoogleIcon } from '../lib/uiUtils'
 import { toast } from 'sonner'
+import * as styles from './OnboardingView.css'
 
 export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)
@@ -14,7 +15,7 @@ export const OnboardingView: React.FC = () => {
   React.useEffect(() => {
     if (!user) return
     const timer = setTimeout(() => {
-      window.api.openMainAndCloseOnboarding()
+      window.authBridge.openMainAndCloseOnboarding()
     }, 1200)
     return () => clearTimeout(timer)
   }, [user])
@@ -23,7 +24,7 @@ export const OnboardingView: React.FC = () => {
     setLoading(true)
     setAuthError(null)
     try {
-      const profile = await window.api.startGoogleAuth()
+      const profile = await window.authBridge.startGoogleAuth()
       if (profile) {
         setUser(profile)
         // Transition is handled in a useEffect below so it cleans up on unmount
@@ -43,56 +44,56 @@ export const OnboardingView: React.FC = () => {
   }
 
   return (
-    <div className="onboarding-container">
-      <div className="onboarding-orb onboarding-orb-1" />
-      <div className="onboarding-orb onboarding-orb-2" />
+    <div className={styles.onboardingContainer}>
+      <div className={`${styles.onboardingOrb} ${styles.onboardingOrb1}`} />
+      <div className={`${styles.onboardingOrb} ${styles.onboardingOrb2}`} />
 
-      <div className="onboarding-card">
+      <div className={styles.onboardingCard}>
         {!user ? (
-          <div className="onboarding-inner">
-            <div className="onboarding-logo-container">
-              <div className="onboarding-logo-icon">☄️</div>
-              <h1 className="onboarding-title">Orch Code</h1>
-              <p className="onboarding-subtitle">
+          <div className={styles.onboardingInner}>
+            <div className={styles.onboardingLogoContainer}>
+              <div className={styles.onboardingLogoIcon}>☄️</div>
+              <h1 className={styles.onboardingTitle}>Orch Code</h1>
+              <p className={styles.onboardingSubtitle}>
                 Supercharge your development agentic experience.
               </p>
             </div>
 
             {loading ? (
-              <div className="onboarding-loading">
-                <div className="onboarding-spinner" />
-                <span className="onboarding-loading-text">Connecting to Google Auth...</span>
+              <div className={styles.onboardingLoading}>
+                <div className={styles.onboardingSpinner} />
+                <span className={styles.onboardingLoadingText}>Connecting to Google Auth...</span>
               </div>
             ) : (
               <>
-                <button className="onboarding-btn" onClick={handleSignIn}>
+                <button className={styles.onboardingBtn} onClick={handleSignIn}>
                   <GoogleIcon size={18} />
-                  <span className="onboarding-btn-text">Sign In with Google</span>
+                  <span className={styles.onboardingBtnText}>Sign In with Google</span>
                 </button>
-                {authError && <p className="onboarding-error">{authError}</p>}
+                {authError && <p className={styles.onboardingError}>{authError}</p>}
               </>
             )}
           </div>
         ) : (
-          <div className="onboarding-welcome">
-            <div className="onboarding-avatar-container">
+          <div className={styles.onboardingWelcome}>
+            <div className={styles.onboardingAvatarContainer}>
               {user.photoUrl ? (
                 <img
                   src={user.photoUrl}
                   alt={user.name}
-                  className="onboarding-avatar-img"
+                  className={styles.onboardingAvatarImg}
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="onboarding-avatar-fallback">
+                <div className={styles.onboardingAvatarFallback}>
                   {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                 </div>
               )}
-              <div className="onboarding-avatar-ring" />
+              <div className={styles.onboardingAvatarRing} />
             </div>
-            <h2 className="onboarding-welcome-title">Welcome back, {user.name}!</h2>
-            <p className="onboarding-welcome-subtitle">Preparing your workspace...</p>
-            <div className="onboarding-spinner-small" />
+            <h2 className={styles.onboardingWelcomeTitle}>Welcome back, {user.name}!</h2>
+            <p className={styles.onboardingWelcomeSubtitle}>Preparing your workspace...</p>
+            <div className={styles.onboardingSpinnerSmall} />
           </div>
         )}
       </div>

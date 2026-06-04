@@ -3,6 +3,7 @@ import { BrowserWindow, WebContentsView } from 'electron'
 class WindowManager {
   private static mainWindow: BrowserWindow | null = null
   private static browserView: WebContentsView | null = null
+  private static debuggingPort = 9222
 
   static setMainWindow(win: BrowserWindow | null) {
     this.mainWindow = win
@@ -18,6 +19,14 @@ class WindowManager {
 
   static getBrowserView(): WebContentsView | null {
     return this.browserView
+  }
+
+  static setDebuggingPort(port: number) {
+    this.debuggingPort = port
+  }
+
+  static getDebuggingPort(): number {
+    return this.debuggingPort
   }
 
   static clear() {

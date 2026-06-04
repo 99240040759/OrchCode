@@ -1,3 +1,5 @@
+import type { AgentStreamChunk } from './sharedTypes'
+
 export interface WorkspaceContext {
   conversationId: string
   rootPath: string
@@ -44,10 +46,16 @@ export interface UserProfile {
   photoUrl: string
 }
 
-export interface AppAPI {
+export interface WorkspaceBridge {
   selectWorkspace: (conversationId: string) => Promise<WorkspaceContext | null>
+  setActiveWorkspace: (conversationId: string, workspacePath: string) => Promise<any>
+  closeAndDeleteWorkspace: (workspacePath: string) => Promise<boolean>
   listWorkspaceFiles: (conversationId: string) => Promise<string[]>
+  readFile: (filePath: string, conversationId?: string) => Promise<any>
+  readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
+}
 
+export interface AgentBridge {
   streamAgent: (
     promptText: string,
     threadId: string,
@@ -57,26 +65,31 @@ export interface AppAPI {
   ) => Promise<void>
   stopAgentStream: (threadId?: string) => Promise<void>
   onAgentChunk: (
-    callback: (chunk: { type: string; payload: any; threadId?: string }) => void
+    callback: (chunk: AgentStreamChunk) => void
   ) => () => void
   getAvailableModels: () => Promise<Record<string, { id: string; name: string }>>
+}
 
+export interface ThreadsBridge {
   getConversationId: () => Promise<string>
   newConversation: () => Promise<{ conversationId: string }>
   getThreads: () => Promise<ThreadEntry[]>
-  getThread: (threadId: string) => Promise<ThreadEntry & { workspacePath?: string | null } | null>
+  getThread: (threadId: string) => Promise<(ThreadEntry & { workspacePath?: string | null }) | null>
   getThreadMessages: (threadId: string) => Promise<ThreadMessage[]>
   deleteThread: (threadId: string) => Promise<boolean>
   getThreadWorkspace: (threadId: string) => Promise<string | null>
-  setActiveWorkspace: (conversationId: string, workspacePath: string) => Promise<any>
-  closeAndDeleteWorkspace: (workspacePath: string) => Promise<boolean>
   generateTitle: (text: string, threadId: string) => Promise<string | null>
+  setActiveSession: (threadId: string) => Promise<boolean>
+}
 
+export interface ArtifactsBridge {
   listArtifacts: (conversationId: string) => Promise<ArtifactEntry[]>
-  readFile: (filePath: string, conversationId?: string) => Promise<any>
-  readOriginalFile: (filePath: string, conversationId?: string) => Promise<any>
-  onArtifactsChanged: (callback: (data: { conversationId: string; artifacts: ArtifactEntry[] }) => void) => () => void
+  onArtifactsChanged: (
+    callback: (data: { conversationId: string; artifacts: ArtifactEntry[] }) => void
+  ) => () => void
+}
 
+export interface TerminalBridge {
   createTerminal: (opts: {
     cols: number
     rows: number
@@ -88,7 +101,9 @@ export interface AppAPI {
   closeTerminal: (opts: { id: string }) => Promise<void>
   onTerminalData: (callback: (payload: { id: string; data: string }) => void) => () => void
   onTerminalExit: (callback: (payload: { id: string; exitCode: number }) => void) => () => void
+}
 
+export interface BrowserBridge {
   openBrowser: (opts: {
     url: string
     bounds: { x: number; y: number; width: number; height: number }
@@ -101,7 +116,9 @@ export interface AppAPI {
   closeBrowser: () => Promise<void>
   onBrowserTitleUpdated: (callback: (title: string) => void) => () => void
   onBrowserUrlChanged: (callback: (url: string) => void) => () => void
+}
 
+export interface DialogBridge {
   showConfirmDialog: (opts: {
     message: string
     detail?: string
@@ -109,24 +126,35 @@ export interface AppAPI {
     defaultId?: number
     cancelId?: number
   }) => Promise<number>
+}
 
+export interface UpdaterBridge {
   getUpdateStatus: () => Promise<UpdateStatus>
   checkForUpdates: () => Promise<void>
   installUpdate: () => Promise<void>
   openMacRelease: () => Promise<void>
   onUpdateStatusChanged: (callback: (status: UpdateStatus) => void) => () => void
   getAppVersion: () => Promise<string>
+}
 
+export interface AuthBridge {
   startGoogleAuth: () => Promise<UserProfile | null>
   logout: () => Promise<boolean>
   getAuthUser: () => Promise<UserProfile | null>
   openMainAndCloseOnboarding: () => Promise<void>
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void) => () => void
-  setActiveSession: (threadId: string) => Promise<boolean>
 }
 
 declare global {
   interface Window {
-    api: AppAPI
+    workspaceBridge: WorkspaceBridge
+    agentBridge: AgentBridge
+    threadsBridge: ThreadsBridge
+    artifactsBridge: ArtifactsBridge
+    terminalBridge: TerminalBridge
+    browserBridge: BrowserBridge
+    dialogBridge: DialogBridge
+    updaterBridge: UpdaterBridge
+    authBridge: AuthBridge
   }
 }

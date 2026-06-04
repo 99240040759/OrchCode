@@ -22,7 +22,7 @@ const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 
 function validateConversationId(conversationId: string) {
-  if (conversationId && !/^[a-zA-Z0-9-_]+$/.test(conversationId)) {
+  if (!conversationId || typeof conversationId !== 'string' || !/^[a-zA-Z0-9-_]+$/.test(conversationId)) {
     throw new Error(`Invalid conversationId format: ${conversationId}`)
   }
 }

@@ -1,9 +1,8 @@
-import { globalStyle } from '@vanilla-extract/css'
+import { style } from '@vanilla-extract/css'
 
 // ─── Chat Thread Container ────────────────────────────────────────────────────
 
-globalStyle('.chat-thread-container', {
-  // @ts-ignore
+export const chatThreadContainer = style({
   scrollbarWidth: 'none',
   msOverflowStyle: 'none',
   flex: 1,
@@ -14,29 +13,29 @@ globalStyle('.chat-thread-container', {
   overflowAnchor: 'auto',
   padding: '16px 0 24px',
   display: 'flex',
-  flexDirection: 'column'
-})
-globalStyle('.chat-thread-container::-webkit-scrollbar', {
-  display: 'none'
+  flexDirection: 'column',
+  '::-webkit-scrollbar': {
+    display: 'none'
+  }
 })
 
-globalStyle('.chat-thread-spacer-top', {
+export const chatThreadSpacerTop = style({
   height: '16px',
   flexShrink: 0
 })
 
-globalStyle('.chat-thread-message-wrapper', {
+export const chatThreadMessageWrapper = style({
   padding: '0 24px',
   overflowAnchor: 'none'
 })
 
-globalStyle('.chat-thread-spacer-bottom', {
+export const chatThreadSpacerBottom = style({
   height: '24px',
   flexShrink: 0,
   overflowAnchor: 'none'
 })
 
-globalStyle('.chat-thread-anchor', {
+export const chatThreadAnchor = style({
   overflowAnchor: 'auto',
   height: '1px',
   marginTop: '-1px'
@@ -44,13 +43,13 @@ globalStyle('.chat-thread-anchor', {
 
 // ─── User Message ─────────────────────────────────────────────────────────────
 
-globalStyle('.chat-message-user-container', {
+export const chatMessageUserContainer = style({
   display: 'flex',
   marginBottom: '24px',
   paddingLeft: 0
 })
 
-globalStyle('.chat-message-user', {
+export const chatMessageUser = style({
   background: 'var(--bg-sidebar)',
   borderRadius: '8px',
   padding: '6px 16px',
@@ -62,7 +61,7 @@ globalStyle('.chat-message-user', {
   userSelect: 'text'
 })
 
-globalStyle('.chat-message-user-content', {
+export const chatMessageUserContent = style({
   display: 'flex',
   flexDirection: 'column',
   gap: '8px'
@@ -70,14 +69,14 @@ globalStyle('.chat-message-user-content', {
 
 // ─── Message Attachments ──────────────────────────────────────────────────────
 
-globalStyle('.message-attachments', {
+export const messageAttachments = style({
   display: 'flex',
   flexWrap: 'wrap',
   gap: '8px',
   marginBottom: '8px'
 })
 
-globalStyle('.message-attachment-chip', {
+export const messageAttachmentChip = style({
   display: 'flex',
   alignItems: 'center',
   gap: '6px',
@@ -89,12 +88,13 @@ globalStyle('.message-attachment-chip', {
   fontSize: 'var(--font-size-xs)',
   color: 'var(--text-secondary)',
   transition: 'background-color 0.15s ease',
-  maxWidth: '160px'
+  maxWidth: '160px',
+  ':hover': {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)'
+  }
 })
-globalStyle('.message-attachment-chip:hover', {
-  backgroundColor: 'rgba(255, 255, 255, 0.08)'
-})
-globalStyle('.message-attachment-chip img', {
+
+export const messageAttachmentChipImg = style({
   width: '20px',
   height: '20px',
   objectFit: 'cover',
@@ -102,13 +102,13 @@ globalStyle('.message-attachment-chip img', {
   flexShrink: 0
 })
 
-globalStyle('.chat-attachment-icon', {
+export const chatAttachmentIcon = style({
   display: 'inline-block',
   verticalAlign: 'middle',
   flexShrink: 0
 })
 
-globalStyle('.chat-attachment-name', {
+export const chatAttachmentName = style({
   maxWidth: '120px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -117,7 +117,7 @@ globalStyle('.chat-attachment-name', {
 
 // ─── Assistant Message ────────────────────────────────────────────────────────
 
-globalStyle('.chat-message-assistant-container', {
+export const chatMessageAssistantContainer = style({
   marginBottom: '24px',
   paddingRight: 0,
   display: 'flex',
@@ -125,7 +125,7 @@ globalStyle('.chat-message-assistant-container', {
   gap: '12px'
 })
 
-globalStyle('.chat-message-assistant', {
+export const chatMessageAssistant = style({
   fontSize: 'var(--font-size-lg)',
   color: 'var(--text-primary)',
   lineHeight: 1.6,
@@ -133,23 +133,23 @@ globalStyle('.chat-message-assistant', {
   marginBottom: 0
 })
 
-globalStyle('.chat-message-generating-container', {
+export const chatMessageGeneratingContainer = style({
   marginTop: 0,
   padding: '4px 0',
   marginLeft: '2px'
 })
 
-globalStyle('.chat-message-generating-text', {
+export const chatMessageGeneratingText = style({
   fontSize: 'var(--font-size-sm)'
 })
 
 // ─── Reasoning Block ──────────────────────────────────────────────────────────
 
-globalStyle('.chat-reasoning-details', {
+export const chatReasoningDetails = style({
   marginBottom: 0
 })
 
-globalStyle('.chat-reasoning-summary', {
+export const chatReasoningSummary = style({
   cursor: 'pointer',
   fontSize: 'var(--font-size-md)',
   color: 'var(--text-secondary)',
@@ -160,26 +160,20 @@ globalStyle('.chat-reasoning-summary', {
   listStyle: 'none'
 })
 
-globalStyle('.chat-reasoning-summary-content', {
-  cursor: 'pointer',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '6px',
-  listStyle: 'none'
-})
 
-globalStyle('.chat-reasoning-chevron', {
+export const chatReasoningChevron = style({
   transform: 'rotate(-90deg)',
   transition: 'transform 0.12s ease',
   flexShrink: 0,
-  color: 'var(--text-secondary)'
+  color: 'var(--text-secondary)',
+  selectors: {
+    [`${chatReasoningDetails}[open] &`]: {
+      transform: 'rotate(0deg)'
+    }
+  }
 })
 
-globalStyle('.chat-reasoning-details[open] .chat-reasoning-chevron', {
-  transform: 'rotate(0deg)'
-})
-
-globalStyle('.chat-reasoning-body', {
+export const chatReasoningBody = style({
   marginTop: '6px',
   paddingBottom: '8px',
   color: 'var(--text-secondary)',
@@ -191,7 +185,7 @@ globalStyle('.chat-reasoning-body', {
 
 // ─── Error Block ──────────────────────────────────────────────────────────────
 
-globalStyle('.chat-error-container', {
+export const chatErrorContainer = style({
   display: 'flex',
   alignItems: 'flex-start',
   gap: '10px',
@@ -202,13 +196,13 @@ globalStyle('.chat-error-container', {
   margin: '12px 0'
 })
 
-globalStyle('.chat-error-icon', {
+export const chatErrorIcon = style({
   color: '#ef4444',
   marginTop: '3px',
   flexShrink: 0
 })
 
-globalStyle('.chat-error-message', {
+export const chatErrorMessage = style({
   fontSize: 'var(--font-size-md)',
   color: 'var(--text-primary)',
   lineHeight: 1.5

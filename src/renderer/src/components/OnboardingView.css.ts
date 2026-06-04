@@ -1,11 +1,11 @@
-import { globalStyle, globalKeyframes } from '@vanilla-extract/css'
+import { style, keyframes } from '@vanilla-extract/css'
 
-globalKeyframes('pulse-ring', {
+export const pulseRing = keyframes({
   '0%, 100%': { opacity: '0.6', transform: 'scale(1)' },
   '50%': { opacity: '1', transform: 'scale(1.02)' }
 })
 
-globalStyle('.onboarding-container', {
+export const onboardingContainer = style({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
@@ -19,20 +19,22 @@ globalStyle('.onboarding-container', {
   userSelect: 'none'
 })
 
-globalStyle('.onboarding-orb', {
+export const onboardingOrb = style({
   position: 'absolute',
   borderRadius: '50%',
   pointerEvents: 'none',
   zIndex: 1
 })
-globalStyle('.onboarding-orb-1', {
+
+export const onboardingOrb1 = style({
   width: '350px',
   height: '350px',
   background: 'radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, rgba(0, 0, 0, 0) 70%)',
   top: '15%',
   left: '10%'
 })
-globalStyle('.onboarding-orb-2', {
+
+export const onboardingOrb2 = style({
   width: '400px',
   height: '400px',
   background: 'radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, rgba(0, 0, 0, 0) 70%)',
@@ -40,7 +42,7 @@ globalStyle('.onboarding-orb-2', {
   right: '5%'
 })
 
-globalStyle('.onboarding-card', {
+export const onboardingCard = style({
   width: '420px',
   padding: '40px',
   borderRadius: '16px',
@@ -55,35 +57,40 @@ globalStyle('.onboarding-card', {
   justifyContent: 'center',
   textAlign: 'center'
 })
-globalStyle('.onboarding-inner', {
+
+export const onboardingInner = style({
   width: '100%',
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   gap: '32px'
 })
-globalStyle('.onboarding-logo-container', {
+
+export const onboardingLogoContainer = style({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   gap: '12px'
 })
-globalStyle('.onboarding-logo-icon', { fontSize: '48px', marginBottom: '8px' })
-globalStyle('.onboarding-title', {
+
+export const onboardingLogoIcon = style({ fontSize: '48px', marginBottom: '8px' })
+
+export const onboardingTitle = style({
   fontSize: '28px',
   fontWeight: 700,
   color: '#ffffff',
   letterSpacing: '-0.02em',
   margin: 0
 })
-globalStyle('.onboarding-subtitle', {
+
+export const onboardingSubtitle = style({
   fontSize: '14.5px',
   color: '#9c9c9c',
   lineHeight: 1.45,
   margin: 0
 })
 
-globalStyle('.onboarding-btn', {
+export const onboardingBtn = style({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -95,25 +102,30 @@ globalStyle('.onboarding-btn', {
   backgroundColor: 'rgba(255, 255, 255, 0.03)',
   cursor: 'pointer',
   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-  transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease'
+  transition: 'background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
+  ':hover': {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    boxShadow: '0 0 15px rgba(255, 255, 255, 0.05)',
+    transform: 'translateY(-1px)'
+  },
+  ':active': {
+    transform: 'translateY(0)'
+  }
 })
-globalStyle('.onboarding-btn:hover', {
-  backgroundColor: 'rgba(255, 255, 255, 0.07)',
-  borderColor: 'rgba(255, 255, 255, 0.15)',
-  boxShadow: '0 0 15px rgba(255, 255, 255, 0.05)',
-  transform: 'translateY(-1px)'
-})
-globalStyle('.onboarding-btn:active', { transform: 'translateY(0)' })
-globalStyle('.onboarding-btn-text', { fontSize: '14px', fontWeight: 600, color: '#ffffff' })
 
-globalStyle('.onboarding-loading', {
+export const onboardingBtnText = style({ fontSize: '14px', fontWeight: 600, color: '#ffffff' })
+
+export const onboardingLoading = style({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   gap: '12px'
 })
-globalStyle('.onboarding-loading-text', { fontSize: '13px', color: '#9c9c9c' })
-globalStyle('.onboarding-spinner', {
+
+export const onboardingLoadingText = style({ fontSize: '13px', color: '#9c9c9c' })
+
+export const onboardingSpinner = style({
   width: '28px',
   height: '28px',
   borderRadius: '50%',
@@ -121,7 +133,8 @@ globalStyle('.onboarding-spinner', {
   borderTopColor: '#3b82f6',
   animation: 'spin 0.8s linear infinite'
 })
-globalStyle('.onboarding-spinner-small', {
+
+export const onboardingSpinnerSmall = style({
   width: '20px',
   height: '20px',
   borderRadius: '50%',
@@ -131,27 +144,30 @@ globalStyle('.onboarding-spinner-small', {
   marginTop: '8px'
 })
 
-globalStyle('.onboarding-welcome', {
+export const onboardingWelcome = style({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
   gap: '16px',
   width: '100%'
 })
-globalStyle('.onboarding-avatar-container', {
+
+export const onboardingAvatarContainer = style({
   position: 'relative',
   width: '96px',
   height: '96px',
   marginBottom: '8px'
 })
-globalStyle('.onboarding-avatar-img', {
+
+export const onboardingAvatarImg = style({
   width: '100%',
   height: '100%',
   borderRadius: '50%',
   objectFit: 'cover',
   border: '2px solid rgba(255, 255, 255, 0.1)'
 })
-globalStyle('.onboarding-avatar-fallback', {
+
+export const onboardingAvatarFallback = style({
   width: '100%',
   height: '100%',
   borderRadius: '50%',
@@ -164,7 +180,8 @@ globalStyle('.onboarding-avatar-fallback', {
   justifyContent: 'center',
   border: '2px solid rgba(255, 255, 255, 0.1)'
 })
-globalStyle('.onboarding-avatar-ring', {
+
+export const onboardingAvatarRing = style({
   position: 'absolute',
   top: '-4px',
   left: '-4px',
@@ -173,17 +190,19 @@ globalStyle('.onboarding-avatar-ring', {
   borderRadius: '50%',
   border: '2px solid #8b5cf6',
   boxShadow: '0 0 16px rgba(139, 92, 246, 0.4)',
-  animation: 'pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+  animation: `${pulseRing} 2s cubic-bezier(0.4, 0, 0.6, 1) infinite`
 })
-globalStyle('.onboarding-welcome-title', {
+
+export const onboardingWelcomeTitle = style({
   fontSize: '22px',
   fontWeight: 700,
   color: '#ffffff',
   margin: 0
 })
-globalStyle('.onboarding-welcome-subtitle', { fontSize: '14px', color: '#9c9c9c', margin: 0 })
 
-globalStyle('.onboarding-error', {
+export const onboardingWelcomeSubtitle = style({ fontSize: '14px', color: '#9c9c9c', margin: 0 })
+
+export const onboardingError = style({
   fontSize: '12px',
   color: '#ef4444',
   textAlign: 'center',

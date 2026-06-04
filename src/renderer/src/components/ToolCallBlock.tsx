@@ -39,8 +39,7 @@ export const FileIcon: React.FC<FileIconProps> = ({ fileName, className = '', si
       autoAssign={true}
       width={size}
       height={size}
-      className={className}
-      style={{ display: 'inline-block', verticalAlign: 'middle' }}
+      className={`${className} ${styles.fileIconWrapper}`}
     />
   )
 }
@@ -53,34 +52,34 @@ interface ToolCallBlockProps {
 
 function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   if (toolName === 'browserScreenshot') {
-    return <Camera size={15} style={{ color: '#38bdf8', flexShrink: 0 }} />
+    return <Camera size={15} className={styles.iconBlue} />
   }
   if (isFile) {
     if (target === 'implementation_plan.md') {
-      return <ClipboardList size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+      return <ClipboardList size={15} className={styles.iconPurple} />
     }
     if (target === 'walkthrough.md') {
-      return <BookOpen size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
+      return <BookOpen size={15} className={styles.iconGreen} />
     }
     return <FileIcon fileName={target} size={16} />
   }
   switch (toolName) {
     case 'browserNavigate':
-      return <Globe size={15} style={{ color: '#60a5fa', flexShrink: 0 }} />
+      return <Globe size={15} className={styles.iconLightBlue} />
     case 'browserType':
-      return <Keyboard size={15} style={{ color: '#34d399', flexShrink: 0 }} />
+      return <Keyboard size={15} className={styles.iconTeal} />
     case 'browserScroll':
-      return <ChevronsUpDown size={15} style={{ color: '#94a3b8', flexShrink: 0 }} />
+      return <ChevronsUpDown size={15} className={styles.iconSlate} />
     case 'browserMouseClickCoordinate':
-      return <MousePointerClick size={15} style={{ color: '#f472b6', flexShrink: 0 }} />
+      return <MousePointerClick size={15} className={styles.iconPink} />
     case 'runCommand':
-      return <Terminal size={15} style={{ color: '#4ade80', flexShrink: 0 }} />
+      return <Terminal size={15} className={styles.iconLime} />
     case 'listDir':
-      return <FolderOpen size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+      return <FolderOpen size={15} className={styles.iconSecondary} />
     case 'searchWeb':
-      return <Globe size={15} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+      return <Globe size={15} className={styles.iconPurple} />
     default:
-      return <Terminal size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+      return <Terminal size={15} className={styles.iconSecondary} />
   }
 }
 
@@ -101,7 +100,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
   const handleClick = async () => {
     if (!isFile || !fullPath) return
     try {
-      const fileData = await window.api.readFile(fullPath, activeThreadId)
+      const fileData = await window.workspaceBridge.readFile(fullPath, activeThreadId)
       if (fileData) {
         setActiveEditorFile(fileData)
         setArtifactPanelMode('editor')
@@ -119,7 +118,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       )
     }
     if (toolCall.status === 'error') {
-      return <AlertCircle size={14} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+      return <AlertCircle size={14} className={styles.iconRed} />
     }
     return null
   }
@@ -131,41 +130,20 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
       className={`${styles.toolCallWrapper} ${isFile ? styles.interactive : styles.nonInteractive}`}
       title={isFile ? `Open ${fullPath}` : undefined}
     >
-      <span style={{ color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap' }}>
+      <span className={styles.mutedText}>
         {operation}
       </span>
 
-      <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}>
+      <span className={styles.iconWrapper}>
         {renderToolIcon(toolCall.toolName, isFile, target)}
       </span>
 
-      <span
-        style={{
-          color: 'var(--text-secondary)',
-          fontWeight: 500,
-          fontFamily: 'var(--font-mono)',
-          fontSize: '11.5px',
-          maxWidth: 240,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          textDecoration: 'none'
-        }}
-      >
+      <span className={styles.targetText}>
         {target}
       </span>
 
       {lineRange && (
-        <span
-          style={{
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '10.5px',
-            opacity: 0.7,
-            marginLeft: -2,
-            whiteSpace: 'nowrap'
-          }}
-        >
+        <span className={styles.lineRangeText}>
           {lineRange}
         </span>
       )}
@@ -177,19 +155,9 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = ({ toolCall }) => {
           toolCall.toolName === 'replaceFileContent' ||
           toolCall.toolName === 'multiReplaceFileContent') &&
         (additions > 0 || deletions > 0) && (
-          <div
-            style={{
-              display: 'flex',
-              gap: 3,
-              fontSize: '10px',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 600,
-              marginLeft: 2,
-              flexShrink: 0
-            }}
-          >
-            {additions > 0 && <span style={{ color: 'var(--accent-green)' }}>+{additions}</span>}
-            {deletions > 0 && <span style={{ color: 'var(--accent-red)' }}>-{deletions}</span>}
+          <div className={styles.diffStats}>
+            {additions > 0 && <span className={styles.diffAdd}>+{additions}</span>}
+            {deletions > 0 && <span className={styles.diffSub}>-{deletions}</span>}
           </div>
         )}
     </Component>

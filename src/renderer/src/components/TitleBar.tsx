@@ -3,6 +3,7 @@ import { useAtom } from 'jotai'
 import { updateStatusAtom, sidebarExpandedAtom, isArtifactPanelOpenAtom } from '../store/agentStore'
 import { getSharedWorker } from '../lib/workerManager'
 import { PanelLeft, PanelRight } from 'lucide-react'
+import * as styles from '../assets/titlebar.css'
 
 interface TitleBarProps {
   title?: string
@@ -25,7 +26,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
     if (!backgroundWorkerApi) return
     setUpdateStatus({ status: 'checking' })
     try {
-      const currentVersion = await window.api.getAppVersion()
+      const currentVersion = await window.updaterBridge.getAppVersion()
       const result = await backgroundWorkerApi.checkMacUpdate(currentVersion)
       setUpdateStatus(result)
 
@@ -46,7 +47,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
       return
     }
 
-    window.api.getUpdateStatus().then((status) => {
+    window.updaterBridge.getUpdateStatus().then((status) => {
       if (status) {
         if (isMac) {
           runMacWorkerCheck()
@@ -57,7 +58,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
     })
 
     const backgroundWorkerApi = getSharedWorker()
-    const unsubscribe = window.api.onUpdateStatusChanged((status) => {
+    const unsubscribe = window.updaterBridge.onUpdateStatusChanged((status) => {
       if (!isMac) {
         setUpdateStatus(status)
         if (status.status === 'available') {
@@ -99,16 +100,16 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
     const workerApi = getSharedWorker()
     if (updateStatus.status === 'downloaded') {
       workerApi?.sendTelemetryEvent('update_install_click', { platform: 'windows' })
-      window.api.installUpdate()
+      window.updaterBridge.installUpdate()
     } else if (updateStatus.status === 'available' && isMac) {
       workerApi?.sendTelemetryEvent('update_download_click', { platform: 'macos' })
-      window.api.openMacRelease()
+      window.updaterBridge.openMacRelease()
     } else if (updateStatus.status === 'error') {
       workerApi?.sendTelemetryEvent('update_retry_click')
       if (isMac) {
         runMacWorkerCheck()
       } else {
-        window.api.checkForUpdates()
+        window.updaterBridge.checkForUpdates()
       }
     }
   }
@@ -119,33 +120,33 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
     if (status === 'idle') return null
 
     let text = ''
-    let className = 'titlebar-update-badge'
+    let className = styles.titlebarUpdateBadge
 
     switch (status) {
       case 'checking':
         text = 'Checking...'
-        className += ' checking'
+        className += ` ${styles.badgeChecking}`
         break
       case 'available':
         if (isMac) {
           text = `Update Available (v${version})`
-          className += ' clickable available'
+          className += ` ${styles.badgeClickable} ${styles.badgeAvailable}`
         } else {
           text = `Downloading update (v${version})...`
-          className += ' info'
+          className += ` ${styles.badgeInfo}`
         }
         break
       case 'downloading':
         text = `Downloading: ${progress ?? 0}%`
-        className += ' downloading'
+        className += ` ${styles.badgeDownloading}`
         break
       case 'downloaded':
         text = 'Restart to Update'
-        className += ' clickable success'
+        className += ` ${styles.badgeClickable} ${styles.badgeSuccess}`
         break
       case 'error':
         text = 'Update error (click to retry)'
-        className += ' clickable error'
+        className += ` ${styles.badgeClickable} ${styles.badgeError}`
         break
       default:
         return null
@@ -158,32 +159,21 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
         title={status === 'error' && error ? error : undefined}
       >
         {status === 'downloading' && (
-          <div className="titlebar-update-progress-bar" style={{ width: `${progress ?? 0}%` }} />
+          <div className={styles.titlebarUpdateProgressBar} style={{ width: `${progress ?? 0}%` }} />
         )}
-        <span className="titlebar-update-text">{text}</span>
+        <span className={styles.titlebarUpdateText}>{text}</span>
       </div>
     )
   }
 
   return (
-    <header className="titlebar" style={{ display: 'flex', width: '100%' }}>
+    <header className={styles.titlebar}>
       <div
-        className="titlebar-left"
-        style={
-          {
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            paddingLeft: isMac ? '80px' : '12px',
-            width: isMac ? '108px' : '40px',
-            flexShrink: 0,
-            WebkitAppRegion: 'no-drag'
-          } as React.CSSProperties & { WebkitAppRegion?: string }
-        }
+        className={`${styles.titlebarLeft} ${isMac ? styles.titlebarLeftMac : styles.titlebarLeftWin}`}
       >
         {!sidebarExpanded && (
           <div
-            className="titlebar-toggle-btn"
+            className={styles.titlebarToggleBtn}
             onClick={() => setSidebarExpanded(true)}
             title="Expand Sidebar"
           >
@@ -192,38 +182,18 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
         )}
       </div>
 
-      <div
-        className="titlebar-center"
-        style={{
-          flex: 1,
-          display: 'flex',
-          justifyContent: 'flex-start',
-          alignItems: 'center',
-          paddingLeft: '16px'
-        }}
-      >
+      <div className={styles.titlebarCenter}>
         {workspaceName ? workspaceName : title}
       </div>
 
       <div
-        className="titlebar-right"
-        style={
-          {
-            paddingRight: isMac ? 16 : 140,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: '12px',
-            flexShrink: 0,
-            WebkitAppRegion: 'no-drag'
-          } as React.CSSProperties & { WebkitAppRegion?: string }
-        }
+        className={`${styles.titlebarRight} ${isMac ? styles.titlebarRightMac : styles.titlebarRightWin}`}
       >
         {renderUpdateIndicator()}
 
         {!isArtifactPanelOpen && (
           <div
-            className="titlebar-toggle-btn"
+            className={styles.titlebarToggleBtn}
             onClick={() => setArtifactPanelOpen(true)}
             title="Expand Right Panel"
           >
