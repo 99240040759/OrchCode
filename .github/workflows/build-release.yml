@@ -49,8 +49,33 @@ jobs:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |
             const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag });
-            await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.data.id, draft: false });
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              await github.rest.repos.updateRelease({ owner, repo, release_id: release.data.id, draft: false });
+              core.info(`Found existing release for ${tag}, published.`);
+            } catch (err) {
+              if (err.status === 404) {
+                core.info(`Release ${tag} not found — ensuring tag ref and creating release.`);
+                // Ensure the tag ref exists (create if missing)
+                try {
+                  await github.rest.git.getRef({ owner, repo, ref: `refs/tags/${tag}` });
+                  core.info(`Tag refs/tags/${tag} already exists.`);
+                } catch (refErr) {
+                  if (refErr.status === 404) {
+                    core.info(`Tag refs/tags/${tag} missing — creating it from current SHA ${process.env.GITHUB_SHA}.`);
+                    await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: process.env.GITHUB_SHA });
+                  } else {
+                    throw refErr;
+                  }
+                }
+                release = await github.rest.repos.createRelease({ owner, repo, tag_name: tag, name: tag, body: 'Release created by workflow', draft: false });
+                core.info(`Created release ${release.data.html_url}`);
+              } else {
+                throw err;
+              }
+            }
 
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
@@ -105,8 +130,32 @@ jobs:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |
             const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag });
-            await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.data.id, draft: false });
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              await github.rest.repos.updateRelease({ owner, repo, release_id: release.data.id, draft: false });
+              core.info(`Found existing release for ${tag}, published.`);
+            } catch (err) {
+              if (err.status === 404) {
+                core.info(`Release ${tag} not found — ensuring tag ref and creating release.`);
+                try {
+                  await github.rest.git.getRef({ owner, repo, ref: `refs/tags/${tag}` });
+                  core.info(`Tag refs/tags/${tag} already exists.`);
+                } catch (refErr) {
+                  if (refErr.status === 404) {
+                    core.info(`Tag refs/tags/${tag} missing — creating it from current SHA ${process.env.GITHUB_SHA}.`);
+                    await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: process.env.GITHUB_SHA });
+                  } else {
+                    throw refErr;
+                  }
+                }
+                release = await github.rest.repos.createRelease({ owner, repo, tag_name: tag, name: tag, body: 'Release created by workflow', draft: false });
+                core.info(`Created release ${release.data.html_url}`);
+              } else {
+                throw err;
+              }
+            }
 
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
@@ -141,5 +190,29 @@ jobs:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |
             const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag });
-            await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.data.id, draft: false });
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              await github.rest.repos.updateRelease({ owner, repo, release_id: release.data.id, draft: false });
+              core.info(`Found existing release for ${tag}, published.`);
+            } catch (err) {
+              if (err.status === 404) {
+                core.info(`Release ${tag} not found — ensuring tag ref and creating release.`);
+                try {
+                  await github.rest.git.getRef({ owner, repo, ref: `refs/tags/${tag}` });
+                  core.info(`Tag refs/tags/${tag} already exists.`);
+                } catch (refErr) {
+                  if (refErr.status === 404) {
+                    core.info(`Tag refs/tags/${tag} missing — creating it from current SHA ${process.env.GITHUB_SHA}.`);
+                    await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: process.env.GITHUB_SHA });
+                  } else {
+                    throw refErr;
+                  }
+                }
+                release = await github.rest.repos.createRelease({ owner, repo, tag_name: tag, name: tag, body: 'Release created by workflow', draft: false });
+                core.info(`Created release ${release.data.html_url}`);
+              } else {
+                throw err;
+              }
+            }
