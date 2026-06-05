@@ -1,22 +1,18 @@
 import React from 'react'
 import * as ScrollArea from '@radix-ui/react-scroll-area'
 import Skeleton from 'react-loading-skeleton'
-import { Info, Package, FileCode } from 'lucide-react'
-import { FileIcon } from './ToolCallBlock'
+import { Info, Package } from 'lucide-react'
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../../preload/index.d'
-import type { FileChangeEntry } from '../store/agentStore'
 import { Panel } from './Primitives'
 
 interface OverviewPanelProps {
   artifacts: ArtifactEntry[]
-  userFiles: FileChangeEntry[]
   loading: boolean
   handleArtifactClick: (art: ArtifactEntry) => void
-  handleFileChangeClick: (fc: FileChangeEntry) => void
 }
 
-const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, userFiles, loading, handleArtifactClick, handleFileChangeClick }) => {
+const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handleArtifactClick }) => {
   return (
     <ScrollArea.Root className="ScrollAreaRoot">
       <ScrollArea.Viewport className="ScrollAreaViewport">
@@ -37,25 +33,6 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, userFiles, loa
                     <div key={art.name} onClick={() => handleArtifactClick(art)} className="overview-item">
                       {getArtifactIcon(art.name, 15)}
                       <span className="item-text">{getDisplayName(art.name)}</span>
-                    </div>
-                  ))}
-              </div>
-            </Panel>
-            <Panel className="overview-panel">
-              <div className="panel-header">
-                <div className="panel-header-left"><FileCode size={14} style={{ color: 'var(--text-secondary)' }} /><span>Files Changed</span></div>
-              </div>
-              <div className="panel-content">
-                {userFiles.length === 0 ? <div className="empty-text">No workspace files modified.</div>
-                  : userFiles.map((fc) => (
-                    <div key={fc.path} onClick={() => handleFileChangeClick(fc)} className="overview-item">
-                      <FileIcon fileName={fc.name} size={13} />
-                      <span className="item-text">{fc.name}</span>
-                      {fc.lineRange && <span className="item-line-range">{fc.lineRange}</span>}
-                      <div className="ov-diff-stats">
-                        {fc.additions > 0 && <span className="ov-diff-add">+{fc.additions}</span>}
-                        {fc.deletions > 0 && <span className="ov-diff-sub">-{fc.deletions}</span>}
-                      </div>
                     </div>
                   ))}
               </div>

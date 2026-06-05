@@ -9,14 +9,14 @@ import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
 import { checkpointDB } from './db'
-import { registerWorkspaceIpc } from './workspaceIpc'
-import { registerThreadIpc } from './threadIpc'
-import { registerAgentIpc } from './agentIpc'
-import { registerBrowserTerminalIpc, cleanupAllPtys } from './browserTerminalIpc'
+import { registerAllIpc } from './ipc/commands'
+import { registerStreamIpc } from './agent/stream'
+import { cleanupAllPtys } from './ipc/commands'
 import WindowManager from './windowManager'
 import { stopBrowserAgentWorker } from './tools'
 import { APP_ID } from './paths'
 import { initializeSkills } from './skills'
+
 initSentry({
   dsn: process.env.SENTRY_DSN,
   enabled: !!process.env.SENTRY_DSN && (app.isPackaged || process.env.NODE_ENV === 'production'),
@@ -189,15 +189,11 @@ app.whenReady().then(async () => {
 
   log.info('[main] App ready — initializing modules')
 
-  // Register modular IPC Handlers
-  registerWorkspaceIpc()
-  registerThreadIpc()
-  registerAgentIpc()
-  registerBrowserTerminalIpc()
+  // Single unified IPC surface: one invoke router + one stream handler
+  registerAllIpc()
+  registerStreamIpc()
 
-  // Initialize helper skills and rewrite paths
   await initializeSkills()
-
   initUpdater()
   await initAuth()
   const authSession = getCurrentSession()

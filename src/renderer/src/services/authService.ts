@@ -2,48 +2,29 @@ import type { UserProfile } from '../../../preload/index.d'
 
 export const authService = {
   startGoogleAuth: async (): Promise<UserProfile | null> => {
-    try {
-      return await window.authBridge.startGoogleAuth()
-    } catch (err) {
-      console.error('[authService] startGoogleAuth failed:', err)
-      throw err
-    }
+    try { return await window.api.invoke('auth:login') as UserProfile | null }
+    catch (err) { console.error('[authService] startGoogleAuth failed:', err); throw err }
   },
 
   logout: async (): Promise<boolean> => {
-    try {
-      return await window.authBridge.logout()
-    } catch (err) {
-      console.error('[authService] logout failed:', err)
-      return false
-    }
+    try { return await window.api.invoke('auth:logout') as boolean }
+    catch (err) { console.error('[authService] logout failed:', err); return false }
   },
 
   getAuthUser: async (): Promise<UserProfile | null> => {
-    try {
-      return await window.authBridge.getAuthUser()
-    } catch (err) {
-      console.error('[authService] getAuthUser failed:', err)
-      return null
-    }
+    try { return await window.api.invoke('auth:get-user') as UserProfile | null }
+    catch (err) { console.error('[authService] getAuthUser failed:', err); return null }
   },
 
   openMainAndCloseOnboarding: async (): Promise<void> => {
-    try {
-      await window.authBridge.openMainAndCloseOnboarding()
-    } catch (err) {
-      console.error('[authService] openMainAndCloseOnboarding failed:', err)
-      throw err
-    }
+    try { await window.api.invoke('auth:open-onboarding') }
+    catch (err) { console.error('[authService] openMainAndCloseOnboarding failed:', err); throw err }
   },
 
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
-    return window.authBridge.onAuthStatusChanged((user) => {
-      try {
-        callback(user)
-      } catch (err) {
-        console.error('[authService] Error in auth status callback:', err)
-      }
+    return window.api.on('auth:status-changed', (user) => {
+      try { callback(user as UserProfile | null) }
+      catch (err) { console.error('[authService] Error in auth status callback:', err) }
     })
   }
 }

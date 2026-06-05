@@ -30,15 +30,6 @@ export interface ToolCallEntry {
   status: 'pending' | 'complete' | 'error'
 }
 
-export interface FileChangeEntry {
-  path: string
-  name: string
-  toolName: string
-  additions: number
-  deletions: number
-  lineRange: string
-  timestamp: number
-}
 
 export interface EditorFile {
   name: string

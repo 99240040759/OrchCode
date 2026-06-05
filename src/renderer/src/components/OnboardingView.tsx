@@ -9,14 +9,14 @@ export const OnboardingView: React.FC = () => {
 
   React.useEffect(() => {
     if (!user) return
-    const timer = setTimeout(() => window.authBridge.openMainAndCloseOnboarding(), 1200)
+    const timer = setTimeout(() => window.api.invoke('auth:open-onboarding').catch(console.error), 1200)
     return () => clearTimeout(timer)
   }, [user])
 
   const handleSignIn = async () => {
     setLoading(true); setAuthError(null)
     try {
-      const profile = await window.authBridge.startGoogleAuth()
+      const profile = await window.api.invoke('auth:login') as any
       if (profile) { setUser(profile); setLoading(false) }
       else { setLoading(false); setAuthError('Sign-in was cancelled or no profile returned.'); toast.error('Sign-in cancelled. Please try again.') }
     } catch (err: any) {

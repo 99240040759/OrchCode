@@ -1,12 +1,17 @@
-import { parentPort, workerData } from 'node:worker_threads'
 import { expose } from 'comlink'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
-import { nodeAdapter } from './nodeAdapter'
 
-const { mainWindowUrl, debuggingPort } = (workerData || {}) as {
-  mainWindowUrl?: string
-  debuggingPort?: number
-}
+let mainWindowUrl: string | undefined
+let debuggingPort: number | undefined
+
+// utilityProcess receives the init message with the MessagePort on first message from parent
+process.parentPort.once('message', ({ data, ports }) => {
+  mainWindowUrl = data.mainWindowUrl
+  debuggingPort = data.debuggingPort
+  // Expose Comlink API directly on the native MessagePort — no adapter needed
+  expose(workerAPI, ports[0] as any)
+  ports[0].start()
+})
 
 let browser: Browser | null = null
 let context: BrowserContext | null = null
@@ -289,10 +294,6 @@ const workerAPI = {
       return { success: false, error: err.message }
     }
   }
-}
-
-if (parentPort) {
-  expose(workerAPI, nodeAdapter(parentPort))
 }
 
 export type WorkerAPI = typeof workerAPI

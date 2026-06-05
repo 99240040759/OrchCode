@@ -2,15 +2,14 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { Worker } from 'node:worker_threads'
+import { utilityProcess, MessageChannelMain } from 'electron'
 import { wrap, type Remote } from 'comlink'
 import log from 'electron-log'
 import WindowManager from '../windowManager'
-import { nodeAdapter } from '../nodeAdapter'
 import type { WorkerAPI } from '../browserWorker'
 import { getConversationScreenshotsPath } from '../paths'
 
-let workerInstance: Worker | null = null
+let workerProcess: Electron.UtilityProcess | null = null
 let automatedBrowser: Remote<WorkerAPI> | null = null
 
 function checkBrowserViewActive(): { success: boolean; error?: string } | null {
@@ -25,30 +24,40 @@ function checkBrowserViewActive(): { success: boolean; error?: string } | null {
   return null
 }
 
-export function startBrowserAgentWorker() {
-  if (workerInstance) return automatedBrowser
+export function startBrowserAgentWorker(): Remote<WorkerAPI> | null {
+  if (workerProcess) return automatedBrowser
   const mainWindow = WindowManager.getMainWindow()
   const mainWindowUrl = mainWindow?.webContents.getURL() || ''
   const debuggingPort = WindowManager.getDebuggingPort()
-  const workerPath = join(__dirname, '../browserWorker.js') // Note: __dirname is tools subfolder, so we go up to find browserWorker.js
-  log.info(
-    `[tools:browser] Spawning Playwright background worker at: ${workerPath} using port: ${debuggingPort}`
-  )
-  workerInstance = new Worker(workerPath, { workerData: { mainWindowUrl, debuggingPort } })
-  automatedBrowser = wrap<WorkerAPI>(nodeAdapter(workerInstance))
+  const workerPath = join(__dirname, '../browserWorker.js')
+  log.info(`[tools:browser] Spawning Playwright worker via utilityProcess: ${workerPath} port: ${debuggingPort}`)
+
+  const { port1, port2 } = new MessageChannelMain()
+
+  workerProcess = utilityProcess.fork(workerPath, [], { serviceName: 'playwright-worker' })
+  // Send init data + port2 to the worker process
+  workerProcess.postMessage({ mainWindowUrl, debuggingPort }, [port2])
+
+  // Wrap port1 directly — utilityProcess MessagePortMain is Comlink-compatible
+  automatedBrowser = wrap<WorkerAPI>(port1 as any)
+
+  workerProcess.on('exit', (code) => {
+    log.warn(`[tools:browser] Worker process exited with code ${code}`)
+    workerProcess = null
+    automatedBrowser = null
+  })
+
   return automatedBrowser
 }
 
 export async function stopBrowserAgentWorker() {
   if (automatedBrowser) {
-    try {
-      await automatedBrowser.disconnect()
-    } catch {}
+    try { await automatedBrowser.disconnect() } catch {}
     automatedBrowser = null
   }
-  if (workerInstance) {
-    await workerInstance.terminate()
-    workerInstance = null
+  if (workerProcess) {
+    workerProcess.kill()
+    workerProcess = null
   }
 }
 

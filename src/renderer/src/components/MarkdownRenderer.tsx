@@ -37,7 +37,7 @@ function useMarkdownComponents(isArtifact: boolean) {
           e.preventDefault()
           try {
             const { setActiveEditorFile: sae, setArtifactPanelMode: spm, setArtifactPanelOpen: sapo, conversationId: cid } = stateRef.current
-            const fileData = await window.workspaceBridge.readFile(filePath, cid)
+            const fileData = await window.api.invoke('file:read', { filePath, conversationId: cid }) as any
             if (fileData) { sae(fileData); spm('editor'); sapo(true) }
           } catch (err) { console.error('[MarkdownRenderer] Failed to open file:', err) }
         }

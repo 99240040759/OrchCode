@@ -97,7 +97,7 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const models = await window.agentBridge.getAvailableModels()
+        const models = await window.api.invoke('models:list') as Record<string, { id: string; name: string }> | null
         if (models) {
           setAvailableModels(models)
           const modelKeys = Object.keys(models)

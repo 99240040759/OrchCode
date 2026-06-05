@@ -1,10 +1,10 @@
-import { app, ipcMain, shell, BrowserWindow, safeStorage } from 'electron'
+import { app, shell, BrowserWindow, safeStorage } from 'electron'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
 import { escapeHtml } from './workspace'
-import { getFallbackKeyPath, getSessionPath } from './paths'
+import { getSessionPath } from './paths'
 
 export interface UserProfile {
   uid: string
@@ -74,38 +74,11 @@ export function getCurrentSession(): AuthSession | null {
   return currentSession
 }
 
-async function getFallbackEncryptionKey(): Promise<Buffer> {
-  const keyPath = getFallbackKeyPath()
-  try {
-    const key = await fs.readFile(keyPath)
-    if (key.length === 32) return key
-  } catch {}
-  const newKey = crypto.randomBytes(32)
-  await fs.writeFile(keyPath, newKey, { mode: 0o600 })
-  return newKey
-}
-
-async function fallbackEncrypt(text: string): Promise<Buffer> {
-  const key = await getFallbackEncryptionKey()
-  const iv = crypto.randomBytes(16)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()])
-  const tag = cipher.getAuthTag()
-  return Buffer.concat([iv, tag, encrypted])
-}
-
-async function fallbackDecrypt(buf: Buffer): Promise<string> {
-  if (buf.length < 32) throw new Error('Invalid fallback buffer length')
-  const key = await getFallbackEncryptionKey()
-  const iv = buf.subarray(0, 16)
-  const tag = buf.subarray(16, 32)
-  const encrypted = buf.subarray(32)
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
-  decipher.setAuthTag(tag)
-  return decipher.update(encrypted) + decipher.final('utf8')
-}
-
 async function loadSession(): Promise<AuthSession | null> {
+  if (!safeStorage.isEncryptionAvailable()) {
+    log.error('[auth] safeStorage unavailable — cannot restore session. Re-authentication required.')
+    return null
+  }
   try {
     const exists = await fs
       .stat(sessionFilePath)
@@ -114,18 +87,9 @@ async function loadSession(): Promise<AuthSession | null> {
     if (!exists) return null
 
     const encrypted = await fs.readFile(sessionFilePath)
-    if (safeStorage.isEncryptionAvailable()) {
-      const result = safeStorage.decryptString(encrypted)
-      currentSession = JSON.parse(result)
-      return currentSession
-    } else {
-      log.warn(
-        '[auth] SECURITY WARNING: OS encryption is unavailable. Using AES-256-GCM encryption with local key file fallback.'
-      )
-      const rawString = await fallbackDecrypt(encrypted)
-      currentSession = JSON.parse(rawString)
-      return currentSession
-    }
+    const result = safeStorage.decryptString(encrypted)
+    currentSession = JSON.parse(result)
+    return currentSession
   } catch (err) {
     log.error('[auth] Load session failed:', err)
     return null
@@ -133,23 +97,17 @@ async function loadSession(): Promise<AuthSession | null> {
 }
 
 async function saveSession(session: AuthSession | null) {
+  if (!session) {
+    await fs.rm(sessionFilePath, { force: true }).catch(() => {})
+    return
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    log.error('[auth] safeStorage unavailable — session not persisted. Re-authentication will be required on next launch.')
+    return
+  }
   try {
-    if (!session) {
-      await fs.rm(sessionFilePath, { force: true })
-      return
-    }
-
-    const rawString = JSON.stringify(session)
-    if (safeStorage.isEncryptionAvailable()) {
-      const encrypted = safeStorage.encryptString(rawString)
-      await fs.writeFile(sessionFilePath, encrypted)
-    } else {
-      log.warn(
-        '[auth] SECURITY WARNING: OS encryption is unavailable. Encrypting session file using local AES-256-GCM key file.'
-      )
-      const encrypted = await fallbackEncrypt(rawString)
-      await fs.writeFile(sessionFilePath, encrypted)
-    }
+    const encrypted = safeStorage.encryptString(JSON.stringify(session))
+    await fs.writeFile(sessionFilePath, encrypted)
   } catch (err) {
     log.error('[auth] Save session failed:', err)
   }
@@ -181,29 +139,32 @@ async function closeTempServer(): Promise<void> {
   })
 }
 
-export async function initAuth() {
-  currentSession = await loadSession()
-  if (currentSession) {
-    log.info('[auth] Recovered session for:', currentSession.user.email)
+export function getAuthUser(): UserProfile | null {
+  return currentSession ? currentSession.user : null
+}
+
+export async function logoutUser(): Promise<boolean> {
+  log.info('[auth] Logging user out...')
+  currentSession = null
+  await saveSession(null)
+  broadcastUserStatus(null)
+  app.emit('auth:logged-out')
+  return true
+}
+
+
+export async function startGoogleAuth(): Promise<UserProfile | null> {
+  if (loginInProgress) {
+    throw new Error('Login already in progress. Please wait or try again later.')
   }
-
-  ipcMain.handle('auth:get-user', () => {
-    return currentSession ? currentSession.user : null
-  })
-
-  ipcMain.handle('auth:login', async () => {
-    if (loginInProgress) {
-      throw new Error('Login already in progress. Please wait or try again later.')
+  loginInProgress = true
+  try {
+    log.info('[auth] Triggering Google Sign-in flow...')
+    if (pendingLoginReject) {
+      pendingLoginReject(new Error('Login cancelled: new login initiated'))
+      pendingLoginReject = null
     }
-    loginInProgress = true
-    try {
-      log.info('[auth] Triggering Google Sign-in flow...')
-
-      if (pendingLoginReject) {
-        pendingLoginReject(new Error('Login cancelled: new login initiated'))
-        pendingLoginReject = null
-      }
-      await closeTempServer()
+    await closeTempServer()
 
       const { verifier, challenge } = generatePKCE()
       const port = 9005
@@ -361,19 +322,12 @@ export async function initAuth() {
     } finally {
       loginInProgress = false
     }
-  })
+}
 
-  ipcMain.handle('auth:logout', async () => {
-    log.info('[auth] Logging user out...')
-    currentSession = null
-    await saveSession(null)
-    broadcastUserStatus(null)
-    app.emit('auth:logged-out')
-    return true
-  })
-
-  ipcMain.handle('auth:open-main-and-close-onboarding', () => {
-    app.emit('auth:open-main-and-close-onboarding')
-    return true
-  })
+export async function initAuth() {
+  currentSession = await loadSession()
+  if (currentSession) {
+    log.info('[auth] Recovered session for:', currentSession.user.email)
+    broadcastUserStatus(currentSession.user)
+  }
 }

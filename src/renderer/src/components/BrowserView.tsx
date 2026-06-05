@@ -30,16 +30,16 @@ const BrowserView: React.FC = () => {
 
   const navigate = useCallback((url: string) => {
     const target = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
-    window.browserBridge.navigateBrowser(target)
+    window.api.invoke('browser:navigate', { url: target }).catch(() => {})
     setUrlInput(target)
   }, [])
 
   const openBrowserWithBounds = useCallback(async () => {
     setLoadError(null)
     try {
-      await window.browserBridge.openBrowser({ url: urlInputRef.current, bounds: getBounds() })
+      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds: getBounds() })
       setIsLoaded(true); isLoadedRef.current = true
-      window.browserBridge.resizeBrowser(getBounds()).catch(() => {})
+      window.api.invoke('browser:resize', getBounds()).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
   }, [getBounds])
 
@@ -48,30 +48,30 @@ const BrowserView: React.FC = () => {
     closedRef.current = false
     let active = true
     const rafId = requestAnimationFrame(() => { if (!active) return; openBrowserWithBounds() })
-    const unsubTitle = window.browserBridge.onBrowserTitleUpdated((t) => { if (active) setTitle(t) })
-    const unsubUrl = window.browserBridge.onBrowserUrlChanged((u) => { if (active) { setDisplayUrl(u); setUrlInput(u) } })
-    const handleWindowResize = () => { if (active && isLoadedRef.current) window.browserBridge.resizeBrowser(getBounds()).catch(() => {}) }
+    const unsubTitle = window.api.on('browser:title-updated', (t) => { if (active) setTitle(t as string) })
+    const unsubUrl = window.api.on('browser:url-changed', (u) => { if (active) { setDisplayUrl(u as string); setUrlInput(u as string) } })
+    const handleWindowResize = () => { if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {}) }
     window.addEventListener('resize', handleWindowResize)
-    const resizeObs = new ResizeObserver(() => { if (active && isLoadedRef.current) window.browserBridge.resizeBrowser(getBounds()).catch(() => {}) })
+    const resizeObs = new ResizeObserver(() => { if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {}) })
     if (containerRef.current) resizeObs.observe(containerRef.current)
     return () => {
       active = false; cancelAnimationFrame(rafId); window.removeEventListener('resize', handleWindowResize); resizeObs.disconnect(); unsubTitle(); unsubUrl()
-      if (!closedRef.current) { closedRef.current = true; window.browserBridge.closeBrowser().catch(() => {}) }
+      if (!closedRef.current) { closedRef.current = true; window.api.invoke('browser:close').catch(() => {}) }
       setIsLoaded(false); isLoadedRef.current = false
     }
   }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
 
   useEffect(() => {
-    if (isLoadedRef.current) window.browserBridge.resizeBrowser(getBounds()).catch(() => {})
+    if (isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
   }, [panelMode, isOpen, sidebarExpanded, getBounds])
 
   return (
     <div className="browser-container">
       <div className="browser-header">
         <div className="browser-nav-group">
-          <button className="browser-nav-btn" onClick={() => window.browserBridge.browserBack()} title="Back"><ArrowLeft size={14} /></button>
-          <button className="browser-nav-btn" onClick={() => window.browserBridge.browserForward()} title="Forward"><ArrowRight size={14} /></button>
-          <button className="browser-nav-btn" onClick={() => window.browserBridge.browserReload()} title="Reload"><RotateCw size={13} /></button>
+          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:back').catch(()=>{})} title="Back"><ArrowLeft size={14} /></button>
+          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:forward').catch(()=>{})} title="Forward"><ArrowRight size={14} /></button>
+          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:reload').catch(()=>{})} title="Reload"><RotateCw size={13} /></button>
         </div>
         <input className="browser-url-bar" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(urlInput) }} spellCheck={false} placeholder="Enter URL or search..." />
         <button className="browser-nav-btn browser-go-btn" onClick={() => navigate(urlInput)} title="Go"><ExternalLink size={13} /></button>

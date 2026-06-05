@@ -37,14 +37,14 @@ const ThreadList: React.FC = () => {
 
   const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
-    const confirmed = await window.dialogBridge.showConfirmDialog({ message: 'Delete this conversation?', detail: 'This will permanently remove the conversation and all its messages.', buttons: ['Cancel', 'Delete'], defaultId: 1, cancelId: 0 })
+    const confirmed = await window.api.invoke('dialog:confirm', { message: 'Delete this conversation?', detail: 'This will permanently remove the conversation and all its messages.', buttons: ['Cancel', 'Delete'], defaultId: 1, cancelId: 0 }) as number
     if (confirmed === 1) await deleteThread(threadId)
   }, [deleteThread])
 
   const handleCloseWorkspace = useCallback(async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
     const name = path.split(/[/\\]/).pop() ?? 'Workspace'
-    const confirmDelete = await window.dialogBridge.showConfirmDialog({ message: `Delete workspace data for "${name}"?`, detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts from disk. Real codebase files inside the directory itself will NOT be touched.`, buttons: ['Cancel', 'Delete Data'], defaultId: 1, cancelId: 0 })
+    const confirmDelete = await window.api.invoke('dialog:confirm', { message: `Delete workspace data for "${name}"?`, detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts from disk. Real codebase files inside the directory itself will NOT be touched.`, buttons: ['Cancel', 'Delete Data'], defaultId: 1, cancelId: 0 }) as number
     if (confirmDelete === 1) await closeAndDeleteWorkspace(path)
   }, [closeAndDeleteWorkspace])
 

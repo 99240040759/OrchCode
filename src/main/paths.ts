@@ -10,9 +10,6 @@ export function getSessionPath(): string {
   return join(app.getPath('userData'), 'session.bin')
 }
 
-export function getFallbackKeyPath(): string {
-  return join(app.getPath('userData'), '.key')
-}
 
 function getConversationsPath(): string {
   return join(app.getPath('userData'), 'conversations')

@@ -115,25 +115,27 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       const { cols, rows } = term
 
-      window.terminalBridge
-        .createTerminal({
-          cols,
-          rows,
-          cwd: workspacePath,
-          conversationId: conversationIdRef.current
-        })
-        .then(({ id }) => {
+      window.api.invoke('terminal:create', {
+        cols,
+        rows,
+        cwd: workspacePath,
+        conversationId: conversationIdRef.current
+      })
+        .then((result) => {
+          const { id } = result as { id: string }
           if (!active) {
-            window.terminalBridge.closeTerminal({ id }).catch(console.error)
+            window.api.invoke('terminal:close', { id }).catch(console.error)
             return
           }
           ptyIdRef.current = id
 
-          unsubDataRef.current = window.terminalBridge.onTerminalData(({ id: dataId, data }) => {
+          unsubDataRef.current = window.api.on('terminal:data', (payload) => {
+            const { id: dataId, data } = payload as { id: string; data: string }
             if (dataId === id) term.write(data)
           })
 
-          unsubExitRef.current = window.terminalBridge.onTerminalExit(({ id: exitId }) => {
+          unsubExitRef.current = window.api.on('terminal:exit', (payload) => {
+            const { id: exitId } = payload as { id: string }
             if (exitId === id) {
               term.write('\r\n\x1b[2m[Process exited]\x1b[0m\r\n')
               ptyIdRef.current = null
@@ -141,22 +143,18 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
           })
 
           term.onData((data) => {
-            if (ptyIdRef.current) window.terminalBridge.terminalInput({ id: ptyIdRef.current, data })
+            if (ptyIdRef.current) window.api.invoke('terminal:input', { id: ptyIdRef.current, data }).catch(() => {})
           })
         })
-        .catch((err) => {
+        .catch((err: any) => {
           if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
         })
 
       const debouncedResize = createDebounce(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
-          try {
-            fitAddon.fit()
-          } catch {}
+          try { fitAddon.fit() } catch {}
           if (ptyIdRef.current) {
-            window.terminalBridge
-              .terminalResize({ id: ptyIdRef.current, cols: term.cols, rows: term.rows })
-              .catch(() => {})
+            window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
           }
         }
       }, 100)
@@ -174,7 +172,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         if (unsubDataRef.current) unsubDataRef.current()
         if (unsubExitRef.current) unsubExitRef.current()
         if (ptyIdRef.current) {
-          window.terminalBridge.closeTerminal({ id: ptyIdRef.current }).catch(() => {})
+          window.api.invoke('terminal:close', { id: ptyIdRef.current }).catch(() => {})
           ptyIdRef.current = null
         }
         term.dispose()

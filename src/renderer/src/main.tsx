@@ -1,32 +1,14 @@
 import { init as initSentry } from '@sentry/electron/renderer'
-import { getSharedWorker, terminateSharedWorker } from './lib/workerManager'
 
 window.addEventListener('beforeunload', () => {
-  terminateSharedWorker()
+  // No worker to terminate — telemetry worker removed
 })
 
 initSentry()
 
-let clientId = localStorage.getItem('orchcode_client_id')
-if (!clientId) {
-  clientId = self.crypto.randomUUID()
-  localStorage.setItem('orchcode_client_id', clientId)
-}
-
-try {
-  const workerApi = getSharedWorker()
-  if (workerApi) {
-    workerApi.sendTelemetryEvent('app_launch', {
-      platform: window.updaterBridge.platform
-    })
-  }
-} catch (err) {
-  console.error('[main] Telemetry bootstrap failed:', err)
-}
-
 // Google Fonts (must stay as CSS — no VE equivalent for @import url)
 import './assets/main.css'
-// Vanilla-extract global styles (replaces all old @import CSS files)
+// Vanilla-extract global styles
 import './assets/styles'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

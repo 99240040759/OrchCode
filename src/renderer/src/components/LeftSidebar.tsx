@@ -13,7 +13,7 @@ interface SidebarProps {
   threadListContent?: React.ReactNode
 }
 
-const isMac = window.updaterBridge.platform === 'darwin'
+const isMac = window.api.platform === 'darwin'
 
 const LeftSidebar: React.FC<SidebarProps> = ({ expanded: controlledExpanded, onToggle, onStartConversation, threadListContent }) => {
   const [localExpanded, setLocalExpanded] = useState(true)

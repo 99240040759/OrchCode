@@ -5,10 +5,10 @@ import { X, Globe, TerminalSquare, ListTodo, PanelRightClose } from 'lucide-reac
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import {
   isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom,
-  activeWorkspaceAtom, activeThreadIdAtom, openFilesAtom, artifactsAtom, filesChangedAtom,
-  type EditorFile, type FileChangeEntry
+  activeWorkspaceAtom, activeThreadIdAtom, openFilesAtom, artifactsAtom,
+  type EditorFile
 } from '../store/agentStore'
-import type { ArtifactEntry } from '../../../preload/index.d'
+import type { ArtifactEntry, FileReadResult } from '../../../preload/index.d'
 import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
 import { setupMonaco } from '../lib/monacoConfig'
 import type { TerminalViewHandle } from './TerminalView'
@@ -20,7 +20,7 @@ import MarkdownView from './MarkdownView'
 import { EmptyState } from './Primitives'
 
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
-const isMac = window.updaterBridge.platform === 'darwin'
+const isMac = window.api.platform === 'darwin'
 
 // ─── Header (inline) ─────────────────────────────────────────────────────────
 
@@ -94,8 +94,6 @@ const ArtifactPanel: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [artifacts, setArtifacts] = useAtom(artifactsAtom)
   const convId = useAtomValue(activeThreadIdAtom)
-  const filesChanged = useAtomValue(filesChangedAtom)
-  const userFiles = filesChanged.filter((fc) => !isAgentArtifact(fc.name))
   const [isDiffMode, setIsDiffMode] = useState(false)
   const [originalContent, setOriginalContent] = useState<string | null>(null)
   const editorRef = useRef<any>(null)
@@ -115,7 +113,9 @@ const ArtifactPanel: React.FC = () => {
   useEffect(() => {
     if (activeFile && isDiffMode) {
       setOriginalContent(null)
-      window.workspaceBridge.readOriginalFile(activeFile.path, convId).then((res) => setOriginalContent(res?.content ?? '')).catch((err) => { console.error('[ArtifactPanel] Failed to read original file:', err); setOriginalContent('') })
+      window.api.invoke('file:read-original', { filePath: activeFile.path, conversationId: convId })
+        .then((res) => setOriginalContent((res as any)?.content ?? ''))
+        .catch((err) => { console.error('[ArtifactPanel] Failed to read original file:', err); setOriginalContent('') })
     } else { setOriginalContent(null) }
   }, [activeFile?.path, isDiffMode, convId])
 
@@ -123,12 +123,17 @@ const ArtifactPanel: React.FC = () => {
     if (!convId) return
     let active = true
     setLoading(true)
-    window.artifactsBridge.listArtifacts(convId).then((data) => { if (active) { setArtifacts(data ?? []); setLoading(false) } }).catch(() => { if (active) setLoading(false) })
+    window.api.invoke('artifacts:list', { conversationId: convId })
+      .then((data) => { if (active) { setArtifacts((data ?? []) as ArtifactEntry[]); setLoading(false) } })
+      .catch(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [convId, setArtifacts])
 
   useEffect(() => {
-    const unsub = window.artifactsBridge.onArtifactsChanged(({ conversationId, artifacts }) => { if (conversationId === convId) setArtifacts(artifacts ?? []) })
+    const unsub = window.api.on('artifacts:changed', (payload) => {
+      const { conversationId, artifacts: arts } = payload as { conversationId: string; artifacts: ArtifactEntry[] }
+      if (conversationId === convId) setArtifacts(arts ?? [])
+    })
     return unsub
   }, [convId, setArtifacts])
 
@@ -138,13 +143,10 @@ const ArtifactPanel: React.FC = () => {
   }, [setOpenFiles, setActiveFile, setPanelMode])
 
   const handleArtifactClick = useCallback(async (artifact: ArtifactEntry) => {
-    try { const fileData = await window.workspaceBridge.readFile(artifact.path, convId); if (fileData) { setIsDiffMode(false); handleOpenFile(fileData) } }
-    catch (err) { console.error('[ArtifactPanel] Failed to open artifact:', err) }
-  }, [convId, handleOpenFile])
-
-  const handleFileChangeClick = useCallback(async (fc: FileChangeEntry) => {
-    try { const fileData = await window.workspaceBridge.readFile(fc.path, convId); if (fileData) { setIsDiffMode(true); handleOpenFile(fileData) } }
-    catch (err) { console.error('[ArtifactPanel] Failed to open changed file:', err) }
+    try {
+      const fileData = await window.api.invoke('file:read', { filePath: artifact.path, conversationId: convId }) as FileReadResult
+      if (fileData) { setIsDiffMode(false); handleOpenFile(fileData) }
+    } catch (err) { console.error('[ArtifactPanel] Failed to open artifact:', err) }
   }, [convId, handleOpenFile])
 
   const handleCloseFile = useCallback((fileToClose: EditorFile, e: React.MouseEvent) => {
@@ -163,7 +165,10 @@ const ArtifactPanel: React.FC = () => {
   }, [panelMode])
 
   useEffect(() => {
-    if (!isOpen && browserWasOpenedRef.current) { window.browserBridge.closeBrowser().catch(() => {}); browserWasOpenedRef.current = false }
+    if (!isOpen && browserWasOpenedRef.current) {
+      window.api.invoke('browser:close').catch(() => {})
+      browserWasOpenedRef.current = false
+    }
   }, [isOpen])
 
   const handleClose = useCallback(() => setIsOpen(false), [setIsOpen])
@@ -185,7 +190,7 @@ const ArtifactPanel: React.FC = () => {
 
       <div className="artifact-panel-content">
         <Tabs.Content value="overview" className="artifact-panel-tab-content">
-          <OverviewPanel artifacts={artifacts} userFiles={userFiles} loading={loading} handleArtifactClick={handleArtifactClick} handleFileChangeClick={handleFileChangeClick} />
+          <OverviewPanel artifacts={artifacts} loading={loading} handleArtifactClick={handleArtifactClick} />
         </Tabs.Content>
 
         <Tabs.Content value="terminal" className={`artifact-panel-tab-content ${panelMode === 'terminal' ? 'tab-content-visible' : 'tab-content-hidden'}`}>

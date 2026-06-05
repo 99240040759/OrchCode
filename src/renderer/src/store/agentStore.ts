@@ -7,7 +7,7 @@ import type {
   UserProfile
 } from '../../../preload/index.d'
 
-export type { StreamBlock, ChatMessage, FileChangeEntry, EditorFile } from './types'
+export type { StreamBlock, ChatMessage, EditorFile } from './types'
 
 type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
 type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
@@ -43,7 +43,7 @@ export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
 
-export const filesChangedAtom = atom<import('./types').FileChangeEntry[]>([])
+
 
 export const sessionTokensAtom = atom<number>(0)
 

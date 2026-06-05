@@ -1,44 +1,41 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useCallback } from 'react'
 import { useAtom } from 'jotai'
 import { updateStatusAtom, sidebarExpandedAtom, isArtifactPanelOpenAtom } from '../store/agentStore'
-import { getSharedWorker } from '../lib/workerManager'
 import { PanelLeft, PanelRight } from 'lucide-react'
+import type { UpdateStatus } from '../../../preload/index.d'
 
 interface TitleBarProps { title?: string; workspaceName?: string }
 
-const isMac = window.updaterBridge.platform === 'darwin'
+const isMac = window.api.platform === 'darwin'
 
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
 
-  const runMacWorkerCheck = React.useCallback(async () => {
+  const runMacWorkerCheck = useCallback(async () => {
     if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
-    const backgroundWorkerApi = getSharedWorker()
-    if (!backgroundWorkerApi) return
     setUpdateStatus({ status: 'checking' })
     try {
-      const currentVersion = await window.updaterBridge.getAppVersion()
-      const result = await backgroundWorkerApi.checkMacUpdate(currentVersion)
-      setUpdateStatus(result)
-      if (result.status === 'available') backgroundWorkerApi.sendTelemetryEvent('update_available', { platform: 'macos', version: result.version || 'unknown' })
+      const currentVersion = await window.api.invoke('app:get-version') as string
+      const res = await fetch('https://api.github.com/repos/sameer786ss/OrchCode/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' }
+      })
+      if (!res.ok) { setUpdateStatus({ status: 'idle' }); return }
+      const data = await res.json()
+      const latestVersion: string = data.tag_name?.replace(/^v/, '') ?? ''
+      const hasUpdate = !!latestVersion && latestVersion !== currentVersion
+      setUpdateStatus(hasUpdate ? { status: 'available', version: latestVersion } : { status: 'idle', version: latestVersion })
     } catch (err: any) { setUpdateStatus({ status: 'error', error: err.message }) }
   }, [setUpdateStatus])
 
   useEffect(() => {
     if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
-    window.updaterBridge.getUpdateStatus().then((status) => {
-      if (status) { if (isMac) runMacWorkerCheck(); else setUpdateStatus(status) }
+    window.api.invoke('updater:get-status').then((status) => {
+      if (status) { if (isMac) runMacWorkerCheck(); else setUpdateStatus(status as UpdateStatus) }
     })
-    const backgroundWorkerApi = getSharedWorker()
-    const unsubscribe = window.updaterBridge.onUpdateStatusChanged((status) => {
-      if (!isMac) {
-        setUpdateStatus(status)
-        if (status.status === 'available') backgroundWorkerApi?.sendTelemetryEvent('update_available', { platform: 'windows', version: status.version || 'unknown' })
-        else if (status.status === 'downloaded') backgroundWorkerApi?.sendTelemetryEvent('update_downloaded', { platform: 'windows', version: status.version || 'unknown' })
-        else if (status.status === 'error') backgroundWorkerApi?.sendTelemetryEvent('update_error', { platform: 'windows', error: status.error || 'unknown' })
-      }
+    const unsubscribe = window.api.on('updater:status-changed', (status) => {
+      if (!isMac) setUpdateStatus(status as UpdateStatus)
     })
     let intervalId: ReturnType<typeof setInterval> | null = null
     if (isMac) intervalId = setInterval(() => runMacWorkerCheck(), 3 * 60 * 60 * 1000)
@@ -46,10 +43,9 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
   }, [setUpdateStatus, runMacWorkerCheck])
 
   const handleUpdateClick = () => {
-    const workerApi = getSharedWorker()
-    if (updateStatus.status === 'downloaded') { workerApi?.sendTelemetryEvent('update_install_click', { platform: 'windows' }); window.updaterBridge.installUpdate() }
-    else if (updateStatus.status === 'available' && isMac) { workerApi?.sendTelemetryEvent('update_download_click', { platform: 'macos' }); window.updaterBridge.openMacRelease() }
-    else if (updateStatus.status === 'error') { workerApi?.sendTelemetryEvent('update_retry_click'); if (isMac) runMacWorkerCheck(); else window.updaterBridge.checkForUpdates() }
+    if (updateStatus.status === 'downloaded') window.api.invoke('updater:install').catch(console.error)
+    else if (updateStatus.status === 'available' && isMac) window.api.invoke('updater:open-mac-release').catch(console.error)
+    else if (updateStatus.status === 'error') { if (isMac) runMacWorkerCheck(); else window.api.invoke('updater:check').catch(console.error) }
   }
 
   const renderUpdateIndicator = () => {
