@@ -62,19 +62,34 @@ export function useThreads() {
   const selectThread = useCallback(
     async (threadId: string) => {
       if (!threadId) return
+      // Always reset run state — prevents spinner getting stuck if previous thread
+      // was still in 'thinking'/'streaming' when the switch happened
+      setAgentRunState('idle')
       if (activeThreadId && activeThreadId !== threadId) {
         await window.agentBridge.stopAgentStream(activeThreadId).catch(() => {})
-        setAgentRunState('idle')
       }
 
       // Reset UI state immediately
       setMessages([])
       setSessionTokens(0)
       resetThreadScopedPanels()
-      setIsThreadLoading(true)
 
       // Track intent — any later stale callback will bail out
       activeRef.current = threadId
+
+      // Debounce the loading overlay: only show spinner if loading takes > 200ms
+      // This prevents a rapid flash/stutter on fast thread switches
+      let loadingTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+        if (activeRef.current === threadId) setIsThreadLoading(true)
+        loadingTimer = null
+      }, 200)
+
+      const clearTimer = () => {
+        if (loadingTimer !== null) {
+          clearTimeout(loadingTimer)
+          loadingTimer = null
+        }
+      }
 
       try {
         await window.threadsBridge.setActiveSession(threadId)
@@ -82,11 +97,19 @@ export function useThreads() {
         console.error('[useThreads] Failed to sync session to backend:', err)
       }
 
-      if (activeRef.current !== threadId) return
+      if (activeRef.current !== threadId) {
+        clearTimer()
+        setIsThreadLoading(false)
+        return
+      }
 
       try {
         const workspacePath = await window.threadsBridge.getThreadWorkspace(threadId)
-        if (activeRef.current !== threadId) return
+        if (activeRef.current !== threadId) {
+          clearTimer()
+          setIsThreadLoading(false)
+          return
+        }
         if (workspacePath) {
           setActiveWorkspace({
             name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace',
@@ -100,12 +123,20 @@ export function useThreads() {
         setActiveWorkspace(null)
       }
 
-      if (activeRef.current !== threadId) return
+      if (activeRef.current !== threadId) {
+        clearTimer()
+        setIsThreadLoading(false)
+        return
+      }
 
       try {
         const rawMessages = await window.threadsBridge.getThreadMessages(threadId)
 
-        if (activeRef.current !== threadId) return
+        if (activeRef.current !== threadId) {
+          clearTimer()
+          setIsThreadLoading(false)
+          return
+        }
 
         if (rawMessages && rawMessages.length > 0) {
           const chatMsgs: ChatMessage[] = rawMessages
@@ -147,6 +178,9 @@ export function useThreads() {
       } catch (err) {
         console.error('[useThreads] Failed to load thread messages:', err)
       }
+
+      // Cancel timer (loading finished before the debounce delay fired)
+      clearTimer()
 
       // Update the active thread ID and clear loading in the same commit
       if (activeRef.current === threadId) {

@@ -9,7 +9,9 @@ export const titlebar = style({
   width: '100%',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '0 16px',
+  // On Windows we must stay within the renderer region — the native
+  // titlebar overlay sits on top of the rightmost ~138 px.
+  padding: '0 0 0 16px',
   // @ts-ignore
   WebkitAppRegion: 'drag',
   position: 'relative',
@@ -62,7 +64,9 @@ export const titlebarRightMac = style({
 })
 
 export const titlebarRightWin = style({
-  paddingRight: '16px'
+  // Reserve space for Windows native min/max/close buttons (3 × 46 px = 138 px)
+  // so update badge and panel toggle are never hidden under the OS layer.
+  paddingRight: '154px'
 })
 
 // ─── Toggle Button ─────────────────────────────────────────────────────────────

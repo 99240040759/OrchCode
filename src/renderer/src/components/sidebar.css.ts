@@ -232,6 +232,12 @@ export const threadItemMeta = style({
   color: 'var(--text-secondary)'
 })
 
+export const runningIndicator = style({
+  color: 'var(--accent-blue)',
+  flexShrink: 0,
+  animation: 'spin 0.8s linear infinite'
+})
+
 export const sidebarSection = style({
   display: 'flex',
   flexDirection: 'column',

@@ -172,7 +172,7 @@ const ThreadList: React.FC = () => {
                             
                             <div className={styles.threadItemMeta}>
                               {isRunning ? (
-                                <Loader2 size={12} className="spin text-accent" />
+                                <Loader2 size={12} className={styles.runningIndicator} />
                               ) : (
                                 <span>{formatRelativeTime(thread.updatedAt ?? thread.createdAt)}</span>
                               )}
