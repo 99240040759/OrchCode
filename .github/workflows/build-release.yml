@@ -129,8 +129,8 @@ jobs:
           script: |
             const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
             const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: 'sameer786ss',
+              repo: 'OrchCode',
               per_page: 100
             });
             const release = releases.find(r => r.tag_name === tag);
@@ -138,8 +138,8 @@ jobs:
               throw new Error(`Release with tag ${tag} not found`);
             }
             await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: 'sameer786ss',
+              repo: 'OrchCode',
               release_id: release.id,
               draft: false
             });
