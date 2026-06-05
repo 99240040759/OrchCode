@@ -47,4 +47,3 @@ publish:
   provider: github
   owner: sameer786ss
   repo: OrchCode
-  targetCommitish: main
