@@ -1,12 +1,11 @@
 import React from 'react'
-import * as styles from './ui/Primitives.css'
 
 export const Panel: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
   children,
   className = '',
   ...props
 }) => (
-  <div className={`${styles.panelRoot} ${className}`} {...props}>
+  <div className={`panel-root ${className}`} {...props}>
     {children}
   </div>
 )
@@ -24,9 +23,9 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   className = '',
   ...props
 }) => (
-  <div className={`${styles.emptyStateRoot} ${className}`} {...props}>
-    {icon && <div className={styles.emptyStateIcon}>{typeof icon === 'string' ? icon : icon}</div>}
-    <h3 className={styles.emptyStateTitle}>{title}</h3>
-    {description && <p className={styles.emptyStateDesc}>{description}</p>}
+  <div className={`empty-state-root ${className}`} {...props}>
+    {icon && <div className="empty-state-icon">{typeof icon === 'string' ? icon : icon}</div>}
+    <h3 className="empty-state-title">{title}</h3>
+    {description && <p className="empty-state-desc-prim">{description}</p>}
   </div>
 )

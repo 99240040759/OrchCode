@@ -21,7 +21,7 @@ import { useThreads } from './hooks/useThreads'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
 import { ChatPane } from './components/ChatPane'
 import { authService } from './services/authService'
-import { threadService } from './services/threadService'
+import { threadService } from './services/services'
 
 // ─── App Inner ────────────────────────────────────────────────────────────────
 
