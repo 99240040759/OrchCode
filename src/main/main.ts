@@ -161,7 +161,7 @@ app.whenReady().then(async () => {
 
   // Intercept and block any loopback network requests aimed at the CDP debugging port
   session.defaultSession.webRequest.onBeforeRequest(
-    { urls: ['*://localhost/*', '*://127.0.0.1/*', '*://::1/*'] },
+    { urls: ['*://localhost/*', '*://127.0.0.1/*', '*://[::1]/*'] },
     (details, callback) => {
       try {
         const url = new URL(details.url)
