@@ -199,7 +199,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         <div className="input-bar-toolbar-right">
           <TokenIndicator current={sessionTokens} max={MAX_TOKENS} />
           {isRunning ? (
-            <button className="toolbar-submit-btn" onClick={handleStop} title="Stop generation" style={{ background: '#3a3a3a' }}><Square size={11} strokeWidth={3} /></button>
+            <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation"><Square size={11} strokeWidth={3} /></button>
           ) : (
             <button className="toolbar-submit-btn" onClick={handleSend} title="Submit" disabled={!inputValue.trim() && attachments.length === 0 && fileReferences.length === 0}>
               <ArrowRight size={14} strokeWidth={2.5} />

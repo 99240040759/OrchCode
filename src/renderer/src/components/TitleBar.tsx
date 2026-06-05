@@ -63,7 +63,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
     }
     return (
       <div className={`titlebar-update-badge ${extraClass}`} onClick={handleUpdateClick} title={status === 'error' && error ? error : undefined}>
-        {status === 'downloading' && <div className="titlebar-update-progress-bar" style={{ width: `${progress ?? 0}%` }} />}
+        {status === 'downloading' && <div className="titlebar-update-progress-bar" style={{ transform: `scaleX(${(progress ?? 0) / 100})` }} />}
         <span className="titlebar-update-text">{text}</span>
       </div>
     )

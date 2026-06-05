@@ -1,3 +1,3 @@
 // Global styles — loaded once at app entry (main.tsx)
-import '../assets/global.css.ts'  // design tokens + keyframes (keep as vanilla-extract)
+import '../assets/global.css'     // design tokens + keyframes (plain CSS)
 import '../assets/app.css'        // all component + layout styles (plain CSS)

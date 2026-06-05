@@ -2,7 +2,6 @@ import 'dotenv/config'
 import { resolve } from 'path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
-import { vanillaExtractPlugin } from '@vanilla-extract/vite-plugin'
 
 // Ensure critical environment variables are present during build
 if (process.env.NODE_ENV === 'production' && !process.env.SUPABASE_URL) {
@@ -55,8 +54,7 @@ export default defineConfig({
         babel: {
           plugins: [['babel-plugin-react-compiler', { target: '19' }]]
         }
-      }),
-      vanillaExtractPlugin()
+      })
     ],
     define: {
       'process.env.GA4_MEASUREMENT_ID': JSON.stringify(process.env.GA4_MEASUREMENT_ID)

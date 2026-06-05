@@ -27,7 +27,7 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
                 <div className="panel-header-left"><Package size={14} style={{ color: 'var(--text-secondary)' }} /><span>Artifacts</span></div>
               </div>
               <div className="panel-content">
-                {loading ? <Skeleton count={3} height={28} baseColor="#262626" highlightColor="#333333" style={{ marginBottom: 6, borderRadius: 4 }} />
+                {loading ? <Skeleton count={3} height={28} baseColor="var(--bg-sidebar)" highlightColor="var(--border-color)" style={{ marginBottom: 6, borderRadius: 4 }} />
                   : artifacts.length === 0 ? <div className="empty-text">No artifacts created yet.</div>
                   : artifacts.map((art) => (
                     <div key={art.name} onClick={() => handleArtifactClick(art)} className="overview-item">

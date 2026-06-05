@@ -1,5 +1,5 @@
 /* ============================================================
-   LAYOUT  (was layout.css.ts)
+   LAYOUT
    ============================================================ */
 
 .app-root { display:flex; height:100vh; overflow:hidden; position:relative; width:100% }
@@ -14,10 +14,10 @@
 
 /* Thread loading overlay */
 .thread-loading-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background-color:rgba(18,18,18,0.6); z-index:50 }
-.thread-loading-spinner { width:20px; height:20px; border-radius:50%; border:2px solid rgba(255,255,255,0.1); border-top-color:var(--accent-blue); animation:spin 0.7s linear infinite }
+.thread-loading-spinner { width:20px; height:20px; border-radius:50%; border:2px solid rgba(255,255,255,0.1); border-top-color:var(--accent-blue); animation:spin 0.7s linear infinite; will-change:transform }
 
 /* ============================================================
-   RADIX UI  (was radix.css.ts)
+   RADIX UI
    ============================================================ */
 
 .tab-trigger { padding:0 16px; height:100%; display:flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--font-size-xs-plus); border:none; background:transparent; transition:background-color 0.15s ease,color 0.15s ease; color:var(--text-secondary) }
@@ -39,7 +39,7 @@
 .profile-dropdown-item.selected { color:var(--text-primary); font-weight:500 }
 
 /* ============================================================
-   TITLEBAR  (was titlebar.css.ts)
+   TITLEBAR
    ============================================================ */
 
 .titlebar { height:var(--titlebar-height); background-color:var(--bg-sidebar); display:flex; width:100%; align-items:center; justify-content:space-between; padding:0 0 0 16px; -webkit-app-region:drag; position:relative; z-index:100 }
@@ -66,7 +66,7 @@
 .badge-error { background-color:rgba(239,68,68,0.1); color:var(--accent-red); border:1px solid rgba(239,68,68,0.2) }
 .badge-error:hover { background-color:var(--accent-red); color:var(--text-primary); border-color:transparent; transform:translateY(-1px) }
 .badge-clickable { cursor:pointer }
-.titlebar-update-progress-bar { position:absolute; top:0; left:0; bottom:0; background:linear-gradient(90deg,rgba(139,92,246,0.15),rgba(59,130,246,0.15)); z-index:1; transition:width 0.3s cubic-bezier(0.1,0.8,0.1,1); will-change:width }
+.titlebar-update-progress-bar { position:absolute; top:0; left:0; bottom:0; right:0; background:linear-gradient(90deg,rgba(139,92,246,0.15),rgba(59,130,246,0.15)); z-index:1; transform-origin:left; transition:transform 0.3s cubic-bezier(0.1,0.8,0.1,1); will-change:transform }
 
 /* Profile */
 .profile-avatar-img { width:20px; height:20px; border-radius:50%; object-fit:cover; flex-shrink:0 }
@@ -83,7 +83,7 @@
 .profile-item-logout:hover { background:rgba(239,68,68,0.08) }
 
 /* ============================================================
-   SIDEBAR  (was sidebar.css.ts)
+   SIDEBAR
    ============================================================ */
 
 .sidebar-root { position:relative; overflow:hidden; width:250px; display:flex; flex-direction:column; height:100vh; background-color:var(--bg-sidebar); flex-shrink:0 }
@@ -146,20 +146,20 @@
 .onboarding-btn-text { font-size:14px; font-weight:600; color:#fff }
 .onboarding-loading { display:flex; flex-direction:column; align-items:center; gap:12px }
 .onboarding-loading-text { font-size:13px; color:#9c9c9c }
-.onboarding-spinner { width:28px; height:28px; border-radius:50%; border:2px solid rgba(255,255,255,0.05); border-top-color:#3b82f6; animation:spin 0.8s linear infinite }
-.onboarding-spinner-small { width:20px; height:20px; border-radius:50%; border:2px solid rgba(255,255,255,0.05); border-top-color:#8b5cf6; animation:spin 0.8s linear infinite; margin-top:8px }
+.onboarding-spinner { width:28px; height:28px; border-radius:50%; border:2px solid rgba(255,255,255,0.05); border-top-color:#3b82f6; animation:spin 0.8s linear infinite; will-change:transform }
+.onboarding-spinner-small { width:20px; height:20px; border-radius:50%; border:2px solid rgba(255,255,255,0.05); border-top-color:#8b5cf6; animation:spin 0.8s linear infinite; margin-top:8px; will-change:transform }
 .onboarding-welcome { display:flex; flex-direction:column; align-items:center; gap:16px; width:100% }
 .onboarding-avatar-container { position:relative; width:96px; height:96px; margin-bottom:8px }
 .onboarding-avatar-img { width:100%; height:100%; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,0.1) }
 .onboarding-avatar-fallback { width:100%; height:100%; border-radius:50%; background-color:#3b82f6; color:#fff; font-size:32px; font-weight:600; display:flex; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,0.1) }
 @keyframes pulse-ring { 0%,100%{opacity:0.6;transform:scale(1)} 50%{opacity:1;transform:scale(1.02)} }
-.onboarding-avatar-ring { position:absolute; top:-4px; left:-4px; right:-4px; bottom:-4px; border-radius:50%; border:2px solid #8b5cf6; box-shadow:0 0 16px rgba(139,92,246,0.4); animation:pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite }
+.onboarding-avatar-ring { position:absolute; top:-4px; left:-4px; right:-4px; bottom:-4px; border-radius:50%; border:2px solid #8b5cf6; box-shadow:0 0 16px rgba(139,92,246,0.4); animation:pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite; will-change:opacity,transform }
 .onboarding-welcome-title { font-size:22px; font-weight:700; color:#fff; margin:0 }
 .onboarding-welcome-subtitle { font-size:14px; color:#9c9c9c; margin:0 }
 .onboarding-error { font-size:12px; color:#ef4444; text-align:center; margin:0; padding:6px 12px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:6px; width:100%; box-sizing:border-box }
 
 /* ============================================================
-   CHAT PANE  (was chat.css.ts — ChatPane section)
+   CHAT PANE
    ============================================================ */
 
 .chat-pane-root { display:flex; flex-direction:column; width:100%; height:100%; position:relative; contain:layout }
@@ -230,6 +230,8 @@
 .toolbar-submit-btn:hover { background-color:var(--text-primary); color:var(--bg-app); transform:scale(1.05) }
 .toolbar-submit-btn:active { transform:scale(0.95) }
 .toolbar-submit-btn:disabled { opacity:0.35; cursor:not-allowed; transform:none }
+.toolbar-submit-btn.stop { background-color: var(--border-color); color: var(--text-secondary); }
+.toolbar-submit-btn.stop:hover { background-color: var(--accent-red); color: #fff; transform: scale(1.05); }
 .input-file-suggestions { position:absolute; bottom:calc(100% + 8px); left:0; right:0; max-height:220px; overflow-y:auto; background-color:var(--bg-sidebar); border:1px solid var(--border-color); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.5); z-index:1000; padding:4px; display:flex; flex-direction:column; gap:2px; backdrop-filter:blur(8px); color:var(--text-primary) }
 .input-file-suggestion-item { display:flex; align-items:center; gap:8px; padding:6px 12px; border-radius:4px; cursor:pointer; background-color:transparent; transition:background-color 0.15s ease }
 .input-file-suggestion-item-selected { background-color:rgba(255,255,255,0.08) }
@@ -252,7 +254,7 @@
 .tool-call-interactive { cursor:pointer }
 .tool-call-interactive:hover { color:var(--text-primary); background-color:rgba(255,255,255,0.04) }
 .tool-call-non-interactive { cursor:default }
-.tool-call-spinner { width:12px; height:12px; border-radius:50%; border:1.5px solid var(--text-secondary); border-top-color:transparent; animation:spin 0.8s linear infinite; flex-shrink:0 }
+.tool-call-spinner { width:12px; height:12px; border-radius:50%; border:1.5px solid var(--text-secondary); border-top-color:transparent; animation:spin 0.8s linear infinite; flex-shrink:0; will-change:transform }
 @media (prefers-reduced-motion:reduce) { .tool-call-spinner { animation:none; border-top-color:var(--text-secondary); opacity:0.5 } }
 .icon-blue { color:#38bdf8; flex-shrink:0 }
 .icon-purple { color:var(--accent-purple); flex-shrink:0 }
@@ -322,7 +324,7 @@
 .markdown-content .hljs-strong { font-weight:bold }
 
 /* ============================================================
-   EDITOR PANEL  (was editor.css.ts)
+   EDITOR PANEL
    ============================================================ */
 
 /* FileViewHeader (shared) */
@@ -389,7 +391,7 @@
 /* CodeEditorView */
 .editor-container { flex:1; overflow:hidden; background-color:var(--bg-app) }
 .loading-container { display:flex; align-items:center; justify-content:center; height:100%; color:var(--text-secondary) }
-.loading-spinner { width:16px; height:16px; border-radius:50%; border:2px solid var(--text-secondary); border-top-color:transparent; animation:spin 0.8s linear infinite; margin-right:8px }
+.loading-spinner { width:16px; height:16px; border-radius:50%; border:2px solid var(--text-secondary); border-top-color:transparent; animation:spin 0.8s linear infinite; margin-right:8px; will-change:transform }
 .empty-theme-placeholder { width:100%; height:100%; background-color:var(--bg-app) }
 
 /* MarkdownView */
@@ -419,7 +421,7 @@
 .ov-diff-sub { color:var(--accent-red); font-family:var(--font-mono); font-size:var(--font-size-xs); font-weight:700 }
 
 /* ============================================================
-   PRIMITIVES  (was ui/Primitives.css.ts)
+   PRIMITIVES
    ============================================================ */
 
 .panel-root { display:flex; flex-direction:column; background-color:var(--bg-app); border:1px solid var(--border-color); border-radius:8px; overflow:hidden }
