@@ -20,8 +20,41 @@ env:
   EP_TARGET_COMMITISH: main
 
 jobs:
+  create-draft:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Draft Release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.RELEASE_PAT }}
+          script: |
+            const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: 'sameer786ss',
+              repo: 'OrchCode',
+              per_page: 100
+            });
+            let release = releases.find(r => r.tag_name === tag);
+            if (!release) {
+              console.log(`Creating draft release for tag ${tag}`);
+              const response = await github.rest.repos.createRelease({
+                owner: 'sameer786ss',
+                repo: 'OrchCode',
+                tag_name: tag,
+                target_commitish: 'main',
+                name: tag,
+                body: `Release ${tag}`,
+                draft: true
+              });
+              release = response.data;
+            } else {
+              console.log(`Draft release for tag ${tag} already exists (ID: ${release.id})`);
+            }
+
   release-windows:
     name: Build & Publish Windows x64
+    needs: [create-draft]
     runs-on: windows-latest
     steps:
       - name: Checkout Source Code
@@ -46,6 +79,7 @@ jobs:
 
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
+    needs: [create-draft]
     runs-on: macos-14
     steps:
       - name: Checkout Source Code
@@ -93,6 +127,7 @@ jobs:
 
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
+    needs: [create-draft]
     runs-on: macos-14
     steps:
       - name: Checkout Source Code
