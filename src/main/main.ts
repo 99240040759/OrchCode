@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, session } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -16,6 +16,7 @@ import { registerBrowserTerminalIpc, cleanupAllPtys } from './browserTerminalIpc
 import WindowManager from './windowManager'
 import { stopBrowserAgentWorker } from './tools'
 import { APP_ID } from './paths'
+import { initializeSkills } from './skills'
 initSentry({
   dsn: process.env.SENTRY_DSN,
   enabled: !!process.env.SENTRY_DSN && (app.isPackaged || process.env.NODE_ENV === 'production'),
@@ -158,6 +159,22 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  // Intercept and block any loopback network requests aimed at the CDP debugging port
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['*://localhost/*', '*://127.0.0.1/*', '*://::1/*'] },
+    (details, callback) => {
+      try {
+        const url = new URL(details.url)
+        if (url.port && Number(url.port) === WindowManager.getDebuggingPort()) {
+          log.warn(`[security] Blocked request to DevTools debugging port: ${details.url}`)
+          callback({ cancel: true })
+          return
+        }
+      } catch {}
+      callback({ cancel: false })
+    }
+  )
+
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
       try {
@@ -178,10 +195,13 @@ app.whenReady().then(async () => {
   registerAgentIpc()
   registerBrowserTerminalIpc()
 
+  // Initialize helper skills and rewrite paths
+  await initializeSkills()
+
   initUpdater()
   await initAuth()
-  const session = getCurrentSession()
-  if (session) {
+  const authSession = getCurrentSession()
+  if (authSession) {
     createMainWindow()
   } else {
     createOnboardingWindow()

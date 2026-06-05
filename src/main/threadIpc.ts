@@ -8,7 +8,7 @@ import {
   getOrCreateWorkspaceContext,
   updateWorkspacePath
 } from './workspace'
-import { getThreads, getThread, getThreadMessages, deleteThread, getThreadWorkspace } from './db'
+import { getThreads, getThread, getThreadMessages, deleteThread, getThreadWorkspace, getActiveThreadId, setActiveThreadId } from './db'
 import WindowManager from './windowManager'
 import { getConversationPath } from './paths'
 import {
@@ -20,6 +20,11 @@ import {
 export function registerThreadIpc() {
   ipcMain.handle('mastra:get-conversation-id', () => {
     try {
+      const activeId = getActiveThreadId()
+      if (activeId) {
+        const thread = getThread(activeId)
+        if (thread) return activeId
+      }
       const threads = getThreads()
       if (threads && threads.length > 0) {
         return threads[0].id
@@ -32,6 +37,7 @@ export function registerThreadIpc() {
 
   ipcMain.handle('session:set-active', async (_event, threadId: string) => {
     try {
+      setActiveThreadId(threadId)
       const wsPath = getThreadWorkspace(threadId)
       if (wsPath) await updateWorkspacePath(threadId, wsPath)
     } catch (err) {
@@ -78,6 +84,10 @@ export function registerThreadIpc() {
 
   ipcMain.handle('mastra:delete-thread', async (_event, threadId: string) => {
     try {
+      const activeId = getActiveThreadId()
+      if (activeId === threadId) {
+        setActiveThreadId(null)
+      }
       const workspacePath = getThreadWorkspace(threadId)
       const context = clearWorkspaceContext(threadId)
       const deleted = deleteThread(threadId)

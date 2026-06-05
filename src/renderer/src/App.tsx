@@ -6,7 +6,6 @@ import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
 import { Toaster } from 'sonner'
 import {
-  activeThreadIdAtom,
   sidebarExpandedAtom,
   activeWorkspaceAtom,
   isArtifactPanelOpenAtom,
@@ -27,7 +26,6 @@ import { threadService } from './services/threadService'
 // ─── App Inner ────────────────────────────────────────────────────────────────
 
 function AppInner(): React.JSX.Element {
-  const setActiveThreadId = useSetAtom(activeThreadIdAtom)
   const setAvailableModels = useSetAtom(availableModelsAtom)
   const setAuthUser = useSetAtom(authUserAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
@@ -52,18 +50,52 @@ function AppInner(): React.JSX.Element {
   }, [globalPrompt, run, setGlobalPrompt, availableModels])
 
   // One-time init: conversation ID, threads, models, auth user
+  // Auth state loader/subscription
   useEffect(() => {
-    const init = async () => {
-      // Fetch current conversation ID from main process
-      const convId = await threadService.getConversationId()
-      if (convId) {
-        await selectThread(convId)
+    const initAuth = async () => {
+      try {
+        const user = await authService.getAuthUser()
+        setAuthUser(user ?? null)
+      } catch {
+        setAuthUser(null)
       }
+    }
 
-      // Load thread list
-      await loadThreads()
+    initAuth()
 
-      // Load available models
+    const unsubAuth = authService.onAuthStatusChanged((user) => {
+      setAuthUser(user ?? null)
+    })
+
+    return () => {
+      unsubAuth()
+    }
+  }, [setAuthUser])
+
+  // Threads & Session Selection
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const convId = await threadService.getConversationId()
+        if (convId) {
+          await selectThread(convId)
+        }
+      } catch (err) {
+        console.error('Failed to select initial thread:', err)
+      }
+      try {
+        await loadThreads()
+      } catch (err) {
+        console.error('Failed to load threads list:', err)
+      }
+    }
+
+    initSession()
+  }, [selectThread, loadThreads])
+
+  // Models Loader
+  useEffect(() => {
+    const loadModels = async () => {
       try {
         const models = await window.agentBridge.getAvailableModels()
         if (models) {
@@ -76,27 +108,10 @@ function AppInner(): React.JSX.Element {
       } catch (err) {
         console.error('Failed to load available models:', err)
       }
-
-      // Load current auth user
-      try {
-        const user = await authService.getAuthUser()
-        setAuthUser(user ?? null)
-      } catch {
-        setAuthUser(null)
-      }
     }
 
-    init()
-
-    // Auth status subscription
-    const unsubAuth = authService.onAuthStatusChanged((user) => {
-      setAuthUser(user ?? null)
-    })
-
-    return () => {
-      unsubAuth()
-    }
-  }, [setActiveThreadId, loadThreads, setAvailableModels, setAuthUser])
+    loadModels()
+  }, [setAvailableModels, selectedModel, setSelectedModel])
 
   const workspaceName = activeWorkspace
     ? `${activeWorkspace.name} / ${activeThreadTitle}`

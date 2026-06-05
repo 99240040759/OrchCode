@@ -3,9 +3,7 @@ import crypto from 'node:crypto'
 import {
   streamText,
   stepCountIs,
-  type ModelMessage,
-  type ToolCallPart,
-  type ToolResultPart
+  type ModelMessage
 } from 'ai'
 import { readFileSync } from 'node:fs'
 import log from 'electron-log'
@@ -13,6 +11,7 @@ import WindowManager from '../windowManager'
 import { getAvailableModels, resolveModel } from './models'
 import { checkModelVisionSupport, checkModelNativeFileSupport } from '../vision'
 import { getOrCreateWorkspaceContext, getWorkspaceContext, updateWorkspacePath } from '../workspace'
+import { getUserSkillsPath } from '../skills'
 import { createCoreTools, browserTools } from '../tools'
 import {
   getThreadMessages,
@@ -97,137 +96,144 @@ function buildMessagesFromHistory(
       }
       messages.push({ role: 'user', content: userContent as any })
     } else if (m.role === 'assistant') {
-      let textContent = ''
-      const toolCalls: ToolCallPart[] = []
-      const toolResults: ToolResultPart[] = []
-
+      let blocks: any[] = []
       if (m.data) {
         try {
-          const blocks = JSON.parse(m.data)
-          if (Array.isArray(blocks)) {
-            for (const block of blocks) {
-              if (block.type === 'text') {
-                textContent += block.content
-              } else if (block.type === 'tool') {
-                toolCalls.push({
-                  type: 'tool-call',
-                  toolCallId: block.toolCallId,
-                  toolName: block.toolName,
-                  input: block.args || {}
-                })
+          const parsed = JSON.parse(m.data)
+          if (Array.isArray(parsed)) {
+            blocks = parsed
+          }
+        } catch (err) {
+          log.error('[main] Failed to parse message block data:', err)
+        }
+      }
 
-                const outputVal = block.result
-                let formattedOutput: unknown
+      if (blocks.length === 0) {
+        messages.push({ role: 'assistant', content: m.content || '' })
+      } else {
+        let currentAssistantParts: any[] = []
+        let currentToolResults: any[] = []
 
-                if (
-                  outputVal &&
-                  typeof outputVal === 'object' &&
-                  'type' in outputVal &&
-                  [
-                    'text',
-                    'json',
-                    'execution-denied',
-                    'error-text',
-                    'error-json',
-                    'content'
-                  ].includes((outputVal as { type?: string }).type || '')
-                ) {
-                  formattedOutput = outputVal
-                } else if (
-                  block.toolName === 'browserScreenshot' &&
-                  (outputVal as { success?: boolean; filePath?: string })?.success &&
-                  (outputVal as { filePath?: string })?.filePath
-                ) {
-                  try {
-                    const cleanPath = (outputVal as { filePath: string }).filePath.replace(
-                      'file://',
-                      ''
-                    )
-                    const base64Image = readFileSync(cleanPath).toString('base64')
-                    formattedOutput = {
-                      type: 'content',
-                      value: [
-                        { type: 'image-data', data: base64Image, mediaType: 'image/png' },
-                        {
-                          type: 'text',
-                          text: `Screenshot: ${(outputVal as { filePath: string }).filePath}`
-                        }
-                      ]
-                    }
-                  } catch (err: unknown) {
-                    formattedOutput = {
-                      type: 'content',
-                      value: [
-                        {
-                          type: 'text',
-                          text: `Failed to read screenshot: ${(err as Error).message}`
-                        }
-                      ]
-                    }
+        const flushCurrent = () => {
+          if (currentAssistantParts.length > 0) {
+            messages.push({ role: 'assistant', content: currentAssistantParts as any })
+            currentAssistantParts = []
+          }
+          if (currentToolResults.length > 0) {
+            messages.push({ role: 'tool', content: currentToolResults as any })
+            currentToolResults = []
+          }
+        }
+
+        for (const block of blocks) {
+          if (block.type === 'text') {
+            if (currentToolResults.length > 0) {
+              flushCurrent()
+            }
+            currentAssistantParts.push({ type: 'text', text: block.content })
+          } else if (block.type === 'tool') {
+            if (currentToolResults.length > 0) {
+              flushCurrent()
+            }
+            currentAssistantParts.push({
+              type: 'tool-call',
+              toolCallId: block.toolCallId,
+              toolName: block.toolName,
+              input: block.args || {}
+            })
+
+            if (block.status === 'complete' || block.status === 'error' || 'result' in block) {
+              const outputVal = block.result
+              let formattedOutput: unknown
+
+              if (
+                outputVal &&
+                typeof outputVal === 'object' &&
+                'type' in outputVal &&
+                [
+                  'text',
+                  'json',
+                  'execution-denied',
+                  'error-text',
+                  'error-json',
+                  'content'
+                ].includes((outputVal as { type?: string }).type || '')
+              ) {
+                formattedOutput = outputVal
+              } else if (
+                block.toolName === 'browserScreenshot' &&
+                (outputVal as { success?: boolean; filePath?: string })?.success &&
+                (outputVal as { filePath?: string })?.filePath
+              ) {
+                try {
+                  const cleanPath = (outputVal as { filePath: string }).filePath.replace(
+                    'file://',
+                    ''
+                  )
+                  const base64Image = readFileSync(cleanPath).toString('base64')
+                  formattedOutput = {
+                    type: 'content',
+                    value: [
+                      { type: 'image-data', data: base64Image, mediaType: 'image/png' },
+                      {
+                        type: 'text',
+                        text: `Screenshot: ${(outputVal as { filePath: string }).filePath}`
+                      }
+                    ]
                   }
-                } else if (
-                  block.toolName === 'viewFile' &&
-                  (outputVal as { isBinary?: boolean })?.isBinary &&
-                  (outputVal as { mimeType?: string })?.mimeType?.startsWith('image/') &&
-                  (outputVal as { base64Content?: string })?.base64Content
-                ) {
+                } catch (err: unknown) {
                   formattedOutput = {
                     type: 'content',
                     value: [
                       {
-                        type: 'image-data',
-                        data: (outputVal as { base64Content: string }).base64Content,
-                        mediaType: (outputVal as { mimeType: string }).mimeType
-                      },
-                      {
                         type: 'text',
-                        text: `Analyzed binary image: ${(outputVal as { absolutePath: string }).absolutePath}`
+                        text: `Failed to read screenshot: ${(err as Error).message}`
                       }
                     ]
                   }
-                } else {
-                  const isError = block.status === 'error'
-                  formattedOutput = isError
-                    ? typeof outputVal === 'string'
-                      ? { type: 'error-text' as const, value: outputVal }
-                      : { type: 'error-json' as const, value: outputVal ?? null }
-                    : typeof outputVal === 'string'
-                      ? { type: 'text' as const, value: outputVal }
-                      : { type: 'json' as const, value: outputVal ?? null }
                 }
-
-                toolResults.push({
-                  type: 'tool-result',
-                  toolCallId: block.toolCallId,
-                  toolName: block.toolName,
-                  output: formattedOutput as any
-                })
+              } else if (
+                block.toolName === 'viewFile' &&
+                (outputVal as { isBinary?: boolean })?.isBinary &&
+                (outputVal as { mimeType?: string })?.mimeType?.startsWith('image/') &&
+                (outputVal as { base64Content?: string })?.base64Content
+              ) {
+                formattedOutput = {
+                  type: 'content',
+                  value: [
+                    {
+                      type: 'image-data',
+                      data: (outputVal as { base64Content: string }).base64Content,
+                      mediaType: (outputVal as { mimeType: string }).mimeType
+                    },
+                    {
+                      type: 'text',
+                      text: `Analyzed binary image: ${(outputVal as { absolutePath: string }).absolutePath}`
+                    }
+                  ]
+                }
+              } else {
+                const isError = block.status === 'error'
+                formattedOutput = isError
+                  ? typeof outputVal === 'string'
+                    ? { type: 'error-text' as const, value: outputVal }
+                    : { type: 'error-json' as const, value: outputVal ?? null }
+                  : typeof outputVal === 'string'
+                    ? { type: 'text' as const, value: outputVal }
+                    : { type: 'json' as const, value: outputVal ?? null }
               }
+
+              currentToolResults.push({
+                type: 'tool-result',
+                toolCallId: block.toolCallId,
+                toolName: block.toolName,
+                output: formattedOutput as any
+              })
             }
           }
-        } catch (err) {
-          log.error('[main] Failed to parse tool block data:', err)
         }
-      }
 
-      if (!textContent) textContent = m.content
-
-      const resultIds = new Set(toolResults.map((r) => r.toolCallId))
-      const pairedCalls = toolCalls.filter((c) => resultIds.has(c.toolCallId))
-      const pairedResults = toolResults.filter((r) =>
-        pairedCalls.some((c) => c.toolCallId === r.toolCallId)
-      )
-
-      if (pairedCalls.length > 0) {
-        for (let index = 0; index < pairedCalls.length; index++) {
-          const parts: unknown[] = []
-          if (index === 0 && textContent) parts.push({ type: 'text', text: textContent })
-          parts.push(pairedCalls[index])
-          messages.push({ role: 'assistant', content: parts } as ModelMessage)
-          messages.push({ role: 'tool', content: [pairedResults[index]] } as ModelMessage)
-        }
-      } else {
-        messages.push({ role: 'assistant', content: textContent || '' })
+        flushCurrent()
       }
     } else if (m.role === 'system') {
       messages.push({ role: 'system', content: m.content })
@@ -304,7 +310,16 @@ export async function handleAgentStreamRequest(
     const models = await getAvailableModels()
     const availableModelsList = Object.values(models)
     if (availableModelsList.length === 0) throw new Error('No models configured on server.')
-    const rawModel = models[modelType || ''] || availableModelsList[0]
+
+    let rawModel: any = null
+    if (modelType) {
+      rawModel = models[modelType]
+      if (!rawModel) {
+        throw new Error(`Requested model "${modelType}" is not configured or available on the server.`)
+      }
+    } else {
+      rawModel = availableModelsList[0]
+    }
     if (!rawModel) throw new Error('Failed to resolve model.')
 
     const modelSupportsVision = checkModelVisionSupport(rawModel.id)
@@ -390,6 +405,22 @@ Root path: ${ctx.rootPath || 'No workspace selected'}
 
 IMPORTANT: Use searchWorkspace(query) to find files or code by pattern. Use listDir(directoryPath) to explore directories. Do NOT assume file contents — always read before editing.
 ${browserInstruction}
+── ADVANCED HELPER SKILLS ──
+You have access to a set of advanced helper skills (guidelines, scripts, and libraries) located at:
+${getUserSkillsPath().replace(/\\/g, '/')}
+
+Available skills:
+- algorithmic-art (algorithmic art generator and viewer templates)
+- brand-guidelines (styling with brand palettes)
+- docx (creating/editing/repacking .docx files using docx-js and python scripts)
+- frontend-design (frontend design principles and guidelines)
+- pdf (reading/filling forms and converting PDFs using python scripts)
+- pptx (creating/editing presentations using python scripts and pptxgenjs)
+- theme-factory (themes with color palettes and font pairings)
+- xlsx (creating/modifying/recalculating spreadsheets using openpyxl and recalc.py)
+
+Before performing any tasks related to these domain areas (e.g., generating slide decks, spreadsheets, word docs, fillable PDFs, or frontend designs), you MUST read the corresponding SKILL.md file at that path (using viewFile) to understand the requirements, workflows, guidelines, and tool usage (including the absolute paths to the helper scripts). Always use the exact scripts and tools detailed in the skill guidelines.
+
 ── ARTIFACT BOUNDARIES & WORKFLOW ──
 Use the sandboxed Artifacts system inside '.orch-artifacts/' folder of the active workspace.
 Use writeToFile, replaceFileContent tools to manage these artifact files:
@@ -499,8 +530,8 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           systemInstruction +
           `\n\n── CONTEXT COMPACTED ──\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}\n\nContinue from this state.`
 
-        // Keep only the 4 most recent messages to give model clean context
-        const recentMessages = (currentMessages as ModelMessage[]).slice(-4)
+        // Keep only the 10 most recent messages to give model clean context
+        const recentMessages = (currentMessages as ModelMessage[]).slice(-10)
 
         return { system: compactedSystem, messages: recentMessages }
       },
@@ -534,7 +565,6 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         })
       } else if (part.type === 'reasoning-end') {
         event.sender.send('agent:stream-chunk', { type: 'reasoning-end', threadId })
-        await saveProgress()
       } else if (part.type === 'text-delta') {
         const textDelta = part.text || ''
         assistantContent += textDelta
@@ -550,7 +580,6 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           threadId
         })
         textDeltaCount++
-        if (textDeltaCount % 100 === 0) await saveProgress()
       } else if (
         part.type === 'tool-input-start' ||
         (part as { type?: string }).type === 'tool-call-streaming-start'
@@ -624,7 +653,6 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           payload: { toolCallId: tid, toolName: tName, args: p.args || p.input },
           threadId
         })
-        await saveProgress()
       } else if (part.type === 'tool-result') {
         log.info(`[main] Tool result: ${part.toolName}`)
         const block = orderedBlocks.find(
@@ -641,7 +669,6 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         })
         const writingTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
         if (writingTools.includes(part.toolName)) pushArtifactsChanged(threadId)
-        await saveProgress()
       } else if ((part as { type?: string }).type === 'tool-error') {
         const toolError = part as {
           toolCallId: string
@@ -665,7 +692,6 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
           },
           threadId
         })
-        await saveProgress()
       } else if (part.type === 'error') {
         const errorMsg =
           part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
@@ -719,9 +745,11 @@ Using runCommand to read/view files is STRICTLY forbidden and causes severe memo
         log.info(
           `[main] Stream finish — turn: ${turnTotal} tokens, session: ${sessionAccumulatedTokens}`
         )
-        await saveProgress()
       }
     }
+
+    // Persist final assistant response state exactly once on successful finish
+    await saveProgress()
   } catch (err: unknown) {
     const error = err as Error & { name?: string }
     log.error('[main] Stream error:', error)

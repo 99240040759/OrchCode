@@ -24,7 +24,7 @@ export const workspaceService = {
       return await window.workspaceBridge.closeAndDeleteWorkspace(workspacePath)
     } catch (err) {
       console.error(`[workspaceService] closeAndDeleteWorkspace failed:`, err)
-      return false
+      throw err
     }
   },
 
@@ -33,7 +33,7 @@ export const workspaceService = {
       return await window.workspaceBridge.listWorkspaceFiles(conversationId)
     } catch (err) {
       console.error(`[workspaceService] listWorkspaceFiles failed:`, err)
-      return []
+      throw err
     }
   },
 

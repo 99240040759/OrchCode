@@ -60,6 +60,10 @@ function getDB(): Database.Database {
       path TEXT PRIMARY KEY,
       lastOpenedAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
   `)
 
   // Run any needed migrations for existing installs
@@ -245,7 +249,7 @@ export function deleteWorkspaceThreads(workspacePath: string): string[] {
   return threadIds
 }
 
-export function compactThreadHistory(threadId: string, summary: string, keepCount = 4): void {
+export function compactThreadHistory(threadId: string, summary: string, keepCount = 10): void {
   const db = getDB()
   db.transaction(() => {
     // 1. Get all messages for this thread sorted by createdAt
@@ -287,4 +291,23 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
       threadId
     )
   })()
+}
+
+export function getActiveThreadId(): string | null {
+  const db = getDB()
+  try {
+    const row = db.prepare("SELECT value FROM app_settings WHERE key = 'activeThreadId'").get() as { value: string } | undefined
+    return row?.value ?? null
+  } catch {
+    return null
+  }
+}
+
+export function setActiveThreadId(threadId: string | null): void {
+  const db = getDB()
+  if (threadId) {
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('activeThreadId', ?)").run(threadId)
+  } else {
+    db.prepare("DELETE FROM app_settings WHERE key = 'activeThreadId'").run()
+  }
 }

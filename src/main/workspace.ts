@@ -8,6 +8,13 @@ import { getConversationPath } from './paths'
 // Correct TypeScript/TSX mime types — override default MPEG-TS video mapping
 mime.types['ts'] = 'application/typescript'
 mime.types['tsx'] = 'application/typescript'
+mime.types['kt'] = 'text/x-kotlin'
+mime.types['kts'] = 'text/x-kotlin'
+mime.types['gradle'] = 'text/x-groovy'
+mime.types['properties'] = 'text/x-properties'
+mime.types['env'] = 'text/plain'
+mime.types['gitignore'] = 'text/plain'
+mime.types['editorconfig'] = 'text/plain'
 
 const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
@@ -163,7 +170,6 @@ const BINARY_MIME_PREFIXES = [
   'image/',
   'video/',
   'audio/',
-  'application/octet-stream',
   'application/zip',
   'application/x-tar',
   'application/pdf'
@@ -226,6 +232,13 @@ interface TraverseOptions {
   onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
 }
 
+interface TraverseState {
+  count: number
+  max: number
+}
+
+const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
+
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore().add(DEFAULT_IGNORED_DIRS)
   try {
@@ -242,8 +255,11 @@ async function traverseDir(
   dir: string,
   options: TraverseOptions,
   ig: Ignore,
-  rootPath: string
+  rootPath: string,
+  state: TraverseState
 ): Promise<void> {
+  if (state.count >= state.max) return
+
   let entries: import('node:fs').Dirent[] = []
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
@@ -253,6 +269,8 @@ async function traverseDir(
 
   const promises: Promise<void>[] = []
   for (const entry of entries) {
+    if (state.count >= state.max) break
+
     const name = entry.name
     const fullPath = join(dir, name)
     let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
@@ -261,10 +279,11 @@ async function traverseDir(
     if (ig.ignores(relPath)) continue
 
     if (entry.isDirectory()) {
-      promises.push(traverseDir(fullPath, options, ig, rootPath))
+      promises.push(traverseDir(fullPath, options, ig, rootPath, state))
     } else if (entry.isFile()) {
       const ext = extname(name).toLowerCase()
       if (BINARY_EXTENSIONS.has(ext)) continue
+      state.count++
       promises.push(
         traverseLimiter.schedule(async () => {
           try {
@@ -279,8 +298,15 @@ async function traverseDir(
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
+  const resolvedRoot = resolve(rootPath)
+  const cached = workspaceFilesCache.get(resolvedRoot)
+  if (cached && Date.now() - cached.timestamp < 10000) {
+    return cached.files
+  }
+
   const files: string[] = []
   const ig = buildIgnore(rootPath)
+  const state: TraverseState = { count: 0, max: 5000 }
 
   await traverseDir(
     rootPath,
@@ -293,9 +319,11 @@ export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
       }
     },
     ig,
-    rootPath
+    rootPath,
+    state
   )
 
   files.sort((a, b) => a.localeCompare(b))
+  workspaceFilesCache.set(resolvedRoot, { files, timestamp: Date.now() })
   return files
 }
