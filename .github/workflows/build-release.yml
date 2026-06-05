@@ -43,15 +43,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 
-      - name: Publish GitHub Release
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.RELEASE_PAT }}
-          script: |
-            const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag });
-            await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.data.id, draft: false });
-
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
     runs-on: macos-14
@@ -99,15 +90,6 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Publish GitHub Release
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.RELEASE_PAT }}
-          script: |
-            const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag });
-            await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.data.id, draft: false });
-
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
     runs-on: macos-14
@@ -135,6 +117,11 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+  publish-release:
+    name: Publish GitHub Release
+    needs: [release-windows, release-mac-intel, release-mac-silicon]
+    runs-on: ubuntu-latest
+    steps:
       - name: Publish GitHub Release
         uses: actions/github-script@v6
         with:
