@@ -4,7 +4,7 @@ import { X, Globe, TerminalSquare, ListTodo, PanelRightClose } from 'lucide-reac
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import type { EditorFile } from '../store/agentStore'
 import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
-import * as styles from './ArtifactPanel.css'
+import * as styles from './editor.css'
 
 interface ArtifactPanelHeaderProps {
   panelMode: string

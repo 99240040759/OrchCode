@@ -4,7 +4,7 @@ import { FileDiff, Search, Copy } from 'lucide-react'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
-import * as styles from './CodeEditorView.css'
+import * as styles from './editor.css'
 
 interface CodeEditorViewProps {
   displayFile: {

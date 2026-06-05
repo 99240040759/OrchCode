@@ -6,7 +6,7 @@ import { PanelLeftClose, Plus } from 'lucide-react'
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/authService'
-import * as styles from './Sidebar.css'
+import * as styles from './sidebar.css'
 import * as titlebarStyles from '../assets/titlebar.css'
 
 interface SidebarProps {

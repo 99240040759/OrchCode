@@ -7,7 +7,7 @@ import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../../preload/index.d'
 import type { FileChangeEntry } from '../store/agentStore'
 import { Panel } from './Primitives'
-import * as styles from './OverviewPanel.css'
+import * as styles from './editor.css'
 
 interface OverviewPanelProps {
   artifacts: ArtifactEntry[]

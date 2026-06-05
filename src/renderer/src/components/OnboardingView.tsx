@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 
 import { GoogleIcon } from '../lib/uiUtils'
 import { toast } from 'sonner'
-import * as styles from './OnboardingView.css'
+import * as styles from './sidebar.css'
 
 export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)

@@ -20,7 +20,7 @@ import { setupMonaco } from '../lib/monacoConfig'
 import type { TerminalViewHandle } from './TerminalView'
 import ArtifactPanelHeader from './ArtifactPanelHeader'
 import ArtifactPanelContent from './ArtifactPanelContent'
-import * as styles from './ArtifactPanel.css'
+import * as styles from './editor.css'
 
 const isMac = window.updaterBridge.platform === 'darwin'
 

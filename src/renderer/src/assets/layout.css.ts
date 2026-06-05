@@ -24,7 +24,7 @@ globalStyle('.app-content-wrapper', {
 globalStyle('.app-container', {
   display: 'flex',
   height: '100vh',
-  width: '100vw',
+  width: '100%',
   position: 'relative'
 })
 

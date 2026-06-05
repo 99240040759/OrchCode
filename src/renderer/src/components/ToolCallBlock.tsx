@@ -20,7 +20,7 @@ import {
   activeThreadIdAtom
 } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/types'
-import * as styles from './ToolCallBlock.css'
+import * as styles from './chat.css'
 import { isAgentArtifact } from '../lib/uiUtils'
 import { parseToolFileOp } from '../lib/parseToolFileOp'
 

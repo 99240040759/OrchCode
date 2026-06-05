@@ -95,10 +95,9 @@ globalStyle('details > summary::-webkit-details-marker', { display: 'none' })
 globalStyle('details > summary', { listStyle: 'none' })
 
 globalStyle(
-  'button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible',
+  'button:focus, input:focus, textarea:focus, [tabindex]:focus, button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible',
   {
-    outline: '2px solid var(--accent-blue)',
-    outlineOffset: '2px'
+    outline: 'none'
   }
 )
 

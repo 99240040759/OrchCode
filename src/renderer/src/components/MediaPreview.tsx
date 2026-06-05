@@ -1,5 +1,5 @@
 import React from 'react'
-import * as styles from './ArtifactPanel.css'
+import * as styles from './editor.css'
 
 interface MediaPreviewProps {
   displayFile: {

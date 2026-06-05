@@ -16,7 +16,7 @@ import AutocompleteSuggestions from './AutocompleteSuggestions'
 import { workspaceService } from '../services/workspaceService'
 import { TokenIndicator } from './ui/TokenIndicator'
 import { toast } from 'sonner'
-import * as styles from './InputBar.css'
+import * as styles from './chat.css'
 
 interface InputBarProps {
   onSubmit?: (val: string, mode?: string, attachments?: any[]) => void

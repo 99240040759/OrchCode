@@ -9,7 +9,7 @@ import type { EditorFile, FileChangeEntry } from '../store/agentStore'
 import type { ArtifactEntry } from '../../../preload/index.d'
 import type { TerminalViewHandle } from './TerminalView'
 import { EmptyState } from './Primitives'
-import * as styles from './ArtifactPanel.css'
+import * as styles from './editor.css'
 
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
 

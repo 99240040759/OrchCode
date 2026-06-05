@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
-import { isArtifactPanelOpenAtom, artifactPanelModeAtom } from '../store/agentStore'
-import * as styles from './BrowserView.css'
+import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom } from '../store/agentStore'
+import * as styles from './editor.css'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -16,6 +16,7 @@ const BrowserView: React.FC = () => {
   const closedRef = useRef(false)
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
+  const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
 
   const panelModeRef = useRef(panelMode)
   const isOpenRef = useRef(isOpen)
@@ -57,6 +58,9 @@ const BrowserView: React.FC = () => {
       await window.browserBridge.openBrowser({ url: urlInputRef.current, bounds })
       setIsLoaded(true)
       isLoadedRef.current = true
+      // Recalculate bounds and resize to correct any layout changes that happened while opening
+      const currentBounds = getBounds()
+      window.browserBridge.resizeBrowser(currentBounds).catch(() => {})
     } catch (err: any) {
       console.error('[BrowserView] openBrowser failed:', err)
       setLoadError(err?.message || 'Failed to open browser. Please try again.')
@@ -84,6 +88,13 @@ const BrowserView: React.FC = () => {
       }
     })
 
+    const handleWindowResize = () => {
+      if (active && isLoadedRef.current) {
+        window.browserBridge.resizeBrowser(getBounds()).catch(() => {})
+      }
+    }
+    window.addEventListener('resize', handleWindowResize)
+
     const resizeObs = new ResizeObserver(() => {
       if (active && isLoadedRef.current) {
         window.browserBridge.resizeBrowser(getBounds()).catch(() => {})
@@ -94,6 +105,7 @@ const BrowserView: React.FC = () => {
     return () => {
       active = false
       cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', handleWindowResize)
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()
@@ -112,7 +124,7 @@ const BrowserView: React.FC = () => {
       const bounds = getBounds()
       window.browserBridge.resizeBrowser(bounds).catch(() => {})
     }
-  }, [panelMode, isOpen, getBounds])
+  }, [panelMode, isOpen, sidebarExpanded, getBounds])
 
   return (
     <div className={styles.browserContainer}>

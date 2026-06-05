@@ -12,7 +12,7 @@ import {
   activeThreadIdAtom
 } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import * as styles from './MarkdownRenderer.css'
+import * as styles from './chat.css'
 
 
 interface MarkdownRendererProps {

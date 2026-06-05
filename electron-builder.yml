@@ -14,7 +14,7 @@ asarUnpack:
 win:
   executableName: Orch Code
 nsis:
-  artifactName: Orch Code Setup ${version}.${ext}
+  artifactName: Orch Code Setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -31,7 +31,7 @@ mac:
   # To enable: set notarize: true and configure credentials in CI environment.
   notarize: false
 dmg:
-  artifactName: Orch Code-${version}-${arch}.${ext}
+  artifactName: Orch Code-${arch}.${ext}
   writeUpdateInfo: false
 linux:
   target:

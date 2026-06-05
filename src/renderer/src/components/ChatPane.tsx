@@ -5,7 +5,7 @@ import TitleBar from './TitleBar'
 import InputBar from './InputBar'
 import ChatThread from './ChatThread'
 import { isThreadLoadingAtom } from '../store/agentStore'
-import * as styles from './ChatPane.css'
+import * as styles from './chat.css'
 
 interface ChatPaneProps {
   fullWidth: boolean

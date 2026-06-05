@@ -11,7 +11,7 @@ import {
   getRelativeDirPath
 } from '../lib/uiUtils'
 import MarkdownRenderer from './MarkdownRenderer'
-import * as styles from './MarkdownView.css'
+import * as styles from './editor.css'
 
 interface MarkdownViewProps {
   displayFile: {

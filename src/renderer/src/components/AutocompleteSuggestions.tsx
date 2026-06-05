@@ -1,6 +1,6 @@
 import React from 'react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import * as styles from './InputBar.css'
+import * as styles from './chat.css'
 
 interface AutocompleteSuggestionsProps {
   showFileSuggestions: boolean

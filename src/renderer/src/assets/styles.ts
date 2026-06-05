@@ -7,8 +7,6 @@ import '../assets/titlebar.css.ts'
 import '../assets/radix.css.ts'
 
 // Component-level
-import '../components/ChatThread.css.ts'
-import '../components/MarkdownRenderer.css.ts'
-import '../components/OnboardingView.css.ts'
-import '../components/ArtifactPanel.css.ts'
-import '../components/Sidebar.css.ts'
+import '../components/chat.css.ts'
+import '../components/sidebar.css.ts'
+import '../components/editor.css.ts'

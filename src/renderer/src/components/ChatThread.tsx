@@ -13,7 +13,7 @@ import type { ChatMessage } from '../store/types'
 import { ChevronDown, AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import * as styles from './ChatThread.css'
+import * as styles from './chat.css'
 
 const decodeBase64 = (base64Str: string): string => {
   try {

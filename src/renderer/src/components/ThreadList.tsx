@@ -10,7 +10,7 @@ import {
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
 import { formatDistanceToNow } from 'date-fns'
-import * as styles from './ThreadList.css'
+import * as styles from './sidebar.css'
 
 function formatRelativeTime(dateStr: string): string {
   try {
