@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+const activePorts = new Map<string, MessagePort>()
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 // Shared with renderer via window.api
 
@@ -40,24 +42,30 @@ contextBridge.exposeInMainWorld('api', {
    */
   stream: (payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void> => {
     return new Promise((resolve, reject) => {
-      // Register for the port BEFORE invoking, to avoid any race
-      ipcRenderer.once('stream:port', (event) => {
-        const port = event.ports[0]
-        port.onmessage = (e: MessageEvent<StreamChunk>) => {
-          try {
-            onChunk(e.data)
-            if (e.data.type === 'finish' || e.data.type === 'error') {
-              port.close()
-            }
-          } catch {}
+      const ch = `stream:port:${payload.threadId}`
+      ipcRenderer.once(ch, (ev) => {
+        const p = ev.ports[0]; if (!p) return reject(new Error('No port'))
+        activePorts.set(payload.threadId, p)
+        p.onmessage = (e) => {
+          try { onChunk(e.data); if (['finish', 'error'].includes(e.data.type)) { p.close(); activePorts.delete(payload.threadId); resolve() } }
+          catch { activePorts.delete(payload.threadId); resolve() }
         }
-        port.onmessageerror = () => resolve()
-        // The port closes when main calls port.close() at stream end
-        port.start()
-        resolve()
+        p.onmessageerror = () => { activePorts.delete(payload.threadId); resolve() }
+        p.start()
+        if (payload.attachments?.length) {
+          const bufs = payload.attachments.map(a => Uint8Array.from(atob(a.base64), c => c.charCodeAt(0)).buffer)
+          p.postMessage({ type: 'bufs', bufs }, bufs)
+        }
       })
-      ipcRenderer.invoke('api:stream', payload).catch(reject)
+      const stripped = { ...payload, attachments: payload.attachments?.map(({ base64: _, ...r }) => r) }
+      ipcRenderer.invoke('api:stream', stripped).catch((e) => { ipcRenderer.removeAllListeners(ch); reject(e) })
     })
+  },
+
+  /** Send abort signal on MessagePort to halt the stream session. */
+  stopStream: (threadId: string): void => {
+    const p = activePorts.get(threadId)
+    if (p) { p.postMessage('abort'); p.close(); activePorts.delete(threadId) }
   },
 
   /**

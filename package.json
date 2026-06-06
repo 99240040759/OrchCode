@@ -1,6 +1,6 @@
 {
   "name": "orch-code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Orch Code - AI-powered agentic code editor",
   "main": "./out/main/index.js",
   "author": "Orch",

@@ -4,6 +4,7 @@ import Bottleneck from 'bottleneck'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
 import { getConversationPath } from './paths'
+import { getUserSkillsPath } from './skills'
 
 Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
 
@@ -56,27 +57,28 @@ export async function updateWorkspacePath(conversationId: string, newPath: strin
   workspaceRegistry.set(conversationId, ctx); return ctx
 }
 
+const isWithin = (base: string, target: string, isWindows: boolean) => {
+  try {
+    const b = normalize(resolve(base)) + sep, t = normalize(resolve(target))
+    const cb = isWindows ? b.toLowerCase() : b, ct = isWindows ? t.toLowerCase() : t
+    return ct === cb.slice(0, -1) || ct.startsWith(cb)
+  } catch { return false }
+}
+
 export function assertWithinWorkspace(rootPath: string, targetPath: string, _conversationId?: string): string {
-  const resolvedRoot = normalize(resolve(rootPath)), normalizedRoot = resolvedRoot + sep
   const resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
   const isWindows = process.platform === 'win32'
-  const rootCompare = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot
-  const targetCompare = isWindows ? resolvedTarget.toLowerCase() : resolvedTarget
-
-  if (targetCompare !== rootCompare.slice(0, -1) && !targetCompare.startsWith(rootCompare)) {
+  if (!isWithin(rootPath, resolvedTarget, isWindows) && !isWithin(getUserSkillsPath(), resolvedTarget, isWindows)) {
     throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
   }
-
   let existingPath = resolvedTarget
   while (!existsSync(existingPath)) {
     const parent = dirname(existingPath)
     if (parent === existingPath) break
     existingPath = parent
   }
-  const realRoot = normalize(realpathSync(resolvedRoot)), realExisting = normalize(realpathSync(existingPath)), realRootWithSep = realRoot + sep
-  const realRootCompare = isWindows ? realRootWithSep.toLowerCase() : realRootWithSep
-  const realExistingCompare = isWindows ? realExisting.toLowerCase() : realExisting
-  if (realExistingCompare !== realRootCompare.slice(0, -1) && !realExistingCompare.startsWith(realRootCompare)) {
+  const realExisting = realpathSync(existingPath)
+  if (!isWithin(realpathSync(resolve(rootPath)), realExisting, isWindows) && !isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting, isWindows)) {
     throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
   }
   return resolvedTarget

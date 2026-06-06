@@ -118,7 +118,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
         <span className="muted-text">{operation}</span>
         <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
         <span className="target-text">{target}</span>
-        {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
+        {toolCall.status === 'pending' && toolCall.toolName !== 'generateImage' && <div className="tool-call-spinner" />}
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>
       {isImageGen && (

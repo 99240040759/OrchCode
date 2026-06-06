@@ -53,7 +53,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
   })
 
   const viewFile = tool({
-    description: 'Read the content of a file within the workspace.',
+    description: 'Read the content of a file within the workspace. Supports both text and binary files (including images, which are rendered as visual inputs if the model supports vision).',
     inputSchema: z.object({ absolutePath: z.string().describe('Absolute path to the file.'), startLine: z.number().int().min(1).optional(), endLine: z.number().int().min(1).optional() }),
     execute: async ({ absolutePath, startLine, endLine }) => {
       try {

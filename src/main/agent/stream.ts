@@ -20,19 +20,23 @@ import { getCurrentSession } from '../auth'
 import { buildMessagesFromHistory, buildAttachmentParts, sanitizeMessages } from './schema'
 
 export const activeAbortControllers = new Map<string, AbortController>()
+export const activePorts = new Map<string, Electron.MessagePortMain>()
+const pendingAttachments = new Map<string, Promise<Buffer[]>>()
+const attachmentResolvers = new Map<string, (bufs: Buffer[]) => void>()
 const SUMMARISE_THRESHOLD = 180_000
 
-const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000) })
+const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
 const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/), modelType: z.string().max(255).optional(), attachments: z.array(AttachmentSchema).max(8).optional() })
 
 export function registerStreamIpc() {
   ipcMain.handle('api:stream', async (event, rawPayload) => {
     if (!getCurrentSession()) throw new Error('Unauthorized: Please sign in to use agents.')
     const request = StreamRequestSchema.parse(rawPayload ?? {})
-    const bytes = (request.attachments ?? []).reduce((t, a) => t + Math.ceil(a.base64.length * 0.75), 0)
-    if (bytes > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
+    if (request.attachments?.length) {
+      pendingAttachments.set(request.threadId, new Promise<Buffer[]>(r => attachmentResolvers.set(request.threadId, r)))
+    }
     const { port1, port2 } = new MessageChannelMain()
-    event.sender.postMessage('stream:port', { threadId: request.threadId }, [port2])
+    event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
     handleAgentStreamRequest(port1, request.threadId, request.modelType, request.attachments, request.promptText).catch((err) => {
       log.error('[stream] Unhandled stream error:', err)
       try { port1.postMessage({ type: 'error', payload: err.message, threadId: request.threadId }); port1.close() } catch {}
@@ -45,7 +49,7 @@ export async function handleAgentStreamRequest(
   port: Electron.MessagePortMain,
   threadId: string,
   modelType?: string,
-  attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }>,
+  attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }>,
   promptText?: string
 ) {
   const text = promptText ?? ''
@@ -58,6 +62,25 @@ export async function handleAgentStreamRequest(
   activeAbortControllers.set(threadId, controller)
 
   try {
+    activePorts.set(threadId, port)
+    port.on('message', (e) => {
+      if (e.data === 'abort') controller.abort()
+      if (e.data?.type === 'bufs') {
+        const resolver = attachmentResolvers.get(threadId)
+        if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
+      }
+    })
+    port.start()
+
+    const attachmentPromise = pendingAttachments.get(threadId)
+    const bufs = attachmentPromise ? await attachmentPromise : []
+    pendingAttachments.delete(threadId)
+    if (attachments && bufs.length) {
+      attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
+      const bytes = bufs.reduce((t, b) => t + b.length, 0)
+      if (bytes > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
+    }
+
     const wsPath = getThreadWorkspace(threadId)
     if (wsPath) await updateWorkspacePath(threadId, wsPath)
   } catch (err) { log.warn(`[stream] Failed to bind workspace for ${threadId}:`, err) }
@@ -87,7 +110,7 @@ export async function handleAgentStreamRequest(
     const modelSupportsVision = checkModelVisionSupport(rawModel.id)
     const modelSupportsNativeFiles = checkModelNativeFileSupport(rawModel.id)
     const { messages: historyMessages, systemInstructionSuffix } = buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
-    const userContent = attachments?.length ? buildAttachmentParts(text, attachments, modelSupportsVision, modelSupportsNativeFiles) : text
+    const userContent = attachments?.length ? buildAttachmentParts(text, attachments as any, modelSupportsVision, modelSupportsNativeFiles) : text
     historyMessages.push({ role: 'user', content: userContent as any })
     const messages = sanitizeMessages(historyMessages)
 
@@ -205,9 +228,9 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           send({ type: 'tool-call', payload: { toolCallId: tid, toolName: p.toolName || '', args: p.args || p.input }, threadId }); break
         }
         case 'tool-result':
-          const b = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === part.toolCallId) as any
-          if (b) { b.result = part.output; b.status = 'complete' }
-          send({ type: 'tool-result', payload: { toolCallId: part.toolCallId, result: part.output }, threadId })
+          const b = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === part.toolCallId) as any, res = (part as any).result
+          if (b) { b.result = res; b.status = 'complete' }
+          send({ type: 'tool-result', payload: { toolCallId: part.toolCallId, result: res }, threadId })
           if (['writeToFile', 'replaceFileContent', 'multiReplaceFileContent'].includes(part.toolName)) pushArtifactsChanged(threadId)
           break
         case 'error':
@@ -251,5 +274,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
     }
   } finally {
     if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
+    activePorts.delete(threadId)
+    try { port.close() } catch {}
   }
 }

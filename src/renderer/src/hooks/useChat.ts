@@ -49,14 +49,14 @@ export function useChat() {
       ...m, isStreaming: false,
       orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' } : b)
     }))
-    window.api.invoke('agent:stop', { threadId: tid }).catch(console.error)
+    window.api.stopStream(tid)
   }, [setRunState, setMessages])
 
   const selectThread = useCallback(async (threadId: string) => {
     if (!threadId) return
     setRunState('idle')
     if (activeThreadId && activeThreadId !== threadId) {
-      await window.api.invoke('agent:stop', { threadId: activeThreadId }).catch(() => {})
+      window.api.stopStream(activeThreadId)
     }
     setMessages([]); setSessionTokens(0); resetThreadScopedPanels()
     activeStreamThreadIdRef.current = threadId
@@ -119,7 +119,7 @@ export function useChat() {
   const newConversation = useCallback(async () => {
     try {
       const { conversationId: newId } = await invoke<{ conversationId: string }>('thread:new')
-      if (activeThreadId) window.api.invoke('agent:stop', { threadId: activeThreadId }).catch(() => {})
+      if (activeThreadId) window.api.stopStream(activeThreadId)
       setRunState('idle')
       if (activeWorkspace?.path) await invoke('workspace:set-active', { conversationId: newId, workspacePath: activeWorkspace.path })
       setActiveThreadId(newId); setMessages([]); setSessionTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
@@ -131,7 +131,7 @@ export function useChat() {
       await invoke('thread:delete', { threadId })
       setThreads(prev => prev.filter(t => t.id !== threadId))
       if (activeThreadId === threadId) {
-        window.api.invoke('agent:stop', { threadId }).catch(() => {})
+        window.api.stopStream(threadId)
         setRunState('idle'); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setActiveWorkspace(null); resetThreadScopedPanels()
       }
     } catch (err) { console.error('[useChat] Delete thread error:', err) }
@@ -154,7 +154,7 @@ export function useChat() {
   const closeAndDeleteWorkspace = useCallback(async (path: string) => {
     try {
       if (activeWorkspace?.path === path) {
-        if (activeThreadId) window.api.invoke('agent:stop', { threadId: activeThreadId }).catch(() => {})
+        if (activeThreadId) window.api.stopStream(activeThreadId)
         setRunState('idle'); setActiveWorkspace(null); setActiveThreadId(''); setMessages([]); setSessionTokens(0); resetThreadScopedPanels()
       }
       const success = await invoke<boolean>('workspace:close-and-delete', { workspacePath: path })

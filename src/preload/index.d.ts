@@ -81,6 +81,7 @@ export type StreamPayload = {
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>
+  stopStream(threadId: string): void
   on(channel: string, cb: (data: unknown) => void): () => void
   platform: 'darwin' | 'win32' | 'linux'
 }
