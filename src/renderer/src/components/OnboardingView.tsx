@@ -46,22 +46,14 @@ export const OnboardingView: React.FC = () => {
   return (
     <div className="onboarding-container">
       {showSplash ? (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 480, height: 480 }}>
-          <Lottie
-            animationData={onboardingEntryAnimation}
-            loop={false}
-            style={{ width: 480, height: 480 }}
-          />
+        <div className="onboarding-splash-wrapper">
+          <Lottie animationData={onboardingEntryAnimation} loop={false} className="onboarding-splash-lottie" />
         </div>
       ) : !user ? (
         <div className="onboarding-inner">
           <div className="onboarding-logo-container">
-            <div className="onboarding-logo-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 200, height: 200, margin: '0 auto 8px' }}>
-              <Lottie
-                animationData={onboardingAnimation}
-                loop={true}
-                style={{ width: 200, height: 200 }}
-              />
+            <div className="onboarding-logo-icon">
+              <Lottie animationData={onboardingAnimation} loop={true} className="onboarding-logo-lottie" />
             </div>
             <h1 className="onboarding-title">Orch Code</h1>
             <p className="onboarding-subtitle">Supercharge your development agentic experience.</p>
@@ -82,12 +74,8 @@ export const OnboardingView: React.FC = () => {
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 300, height: 300 }}>
-          <Lottie
-            animationData={onboardingCompleteAnimation}
-            loop={true}
-            style={{ width: 300, height: 300 }}
-          />
+        <div className="onboarding-complete-wrapper">
+          <Lottie animationData={onboardingCompleteAnimation} loop={true} className="onboarding-complete-lottie" />
         </div>
       )}
     </div>

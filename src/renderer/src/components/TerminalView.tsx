@@ -179,17 +179,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       }
     }, [workspacePath, conversationId])
 
-    return (
-      <div
-        ref={termContainerRef}
-        style={{
-          width: '100%',
-          height: '100%',
-          backgroundColor: 'var(--bg-app)',
-          padding: '16px 20px'
-        }}
-      />
-    )
+    return <div ref={termContainerRef} className="terminal-container" />
   }
 )
 TerminalView.displayName = 'TerminalView'

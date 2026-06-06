@@ -93,7 +93,7 @@ export function isFileBinary(filePath: string, buf: Buffer): boolean {
   return buf.subarray(0, 512).includes(0x00)
 }
 
-const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
+const DEFAULT_IGNORED_DIRS = ['.git', '.gemini', 'node_modules', 'dist', 'out', 'build', 'target', 'coverage', '.cache', '.idea', '.vscode', '.next', '.nuxt', '.venv', 'venv', 'env', '__pycache__']
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
 interface TraverseOptions { onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void }

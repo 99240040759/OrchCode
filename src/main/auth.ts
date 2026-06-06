@@ -40,6 +40,9 @@ function generatePKCE() {
 }
 
 export function getCurrentSession(): AuthSession | null {
+  if (!currentSession && process.env.SUPABASE_SESSION_TOKEN) {
+    return { idToken: process.env.SUPABASE_SESSION_TOKEN, refreshToken: '', user: { uid: 'worker', name: 'Worker', email: 'worker@orch.live', photoUrl: '' } }
+  }
   return currentSession
 }
 

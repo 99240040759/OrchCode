@@ -346,9 +346,14 @@ const commands: Record<string, CommandHandler> = {
       const mainWindow = WindowManager.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       let bv = WindowManager.getBrowserView()
+      if (bv && (bv as any).conversationId !== conversationId) {
+        try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch {}
+        bv = null; WindowManager.setBrowserView(null)
+      }
       if (bv) { bv.setBounds(normalizeBounds(bounds)); await bv.webContents.loadURL(normalizeBrowserUrl(url)); return }
       const partition = conversationId ? `persist:conversation_${conversationId}` : undefined
       bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } })
+      ;(bv as any).conversationId = conversationId
       WindowManager.setBrowserView(bv); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
       await bv.webContents.loadURL(normalizeBrowserUrl(url || 'https://google.com'))
       bv.webContents.on('page-title-updated', (_e, title) => { try { event.sender.send('browser:title-updated', title) } catch {} })

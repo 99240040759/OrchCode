@@ -92,7 +92,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   const imgResult = toolCall.result as { success: boolean; filePath: string } | undefined
 
   return (
-    <div className="tool-call-block-container" style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className="tool-call-block-container">
       <Component
         onClick={isFile ? handleClick : undefined}
         className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
@@ -105,7 +105,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>
       {isImageGen && toolCall.status === 'complete' && imgResult?.success && (
-        <div className="tool-image-preview-frame" style={{ marginTop: '4px' }}>
+        <div className="tool-image-preview-frame">
           <LocalImage src={imgResult.filePath} alt="Generated Image" />
         </div>
       )}

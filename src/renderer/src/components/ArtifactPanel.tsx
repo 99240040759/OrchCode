@@ -35,14 +35,14 @@ const PanelHeader: React.FC<HeaderProps> = ({ panelMode, openFiles, hoveredTabPa
   return (
     <div className={`artifact-panel-header ${isMac ? 'artifact-panel-header-mac' : 'artifact-panel-header-win'}`}>
       <Tabs.List className="artifact-panel-tabs-list">
-        {trigger('overview', 'Overview', <ListTodo size={14} style={{ color: panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)' }} />)}
-        {trigger('terminal', 'Terminal', <TerminalSquare size={14} style={{ color: panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)' }} />)}
-        {trigger('browser', 'Browser', <Globe size={14} style={{ color: panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)' }} />)}
+        {trigger('overview', 'Overview', <ListTodo size={14} color={panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)'} />)}
+        {trigger('terminal', 'Terminal', <TerminalSquare size={14} color={panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)'} />)}
+        {trigger('browser', 'Browser', <Globe size={14} color={panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)'} />)}
         {openFiles.map((f) => {
           const hovered = hoveredTabPath === f.path
           return (
             <Tabs.Trigger key={f.path} value={f.path} className="artifact-tab-trigger" onMouseEnter={() => setHoveredTabPath(f.path)} onMouseLeave={() => setHoveredTabPath(null)}>
-              <div className="tab-icon-wrapper">{hovered ? <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span> : isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={f.name} autoAssign width={16} height={16} style={{ flexShrink: 0 }} />}</div>
+              <div className="tab-icon-wrapper">{hovered ? <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span> : isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={f.name} autoAssign width={16} height={16} className="flex-shrink-0" />}</div>
               <span>{getDisplayName(f.name)}</span>
             </Tabs.Trigger>
           )

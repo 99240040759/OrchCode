@@ -126,64 +126,41 @@ type RawMessage = { role: string; content: string; data?: string | null }
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
   const result: ModelMessage[] = []
   const activeToolCallIds = new Set<string>()
-
-  // 1. Collect all valid tool call IDs from assistant messages in this history
   for (const msg of messages) {
-    if (msg.role === 'assistant') {
+    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+      for (const part of msg.content) { if (part.type === 'tool-call') activeToolCallIds.add(part.toolCallId) }
+    }
+  }
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
       if (Array.isArray(msg.content)) {
-        for (const part of msg.content) {
-          if (part.type === 'tool-call') {
-            activeToolCallIds.add(part.toolCallId)
-          }
-        }
-      }
-      result.push(msg)
-    } else if (msg.role === 'tool') {
-      // Keep only tool results that have a matching tool call in this history
-      if (Array.isArray(msg.content)) {
-        const validParts = msg.content.filter(
-          (part: any) => part.type === 'tool-result' && activeToolCallIds.has(part.toolCallId)
-        )
-        if (validParts.length > 0) {
-          result.push({ role: 'tool', content: validParts as any })
-        }
+        const validParts = msg.content.filter((part: any) => part.type === 'tool-result' && activeToolCallIds.has(part.toolCallId))
+        if (validParts.length > 0) result.push({ role: 'tool', content: validParts as any })
       } else {
         const toolCallId = (msg as any).toolCallId
-        if (!toolCallId || activeToolCallIds.has(toolCallId)) {
-          result.push(msg)
-        }
+        if (!toolCallId || activeToolCallIds.has(toolCallId)) result.push(msg)
       }
     } else {
       result.push(msg)
     }
   }
-
-  // 2. Merge consecutive messages of the same role (user with user, assistant with assistant, tool with tool)
   const merged: ModelMessage[] = []
   for (const msg of result) {
-    if (merged.length === 0) {
-      merged.push(msg)
-      continue
-    }
-
+    if (merged.length === 0) { merged.push(msg); continue }
     const prev = merged[merged.length - 1]
     if (prev.role === msg.role) {
       if (prev.role === 'user') {
-        const prevContent = prev.content
-        const currContent = msg.content
-        if (typeof prevContent === 'string' && typeof currContent === 'string') {
-          prev.content = prevContent + '\n\n' + currContent
-        } else {
+        const prevContent = prev.content, currContent = msg.content
+        if (typeof prevContent === 'string' && typeof currContent === 'string') prev.content = prevContent + '\n\n' + currContent
+        else {
           const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
           const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
           prev.content = [...prevParts, ...currParts] as any
         }
       } else if (prev.role === 'assistant') {
-        const prevContent = prev.content
-        const currContent = msg.content
-        if (typeof prevContent === 'string' && typeof currContent === 'string') {
-          prev.content = prevContent + '\n\n' + currContent
-        } else {
+        const prevContent = prev.content, currContent = msg.content
+        if (typeof prevContent === 'string' && typeof currContent === 'string') prev.content = prevContent + '\n\n' + currContent
+        else {
           const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
           const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
           prev.content = [...prevParts, ...currParts] as any
@@ -197,7 +174,6 @@ export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
       merged.push(msg)
     }
   }
-
   return merged
 }
 

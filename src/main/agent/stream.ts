@@ -176,11 +176,15 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
     assistantMsgId = crypto.randomUUID()
     let currentReasoningStartMs = 0
-
-    const saveProgress = async () => {
+    let lastSaveMs = 0
+    const saveProgress = async (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastSaveMs < 1000) return
       if (assistantContent || orderedBlocks.length > 0) {
-        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) }
-        catch (err) { log.error('[stream] Progressive save failed:', err) }
+        try {
+          await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) })
+          lastSaveMs = now
+        } catch (err) { log.error('[stream] Progressive save failed:', err) }
       }
     }
 
@@ -216,8 +220,8 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           messages: sanitizeMessages((currentMessages as ModelMessage[]).slice(-10))
         }
       },
-      onAbort: saveProgress,
-      onError: async ({ error }) => { log.error('[stream] AI SDK error:', error); await saveProgress() }
+      onAbort: () => { void saveProgress(true) },
+      onError: async ({ error }) => { log.error('[stream] AI SDK error:', error); await saveProgress(true) }
     })
 
     for await (const part of result.fullStream) {
@@ -238,7 +242,8 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           const last = orderedBlocks[orderedBlocks.length - 1]
           if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: delta })
           else last.content += delta
-          send({ type: 'text-delta', payload: delta, threadId }); break
+          send({ type: 'text-delta', payload: delta, threadId })
+          await saveProgress(false); break
         }
         case 'tool-input-start': {
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
@@ -266,7 +271,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
             if (process.type === 'utility') (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
             else pushArtifactsChanged(threadId)
           }
-          break
+          await saveProgress(false); break
         }
         case 'error': {
           const errMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
@@ -297,7 +302,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
         }
       }
     }
-    await saveProgress()
+    await saveProgress(true)
   } catch (err: unknown) {
     const error = err as Error & { name?: string }
     log.error('[stream] error:', error)

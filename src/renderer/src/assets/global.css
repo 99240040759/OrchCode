@@ -7,6 +7,11 @@
   --bg-editor: #161616;
   --bg-titlebar: #1a1a1a;
   --bg-artifact-header: #222222;
+  --bg-trans-hover: rgba(255, 255, 255, 0.04);
+  --bg-trans-active: rgba(255, 255, 255, 0.06);
+  --bg-trans-select: rgba(255, 255, 255, 0.08);
+  --bg-brass-hover: rgba(226, 168, 86, 0.05);
+  --bg-brass-dim: rgba(226, 168, 86, 0.02);
   --border-color: rgba(226, 168, 86, 0.08);
   --border-focus: rgba(226, 168, 86, 0.25);
   --text-primary: #f5f4f0;

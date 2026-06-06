@@ -11,14 +11,14 @@ const MediaPreview: React.FC<MediaPreviewProps> = ({ displayFile }) => {
     <div className="media-preview-outer media-preview-container">
       {mimeType?.startsWith('image/') && (
         <div className="media-image-wrapper">
-          <img src={src} alt={name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />
+          <img src={src} alt={name} className="media-preview-image" />
         </div>
       )}
-      {mimeType?.startsWith('video/') && <video controls autoPlay src={src} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '4px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} />}
+      {mimeType?.startsWith('video/') && <video controls autoPlay src={src} className="media-preview-video" />}
       {mimeType?.startsWith('audio/') && (
         <div className="media-audio-wrapper">
           <span className="media-audio-label">{name}</span>
-          <audio controls autoPlay src={src} style={{ width: '320px' }} />
+          <audio controls autoPlay src={src} className="media-preview-audio" />
         </div>
       )}
       {!mimeType?.startsWith('image/') && !mimeType?.startsWith('video/') && !mimeType?.startsWith('audio/') && (

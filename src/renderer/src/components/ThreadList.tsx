@@ -28,6 +28,16 @@ const ThreadList: React.FC = () => {
     return Array.from(set)
   }, [threads, activeWorkspace?.path])
 
+  const threadsByWorkspace = useMemo(() => {
+    const map: Record<string, typeof threads> = {}
+    for (const t of threads) {
+      const p = t.workspacePath || ''
+      if (!map[p]) map[p] = []
+      map[p].push(t)
+    }
+    return map
+  }, [threads])
+
   React.useEffect(() => {
     if (activeWorkspace?.path) setExpandedPaths(prev => ({ ...prev, [activeWorkspace.path]: prev[activeWorkspace.path] !== false }))
   }, [activeWorkspace?.path])
@@ -67,22 +77,25 @@ const ThreadList: React.FC = () => {
               </div>
               {expanded && (
                 <div className="thread-list-group">
-                  {threads.filter(t => t.workspacePath === path).length === 0 ? <span className="empty-state-desc thread-list-header">No chats yet</span> :
-                    threads.filter(t => t.workspacePath === path).map((thread) => {
-                      const active = activeThreadId === thread.id
-                      return (
-                        <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', minWidth: 0 }}>
-                            <span className={`thread-item-title${active ? ' thread-item-active-title' : ''}`} style={{ flex: 1, minWidth: 0, marginBottom: 0 }}>{thread.title ?? 'New conversation'}</span>
-                            {active && agentRunState !== 'idle' && <Loader2 size={12} className="running-indicator" />}
-                          </div>
-                          <div className="thread-item-meta" style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', minWidth: 0 }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>{formatConversationDate(thread.updatedAt ?? thread.createdAt)}</span>
-                            <div className="sidebar-section-header-action" style={{ flexShrink: 0 }} onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation"><Trash2 size={12} /></div>
-                          </div>
-                        </div>
-                      )
-                    })}
+                  {(() => {
+                    const workspaceThreads = threadsByWorkspace[path] || []
+                    return workspaceThreads.length === 0 ? <span className="empty-state-desc thread-list-header">No chats yet</span> :
+                      workspaceThreads.map((thread) => {
+                        const active = activeThreadId === thread.id
+                        return (
+                           <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)}>
+                             <div className="thread-item-row">
+                               <span className={`thread-item-title-text ${active ? 'thread-item-active-title' : 'thread-item-title'}`}>{thread.title ?? 'New conversation'}</span>
+                               {active && agentRunState !== 'idle' && <Loader2 size={12} className="running-indicator" />}
+                             </div>
+                             <div className="thread-item-meta">
+                               <span className="thread-item-meta-time">{formatConversationDate(thread.updatedAt ?? thread.createdAt)}</span>
+                               <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation"><Trash2 size={12} /></div>
+                             </div>
+                           </div>
+                        )
+                      })
+                  })()}
                 </div>
               )}
             </div>

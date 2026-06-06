@@ -38,7 +38,7 @@ export const ChatPane = React.memo<ChatPaneProps>(
               <Lottie
                 animationData={emptyStateAnimation}
                 loop={true}
-                style={{ width: 220, height: 220 }}
+                className="home-lottie"
               />
             </div>
           </div>
