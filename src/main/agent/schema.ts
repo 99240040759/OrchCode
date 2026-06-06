@@ -123,15 +123,99 @@ export function buildAttachmentParts(
 
 type RawMessage = { role: string; content: string; data?: string | null }
 
+export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
+  const result: ModelMessage[] = []
+  const activeToolCallIds = new Set<string>()
+
+  // 1. Collect all valid tool call IDs from assistant messages in this history
+  for (const msg of messages) {
+    if (msg.role === 'assistant') {
+      if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === 'tool-call') {
+            activeToolCallIds.add(part.toolCallId)
+          }
+        }
+      }
+      result.push(msg)
+    } else if (msg.role === 'tool') {
+      // Keep only tool results that have a matching tool call in this history
+      if (Array.isArray(msg.content)) {
+        const validParts = msg.content.filter(
+          (part: any) => part.type === 'tool-result' && activeToolCallIds.has(part.toolCallId)
+        )
+        if (validParts.length > 0) {
+          result.push({ role: 'tool', content: validParts as any })
+        }
+      } else {
+        const toolCallId = (msg as any).toolCallId
+        if (!toolCallId || activeToolCallIds.has(toolCallId)) {
+          result.push(msg)
+        }
+      }
+    } else {
+      result.push(msg)
+    }
+  }
+
+  // 2. Merge consecutive messages of the same role (user with user, assistant with assistant, tool with tool)
+  const merged: ModelMessage[] = []
+  for (const msg of result) {
+    if (merged.length === 0) {
+      merged.push(msg)
+      continue
+    }
+
+    const prev = merged[merged.length - 1]
+    if (prev.role === msg.role) {
+      if (prev.role === 'user') {
+        const prevContent = prev.content
+        const currContent = msg.content
+        if (typeof prevContent === 'string' && typeof currContent === 'string') {
+          prev.content = prevContent + '\n\n' + currContent
+        } else {
+          const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
+          const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
+          prev.content = [...prevParts, ...currParts] as any
+        }
+      } else if (prev.role === 'assistant') {
+        const prevContent = prev.content
+        const currContent = msg.content
+        if (typeof prevContent === 'string' && typeof currContent === 'string') {
+          prev.content = prevContent + '\n\n' + currContent
+        } else {
+          const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
+          const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
+          prev.content = [...prevParts, ...currParts] as any
+        }
+      } else if (prev.role === 'tool') {
+        const prevParts = Array.isArray(prev.content) ? prev.content : [prev.content]
+        const currParts = Array.isArray(msg.content) ? msg.content : [msg.content]
+        prev.content = [...prevParts, ...currParts] as any
+      }
+    } else {
+      merged.push(msg)
+    }
+  }
+
+  return merged
+}
+
 export function buildMessagesFromHistory(
   history: RawMessage[],
   modelSupportsVision: boolean,
   modelSupportsNativeFiles: boolean
-): ModelMessage[] {
-  const messages: ModelMessage[] = []
+): {
+  messages: ModelMessage[]
+  systemInstructionSuffix: string
+} {
+  const rawMessages: ModelMessage[] = []
+  let systemInstructionSuffix = ''
 
   for (const m of history) {
-    if (m.role === 'user') {
+    if (m.role === 'system') {
+      systemInstructionSuffix += `\n\n${m.content}`
+    } else if (m.role === 'user') {
       let userContent: string | unknown[] = m.content
       if (m.data) {
         try {
@@ -143,24 +227,21 @@ export function buildMessagesFromHistory(
           log.error('[schema] Failed to parse attachment data:', err)
         }
       }
-      messages.push({ role: 'user', content: userContent as any })
+      rawMessages.push({ role: 'user', content: userContent as any })
     } else if (m.role === 'assistant') {
       let blocks: StreamBlock[] = []
       if (m.data) {
-        // L-6 FIX: Use the typed parseAssistantMessageData() instead of raw JSON.parse
-        // inline. This runs Zod validation so malformed/partial block data is rejected
-        // cleanly instead of silently corrupting the message history replay.
         const parsed = parseAssistantMessageData(m.data)
         if (parsed) blocks = parsed
       }
       if (blocks.length === 0) {
-        messages.push({ role: 'assistant', content: m.content || '' })
+        rawMessages.push({ role: 'assistant', content: m.content || '' })
       } else {
         let assistantParts: any[] = []
         let toolResults: any[] = []
         const flush = () => {
-          if (assistantParts.length) { messages.push({ role: 'assistant', content: assistantParts as any }); assistantParts = [] }
-          if (toolResults.length) { messages.push({ role: 'tool', content: toolResults as any }); toolResults = [] }
+          if (assistantParts.length) { rawMessages.push({ role: 'assistant', content: assistantParts as any }); assistantParts = [] }
+          if (toolResults.length) { rawMessages.push({ role: 'tool', content: toolResults as any }); toolResults = [] }
         }
         for (const block of blocks) {
           if (block.type === 'text') {
@@ -205,9 +286,13 @@ export function buildMessagesFromHistory(
         }
         flush()
       }
-    } else if (m.role === 'system') {
-      messages.push({ role: 'system', content: m.content })
     }
   }
-  return messages
+
+  const messages = sanitizeMessages(rawMessages)
+
+  return {
+    messages,
+    systemInstructionSuffix
+  }
 }

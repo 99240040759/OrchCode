@@ -23,7 +23,7 @@ import {
 import { summariseContext, compactThreadHistory } from './summarisation'
 import { pushArtifactsChanged } from './artifacts'
 import { getCurrentSession } from '../auth'
-import { buildMessagesFromHistory, buildAttachmentParts } from './schema'
+import { buildMessagesFromHistory, buildAttachmentParts, sanitizeMessages } from './schema'
 
 export const activeAbortControllers = new Map<string, AbortController>()
 
@@ -125,11 +125,16 @@ export async function handleAgentStreamRequest(
     const modelSupportsVision = checkModelVisionSupport(rawModel.id)
     const modelSupportsNativeFiles = checkModelNativeFileSupport(rawModel.id)
 
-    const messages = buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
+    const { messages: historyMessages, systemInstructionSuffix } = buildMessagesFromHistory(
+      history,
+      modelSupportsVision,
+      modelSupportsNativeFiles
+    )
     const userContent = attachments?.length
       ? buildAttachmentParts(text, attachments, modelSupportsVision, modelSupportsNativeFiles)
       : text
-    messages.push({ role: 'user', content: userContent as any })
+    historyMessages.push({ role: 'user', content: userContent as any })
+    const messages = sanitizeMessages(historyMessages)
 
     const browserView = WindowManager.getBrowserView()
     const browserInstruction = browserView
@@ -193,7 +198,7 @@ Do NOT execute terminal/shell commands for file operations. Use runCommand ONLY 
 
     const result = streamText({
       model: resolvedModel,
-      system: systemInstruction,
+      system: systemInstruction + (systemInstructionSuffix || ''),
       messages,
       tools: activeTools,
       stopWhen: stepCountIs(100),
@@ -221,9 +226,11 @@ Do NOT execute terminal/shell commands for file operations. Use runCommand ONLY 
           sessionAccumulatedTokens = 0
         } catch (err) { log.error('[stream] Database compaction failed:', err) }
         send({ type: 'token-update', payload: { accumulatedTokens: 0 }, threadId })
+        const sliced = (currentMessages as ModelMessage[]).slice(-10)
+        const sanitized = sanitizeMessages(sliced)
         return {
           system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nPrior conversation summarised. Summary:\n\n${summary}\n\nContinue from this state.`,
-          messages: (currentMessages as ModelMessage[]).slice(-10)
+          messages: sanitized
         }
       },
 
@@ -372,6 +379,7 @@ Do NOT execute terminal/shell commands for file operations. Use runCommand ONLY 
     }
   } finally {
     if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
-    try { port.close() } catch {}
+    // The renderer process is now responsible for closing the port when it receives the 'finish' or 'error' chunk.
+    // This guarantees that all IPC messages are flushed and processed before the pipe is destroyed.
   }
 }

@@ -42,33 +42,37 @@ export const ChatPane = React.memo<ChatPaneProps>(
         ) : (
           <div className="chat-pane-empty">
             <div className="home-prompt-view">
-              <div className="chat-pane-content-full-width">
-                <div className="home-prompt-header">
-                  <h2 className="home-prompt-title" onClick={onOpenWorkspace}>
-                    <span className="text-primary">Start new conversation in</span>
-                    <ChevronDown size={14} className="home-prompt-chevron" />
-                    <span className="text-primary font-semibold">
-                      {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
-                    </span>
-                  </h2>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: 220, marginBottom: 12 }}>
-                  <Lottie
-                    animationData={emptyStateAnimation}
-                    loop={true}
-                    style={{ width: 220, height: 220 }}
-                  />
-                </div>
-                <InputBar onSubmit={onSubmit} onStop={onStop} />
-
-                {fullWidth && (
-                  <div className="prompt-sub-links">
-                    <a href="#" className="prompt-sub-link" onClick={(e) => { e.preventDefault(); onOpenArtifacts() }}>
-                      <Code size={14} strokeWidth={2} />
-                      <span>Open editor</span>
-                    </a>
+              <div className="chat-pane-content-full-width" style={{ display: 'flex', flexDirection: 'column', flex: 1, width: '100%', height: '100%' }}>
+                <div style={{ height: '50%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: 220 }}>
+                    <Lottie
+                      animationData={emptyStateAnimation}
+                      loop={true}
+                      style={{ width: 220, height: 220 }}
+                    />
                   </div>
-                )}
+                </div>
+
+                <div style={{ height: '50%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', paddingTop: 4, width: '100%' }}>
+                  <div className="home-prompt-header" style={{ marginBottom: 6 }}>
+                    <h2 className="home-prompt-title" onClick={onOpenWorkspace}>
+                      <span className="text-primary">Start new conversation in</span>
+                      <ChevronDown size={14} className="home-prompt-chevron" />
+                      <span className="text-primary font-semibold">
+                        {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
+                      </span>
+                    </h2>
+                  </div>
+                  <InputBar onSubmit={onSubmit} onStop={onStop} />
+                  {fullWidth && (
+                    <div className="prompt-sub-links" style={{ marginTop: 12 }}>
+                      <a href="#" className="prompt-sub-link" onClick={(e) => { e.preventDefault(); onOpenArtifacts() }}>
+                        <Code size={14} strokeWidth={2} />
+                        <span>Open editor</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
         port.onmessage = (e: MessageEvent<StreamChunk>) => {
           try {
             onChunk(e.data)
+            if (e.data.type === 'finish' || e.data.type === 'error') {
+              port.close()
+            }
           } catch {}
         }
         port.onmessageerror = () => resolve()

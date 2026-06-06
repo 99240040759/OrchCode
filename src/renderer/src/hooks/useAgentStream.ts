@@ -127,11 +127,21 @@ export function useAgentStream() {
         } else if (chunkType === 'text-delta') {
           fullContent += chunkText
           const last = orderedBlocks[orderedBlocks.length - 1]
-          if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: chunkText })
-          else orderedBlocks[orderedBlocks.length - 1] = { ...last, content: last.content + chunkText }
+          if (last?.type === 'reasoning') {
+            last.isStreaming = false
+            orderedBlocks.push({ type: 'text', content: chunkText })
+          } else if (!last || last.type !== 'text') {
+            orderedBlocks.push({ type: 'text', content: chunkText })
+          } else {
+            orderedBlocks[orderedBlocks.length - 1] = { ...last, content: last.content + chunkText }
+          }
           scheduleFlush()
         } else if (chunkType === 'tool-call-streaming-start') {
           setRunState('tool-calling')
+          const last = orderedBlocks[orderedBlocks.length - 1]
+          if (last?.type === 'reasoning') {
+            last.isStreaming = false
+          }
           const tcId = (chunkData?.toolCallId as string) ?? crypto.randomUUID()
           const tcName = (chunkData?.toolName as string) ?? 'unknown'
           orderedBlocks.push({ type: 'tool', toolCallId: tcId, toolName: tcName, args: {}, argsDelta: '', status: 'pending' })

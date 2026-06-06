@@ -4,10 +4,21 @@ import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2 } fro
 import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
 import { useThreads } from '../hooks/useThreads'
 import type { ThreadEntry } from '../../../preload/index.d'
-import { formatDistanceToNow } from 'date-fns'
+import { format, isToday, isYesterday } from 'date-fns'
 
-function formatRelativeTime(dateStr: string): string {
-  try { return formatDistanceToNow(new Date(dateStr), { addSuffix: true }) } catch { return 'unknown' }
+function formatConversationDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr)
+    if (isToday(date)) {
+      return `Today at ${format(date, 'h:mm a')}`
+    }
+    if (isYesterday(date)) {
+      return `Yesterday at ${format(date, 'h:mm a')}`
+    }
+    return format(date, 'MMM d, yyyy h:mm a')
+  } catch {
+    return 'unknown'
+  }
 }
 
 const ThreadList: React.FC = () => {
@@ -91,16 +102,19 @@ const ThreadList: React.FC = () => {
                         const isRunning = isThreadActive && agentRunState !== 'idle'
                         return (
                           <div key={thread.id} className={`thread-item${isThreadActive ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)}>
-                            <span className={`thread-item-title${isThreadActive ? ' thread-item-active-title' : ''}`}>
-                              {thread.title ?? 'New conversation'}
-                            </span>
-                            <div className="thread-item-meta">
-                              {isRunning ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', minWidth: 0 }}>
+                              <span className={`thread-item-title${isThreadActive ? ' thread-item-active-title' : ''}`} style={{ flex: 1, minWidth: 0, marginBottom: 0 }}>
+                                {thread.title ?? 'New conversation'}
+                              </span>
+                              {isRunning && (
                                 <Loader2 size={12} className="running-indicator" />
-                              ) : (
-                                <span>{formatRelativeTime(thread.updatedAt ?? thread.createdAt)}</span>
                               )}
-                              <div className="sidebar-section-header-action" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation">
+                            </div>
+                            <div className="thread-item-meta" style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', minWidth: 0 }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
+                                {formatConversationDate(thread.updatedAt ?? thread.createdAt)}
+                              </span>
+                              <div className="sidebar-section-header-action" style={{ flexShrink: 0 }} onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation">
                                 <Trash2 size={12} />
                               </div>
                             </div>
