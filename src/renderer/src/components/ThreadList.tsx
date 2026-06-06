@@ -22,10 +22,10 @@ const ThreadList: React.FC = () => {
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
 
   const allWorkspacePaths = useMemo(() => {
-    const paths = threads.map(t => t.workspacePath).filter((p): p is string => typeof p === 'string' && p.length > 0)
+    const paths = threads.map(t => t.workspacePath || '')
     const set = new Set(paths)
     if (activeWorkspace?.path) set.add(activeWorkspace.path)
-    return Array.from(set)
+    return Array.from(set).sort((a, b) => a === '' ? 1 : b === '' ? -1 : a.localeCompare(b))
   }, [threads, activeWorkspace?.path])
 
   const threadsByWorkspace = useMemo(() => {
@@ -66,14 +66,14 @@ const ThreadList: React.FC = () => {
 
       <div className="thread-list-group">
         {allWorkspacePaths.length === 0 ? <div className="empty-state-desc thread-list-header">No projects opened yet.</div> : allWorkspacePaths.map((path) => {
-          const isActive = activeWorkspace?.path === path, expanded = !!expandedPaths[path]
+          const isActive = path === '' ? !activeWorkspace : activeWorkspace?.path === path, expanded = !!expandedPaths[path]
           return (
             <div key={path} className="thread-list-group">
               <div className="thread-group-header" onClick={() => toggleExpand(path)}>
                 <div className="thread-group-actions">{expanded ? <ChevronDown size={14} className="text-secondary" /> : <ChevronRight size={14} className="text-secondary" />}</div>
                 <Folder size={14} className="text-secondary" />
-                <span className={`thread-group-title${isActive ? ' thread-item-active-title' : ''}`} title={path}>{path.split(/[/\\]/).pop() ?? 'Workspace'}</span>
-                <div className="thread-group-actions"><div className="sidebar-section-header-action" onClick={(e) => handleCloseWorkspace(e, path)} title="Close project"><X size={13} /></div></div>
+                <span className={`thread-group-title${isActive ? ' thread-item-active-title' : ''}`} title={path}>{path ? (path.split(/[/\\]/).pop() ?? 'Workspace') : 'General Chats'}</span>
+                <div className="thread-group-actions">{path && <div className="sidebar-section-header-action" onClick={(e) => handleCloseWorkspace(e, path)} title="Close project"><X size={13} /></div>}</div>
               </div>
               {expanded && (
                 <div className="thread-list-group">

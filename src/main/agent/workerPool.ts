@@ -1,5 +1,6 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import log from 'electron-log'
 
 export class WorkerPool {
@@ -14,7 +15,8 @@ export class WorkerPool {
       return idle
     }
     if (this.workers.length < this.maxWorkers) {
-      const workerPath = join(__dirname, 'agentWorker.js')
+      let workerPath = join(__dirname, 'agentWorker.js')
+      if (!existsSync(workerPath)) workerPath = join(__dirname, '..', 'agentWorker.js')
       log.info(`[workerPool] Spawning utilityProcess worker at: ${workerPath}`)
       const { app } = require('electron')
       const child = utilityProcess.fork(workerPath, [], {

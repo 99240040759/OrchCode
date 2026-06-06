@@ -121,7 +121,7 @@ const commands: Record<string, CommandHandler> = {
         const title = data.title?.trim() ?? null
         if (title) await updateThreadTitle(threadId, title)
         return title
-      } catch (err) { log.error('[commands] Title generation error:', err); return null }
+      } catch (err) { log.error('[commands] Title generation error:', err); throw err }
     }
   },
   'thread:active-id': {
@@ -132,7 +132,7 @@ const commands: Record<string, CommandHandler> = {
         if (activeId && getThread(activeId)) return activeId
         const threads = getThreads()
         return threads?.length ? threads[0].id : ''
-      } catch { return '' }
+      } catch (err) { throw err }
     }
   },
   'thread:new': { schema: z.object({}), execute: async () => { const newId = `session-${crypto.randomUUID()}`; await getOrCreateWorkspaceContext(newId); return { conversationId: newId } } },
@@ -140,12 +140,12 @@ const commands: Record<string, CommandHandler> = {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }) => {
       try { setActiveThreadId(threadId); const wsPath = getThreadWorkspace(threadId); if (wsPath) await updateWorkspacePath(threadId, wsPath) }
-      catch (err) { log.warn(`[commands] Auto-bind error for ${threadId}:`, err) }
+      catch (err) { log.warn(`[commands] Auto-bind error for ${threadId}:`, err); throw err }
       return true
     }
   },
-  'thread:list': { schema: z.object({}), execute: async () => { try { return await getThreads() } catch (err) { log.error('[commands] getThreads:', err); return [] } } },
-  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }) => { try { return getThread(threadId) } catch { return null } } },
+  'thread:list': { schema: z.object({}), execute: async () => { try { return await getThreads() } catch (err) { log.error('[commands] getThreads:', err); throw err } } },
+  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }) => { try { return getThread(threadId) } catch (err) { throw err } } },
   'thread:messages': {
     schema: z.object({ threadId: threadIdSchema }),
     execute: ({ threadId }) => {
@@ -154,7 +154,7 @@ const commands: Record<string, CommandHandler> = {
           const parsed = message.role === 'assistant' ? parseAssistantMessageData(message.data) : message.role === 'user' ? parseUserMessageData(message.data) : undefined
           return { ...message, data: parsed ? serializeMessageData(parsed) : undefined }
         })
-      } catch (err) { log.error('[commands] getThreadMessages:', err); return [] }
+      } catch (err) { log.error('[commands] getThreadMessages:', err); throw err }
     }
   },
   'thread:delete': {
@@ -167,10 +167,10 @@ const commands: Record<string, CommandHandler> = {
         const deleted = deleteThread(threadId)
         if (!wsPath && context?.isUserWorkspace !== true) await fs.rm(getConversationPath(threadId), { recursive: true, force: true })
         return deleted
-      } catch (err) { log.error('[commands] deleteThread:', err); return false }
+      } catch (err) { log.error('[commands] deleteThread:', err); throw err }
     }
   },
-  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }) => { try { return getThreadWorkspace(threadId) } catch { return null } } },
+  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }) => { try { return getThreadWorkspace(threadId) } catch (err) { throw err } } },
   'workspace:select': {
     schema: z.object({ conversationId: convIdSchema }),
     execute: async ({ conversationId }, event) => {
@@ -181,7 +181,7 @@ const commands: Record<string, CommandHandler> = {
       const selectedPath = result.filePaths[0]
       addOpenedWorkspace(selectedPath)
       const ctx = await updateWorkspacePath(conversationId, selectedPath)
-      try { setThreadWorkspace(conversationId, selectedPath) } catch (err) { log.warn('[commands] Could not bind workspace:', err) }
+      try { setThreadWorkspace(conversationId, selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
     }
   },
@@ -191,7 +191,7 @@ const commands: Record<string, CommandHandler> = {
       if (!conversationId) throw new Error('conversationId is required')
       const ctx = await updateWorkspacePath(conversationId, workspacePath)
       addOpenedWorkspace(workspacePath)
-      try { setThreadWorkspace(conversationId, workspacePath) } catch (err) { log.warn('[commands] Could not bind workspace:', err) }
+      try { setThreadWorkspace(conversationId, workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
     }
   },
@@ -201,7 +201,7 @@ const commands: Record<string, CommandHandler> = {
       if (!conversationId) throw new Error('conversationId is required')
       const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
       if (!ctx?.rootPath) return []
-      try { return await listWorkspaceFiles(ctx.rootPath) } catch (err) { log.error('[commands] listFiles error:', err); return [] }
+      try { return await listWorkspaceFiles(ctx.rootPath) } catch (err) { log.error('[commands] listFiles error:', err); throw err }
     }
   },
   'workspace:close-and-delete': {
@@ -212,10 +212,10 @@ const commands: Record<string, CommandHandler> = {
         const affected = await deleteWorkspaceThreads(workspacePath)
         for (const tid of affected) {
           clearWorkspaceContext(tid)
-          try { await fs.rm(getConversationPath(tid), { recursive: true, force: true }) } catch {}
+          await fs.rm(getConversationPath(tid), { recursive: true, force: true })
         }
         return true
-      } catch (err) { log.error('[commands] close-and-delete error:', err); return false }
+      } catch (err) { log.error('[commands] close-and-delete error:', err); throw err }
     }
   },
   'file:read': {
@@ -247,14 +247,10 @@ const commands: Record<string, CommandHandler> = {
         try {
           const { stdout } = await execa('git', ['show', `HEAD:${gitPath}`], { cwd: ctx.rootPath, timeout: 5000, reject: true, shell: false })
           return { content: stdout }
-        } catch {
-          try { return { content: await fs.readFile(safePath, 'utf-8') } } catch { return { content: '' } }
+        } catch (gitErr) {
+          try { return { content: await fs.readFile(safePath, 'utf-8') } } catch (fsErr) { log.error('[commands] git show and disk read failed:', fsErr); throw fsErr }
         }
-      } catch (err: any) {
-        log.error('[commands] file:read-original error:', err)
-        if (err.message?.includes('Path traversal')) throw err
-        return { content: '' }
-      }
+      } catch (err: any) { log.error('[commands] file:read-original error:', err); throw err }
     }
   },
   'dialog:confirm': {
@@ -350,7 +346,13 @@ const commands: Record<string, CommandHandler> = {
         try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch {}
         bv = null; WindowManager.setBrowserView(null)
       }
-      if (bv) { bv.setBounds(normalizeBounds(bounds)); await bv.webContents.loadURL(normalizeBrowserUrl(url)); return }
+      if (bv) {
+        bv.setBounds(normalizeBounds(bounds))
+        try { mainWindow.contentView.addChildView(bv) } catch {}
+        const targetUrl = normalizeBrowserUrl(url)
+        if (bv.webContents.getURL() !== targetUrl) await bv.webContents.loadURL(targetUrl)
+        return
+      }
       const partition = conversationId ? `persist:conversation_${conversationId}` : undefined
       bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } })
       ;(bv as any).conversationId = conversationId
@@ -371,8 +373,7 @@ const commands: Record<string, CommandHandler> = {
     execute: () => {
       const win = WindowManager.getMainWindow()
       const bv = WindowManager.getBrowserView()
-      if (bv && win) { try { win.contentView.removeChildView(bv); bv.webContents.close() } catch {} }
-      WindowManager.setBrowserView(null)
+      if (bv && win) { try { win.contentView.removeChildView(bv) } catch {} }
     }
   }
 }

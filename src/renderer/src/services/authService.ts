@@ -8,12 +8,12 @@ export const authService = {
 
   logout: async (): Promise<boolean> => {
     try { return await window.api.invoke('auth:logout') as boolean }
-    catch (err) { console.error('[authService] logout failed:', err); return false }
+    catch (err) { console.error('[authService] logout failed:', err); throw err }
   },
 
   getAuthUser: async (): Promise<UserProfile | null> => {
     try { return await window.api.invoke('auth:get-user') as UserProfile | null }
-    catch (err) { console.error('[authService] getAuthUser failed:', err); return null }
+    catch (err) { console.error('[authService] getAuthUser failed:', err); throw err }
   },
 
   openMainAndCloseOnboarding: async (): Promise<void> => {
@@ -24,7 +24,7 @@ export const authService = {
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
     return window.api.on('auth:status-changed', (user) => {
       try { callback(user as UserProfile | null) }
-      catch (err) { console.error('[authService] Error in auth status callback:', err) }
+      catch (err) { console.error('[authService] Error in auth status callback:', err); throw err }
     })
   }
 }

@@ -162,8 +162,8 @@ const ArtifactPanel: React.FC = () => {
         <Tabs.Content value="overview" className="artifact-panel-tab-content">
           <OverviewPanel artifacts={artifacts} loading={loading} handleArtifactClick={handleArtifactClick} />
         </Tabs.Content>
-        <Tabs.Content value="terminal" className={`artifact-panel-tab-content ${panelMode === 'terminal' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
-          {panelMode === 'terminal' && <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />}
+        <Tabs.Content value="terminal" forceMount className={`artifact-panel-tab-content ${panelMode === 'terminal' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
+          <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />
         </Tabs.Content>
         <Tabs.Content value="browser" forceMount className={`artifact-panel-tab-content ${panelMode === 'browser' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
           <BrowserView />

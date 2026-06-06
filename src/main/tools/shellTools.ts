@@ -9,7 +9,9 @@ const BLOCKED_EXECUTABLES = new Set([
   'sudo', 'su', 'runas', 'gksudo',
   'shutdown', 'reboot', 'init',
   'mkfs', 'fdisk', 'format', 'dd',
-  'passwd', 'chroot'
+  'passwd', 'chroot',
+  'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
+  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
 ])
 
 // L-7 FIX: Proper shell-quote tokenizer that handles:
@@ -27,8 +29,8 @@ function tokenizeCommand(commandLine: string): string[] {
   while (i < commandLine.length) {
     const ch = commandLine[i]
 
-    if (ch === '\\' && inDouble && i + 1 < commandLine.length) {
-      // Escape sequences inside double quotes
+    if (ch === '\\' && inDouble && i + 1 < commandLine.length && (commandLine[i + 1] === '"' || commandLine[i + 1] === '\\')) {
+      // Escape sequences inside double quotes (only double quotes or backslashes)
       i++
       current += commandLine[i]
     } else if (ch === "'" && !inDouble) {

@@ -52,7 +52,7 @@ export function registerStreamIpc() {
     worker.once('exit', onExit)
     const onMsg = (msg: any) => {
       if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
-      if (msg?.type === 'tool-request') {
+      if (msg?.type === 'tool-request' && msg.threadId === request.threadId) {
         const { requestId, toolName, args } = msg
         const t = browserTools(request.threadId, true)[toolName]
         if (t) {
@@ -114,7 +114,7 @@ export async function handleAgentStreamRequest(
 
     const wsPath = getThreadWorkspace(threadId)
     if (wsPath) await updateWorkspacePath(threadId, wsPath)
-  } catch (err) { log.warn(`[stream] Failed to bind workspace for ${threadId}:`, err) }
+  } catch (err) { log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
 
   let assistantMsgId = ''
   let assistantContent = ''

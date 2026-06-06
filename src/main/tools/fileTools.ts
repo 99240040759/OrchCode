@@ -23,7 +23,7 @@ async function applyEditsToFile(filePath: string, edits: { startLine: number; en
   for (const edit of sorted) {
     if (edit.endLine < edit.startLine) throw new Error(`Invalid line range: endLine before startLine.`)
     if (edit.startLine > lines.length || edit.endLine > lines.length) throw new Error(`Invalid line range ${edit.startLine}-${edit.endLine}: file has ${lines.length} lines.`)
-    lines.splice(edit.startLine - 1, edit.endLine - edit.startLine + 1, ...edit.replacementContent.split('\n'))
+    lines.splice(edit.startLine - 1, edit.endLine - edit.startLine + 1, ...edit.replacementContent.replace(/\r\n/g, '\n').split('\n'))
   }
   await fs.writeFile(filePath, isCrlf ? lines.join('\r\n') : lines.join('\n'), 'utf-8')
 }

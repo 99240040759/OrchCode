@@ -64,6 +64,7 @@ export function checkpointDB() {
     log.info('[db] WAL checkpoint complete.')
   } catch (err) {
     log.error('[db] Error checkpointing WAL:', err)
+    throw err
   }
 }
 
@@ -246,8 +247,9 @@ export function getActiveThreadId(): string | null {
   try {
     const row = db.prepare("SELECT value FROM app_settings WHERE key = 'activeThreadId'").get() as { value: string } | undefined
     return row?.value ?? null
-  } catch {
-    return null
+  } catch (err) {
+    log.error('[db] getActiveThreadId error:', err)
+    throw err
   }
 }
 

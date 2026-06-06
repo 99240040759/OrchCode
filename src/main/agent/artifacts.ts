@@ -27,7 +27,9 @@ export async function pushArtifactsChanged(conversationId: string): Promise<void
         })
     )
     mainWindow.webContents.send('artifacts:changed', { conversationId, artifacts })
-  } catch {}
+  } catch (err: any) {
+    if (err.code !== 'ENOENT') throw err
+  }
 }
 
 export async function listArtifacts(conversationId: string): Promise<ArtifactEntry[]> {
@@ -44,7 +46,8 @@ export async function listArtifacts(conversationId: string): Promise<ArtifactEnt
           return { name: e.name, path: p, size: stat.size, modified: stat.mtime.toISOString() }
         })
     )
-  } catch {
-    return []
+  } catch (err: any) {
+    if (err.code === 'ENOENT') return []
+    throw err
   }
 }

@@ -2,11 +2,11 @@ import { handleAgentStreamRequest } from './agent/stream'
 import log from 'electron-log'
 const proc = process as any
 const pendingRequests = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
-export function callMainProcessTool(toolName: string, args: any): Promise<any> {
+export function callMainProcessTool(toolName: string, args: any, threadId?: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const requestId = Math.random().toString(36).substring(2)
     pendingRequests.set(requestId, { resolve, reject })
-    proc.parentPort.postMessage({ type: 'tool-request', requestId, toolName, args })
+    proc.parentPort.postMessage({ type: 'tool-request', requestId, toolName, args, threadId })
   })
 }
 proc.parentPort.on('message', async (e: any) => {

@@ -41,7 +41,7 @@ export function useChat() {
 
   const loadThreads = useCallback(async () => {
     try { setThreads((await invoke<ThreadEntry[]>('thread:list')) ?? []) }
-    catch (err) { console.error('[useChat] Failed to load threads:', err) }
+    catch (err) { console.error('[useChat] Failed to load threads:', err); throw err }
   }, [setThreads])
 
   const stop = useCallback(() => {
@@ -72,7 +72,7 @@ export function useChat() {
     const checkStale = () => { if (activeStreamThreadIdRef.current !== threadId) { clearTimer(); setIsThreadLoading(false); return true }; return false }
 
     try { await invoke('thread:set-active', { threadId }) }
-    catch (err) { console.error('[useChat] Failed to sync session:', err) }
+    catch (err) { console.error('[useChat] Failed to sync session:', err); throw err }
 
     if (checkStale()) return
 
@@ -83,6 +83,7 @@ export function useChat() {
     } catch (err) {
       console.error('[useChat] Failed to bind workspace:', err)
       setActiveWorkspace(null)
+      throw err
     }
 
     if (checkStale()) return
@@ -112,6 +113,7 @@ export function useChat() {
       }
     } catch (err) {
       console.error('[useChat] Failed to load messages:', err)
+      throw err
     }
 
     clearTimer()
@@ -125,7 +127,7 @@ export function useChat() {
       setRunState('idle')
       if (activeWorkspace?.path) await invoke('workspace:set-active', { conversationId: newId, workspacePath: activeWorkspace.path })
       setActiveThreadId(newId); setMessages([]); setSessionTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
-    } catch (err) { console.error('[useChat] New conversation error:', err); return null }
+    } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
   }, [activeWorkspace, activeThreadId, setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setRunState, loadThreads])
 
   const deleteThread = useCallback(async (threadId: string) => {
@@ -136,13 +138,13 @@ export function useChat() {
         window.api.stopStream(threadId)
         setRunState('idle'); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setActiveWorkspace(null); resetThreadScopedPanels()
       }
-    } catch (err) { console.error('[useChat] Delete thread error:', err) }
+    } catch (err) { console.error('[useChat] Delete thread error:', err); throw err }
   }, [activeThreadId, setThreads, setActiveThreadId, setMessages, setSessionTokens, setActiveWorkspace, resetThreadScopedPanels, setRunState])
 
   const switchWorkspace = useCallback(async (path: string) => {
     try {
       let currentId = activeThreadId
-      if (!currentId) { const newId = await newConversation(); if (!newId) return null; currentId = newId }
+      if (!currentId) { const newId = await newConversation(); currentId = newId }
       const ctx = await invoke<{ rootPath: string }>('workspace:set-active', { conversationId: currentId, workspacePath: path })
       if (ctx) {
         resetThreadScopedPanels()
@@ -150,7 +152,7 @@ export function useChat() {
         return ctx
       }
       return null
-    } catch (err) { console.error('[useChat] Switch workspace error:', err); return null }
+    } catch (err) { console.error('[useChat] Switch workspace error:', err); throw err }
   }, [activeThreadId, newConversation, setActiveWorkspace, resetThreadScopedPanels])
 
   const closeAndDeleteWorkspace = useCallback(async (path: string) => {
@@ -162,13 +164,13 @@ export function useChat() {
       const success = await invoke<boolean>('workspace:close-and-delete', { workspacePath: path })
       if (success) await loadThreads()
       return success
-    } catch (err) { console.error('[useChat] Close & delete workspace error:', err); return false }
+    } catch (err) { console.error('[useChat] Close & delete workspace error:', err); throw err }
   }, [activeWorkspace, setActiveWorkspace, loadThreads, setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, activeThreadId, setRunState])
 
   const openWorkspace = useCallback(async () => {
     try {
       let currentId = activeThreadId
-      if (!currentId) { const newId = await newConversation(); if (!newId) return null; currentId = newId }
+      if (!currentId) { const newId = await newConversation(); currentId = newId }
       const ctx = await invoke<{ rootPath: string } | null>('workspace:select', { conversationId: currentId })
       if (ctx) {
         resetThreadScopedPanels()
@@ -176,7 +178,7 @@ export function useChat() {
         await loadThreads(); return ctx
       }
       return null
-    } catch (err) { console.error('[useChat] Open workspace error:', err); return null }
+    } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
   }, [activeThreadId, newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels])
 
   const run = useCallback(async (promptText: string, _mode?: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {

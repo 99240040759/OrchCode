@@ -62,12 +62,11 @@ const isWithin = (base: string, target: string, isWindows: boolean) => {
   } catch { return false }
 }
 
-export function assertWithinWorkspace(rootPath: string, targetPath: string, _conversationId?: string): string {
+export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
   const resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
   const isWindows = process.platform === 'win32'
-  if (!isWithin(rootPath, resolvedTarget, isWindows) && !isWithin(getUserSkillsPath(), resolvedTarget, isWindows)) {
-    throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
-  }
+  const isAllowed = isWithin(rootPath, resolvedTarget, isWindows) || isWithin(getUserSkillsPath(), resolvedTarget, isWindows) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget, isWindows) : false)
+  if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
   let existingPath = resolvedTarget
   while (!existsSync(existingPath)) {
     const parent = dirname(existingPath)
@@ -75,9 +74,8 @@ export function assertWithinWorkspace(rootPath: string, targetPath: string, _con
     existingPath = parent
   }
   const realExisting = realpathSync(existingPath)
-  if (!isWithin(realpathSync(resolve(rootPath)), realExisting, isWindows) && !isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting, isWindows)) {
-    throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
-  }
+  const isRealAllowed = isWithin(realpathSync(resolve(rootPath)), realExisting, isWindows) || isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting, isWindows) || (conversationId ? isWithin(realpathSync(resolve(getConversationPath(conversationId))), realExisting, isWindows) : false)
+  if (!isRealAllowed) throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
   return resolvedTarget
 }
 

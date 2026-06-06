@@ -60,8 +60,8 @@ export async function listInstalledSkills(): Promise<{ name: string; description
     )
     return skills
   } catch (err) {
-    log.warn('[skills] Failed to list installed skills:', err)
-    return []
+    log.error('[skills] Failed to list installed skills:', err)
+    throw err
   }
 }
 
@@ -84,12 +84,13 @@ export async function initializeSkills(): Promise<void> {
       if (folder.isDirectory()) {
         const src = join(srcSkillsDir, folder.name)
         const dest = join(destSkillsDir, folder.name)
-        await copyDirRecursive(src, dest)
+        if (!existsSync(dest)) await copyDirRecursive(src, dest)
       }
     }
 
     log.info('[main] Skills initialized successfully.')
   } catch (err) {
     log.error('[main] Failed to initialize skills:', err)
+    throw err
   }
 }
