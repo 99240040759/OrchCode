@@ -76,7 +76,7 @@ jobs:
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
     needs: [create-draft]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
     needs: [create-draft]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
