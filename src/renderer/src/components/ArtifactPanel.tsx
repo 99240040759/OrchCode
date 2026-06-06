@@ -79,16 +79,6 @@ const ArtifactPanel: React.FC = () => {
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const [openFiles, setOpenFiles] = useAtom(openFilesAtom)
 
-  useEffect(() => {
-    if (activeFile) {
-      setOpenFiles((prev) => {
-        const existingIndex = prev.findIndex((f) => f.path === activeFile.path)
-        if (existingIndex === -1) return [...prev, activeFile]
-        const next = [...prev]; next[existingIndex] = activeFile; return next
-      })
-    }
-  }, [activeFile, setOpenFiles])
-
   const [hoveredTabPath, setHoveredTabPath] = useState<string | null>(null)
   const [themeLoaded, setThemeLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -100,6 +90,10 @@ const ArtifactPanel: React.FC = () => {
   const diffEditorRef = useRef<any>(null)
   const terminalRef = useRef<TerminalViewHandle | null>(null)
   const browserWasOpenedRef = useRef(false)
+
+  // L-4 FIX: Persist a ref to convId so the IPC listener never needs re-registration
+  const convIdRef = useRef(convId)
+  convIdRef.current = convId
 
   const handleEditorMount = useCallback((editor: any) => { editorRef.current = editor }, [])
   const handleDiffEditorMount = useCallback((editor: any) => { diffEditorRef.current = editor }, [])
@@ -129,17 +123,29 @@ const ArtifactPanel: React.FC = () => {
     return () => { active = false }
   }, [convId, setArtifacts])
 
+  // L-4 FIX: Register the IPC listener ONCE. Use convIdRef so it always reads the
+  // current conversation ID without needing to re-register on every convId change.
   useEffect(() => {
     const unsub = window.api.on('artifacts:changed', (payload) => {
       const { conversationId, artifacts: arts } = payload as { conversationId: string; artifacts: ArtifactEntry[] }
-      if (conversationId === convId) setArtifacts(arts ?? [])
+      if (conversationId === convIdRef.current) setArtifacts(arts ?? [])
     })
     return unsub
-  }, [convId, setArtifacts])
+  }, [setArtifacts])
 
+  // C-2 FIX: handleOpenFile now handles open-files registration directly.
+  // The previous useEffect that wrote back to openFilesAtom whenever activeFile changed
+  // created a write-in-effect feedback loop causing cascading re-renders.
   const handleOpenFile = useCallback((fileData: EditorFile) => {
-    setOpenFiles((prev) => { const idx = prev.findIndex((f) => f.path === fileData.path); if (idx === -1) return [...prev, fileData]; const next = [...prev]; next[idx] = fileData; return next })
-    setActiveFile(fileData); setPanelMode('editor')
+    setOpenFiles((prev) => {
+      const idx = prev.findIndex((f) => f.path === fileData.path)
+      if (idx === -1) return [...prev, fileData]
+      const next = [...prev]
+      next[idx] = fileData
+      return next
+    })
+    setActiveFile(fileData)
+    setPanelMode('editor')
   }, [setOpenFiles, setActiveFile, setPanelMode])
 
   const handleArtifactClick = useCallback(async (artifact: ArtifactEntry) => {
@@ -172,6 +178,8 @@ const ArtifactPanel: React.FC = () => {
   }, [isOpen])
 
   const handleClose = useCallback(() => setIsOpen(false), [setIsOpen])
+
+  // C-4 FIX: All hooks are declared above this guard.
   if (!isOpen) return null
 
   const activeTabValue = panelMode === 'editor' ? (activeFile?.path ?? '') : panelMode
@@ -197,11 +205,13 @@ const ArtifactPanel: React.FC = () => {
           {panelMode === 'terminal' && <TerminalView ref={terminalRef} workspacePath={activeWorkspace?.path} />}
         </Tabs.Content>
 
+        {/* C-3 / A-2 FIX: browser tab uses forceMount (browser must persist its WebView)
+            but editor tab does NOT use forceMount — Monaco only instantiates when active. */}
         <Tabs.Content value="browser" forceMount className={`artifact-panel-tab-content ${panelMode === 'browser' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
           <BrowserView />
         </Tabs.Content>
 
-        <Tabs.Content value="editor" forceMount className={`artifact-panel-tab-content ${panelMode === 'editor' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
+        <Tabs.Content value={activeFile?.path ?? ''} className="artifact-panel-tab-content">
           {!activeFile ? (
             <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." />
           ) : activeFile.isBinary ? (

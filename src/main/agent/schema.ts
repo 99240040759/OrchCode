@@ -147,10 +147,11 @@ export function buildMessagesFromHistory(
     } else if (m.role === 'assistant') {
       let blocks: StreamBlock[] = []
       if (m.data) {
-        try {
-          const parsed = JSON.parse(m.data)
-          if (Array.isArray(parsed)) blocks = parsed
-        } catch {}
+        // L-6 FIX: Use the typed parseAssistantMessageData() instead of raw JSON.parse
+        // inline. This runs Zod validation so malformed/partial block data is rejected
+        // cleanly instead of silently corrupting the message history replay.
+        const parsed = parseAssistantMessageData(m.data)
+        if (parsed) blocks = parsed
       }
       if (blocks.length === 0) {
         messages.push({ role: 'assistant', content: m.content || '' })

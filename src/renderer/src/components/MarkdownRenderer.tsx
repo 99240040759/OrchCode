@@ -18,7 +18,10 @@ function extractText(node: any): string {
   return ''
 }
 
-function useMarkdownComponents(isArtifact: boolean) {
+// L-3 FIX: The components object is truly static — no values from props are used inside.
+// Changed dep from [isArtifact] to [] so ReactMarkdown never re-mounts its tree.
+// isArtifact only affects the wrapper className, not the component definitions.
+function useMarkdownComponents() {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -72,11 +75,11 @@ function useMarkdownComponents(isArtifact: boolean) {
       return <pre {...props}>{children}</pre>
     },
     code: ({ className, children, ...props }: any) => <code className={className} {...props}>{children}</code>
-  }), [isArtifact])
+  }), [])
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact = false }) => {
-  const components = useMarkdownComponents(isArtifact)
+  const components = useMarkdownComponents()
   return (
     <div className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]} urlTransform={(value) => value} components={components}>

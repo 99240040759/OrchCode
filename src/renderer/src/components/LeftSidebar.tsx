@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useAtomValue } from 'jotai'
 import { PanelLeftClose, Plus } from 'lucide-react'
@@ -6,35 +6,32 @@ import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/authService'
 
+// M-6 FIX: Removed unused uncontrolled `localExpanded` state.
+// LeftSidebar is always used as a controlled component (App.tsx always passes expanded prop).
+// The uncontrolled code path was dead code.
+
 interface SidebarProps {
-  expanded?: boolean
-  onToggle?: (expanded: boolean) => void
+  expanded: boolean
+  onToggle: (expanded: boolean) => void
   onStartConversation?: () => void
   threadListContent?: React.ReactNode
 }
 
 const isMac = window.api.platform === 'darwin'
 
-const LeftSidebar: React.FC<SidebarProps> = ({ expanded: controlledExpanded, onToggle, onStartConversation, threadListContent }) => {
-  const [localExpanded, setLocalExpanded] = useState(true)
-  const isExpanded = controlledExpanded !== undefined ? controlledExpanded : localExpanded
+const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onToggle, onStartConversation, threadListContent }) => {
   const authUser = useAtomValue(authUserAtom)
 
   const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (err) { console.error('Google Sign-in failed:', err) } }
   const handleLogout = async () => { try { await authService.logout() } catch (err) { console.error('Logout failed:', err) } }
-  const handleToggle = () => {
-    const newExpanded = !isExpanded
-    if (controlledExpanded === undefined) setLocalExpanded(newExpanded)
-    onToggle?.(newExpanded)
-  }
 
-  if (!isExpanded) return null
+  if (!expanded) return null
 
   return (
     <aside className="sidebar-root sidebar-expanded">
       <div className="sidebar-inner">
         <div className={`sidebar-header-row app-region-drag ${isMac ? 'sidebar-header-row-mac' : 'sidebar-header-row-win'}`}>
-          <div className="sidebar-collapse-btn app-region-no-drag" onClick={handleToggle} title="Collapse Sidebar">
+          <div className="sidebar-collapse-btn app-region-no-drag" onClick={() => onToggle(false)} title="Collapse Sidebar">
             <PanelLeftClose size={16} strokeWidth={1.5} className="text-secondary" />
           </div>
         </div>

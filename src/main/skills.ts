@@ -14,48 +14,56 @@ export function getUserSkillsPath(): string {
   return join(app.getPath('userData'), 'skills')
 }
 
-async function copyDirAndConvertPaths(
-  srcDir: string,
-  destDir: string,
-  rootDestSkillDir: string,
-  childrenNames: string[]
-): Promise<void> {
-  await fs.mkdir(destDir, { recursive: true })
-  const entries = await fs.readdir(srcDir, { withFileTypes: true })
-
+async function copyDirRecursive(src: string, dest: string): Promise<void> {
+  await fs.mkdir(dest, { recursive: true })
+  const entries = await fs.readdir(src, { withFileTypes: true })
   for (const entry of entries) {
-    const srcPath = join(srcDir, entry.name)
-    const destPath = join(destDir, entry.name)
-
+    const srcPath = join(src, entry.name)
+    const destPath = join(dest, entry.name)
     if (entry.isDirectory()) {
-      await copyDirAndConvertPaths(srcPath, destPath, rootDestSkillDir, childrenNames)
+      await copyDirRecursive(srcPath, destPath)
     } else if (entry.isFile()) {
-      if (entry.name.endsWith('.md')) {
-        let content = await fs.readFile(srcPath, 'utf-8')
-
-        // Replace relative child references with absolute paths
-        for (const childName of childrenNames) {
-          // 1. Folder references (e.g. scripts/office/unpack.py)
-          const folderRegex = new RegExp(`\\b${childName}[/\\\\]([a-zA-Z0-9_\\-/.]+)`, 'g')
-          content = content.replace(folderRegex, (_, subpath) => {
-            const absolutePath = join(rootDestSkillDir, childName, subpath).replace(/\\/g, '/')
-            return `"${absolutePath}"`
-          })
-
-          // 2. Direct file references (e.g. theme-showcase.pdf, forms.md, or themes)
-          // Avoid matching when it's already part of an absolute path (wrapped in quotes)
-          const fileRegex = new RegExp(`\\b${childName.replace('.', '\\.')}(?!\\/|\\\\|\\w)\\b`, 'gi')
-          content = content.replace(fileRegex, () => {
-            const absolutePath = join(rootDestSkillDir, childName).replace(/\\/g, '/')
-            return `"${absolutePath}"`
-          })
-        }
-
-        await fs.writeFile(destPath, content, 'utf-8')
-      } else {
-        await fs.copyFile(srcPath, destPath)
-      }
+      await fs.copyFile(srcPath, destPath)
     }
+  }
+}
+
+/**
+ * Scans the installed skills directory and returns metadata for each skill:
+ * the folder name and the first-line description from its SKILL.md (if any).
+ */
+export async function listInstalledSkills(): Promise<{ name: string; description: string }[]> {
+  const skillsDir = getUserSkillsPath()
+  if (!existsSync(skillsDir)) return []
+  try {
+    const entries = await fs.readdir(skillsDir, { withFileTypes: true })
+    const skills = await Promise.all(
+      entries
+        .filter((e) => e.isDirectory())
+        .map(async (e) => {
+          let description = ''
+          try {
+            const skillMd = join(skillsDir, e.name, 'SKILL.md')
+            const content = await fs.readFile(skillMd, 'utf-8')
+            // Extract the first non-empty, non-heading line as a one-line description
+            const lines = content.split('\n')
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (trimmed && !trimmed.startsWith('#')) {
+                description = trimmed.slice(0, 120)
+                break
+              }
+            }
+          } catch {
+            // No SKILL.md — just use the folder name
+          }
+          return { name: e.name, description }
+        })
+    )
+    return skills
+  } catch (err) {
+    log.warn('[skills] Failed to list installed skills:', err)
+    return []
   }
 }
 
@@ -71,25 +79,18 @@ export async function initializeSkills(): Promise<void> {
       return
     }
 
-    // Ensure destination skills folder exists
     await fs.mkdir(destSkillsDir, { recursive: true })
 
     const skillFolders = await fs.readdir(srcSkillsDir, { withFileTypes: true })
     for (const folder of skillFolders) {
       if (folder.isDirectory()) {
-        const srcSkillDir = join(srcSkillsDir, folder.name)
-        const destSkillDir = join(destSkillsDir, folder.name)
-
-        // Find all top-level children in this skill to use for replacement
-        const children = await fs.readdir(srcSkillDir)
-        // Filter out the main SKILL.md and LICENSE.txt or other .md files from children replacement list
-        const replacementChildren = children.filter((c) => c !== 'SKILL.md' && c !== 'LICENSE.txt')
-
-        await copyDirAndConvertPaths(srcSkillDir, destSkillDir, destSkillDir, replacementChildren)
+        const src = join(srcSkillsDir, folder.name)
+        const dest = join(destSkillsDir, folder.name)
+        await copyDirRecursive(src, dest)
       }
     }
 
-    log.info('[main] Skills initialized and paths converted successfully.')
+    log.info('[main] Skills initialized successfully.')
   } catch (err) {
     log.error('[main] Failed to initialize skills:', err)
   }

@@ -8,7 +8,7 @@ import WindowManager from '../windowManager'
 import { getAvailableModels, resolveModel } from './models'
 import { checkModelVisionSupport, checkModelNativeFileSupport } from '../vision'
 import { getOrCreateWorkspaceContext, getWorkspaceContext, updateWorkspacePath } from '../workspace'
-import { getUserSkillsPath } from '../skills'
+import { getUserSkillsPath, listInstalledSkills } from '../skills'
 import { createCoreTools, browserTools } from '../tools'
 import {
   getThreadMessages,
@@ -136,6 +136,20 @@ export async function handleAgentStreamRequest(
       ? `\n── BROWSER AUTOMATION ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url): Open pages.\n2. browserType(selector, text, frameSelector?): Type into inputs, pierce iframes.\n3. browserScroll(direction, amount?): Scroll to load lazy elements.\n4. browserMouseClickCoordinate(x, y, button?): Click absolute pixel coordinates.\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS capture a screenshot after navigation/typing to verify page state.` : `5. browserGetPageContent(): Extract page URL, title, inner text, and interactive elements.`}`
       : ''
 
+    // Dynamically scan installed skills so the list never rots as skills are added/removed
+    const installedSkills = await listInstalledSkills()
+    const skillsRootPath = getUserSkillsPath().replace(/\\/g, '/')
+    const skillsSection = installedSkills.length > 0
+      ? `── ADVANCED HELPER SKILLS ──
+You have access to a set of advanced helper skills (guidelines, scripts, and libraries) located at:
+${skillsRootPath}
+
+Available skills:
+${installedSkills.map((s) => `- ${s.name}${s.description ? ` (${s.description})` : ''}`).join('\n')}
+
+Before performing any tasks related to these domain areas, use listDir to explore the skill folder and readFile to read the SKILL.md at that path. Always follow the exact workflows, scripts, and tools detailed in the skill file.`
+      : ''
+
     const systemInstruction = `You are Orch Code, a highly capable AI developer assistant. Active conversation ID: ${threadId}.
 
 ── WORKSPACE ──
@@ -143,22 +157,7 @@ Root path: ${ctx.rootPath || 'No workspace selected'}
 
 IMPORTANT: Use searchWorkspace(query) to find files or code by pattern. Use listDir(directoryPath) to explore directories. Do NOT assume file contents — always read before editing.
 ${browserInstruction}
-── ADVANCED HELPER SKILLS ──
-You have access to a set of advanced helper skills (guidelines, scripts, and libraries) located at:
-${getUserSkillsPath().replace(/\\/g, '/')}
-
-Available skills:
-- algorithmic-art (algorithmic art generator and viewer templates)
-- brand-guidelines (styling with brand palettes)
-- docx (creating/editing/repacking .docx files using docx-js and python scripts)
-- frontend-design (frontend design principles and guidelines)
-- pdf (reading/filling forms and converting PDFs using python scripts)
-- pptx (creating/editing presentations using python scripts and pptxgenjs)
-- theme-factory (themes with color palettes and font pairings)
-- xlsx (creating/modifying/recalculating spreadsheets using openpyxl and recalc.py)
-
-Before performing any tasks related to these domain areas, you MUST read the corresponding SKILL.md file at that path (using viewFile) to understand the requirements, workflows, guidelines, and tool usage. Always use the exact scripts and tools detailed in the skill guidelines.
-
+${skillsSection}
 ── ARTIFACT BOUNDARIES & WORKFLOW ──
 Use the sandboxed Artifacts system inside '.orch-artifacts/' folder of the active workspace.
 Use writeToFile, replaceFileContent tools to manage these artifact files:

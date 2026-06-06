@@ -16,6 +16,7 @@ interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
   description?: string
 }
 
+// M-8 FIX: Removed redundant `typeof icon === 'string' ? icon : icon` ternary.
 export const EmptyState: React.FC<EmptyStateProps> = ({
   icon,
   title,
@@ -24,7 +25,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   ...props
 }) => (
   <div className={`empty-state-root ${className}`} {...props}>
-    {icon && <div className="empty-state-icon">{typeof icon === 'string' ? icon : icon}</div>}
+    {icon && <div className="empty-state-icon">{icon}</div>}
     <h3 className="empty-state-title">{title}</h3>
     {description && <p className="empty-state-desc-prim">{description}</p>}
   </div>

@@ -5,7 +5,7 @@ import { join, relative, extname, dirname } from 'node:path'
 import { execa } from 'execa'
 import { rgPath } from '@vscode/ripgrep'
 import log from 'electron-log'
-import { getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType } from '../workspace'
+import { getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType, invalidateWorkspaceFilesCache } from '../workspace'
 
 const MAX_TOOL_FILE_READ_BYTES = 25 * 1024 * 1024
 
@@ -201,6 +201,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     }),
     execute: async ({ targetFile, codeContent, overwrite }) => {
       try {
+        const ctx = wctx()
         const safePath = safe(targetFile)
 
         let exists = false
@@ -215,6 +216,8 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
 
         await fs.mkdir(dirname(safePath), { recursive: true })
         await fs.writeFile(safePath, codeContent, 'utf-8')
+        // L-8 FIX: Invalidate cache so subsequent listWorkspaceFiles sees the new file immediately
+        invalidateWorkspaceFilesCache(ctx.rootPath)
         log.info(`[tool:writeToFile] wrote ${safePath} (overwrite=${overwrite})`)
         return { success: true, absolutePath: safePath, created: !exists }
       } catch (err: any) {
@@ -247,6 +250,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
       try {
         const safePath = safe(targetFile)
         const raw = await fs.readFile(safePath, 'utf-8')
+        const ctx = wctx()
         const isCrlf = raw.includes('\r\n')
         const normalizedRaw = raw.replace(/\r\n/g, '\n')
         const allLines = normalizedRaw.split('\n')
@@ -257,6 +261,8 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         const finalContent = isCrlf ? newLines.join('\r\n') : newLines.join('\n')
 
         await fs.writeFile(safePath, finalContent, 'utf-8')
+        // L-8 FIX: Invalidate cache after edit
+        invalidateWorkspaceFilesCache(ctx.rootPath)
         log.info(`[tool:replaceFileContent] edited ${safePath} (lines: ${startLine}-${endLine})`)
         return { success: true, absolutePath: safePath }
       } catch (err: any) {
@@ -295,9 +301,13 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         )
 
         const raw = await fs.readFile(safePath, 'utf-8')
+        const ctx = wctx()
         const isCrlf = raw.includes('\r\n')
-        let normalizedRaw = raw.replace(/\r\n/g, '\n')
+        const normalized = raw.replace(/\r\n/g, '\n')
 
+        // A-6 FIX: Split ONCE into a mutable line array.
+        // Apply all chunks to the array in reverse order (high→low lines) so earlier
+        // line numbers remain valid as we splice. Then join once at the end.
         const sorted = [...replacementChunks].sort((a, b) => b.startLine - a.startLine)
         const ascending = [...replacementChunks].sort((a, b) => a.startLine - b.startLine)
         for (let i = 1; i < ascending.length; i++) {
@@ -307,26 +317,22 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
             )
           }
         }
+
+        const lines = normalized.split('\n')
         const results: { startLine: number; endLine: number }[] = []
 
         for (const chunk of sorted) {
-          const allLines = normalizedRaw.split('\n')
-          const { start, end, beforeLines, afterLines } = sliceLines(
-            allLines,
-            chunk.startLine,
-            chunk.endLine
-          )
-
-          normalizedRaw = [
-            ...beforeLines,
-            ...chunk.replacementContent.split('\n'),
-            ...afterLines
-          ].join('\n')
+          const { start, end } = sliceLines(lines, chunk.startLine, chunk.endLine)
+          const replacementLines = chunk.replacementContent.split('\n')
+          // Splice in-place: replace [start-1 .. end] with replacement lines
+          lines.splice(start - 1, end - start + 1, ...replacementLines)
           results.push({ startLine: start, endLine: end })
         }
 
-        const finalContent = isCrlf ? normalizedRaw.replace(/\n/g, '\r\n') : normalizedRaw
+        const finalContent = isCrlf ? lines.join('\r\n') : lines.join('\n')
         await fs.writeFile(safePath, finalContent, 'utf-8')
+        // L-8 FIX: Invalidate cache after multi-edit
+        invalidateWorkspaceFilesCache(ctx.rootPath)
         log.info(`[tool:multiReplaceFileContent] done — ${results.length} chunks applied`)
         return { success: true, absolutePath: safePath, chunksApplied: results.length, results }
       } catch (err: any) {

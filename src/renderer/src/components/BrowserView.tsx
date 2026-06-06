@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom } from '../store/agentStore'
@@ -15,12 +15,15 @@ const BrowserView: React.FC = () => {
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
   const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
+
+  // M-7 FIX: Replace 3 ref-sync useEffects with direct render-time assignments.
+  // This is equivalent and avoids 3 scheduled microtasks per render.
   const panelModeRef = useRef(panelMode)
   const isOpenRef = useRef(isOpen)
   const urlInputRef = useRef(urlInput)
-  useEffect(() => { panelModeRef.current = panelMode }, [panelMode])
-  useEffect(() => { isOpenRef.current = isOpen }, [isOpen])
-  useEffect(() => { urlInputRef.current = urlInput }, [urlInput])
+  panelModeRef.current = panelMode
+  isOpenRef.current = isOpen
+  urlInputRef.current = urlInput
 
   const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
     if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) return { x: 0, y: 0, width: 0, height: 0 }
@@ -43,27 +46,41 @@ const BrowserView: React.FC = () => {
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
   }, [getBounds])
 
+  // C-3 FIX: Merged all resize/open logic into a single effect.
+  // Previously two effects both depended on panelMode+isOpen and fired simultaneously,
+  // sending two browser:resize IPC calls on each panel toggle.
   useEffect(() => {
     if (panelMode !== 'browser' || !isOpen) return
     closedRef.current = false
     let active = true
+
     const rafId = requestAnimationFrame(() => { if (!active) return; openBrowserWithBounds() })
     const unsubTitle = window.api.on('browser:title-updated', (t) => { if (active) setTitle(t as string) })
     const unsubUrl = window.api.on('browser:url-changed', (u) => { if (active) { setDisplayUrl(u as string); setUrlInput(u as string) } })
-    const handleWindowResize = () => { if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {}) }
-    window.addEventListener('resize', handleWindowResize)
-    const resizeObs = new ResizeObserver(() => { if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {}) })
+
+    const handleResize = () => {
+      if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
+    }
+    window.addEventListener('resize', handleResize)
+    const resizeObs = new ResizeObserver(handleResize)
     if (containerRef.current) resizeObs.observe(containerRef.current)
+
     return () => {
-      active = false; cancelAnimationFrame(rafId); window.removeEventListener('resize', handleWindowResize); resizeObs.disconnect(); unsubTitle(); unsubUrl()
+      active = false
+      cancelAnimationFrame(rafId)
+      window.removeEventListener('resize', handleResize)
+      resizeObs.disconnect()
+      unsubTitle()
+      unsubUrl()
       if (!closedRef.current) { closedRef.current = true; window.api.invoke('browser:close').catch(() => {}) }
       setIsLoaded(false); isLoadedRef.current = false
     }
   }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
 
+  // Sidebar expand/collapse still needs a resize push — but only when browser is already loaded
   useEffect(() => {
     if (isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
-  }, [panelMode, isOpen, sidebarExpanded, getBounds])
+  }, [sidebarExpanded, getBounds])
 
   return (
     <div className="browser-container">

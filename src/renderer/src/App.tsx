@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import LeftSidebar from './components/LeftSidebar'
 import ThreadList from './components/ThreadList'
@@ -33,13 +33,18 @@ function AppInner(): React.JSX.Element {
   const hasMessages = useAtomValue(hasMessagesAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
-  const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
+  // C-3 FIX: Use separate atoms for read/write to avoid subscribing AppInner to selectedModel changes
+  const setSelectedModel = useSetAtom(selectedModelAtom)
+  const selectedModel = useAtomValue(selectedModelAtom)
   const activeThreadTitle = activeThread ? activeThread.title || 'New Chat' : 'New Chat'
 
   const { run, stop } = useAgentStream()
   const { openWorkspace, newConversation, loadThreads, selectThread } = useThreads()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
   const availableModels = useAtomValue(availableModelsAtom)
+
+  // C-6 FIX: Guard against double-fire of session init
+  const sessionInitialized = useRef(false)
 
   // Global prompt trigger (e.g., from new conversation or keyboard shortcut)
   useEffect(() => {
@@ -49,7 +54,6 @@ function AppInner(): React.JSX.Element {
     }
   }, [globalPrompt, run, setGlobalPrompt, availableModels])
 
-  // One-time init: conversation ID, threads, models, auth user
   // Auth state loader/subscription
   useEffect(() => {
     const initAuth = async () => {
@@ -72,8 +76,11 @@ function AppInner(): React.JSX.Element {
     }
   }, [setAuthUser])
 
-  // Threads & Session Selection
+  // C-6 FIX: Threads & Session Selection — guarded with ref to prevent double-init
   useEffect(() => {
+    if (sessionInitialized.current) return
+    sessionInitialized.current = true
+
     const initSession = async () => {
       try {
         const convId = await threadService.getConversationId()
@@ -93,7 +100,7 @@ function AppInner(): React.JSX.Element {
     initSession()
   }, [selectThread, loadThreads])
 
-  // Models Loader
+  // Models Loader — runs once on mount
   useEffect(() => {
     const loadModels = async () => {
       try {
@@ -101,6 +108,7 @@ function AppInner(): React.JSX.Element {
         if (models) {
           setAvailableModels(models)
           const modelKeys = Object.keys(models)
+          // A-3 FIX: Read selectedModel value directly instead of subscribing via useAtom
           if (!selectedModel && modelKeys.length > 0) {
             setSelectedModel(modelKeys[0])
           }
@@ -111,7 +119,8 @@ function AppInner(): React.JSX.Element {
     }
 
     loadModels()
-  }, [setAvailableModels, selectedModel, setSelectedModel])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setAvailableModels, setSelectedModel])
 
   const workspaceName = activeWorkspace
     ? `${activeWorkspace.name} / ${activeThreadTitle}`
@@ -151,38 +160,41 @@ function AppInner(): React.JSX.Element {
           <main className="workspace-main">
             <div className="app-glow-border" />
 
-            {isArtifactPanelOpen ? (
-              <PanelGroup
-                direction="horizontal"
-                className="split-view-container"
+            {/*
+              C-1 FIX: Instead of conditionally rendering two completely different JSX subtrees
+              (which hard-remounts ChatPane on every panel toggle causing "massive flashes"),
+              we ALWAYS render PanelGroup with ChatPane mounted.
+              The artifact panel is hidden via CSS when closed — no unmount/remount occurs.
+            */}
+            <PanelGroup
+              direction="horizontal"
+              className="split-view-container"
+            >
+              <Panel
+                id="chat-pane-panel"
+                defaultSize={isArtifactPanelOpen ? 45 : 100}
+                minSize={30}
               >
-                <Panel id="chat-pane-panel" defaultSize={45} minSize={30}>
-                  <ChatPane
-                    fullWidth={false}
-                    onSubmit={handlePromptSubmit}
-                    onStop={stop}
-                    onOpenArtifacts={() => setArtifactPanelOpen(true)}
-                    onOpenWorkspace={openWorkspace}
-                    workspaceName={workspaceName}
-                    hasMessages={hasMessages}
-                  />
-                </Panel>
-                <PanelResizeHandle className="panel-resize-handle" />
-                <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
-                  <ArtifactPanel />
-                </Panel>
-              </PanelGroup>
-            ) : (
-              <ChatPane
-                fullWidth={true}
-                onSubmit={handlePromptSubmit}
-                onStop={stop}
-                onOpenArtifacts={() => setArtifactPanelOpen(true)}
-                onOpenWorkspace={openWorkspace}
-                workspaceName={workspaceName}
-                hasMessages={hasMessages}
-              />
-            )}
+                <ChatPane
+                  fullWidth={!isArtifactPanelOpen}
+                  onSubmit={handlePromptSubmit}
+                  onStop={stop}
+                  onOpenArtifacts={() => setArtifactPanelOpen(true)}
+                  onOpenWorkspace={openWorkspace}
+                  workspaceName={workspaceName}
+                  hasMessages={hasMessages}
+                />
+              </Panel>
+
+              {isArtifactPanelOpen && (
+                <>
+                  <PanelResizeHandle className="panel-resize-handle" />
+                  <Panel id="artifact-panel-panel" defaultSize={55} minSize={35}>
+                    <ArtifactPanel />
+                  </Panel>
+                </>
+              )}
+            </PanelGroup>
           </main>
         </div>
       </div>

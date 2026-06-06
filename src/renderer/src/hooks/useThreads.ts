@@ -209,17 +209,19 @@ export function useThreads() {
   const closeAndDeleteWorkspace = useCallback(
     async (path: string) => {
       try {
+        // L-2 FIX: Synchronously reset active state BEFORE the async IPC call to avoid
+        // a window where UI reads stale activeThreadId / chatMessages during deletion.
+        if (activeWorkspace?.path === path) {
+          if (activeThreadId) await window.api.invoke('agent:stop', { threadId: activeThreadId }).catch(() => {})
+          setAgentRunState('idle')
+          setActiveWorkspace(null)
+          setActiveThreadId('')
+          setMessages([])
+          setSessionTokens(0)
+          resetThreadScopedPanels()
+        }
         const success = await invoke<boolean>('workspace:close-and-delete', { workspacePath: path })
         if (success) {
-          if (activeWorkspace?.path === path) {
-            if (activeThreadId) await window.api.invoke('agent:stop', { threadId: activeThreadId }).catch(() => {})
-            setAgentRunState('idle')
-            setActiveWorkspace(null)
-            setActiveThreadId('')
-            setMessages([])
-            setSessionTokens(0)
-            resetThreadScopedPanels()
-          }
           await loadThreads()
         }
         return success

@@ -18,10 +18,8 @@ serve(createHandler(async (_req, env) => {
   const models: Record<string, { id: string; name: string }> = {}
 
   for (const [prefix, defaultId, defaultName] of MODEL_DEFINITIONS) {
-    const key = prefix.toLowerCase().replace(/_/g, (_, i, s) =>
-      s[i - 1] === '_' || i === 0 ? '' : '_'
-    )
-    // Build the response key by lowercasing the prefix (e.g. GLM_4_5_FLASH → glm_4_5_flash)
+    // L-5 FIX: Removed the unused `key` variable that was computed but never referenced.
+    // The response key is simply the lowercased prefix (e.g. GLM_4_5_FLASH → glm_4_5_flash).
     const responseKey = prefix.toLowerCase()
     models[responseKey] = {
       id: env[`${prefix}_MODEL_ID`] || defaultId,

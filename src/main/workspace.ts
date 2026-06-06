@@ -195,16 +195,7 @@ export function isFileBinary(filePath: string, buf: Buffer): boolean {
   return buf.subarray(0, 512).includes(0x00)
 }
 
-// ─── HTML Escaping ────────────────────────────────────────────────────────────
-
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+// M-3 FIX: escapeHtml removed — it was exported but never imported anywhere in the codebase.
 
 // ─── Workspace File Tree ──────────────────────────────────────────────────────
 
@@ -238,6 +229,12 @@ interface TraverseState {
 }
 
 const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
+
+// L-8 FIX: Exported so file write tools can invalidate stale listings immediately after a write.
+export function invalidateWorkspaceFilesCache(rootPath: string): void {
+  const resolvedRoot = resolve(rootPath)
+  workspaceFilesCache.delete(resolvedRoot)
+}
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore().add(DEFAULT_IGNORED_DIRS)

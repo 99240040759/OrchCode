@@ -1,6 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { execa } from 'execa'
+import { basename } from 'node:path'
 import log from 'electron-log'
 import { getWorkspaceContext, assertWithinWorkspace } from '../workspace'
 
@@ -10,6 +11,44 @@ const BLOCKED_EXECUTABLES = new Set([
   'mkfs', 'fdisk', 'format', 'dd',
   'passwd', 'chroot'
 ])
+
+// L-7 FIX: Proper shell-quote tokenizer that handles:
+// - Quoted strings with spaces: git commit -m "fix: my message"
+// - Single-quoted strings: echo 'hello world'
+// - Paths with spaces: "C:\Program Files\app.exe"
+// - Escaped quotes within strings
+function tokenizeCommand(commandLine: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let inSingle = false
+  let inDouble = false
+  let i = 0
+
+  while (i < commandLine.length) {
+    const ch = commandLine[i]
+
+    if (ch === '\\' && inDouble && i + 1 < commandLine.length) {
+      // Escape sequences inside double quotes
+      i++
+      current += commandLine[i]
+    } else if (ch === "'" && !inDouble) {
+      inSingle = !inSingle
+    } else if (ch === '"' && !inSingle) {
+      inDouble = !inDouble
+    } else if ((ch === ' ' || ch === '\t') && !inSingle && !inDouble) {
+      if (current.length > 0) {
+        tokens.push(current)
+        current = ''
+      }
+    } else {
+      current += ch
+    }
+    i++
+  }
+
+  if (current.length > 0) tokens.push(current)
+  return tokens
+}
 
 function resolveWorkspace(convId: string) {
   const ctx = getWorkspaceContext(convId)
@@ -46,8 +85,8 @@ export function createShellTools(convId: string) {
         const ctx = wctx()
         const runDir = cwd ? assertWithinWorkspace(ctx.rootPath, cwd, convId) : ctx.rootPath
 
-        // Split into executable + args — never pass to a shell interpreter
-        const tokens = commandLine.trim().split(/\s+/)
+        // L-7 FIX: Use proper tokenizer that handles quoted arguments and paths with spaces
+        const tokens = tokenizeCommand(commandLine.trim())
         const executable = tokens[0]
         const args = tokens.slice(1)
 
@@ -55,7 +94,14 @@ export function createShellTools(convId: string) {
           return { success: false, stdout: '', stderr: 'Empty command.', exitCode: 1 }
         }
 
-        if (BLOCKED_EXECUTABLES.has(executable.toLowerCase())) {
+        // M-9 FIX: Check both the raw executable string AND its basename to prevent
+        // blocklist bypass via full paths like /usr/bin/sudo or C:\Windows\sudo.exe
+        const executableBasename = basename(executable).toLowerCase()
+        const executableLower = executable.toLowerCase()
+        if (
+          BLOCKED_EXECUTABLES.has(executableBasename) ||
+          BLOCKED_EXECUTABLES.has(executableLower)
+        ) {
           return {
             success: false,
             stdout: '',
