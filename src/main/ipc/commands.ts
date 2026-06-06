@@ -39,7 +39,6 @@ import { activeAbortControllers } from '../agent/stream'
 import { listArtifacts } from '../agent/artifacts'
 import { getConversationPath } from '../paths'
 import WindowManager from '../windowManager'
-import { startBrowserAgentWorker, stopBrowserAgentWorker } from '../tools'
 import { getCurrentUpdateStatus, triggerUpdateCheck, triggerInstall } from '../updater'
 import { startGoogleAuth, getAuthUser, logoutUser, getCurrentSession } from '../auth'
 import pty from 'node-pty'
@@ -342,22 +341,19 @@ const commands: Record<string, CommandHandler> = {
     }
   },
   'browser:open': {
-    schema: z.object({ url: z.string().min(1), bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }) }),
-    execute: async ({ url, bounds }, event) => {
+    schema: z.object({ url: z.string().min(1), bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }), conversationId: z.string().optional() }),
+    execute: async ({ url, bounds, conversationId }, event) => {
       const mainWindow = WindowManager.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       let bv = WindowManager.getBrowserView()
       if (bv) { bv.setBounds(normalizeBounds(bounds)); await bv.webContents.loadURL(normalizeBrowserUrl(url)); return }
-      bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true } })
+      const partition = conversationId ? `persist:conversation_${conversationId}` : undefined
+      bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } })
       WindowManager.setBrowserView(bv); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
       await bv.webContents.loadURL(normalizeBrowserUrl(url || 'https://google.com'))
       bv.webContents.on('page-title-updated', (_e, title) => { try { event.sender.send('browser:title-updated', title) } catch {} })
-      const onNavigate = (_e: any, navUrl: string) => {
-        try { event.sender.send('browser:url-changed', navUrl) } catch {}
-        try { const w = startBrowserAgentWorker(); if (w) w.syncUrl(navUrl).catch(() => {}) } catch {}
-      }
+      const onNavigate = (_e: any, navUrl: string) => { try { event.sender.send('browser:url-changed', navUrl) } catch {} }
       bv.webContents.on('did-navigate', onNavigate); bv.webContents.on('did-navigate-in-page', onNavigate)
-      startBrowserAgentWorker()
     }
   },
   'browser:navigate': { schema: z.object({ url: z.string().min(1) }), execute: ({ url }) => { const bv = WindowManager.getBrowserView(); if (!bv) throw new Error('Browser closed.'); return bv.webContents.loadURL(normalizeBrowserUrl(url)) } },
@@ -367,11 +363,11 @@ const commands: Record<string, CommandHandler> = {
   'browser:resize': { schema: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }), execute: (bounds) => { WindowManager.getBrowserView()?.setBounds(normalizeBounds(bounds)) } },
   'browser:close': {
     schema: z.object({}),
-    execute: async () => {
+    execute: () => {
       const win = WindowManager.getMainWindow()
       const bv = WindowManager.getBrowserView()
       if (bv && win) { try { win.contentView.removeChildView(bv); bv.webContents.close() } catch {} }
-      WindowManager.setBrowserView(null); await stopBrowserAgentWorker()
+      WindowManager.setBrowserView(null)
     }
   }
 }

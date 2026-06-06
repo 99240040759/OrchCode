@@ -29,41 +29,17 @@ function getDB(): Database.Database {
 
   dbInstance = new Database(dbPath)
   dbInstance.pragma('journal_mode = WAL')
+  dbInstance.pragma('synchronous = NORMAL')
+  dbInstance.pragma('temp_store = MEMORY')
   dbInstance.pragma('foreign_keys = ON')
 
   dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS threads (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      resourceId TEXT NOT NULL,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      accumulatedTokens INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      threadId TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      data TEXT,
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_thread_created
-      ON messages(threadId, createdAt);
-    CREATE TABLE IF NOT EXISTS thread_workspaces (
-      threadId TEXT PRIMARY KEY,
-      workspacePath TEXT NOT NULL,
-      FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS opened_workspaces (
-      path TEXT PRIMARY KEY,
-      lastOpenedAt TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
+    CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, resourceId TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, accumulatedTokens INTEGER NOT NULL DEFAULT 0) STRICT;
+    CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, data TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(threadId, createdAt);
+    CREATE TABLE IF NOT EXISTS thread_workspaces (threadId TEXT PRIMARY KEY, workspacePath TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
+    CREATE TABLE IF NOT EXISTS opened_workspaces (path TEXT PRIMARY KEY, lastOpenedAt TEXT NOT NULL) STRICT;
+    CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT) STRICT;
   `)
 
   // Run any needed migrations for existing installs
@@ -131,45 +107,17 @@ export function getThreadMessages(threadId: string): ThreadMessage[] {
     .all(threadId) as ThreadMessage[]
 }
 
-export function saveMessage(
-  threadId: string,
-  message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }
-): ThreadMessage {
-  const db = getDB()
-  const now = new Date().toISOString()
-  const msg = {
-    id: message.id,
-    threadId,
-    role: message.role,
-    content: message.content,
-    data: message.data || null,
-    createdAt: message.createdAt || now
-  }
-
+export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }): ThreadMessage {
+  const db = getDB(), now = new Date().toISOString()
+  const msg = { id: message.id, threadId, role: message.role, content: message.content, data: message.data || null, createdAt: message.createdAt || now }
+  let saved: ThreadMessage | undefined
   db.transaction(() => {
-    const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
-    if (!threadExists) {
-      db.prepare(
-        `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens)
-         VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`
-      ).run(threadId, now, now)
-    } else {
-      db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
-    }
-    db.prepare(
-      `INSERT INTO messages (id, threadId, role, content, data, createdAt)
-       VALUES (@id, @threadId, @role, @content, @data, @createdAt)
-       ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data`
-    ).run(msg)
+    if (!db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
+      db.prepare(`INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+    } else { db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId) }
+    saved = db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data RETURNING id, role, content, data, createdAt`).get(msg) as ThreadMessage
   })()
-
-  return {
-    id: msg.id,
-    role: msg.role as 'user' | 'assistant' | 'system',
-    content: msg.content,
-    data: msg.data || undefined,
-    createdAt: msg.createdAt
-  }
+  return { id: saved!.id, role: saved!.role as 'user' | 'assistant' | 'system', content: saved!.content, data: saved!.data || undefined, createdAt: saved!.createdAt }
 }
 
 export function deleteThread(threadId: string): boolean {

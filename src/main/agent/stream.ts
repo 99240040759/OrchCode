@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import crypto from 'node:crypto'
-import { streamText, stepCountIs, type ModelMessage } from 'ai'
-import { ipcMain, MessageChannelMain } from 'electron'
+import { streamText, stepCountIs, type ModelMessage, type UserContent } from 'ai'
 import log from 'electron-log'
 import { z } from 'zod'
 import WindowManager from '../windowManager'
@@ -16,8 +15,13 @@ import {
 } from '../db'
 import { summariseContext, compactThreadHistory } from './summarisation'
 import { pushArtifactsChanged } from './artifacts'
-import { getCurrentSession } from '../auth'
 import { buildMessagesFromHistory, buildAttachmentParts, sanitizeMessages } from './schema'
+import type { ModelInfo } from './models'
+import { pool } from './workerPool'
+import { getCurrentSession } from '../auth'
+
+type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; content: string; durationMs: number } | { type: 'tool'; toolCallId: string; toolName: string; args: Record<string, unknown>; argsDelta?: string; result?: unknown; status: 'pending' | 'complete' | 'error' } | { type: 'error'; message: string }
+interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
 export const activeAbortControllers = new Map<string, AbortController>()
 export const activePorts = new Map<string, Electron.MessagePortMain>()
@@ -29,18 +33,43 @@ const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z
 const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/), modelType: z.string().max(255).optional(), attachments: z.array(AttachmentSchema).max(8).optional() })
 
 export function registerStreamIpc() {
+  const { ipcMain, MessageChannelMain } = require('electron')
   ipcMain.handle('api:stream', async (event, rawPayload) => {
-    if (!getCurrentSession()) throw new Error('Unauthorized: Please sign in to use agents.')
+    const session = getCurrentSession()
+    if (!session) throw new Error('Unauthorized: Please sign in to use agents.')
     const request = StreamRequestSchema.parse(rawPayload ?? {})
     if (request.attachments?.length) {
-      pendingAttachments.set(request.threadId, new Promise<Buffer[]>(r => attachmentResolvers.set(request.threadId, r)))
+      pendingAttachments.set(request.threadId, new Promise<Buffer[]>((resolve, reject) => {
+        const timeoutId = setTimeout(() => { attachmentResolvers.delete(request.threadId); reject(new Error('Attachment handshake timeout')) }, 10000)
+        attachmentResolvers.set(request.threadId, (bufs) => { clearTimeout(timeoutId); resolve(bufs) })
+      }))
     }
     const { port1, port2 } = new MessageChannelMain()
     event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
-    handleAgentStreamRequest(port1, request.threadId, request.modelType, request.attachments, request.promptText).catch((err) => {
-      log.error('[stream] Unhandled stream error:', err)
-      try { port1.postMessage({ type: 'error', payload: err.message, threadId: request.threadId }); port1.close() } catch {}
-    })
+    const worker = pool.getOrCreateWorker(session.idToken)
+    pool.setJob(worker.pid!, `stream:${request.threadId}`)
+    const onExit = () => pool.clearJob(worker.pid!)
+    worker.once('exit', onExit)
+    const onMsg = (msg: any) => {
+      if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
+      if (msg?.type === 'tool-request') {
+        const { requestId, toolName, args } = msg
+        const t = browserTools(request.threadId, true)[toolName]
+        if (t) {
+          t.execute(args).then((res: any) => {
+            const transfers = res && res.buffer instanceof ArrayBuffer ? [res.buffer] : []
+            worker.postMessage({ type: 'tool-response', requestId, result: res }, transfers)
+          }).catch((err: any) => worker.postMessage({ type: 'tool-response', requestId, error: err.message }))
+        } else worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
+      }
+      if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
+        pool.clearJob(worker.pid!)
+        worker.off('message', onMsg); worker.off('exit', onExit)
+      }
+    }
+    worker.on('message', onMsg)
+    const isBrowserActive = !!WindowManager.getBrowserView()
+    worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
     return { ok: true }
   })
 }
@@ -50,7 +79,8 @@ export async function handleAgentStreamRequest(
   threadId: string,
   modelType?: string,
   attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }>,
-  promptText?: string
+  promptText?: string,
+  isBrowserActive?: boolean
 ) {
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
@@ -70,6 +100,7 @@ export async function handleAgentStreamRequest(
         if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
       }
     })
+    port.on('close', () => { log.info(`[stream] Port closed by renderer for ${threadId}. Aborting.`); controller.abort() })
     port.start()
 
     const attachmentPromise = pendingAttachments.get(threadId)
@@ -87,7 +118,7 @@ export async function handleAgentStreamRequest(
 
   let assistantMsgId = ''
   let assistantContent = ''
-  const orderedBlocks: Record<string, unknown>[] = []
+  const orderedBlocks: StreamBlock[] = []
   let sessionAccumulatedTokens = 0
 
   try {
@@ -104,17 +135,17 @@ export async function handleAgentStreamRequest(
     const models = await getAvailableModels()
     const availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
-    const rawModel: any = modelType ? models[modelType] : availableList[0]
+    const rawModel: ModelInfo | undefined = modelType ? models[modelType] : availableList[0]
     if (!rawModel) throw new Error(`Requested model "${modelType}" is not available.`)
 
     const modelSupportsVision = checkModelVisionSupport(rawModel.id)
     const modelSupportsNativeFiles = checkModelNativeFileSupport(rawModel.id)
     const { messages: historyMessages, systemInstructionSuffix } = buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
-    const userContent = attachments?.length ? buildAttachmentParts(text, attachments as any, modelSupportsVision, modelSupportsNativeFiles) : text
-    historyMessages.push({ role: 'user', content: userContent as any })
+    const userContent = attachments?.length ? (buildAttachmentParts(text, attachments as Array<{ type: string; name: string; mimeType?: string; base64: string }>, modelSupportsVision, modelSupportsNativeFiles) as UserContent) : text
+    historyMessages.push({ role: 'user', content: userContent })
     const messages = sanitizeMessages(historyMessages)
 
-    const browserView = WindowManager.getBrowserView()
+    const browserView = process.type === 'utility' ? null : WindowManager.getBrowserView()
     const browserInstruction = browserView
       ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract inner text and elements.`}`
       : ''
@@ -139,7 +170,7 @@ Use the sandboxed system inside '.orch-artifacts/'. Manage with writeToFile, rep
 Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
 
     const coreTools = createCoreTools(threadId, modelSupportsVision)
-    const activeTools = { ...coreTools, ...(browserView ? browserTools(threadId, modelSupportsVision) : {}) }
+    const activeTools = { ...coreTools, ...((browserView || isBrowserActive) ? browserTools(threadId, modelSupportsVision) : {}) }
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
 
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
@@ -197,7 +228,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           send({ type: 'reasoning-start', threadId }); break
         case 'reasoning-delta': {
           const last = orderedBlocks[orderedBlocks.length - 1]
-          if (last?.type === 'reasoning') { (last as any).content += part.text || ''; (last as any).durationMs = Date.now() - currentReasoningStartMs }
+          if (last?.type === 'reasoning') { last.content += part.text || ''; last.durationMs = Date.now() - currentReasoningStartMs }
           send({ type: 'reasoning-delta', payload: part.text || '', threadId }); break
         }
         case 'reasoning-end':
@@ -206,59 +237,64 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           const delta = part.text || ''; assistantContent += delta
           const last = orderedBlocks[orderedBlocks.length - 1]
           if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: delta })
-          else (last as any).content += delta
+          else last.content += delta
           send({ type: 'text-delta', payload: delta, threadId }); break
         }
         case 'tool-input-start': {
-          const p = part as any, tid = p.toolCallId || p.id || ''
+          const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
           orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
           send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId }); break
         }
         case 'tool-input-delta': {
-          const p = part as any, tid = p.toolCallId || p.id || '', delta = p.argsTextDelta || p.delta || ''
-          const b = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === tid) as any
-          if (b) b.argsDelta = (b.argsDelta || '') + delta
+          const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', delta = p.argsTextDelta || p.delta || ''
+          const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
+          if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
           send({ type: 'tool-call-delta', payload: { toolCallId: tid, delta }, threadId }); break
         }
         case 'tool-call': {
-          const p = part as any, tid = p.toolCallId || p.id || ''
-          const b = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === tid) as any
-          if (b) { b.args = p.args || p.input; b.argsDelta = undefined }
-          else orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: p.args || p.input, status: 'pending' })
-          send({ type: 'tool-call', payload: { toolCallId: tid, toolName: p.toolName || '', args: p.args || p.input }, threadId }); break
+          const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', args = (p.args || p.input || {}) as Record<string, unknown>
+          const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
+          if (b && b.type === 'tool') { b.args = args; b.argsDelta = undefined }
+          else orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args, status: 'pending' })
+          send({ type: 'tool-call', payload: { toolCallId: tid, toolName: p.toolName || '', args }, threadId }); break
         }
-        case 'tool-result':
-          const b = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === part.toolCallId) as any, res = (part as any).result
-          if (b) { b.result = res; b.status = 'complete' }
-          send({ type: 'tool-result', payload: { toolCallId: part.toolCallId, result: res }, threadId })
-          if (['writeToFile', 'replaceFileContent', 'multiReplaceFileContent'].includes(part.toolName)) pushArtifactsChanged(threadId)
+        case 'tool-result': {
+          const p = part as unknown as { toolCallId: string; toolName: string; result: unknown }, b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
+          if (b && b.type === 'tool') { b.result = p.result; b.status = 'complete' }
+          send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: p.result }, threadId })
+          if (['writeToFile', 'replaceFileContent', 'multiReplaceFileContent'].includes(p.toolName)) {
+            if (process.type === 'utility') (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
+            else pushArtifactsChanged(threadId)
+          }
           break
-        case 'error':
-          const errorMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
-          log.error(`[stream] error: "${errorMsg}"`)
-          for (const x of orderedBlocks) { if ((x as any).status === 'pending') (x as any).status = 'error' }
-          send({ type: 'error', payload: errorMsg, threadId }); break
-        case 'finish':
-          const usage = (part as any).totalUsage || {}, promptTokens = usage.inputTokens || 0, completionTokens = usage.outputTokens || 0, total = promptTokens + completionTokens
-          try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || total) } catch (err) { log.error('[stream] Token count save failed:', err) }
-          send({ type: 'finish', payload: { usage: { promptTokens, completionTokens, totalTokens: total }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || total) }, threadId })
-          if ((part as any).finishReason === 'length') { log.warn(`[stream] Token length limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
+        }
+        case 'error': {
+          const errMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
+          log.error(`[stream] error: "${errMsg}"`); for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
+          send({ type: 'error', payload: errMsg, threadId }); break
+        }
+        case 'finish': {
+          const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }, u = p.totalUsage || {}, pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0, tot = pTokens + cTokens
+          try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
+          send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot) }, threadId })
+          if (p.finishReason === 'length') { log.warn(`[stream] Token limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
           break
-        default:
-          const p = part as any, tid = p.toolCallId || p.id || ''
+        }
+        default: {
+          const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
           if (p.type === 'tool-call-streaming-start') {
             orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
             send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId })
           } else if (p.type === 'tool-call-delta') {
-            const delta = p.argsTextDelta || p.delta || '', block = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === tid) as any
-            if (block) block.argsDelta = (block.argsDelta || '') + delta
+            const delta = p.argsTextDelta || p.delta || '', b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
+            if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
             send({ type: 'tool-call-delta', payload: { toolCallId: tid, delta }, threadId })
           } else if (p.type === 'tool-error') {
-            const errMsg = p.error instanceof Error ? p.error.message : String(p.error)
-            const block = orderedBlocks.find((x) => x.type === 'tool' && (x as any).toolCallId === p.toolCallId) as any
-            if (block) { block.result = { success: false, error: errMsg }; block.status = 'error' }
+            const errMsg = p.error instanceof Error ? p.error.message : String(p.error), b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
+            if (b && b.type === 'tool') { b.result = { success: false, error: errMsg }; b.status = 'error' }
             send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: { success: false, error: errMsg } }, threadId })
           }
+        }
       }
     }
     await saveProgress()
@@ -266,7 +302,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
     const error = err as Error & { name?: string }
     log.error('[stream] error:', error)
     if (error.name !== 'AbortError') {
-      for (const x of orderedBlocks) { if ((x as any).status === 'pending') (x as any).status = 'error' }
+      for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
       if (assistantContent || orderedBlocks.length > 0) {
         try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) }) } catch {}
       }

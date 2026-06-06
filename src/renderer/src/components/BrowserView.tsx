@@ -1,7 +1,17 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
-import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom } from '../store/agentStore'
+import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom } from '../store/agentStore'
+
+function createDebounce(fn: () => void, delay: number) {
+  let timeoutId: any = null
+  const debounced = () => {
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => fn(), delay)
+  }
+  debounced.cancel = () => { if (timeoutId) clearTimeout(timeoutId) }
+  return debounced
+}
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -15,6 +25,7 @@ const BrowserView: React.FC = () => {
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
   const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
+  const activeThreadId = useAtomValue(activeThreadIdAtom)
 
   // M-7 FIX: Replace 3 ref-sync useEffects with direct render-time assignments.
   // This is equivalent and avoids 3 scheduled microtasks per render.
@@ -40,7 +51,7 @@ const BrowserView: React.FC = () => {
   const openBrowserWithBounds = useCallback(async () => {
     setLoadError(null)
     try {
-      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds: getBounds() })
+      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds: getBounds(), conversationId: activeThreadId })
       setIsLoaded(true); isLoadedRef.current = true
       window.api.invoke('browser:resize', getBounds()).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
@@ -58,17 +69,18 @@ const BrowserView: React.FC = () => {
     const unsubTitle = window.api.on('browser:title-updated', (t) => { if (active) setTitle(t as string) })
     const unsubUrl = window.api.on('browser:url-changed', (u) => { if (active) { setDisplayUrl(u as string); setUrlInput(u as string) } })
 
-    const handleResize = () => {
+    const debouncedResize = createDebounce(() => {
       if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
-    }
-    window.addEventListener('resize', handleResize)
-    const resizeObs = new ResizeObserver(handleResize)
+    }, 50)
+    window.addEventListener('resize', debouncedResize)
+    const resizeObs = new ResizeObserver(debouncedResize)
     if (containerRef.current) resizeObs.observe(containerRef.current)
 
     return () => {
       active = false
       cancelAnimationFrame(rafId)
-      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('resize', debouncedResize)
+      debouncedResize.cancel()
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()

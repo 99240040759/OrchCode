@@ -177,7 +177,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
         term.dispose()
       }
-    }, [workspacePath])
+    }, [workspacePath, conversationId])
 
     return (
       <div

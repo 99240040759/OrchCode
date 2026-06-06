@@ -50,8 +50,9 @@ function AppInner(): React.JSX.Element {
   }, [selectThread, loadThreads])
 
   useEffect(() => {
-    window.api.invoke('models:list').then((m: any) => {
-      if (m) { setAvailableModels(m); if (!selectedModel && Object.keys(m).length > 0) setSelectedModel(Object.keys(m)[0]) }
+    window.api.invoke('models:list').then((m: unknown) => {
+      const models = m as Record<string, { id: string; name: string }> | undefined
+      if (models) { setAvailableModels(models); if (!selectedModel && Object.keys(models).length > 0) setSelectedModel(Object.keys(models)[0]) }
     }).catch(console.error)
   }, [setAvailableModels, setSelectedModel, selectedModel])
 

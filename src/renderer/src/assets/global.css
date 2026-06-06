@@ -142,8 +142,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 }
 
 @keyframes textShimmer {
-  0% { transform: translate3d(-100%, 0, 0); }
-  100% { transform: translate3d(100%, 0, 0); }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 @keyframes pulse-opacity {
@@ -158,25 +158,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 
 /* Utility Classes */
 .shimmer-text {
-  color: var(--text-muted);
-  position: relative;
+  background: linear-gradient(90deg, var(--text-muted) 25%, var(--text-secondary) 50%, var(--text-muted) 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   display: inline-block;
-  overflow: hidden;
   vertical-align: bottom;
+  animation: textShimmer 1.6s infinite linear;
 }
-.shimmer-text::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent 30%, var(--text-secondary) 50%, transparent 70%);
-  transform: translate3d(-100%, 0, 0);
-  animation: textShimmer 1.6s linear infinite;
-  will-change: transform;
-}
-
 .hidden-input {
   display: none;
 }

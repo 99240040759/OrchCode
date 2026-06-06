@@ -6,8 +6,9 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import {
   isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom,
   activeWorkspaceAtom, activeThreadIdAtom, openFilesAtom, artifactsAtom,
-  type EditorFile
+  type EditorFile, type ArtifactPanelMode
 } from '../store/agentStore'
+import type { editor } from 'monaco-editor'
 import type { ArtifactEntry, FileReadResult } from '../../../preload/index.d'
 import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
 import { setupMonaco } from '../lib/monacoConfig'
@@ -64,18 +65,18 @@ const ArtifactPanel: React.FC = () => {
   const convId = useAtomValue(activeThreadIdAtom)
   const [isDiffMode, setIsDiffMode] = useState(false)
   const [originalContent, setOriginalContent] = useState<string | null>(null)
-  const editorRef = useRef<any>(null)
-  const diffEditorRef = useRef<any>(null)
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const terminalRef = useRef<TerminalViewHandle | null>(null)
   const browserWasOpenedRef = useRef(false)
   const convIdRef = useRef(convId)
   convIdRef.current = convId
 
-  const handleEditorMount = useCallback((editor: any) => { editorRef.current = editor }, [])
-  const handleDiffEditorMount = useCallback((editor: any) => { diffEditorRef.current = editor }, [])
+  const handleEditorMount = useCallback((editor: editor.IStandaloneCodeEditor) => { editorRef.current = editor }, [])
+  const handleDiffEditorMount = useCallback((editor: editor.IStandaloneDiffEditor) => { diffEditorRef.current = editor }, [])
   const handleSearchClick = useCallback(() => {
-    if (isDiffMode) diffEditorRef.current?.getModifiedEditor()?.focus()?.trigger('actions', 'actions.find', null)
-    else editorRef.current?.focus()?.trigger('actions', 'actions.find', null)
+    const ed = isDiffMode ? diffEditorRef.current?.getModifiedEditor() : editorRef.current
+    if (ed) { ed.focus(); ed.trigger('actions', 'actions.find', null) }
   }, [isDiffMode])
 
   useEffect(() => { setupMonaco().then(() => setThemeLoaded(true)) }, [])
@@ -84,7 +85,7 @@ const ArtifactPanel: React.FC = () => {
     if (activeFile && isDiffMode) {
       setOriginalContent(null)
       window.api.invoke('file:read-original', { filePath: activeFile.path, conversationId: convId })
-        .then((res: any) => setOriginalContent(res?.content ?? ''))
+        .then((res) => setOriginalContent((res as { content?: string })?.content ?? ''))
         .catch(() => setOriginalContent(''))
     } else setOriginalContent(null)
   }, [activeFile?.path, isDiffMode, convId])
@@ -99,8 +100,9 @@ const ArtifactPanel: React.FC = () => {
   }, [convId, setArtifacts])
 
   useEffect(() => {
-    return window.api.on('artifacts:changed', (payload: any) => {
-      if (payload?.conversationId === convIdRef.current) setArtifacts(payload.artifacts ?? [])
+    return window.api.on('artifacts:changed', (payload: unknown) => {
+      const p = payload as { conversationId: string; artifacts?: ArtifactEntry[] } | undefined
+      if (p?.conversationId === convIdRef.current) setArtifacts(p.artifacts ?? [])
     })
   }, [setArtifacts])
 
@@ -139,7 +141,7 @@ const ArtifactPanel: React.FC = () => {
     const handleLayout = () => { try { editorRef.current?.layout(); diffEditorRef.current?.layout() } catch {} }
     window.addEventListener('resize', handleLayout)
     const panelEl = document.querySelector('.artifact-pane-wrapper')
-    let timer: any
+    let timer: ReturnType<typeof setTimeout> | undefined
     const obs = new ResizeObserver(() => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => requestAnimationFrame(handleLayout), 50)
@@ -149,7 +151,7 @@ const ArtifactPanel: React.FC = () => {
   }, [])
 
   const handleTabChange = useCallback((val: string) => {
-    if (['overview', 'terminal', 'browser'].includes(val)) { setPanelMode(val as any); setActiveFile(null) }
+    if (['overview', 'terminal', 'browser'].includes(val)) { setPanelMode(val as ArtifactPanelMode); setActiveFile(null) }
     else { const file = openFiles.find(f => f.path === val); if (file) { setIsDiffMode(false); setActiveFile(file); setPanelMode('editor') } }
   }, [openFiles, setPanelMode, setActiveFile])
 

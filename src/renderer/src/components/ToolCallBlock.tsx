@@ -15,57 +15,39 @@ export const FileIcon: React.FC<{ fileName: string; className?: string; size?: n
 )
 
 // Derive a human-readable label and target from the tool name + args natively
-function getToolDisplay(toolName: string, args: Record<string, unknown>): {
+function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error'): {
   operation: string
   target: string
   fullPath: string | null
   isFile: boolean
 } {
+  const isErr = status === 'error', isComp = status === 'complete'
   const fileWriteTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
-
   if (fileWriteTools.includes(toolName)) {
-    const path = (args.targetFile as string) ?? ''
-    const name = path.split(/[/\\]/).pop() ?? path
-    return { operation: toolName === 'writeToFile' ? 'Writing' : 'Editing', target: name, fullPath: path || null, isFile: true }
+    const path = (args.targetFile as string) ?? '', name = path.split(/[/\\]/).pop() ?? path
+    const op = toolName === 'writeToFile' ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
+    return { operation: op, target: name, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
     const path = (args.absolutePath as string) ?? ''
-    return { operation: 'Viewing', target: path.split(/[/\\]/).pop() ?? path, fullPath: path || null, isFile: true }
+    return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: path.split(/[/\\]/).pop() ?? path, fullPath: path || null, isFile: true }
   }
   if (toolName === 'listDir') {
     const path = (args.directoryPath as string) ?? ''
-    return { operation: 'Listing', target: path.split(/[/\\]/).pop() ?? path, fullPath: null, isFile: false }
+    return { operation: isComp ? 'Listed' : isErr ? 'Failed to list' : 'Listing', target: path.split(/[/\\]/).pop() ?? path, fullPath: null, isFile: false }
   }
-  if (toolName === 'searchWorkspace') {
-    return { operation: 'Searching', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
-  }
-  if (toolName === 'runCommand') {
-    return { operation: 'Running', target: String(args.commandLine ?? '').slice(0, 40), fullPath: null, isFile: false }
-  }
-  if (toolName === 'browserNavigate') {
-    return { operation: 'Navigating', target: String(args.url ?? '').replace(/^https?:\/\//, '').slice(0, 40), fullPath: null, isFile: false }
-  }
-  if (toolName === 'browserScreenshot') {
-    return { operation: 'Capturing', target: 'screenshot', fullPath: null, isFile: false }
-  }
-  if (toolName === 'browserType') {
-    return { operation: 'Typing', target: String(args.selector ?? '').slice(0, 30), fullPath: null, isFile: false }
-  }
-  if (toolName === 'browserScroll') {
-    return { operation: 'Scrolling', target: String(args.direction ?? ''), fullPath: null, isFile: false }
-  }
-  if (toolName === 'browserMouseClickCoordinate') {
-    return { operation: 'Clicking', target: `(${args.x}, ${args.y})`, fullPath: null, isFile: false }
-  }
-  if (toolName === 'searchWeb') {
-    return { operation: 'Searching web', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
-  }
+  if (toolName === 'searchWorkspace') return { operation: isComp ? 'Searched' : isErr ? 'Failed to search' : 'Searching', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'runCommand') return { operation: isComp ? 'Ran' : isErr ? 'Failed to run' : 'Running', target: String(args.commandLine ?? '').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'browserNavigate') return { operation: isComp ? 'Navigated' : isErr ? 'Failed to navigate' : 'Navigating', target: String(args.url ?? '').replace(/^https?:\/\//, '').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'browserScreenshot') return { operation: isComp ? 'Captured' : isErr ? 'Failed to capture' : 'Capturing', target: 'screenshot', fullPath: null, isFile: false }
+  if (toolName === 'browserType') return { operation: isComp ? 'Typed' : isErr ? 'Failed to type' : 'Typing', target: String(args.selector ?? '').slice(0, 30), fullPath: null, isFile: false }
+  if (toolName === 'browserScroll') return { operation: isComp ? 'Scrolled' : isErr ? 'Failed to scroll' : 'Scrolling', target: String(args.direction ?? ''), fullPath: null, isFile: false }
+  if (toolName === 'browserMouseClickCoordinate') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: `(${args.x}, ${args.y})`, fullPath: null, isFile: false }
+  if (toolName === 'searchWeb') return { operation: isComp ? 'Searched web' : isErr ? 'Failed to search web' : 'Searching web', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'generateImage') {
-    const prompt = (args.prompt as string) ?? ''
-    const target = prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt
-    return { operation: 'Generating image', target, fullPath: null, isFile: false }
+    const prompt = (args.prompt as string) ?? '', target = prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt
+    return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target, fullPath: null, isFile: false }
   }
-  // Default: just show tool name
   return { operation: toolName, target: '', fullPath: null, isFile: false }
 }
 
@@ -91,7 +73,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
 }
 
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args)
+  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -107,6 +89,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
 
   const Component = (isFile ? 'button' : 'div') as React.ElementType
   const isImageGen = toolCall.toolName === 'generateImage'
+  const imgResult = toolCall.result as { success: boolean; filePath: string } | undefined
 
   return (
     <div className="tool-call-block-container" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -118,25 +101,12 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
         <span className="muted-text">{operation}</span>
         <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
         <span className="target-text">{target}</span>
-        {toolCall.status === 'pending' && toolCall.toolName !== 'generateImage' && <div className="tool-call-spinner" />}
+        {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>
-      {isImageGen && (
+      {isImageGen && toolCall.status === 'complete' && imgResult?.success && (
         <div className="tool-image-preview-frame" style={{ marginTop: '4px' }}>
-          {toolCall.status === 'pending' && (
-            <div className="local-image-loading-frame">
-              <div className="tool-call-spinner" />
-              <span className="shimmer-text">Creating image...</span>
-            </div>
-          )}
-          {toolCall.status === 'error' && (
-            <div className="local-image-error-frame">
-              <span>Generation failed</span>
-            </div>
-          )}
-          {toolCall.status === 'complete' && toolCall.result && (toolCall.result as any).success && (
-            <LocalImage src={(toolCall.result as any).filePath} alt="Generated Image" />
-          )}
+          <LocalImage src={imgResult.filePath} alt="Generated Image" />
         </div>
       )}
     </div>

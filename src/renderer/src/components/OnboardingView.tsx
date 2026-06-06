@@ -6,6 +6,8 @@ import onboardingAnimation from '../assets/onboarding.json'
 import onboardingEntryAnimation from '../assets/onboarding-entry.json'
 import onboardingCompleteAnimation from '../assets/onboarding-complete.json'
 
+import type { UserProfile } from '../../../preload/index.d'
+
 export const OnboardingView: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -30,12 +32,12 @@ export const OnboardingView: React.FC = () => {
   const handleSignIn = async () => {
     setLoading(true); setAuthError(null)
     try {
-      const profile = await window.api.invoke('auth:login') as any
+      const profile = await window.api.invoke('auth:login') as UserProfile | null
       if (profile) { setUser(profile); setLoading(false) }
       else { setLoading(false); setAuthError('Sign-in was cancelled or no profile returned.'); toast.error('Sign-in cancelled. Please try again.') }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLoading(false)
-      const msg = err?.message || 'Unknown error'
+      const msg = err instanceof Error ? err.message : String(err)
       setAuthError(msg); toast.error(`Sign-in failed: ${msg}`)
       console.error('Onboarding Sign-in failed:', err)
     }

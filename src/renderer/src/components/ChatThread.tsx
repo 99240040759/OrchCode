@@ -9,7 +9,7 @@ import {
   artifactPanelModeAtom
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
-import type { ChatMessage } from '../store/types'
+import type { ChatMessage, StreamBlock } from '../store/types'
 import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
@@ -112,63 +112,31 @@ const ReasoningBlock = React.memo(
 )
 ReasoningBlock.displayName = 'ReasoningBlock'
 
-const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
-  <div className="chat-message-assistant-container">
-    {message.orderedBlocks?.map((block: any, i: number) => {
-      if (block.type === 'reasoning') {
-        return <ReasoningBlock key={`reasoning-${i}`} content={block.content} durationMs={block.durationMs} isStreaming={block.isStreaming} />
-      }
-      if (block.type === 'tool') {
-        const toolCall = { id: block.toolCallId, toolName: block.toolName, args: block.args, result: block.result, status: block.status }
-        const isPendingTool = block.status === 'pending'
-        const isLastBlock = i === (message.orderedBlocks?.length ?? 0) - 1
-        return (
-          <div key={`tool-${i}`}>
-            <ToolCallBlock toolCall={toolCall} />
-            {message.isStreaming && isLastBlock && isPendingTool && (
-              <div className="chat-message-generating-container">
-                <span className="shimmer-text chat-message-generating-text">Working</span>
-              </div>
-            )}
-          </div>
-        )
-      }
-      if (block.type === 'text') {
-        return (
-          <div key={`text-${i}`} className="assistant-content chat-message-assistant">
-            <MarkdownRenderer content={block.content} />
-            {message.isStreaming && i === (message.orderedBlocks?.length ?? 0) - 1 && (
-              <div className="chat-message-generating-container">
-                <span className="shimmer-text chat-message-generating-text">Generating</span>
-              </div>
-            )}
-          </div>
-        )
-      }
-      if (block.type === 'error') {
-        return (
-          <div key={`error-${i}`} className="chat-error-container">
-            <AlertTriangle size={15} className="chat-error-icon" />
-            <span className="chat-error-message">{block.message}</span>
-          </div>
-        )
-      }
-      return null
-    })}
-
-    {!message.orderedBlocks && message.content && (
-      <div className="assistant-content chat-message-assistant">
-        <MarkdownRenderer content={message.content} />
-      </div>
-    )}
-
-    {message.isStreaming && (!message.orderedBlocks || message.orderedBlocks.length === 0) && (
-      <div className="chat-message-generating-container">
-        <span className="shimmer-text chat-message-generating-text">Thinking</span>
-      </div>
-    )}
-  </div>
-), (prev, next) => {
+const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
+  let statusText = 'Thinking'
+  if (message.orderedBlocks && message.orderedBlocks.length > 0) {
+    const last = message.orderedBlocks[message.orderedBlocks.length - 1]
+    if (last.type === 'tool' && last.status === 'pending') statusText = 'Working'
+    else if (last.type === 'text') statusText = 'Generating'
+  }
+  return (
+    <div className="chat-message-assistant-container">
+      {message.orderedBlocks?.map((block: StreamBlock, i: number) => {
+        if (block.type === 'reasoning') return <ReasoningBlock key={`reasoning-${i}`} content={block.content} durationMs={block.durationMs} isStreaming={block.isStreaming} />
+        if (block.type === 'tool') return <div key={`tool-${i}`}><ToolCallBlock toolCall={{ id: block.toolCallId, toolName: block.toolName, args: block.args, result: block.result, status: block.status }} /></div>
+        if (block.type === 'text') return <div key={`text-${i}`} className="assistant-content chat-message-assistant"><MarkdownRenderer content={block.content} /></div>
+        if (block.type === 'error') return <div key={`error-${i}`} className="chat-error-container"><AlertTriangle size={15} className="chat-error-icon" /><span className="chat-error-message">{block.message}</span></div>
+        return null
+      })}
+      {!message.orderedBlocks && message.content && <div className="assistant-content chat-message-assistant"><MarkdownRenderer content={message.content} /></div>}
+      {message.isStreaming && (
+        <div className="chat-message-generating-container">
+          <span className="shimmer-text chat-message-generating-text">{statusText}</span>
+        </div>
+      )}
+    </div>
+  )
+}, (prev, next) => {
   if (prev.message.isStreaming !== next.message.isStreaming) return false
   if (prev.message.orderedBlocks !== next.message.orderedBlocks) return false
   if (prev.message.content !== next.message.content) return false
@@ -235,8 +203,8 @@ const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom
     if (message.content) return message.content
     if (message.orderedBlocks) {
       return message.orderedBlocks
-        .filter((b: any) => b.type === 'text')
-        .map((b: any) => b.content)
+        .filter((b): b is StreamBlock & { type: 'text' } => b.type === 'text')
+        .map((b) => b.content)
         .join('')
     }
     return ''

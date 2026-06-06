@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow, shell, session, nativeTheme } from 'electron'
+import { app, BrowserWindow, shell, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -13,7 +13,6 @@ import { registerAllIpc } from './ipc/commands'
 import { registerStreamIpc } from './agent/stream'
 import { cleanupAllPtys } from './ipc/commands'
 import WindowManager from './windowManager'
-import { stopBrowserAgentWorker } from './tools'
 import { APP_ID } from './paths'
 import { initializeSkills } from './skills'
 
@@ -84,12 +83,6 @@ log.info('[main] Orch-Code starting...')
 if (app.isPackaged) {
   log.warn('[main] Running in production mode.')
 }
-// Choose a random debugging port to prevent predictable port scanning exploits
-const debuggingPort = Math.floor(Math.random() * 18000) + 12000
-WindowManager.setDebuggingPort(debuggingPort)
-app.commandLine.appendSwitch('remote-debugging-port', String(debuggingPort))
-app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
-
 let mainWindow: BrowserWindow | null = null
 let onboardingWindow: BrowserWindow | null = null
 
@@ -193,7 +186,6 @@ function createMainWindow(): BrowserWindow {
       WindowManager.setBrowserView(null)
     }
     cleanupAllPtys()
-    void stopBrowserAgentWorker()
     mainWindow = null
     WindowManager.setMainWindow(null)
   })
@@ -213,22 +205,6 @@ app.whenReady().then(async () => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
-
-  // Intercept and block any loopback network requests aimed at the CDP debugging port
-  session.defaultSession.webRequest.onBeforeRequest(
-    { urls: ['*://localhost/*', '*://127.0.0.1/*', '*://[::1]/*'] },
-    (details, callback) => {
-      try {
-        const url = new URL(details.url)
-        if (url.port && Number(url.port) === WindowManager.getDebuggingPort()) {
-          log.warn(`[security] Blocked request to DevTools debugging port: ${details.url}`)
-          callback({ cancel: true })
-          return
-        }
-      } catch {}
-      callback({ cancel: false })
-    }
-  )
 
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
@@ -296,6 +272,5 @@ app.on('window-all-closed', async () => {
 
 app.on('before-quit', () => {
   cleanupAllPtys()
-  void stopBrowserAgentWorker()
   checkpointDB()
 })

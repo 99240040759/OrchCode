@@ -2,71 +2,26 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { utilityProcess, MessageChannelMain } from 'electron'
-import { wrap, type Remote } from 'comlink'
 import log from 'electron-log'
 import WindowManager from '../windowManager'
-import type { WorkerAPI } from '../browserWorker'
 import { getConversationScreenshotsPath } from '../paths'
 
-let workerProcess: Electron.UtilityProcess | null = null
-let automatedBrowser: Remote<WorkerAPI> | null = null
+interface ScreenshotOutput { success: boolean; message?: string; filePath?: string; filename?: string; error?: string }
 
-function checkBrowserViewActive(): { success: boolean; error?: string } | null {
+
+function getBrowserWebContents() {
   const bv = WindowManager.getBrowserView()
-  if (!bv) {
+  return bv ? bv.webContents : null
+}
+
+function checkBrowserViewActive() {
+  if (!WindowManager.getBrowserView()) {
     return {
       success: false,
-      error:
-        'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
+      error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
     }
   }
   return null
-}
-
-export function startBrowserAgentWorker(): Remote<WorkerAPI> | null {
-  if (workerProcess) return automatedBrowser
-  const mainWindow = WindowManager.getMainWindow()
-  const mainWindowUrl = mainWindow?.webContents.getURL() || ''
-  const debuggingPort = WindowManager.getDebuggingPort()
-  const workerPath = join(__dirname, '../browserWorker.js')
-  log.info(`[tools:browser] Spawning Playwright worker via utilityProcess: ${workerPath} port: ${debuggingPort}`)
-
-  const { port1, port2 } = new MessageChannelMain()
-
-  workerProcess = utilityProcess.fork(workerPath, [], { serviceName: 'playwright-worker' })
-  // Send init data + port2 to the worker process
-  workerProcess.postMessage({ mainWindowUrl, debuggingPort }, [port2])
-
-  const comlinkEndpoint = {
-    addEventListener: (t: string, l: any) => t === 'message' && port1.on('message', (e: any) => l({ data: e.data, ports: e.ports })),
-    removeEventListener: (t: string, l: any) => t === 'message' && port1.off('message', l),
-    postMessage: (m: any, tr?: any) => port1.postMessage(m, tr),
-    start: () => port1.start(),
-    close: () => port1.close()
-  }
-
-  // Wrap port1 via the adapter — utilityProcess MessagePortMain needs this translation layer
-  automatedBrowser = wrap<WorkerAPI>(comlinkEndpoint as any)
-
-  workerProcess.on('exit', (code) => {
-    log.warn(`[tools:browser] Worker process exited with code ${code}`)
-    workerProcess = null
-    automatedBrowser = null
-  })
-
-  return automatedBrowser
-}
-
-export async function stopBrowserAgentWorker() {
-  if (automatedBrowser) {
-    try { await automatedBrowser.disconnect() } catch {}
-    automatedBrowser = null
-  }
-  if (workerProcess) {
-    workerProcess.kill()
-    workerProcess = null
-  }
 }
 
 export function browserTools(convId: string, modelSupportsVision = true) {
@@ -77,40 +32,45 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserNavigate] url="${url}"`)
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
-        return await agent.navigate(url)
-      } catch (err: any) {
-        log.error('[tool:browserNavigate] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        const target = url.startsWith('http') ? url : `https://${url}`
+        await wc.loadURL(target)
+        return { success: true, url: wc.getURL() }
+      } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }
   })
 
   const browserType = tool({
-    description:
-      'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
+    description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
     inputSchema: z.object({
       selector: z.string().describe('CSS selector of the input field.'),
       text: z.string().describe('The text to type.'),
-      frameSelector: z
-        .string()
-        .optional()
-        .describe('Optional CSS selector of the iframe containing the target input.')
+      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
     }),
     execute: async ({ selector, text, frameSelector }) => {
       log.info(`[tool:browserType] selector="${selector}"`)
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
-        return await agent.type(selector, text, frameSelector)
-      } catch (err: any) {
-        log.error('[tool:browserType] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        await wc.executeJavaScript(`
+          (() => {
+            const doc = ${frameSelector ? `document.querySelector('${frameSelector}').contentDocument` : 'document'};
+            const el = doc.querySelector('${selector}');
+            if (!el) throw new Error('Element not found');
+            el.focus();
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+              el.value = ${JSON.stringify(text)};
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+              el.textContent = ${JSON.stringify(text)};
+            }
+          })()
+        `)
+        return { success: true }
+      } catch (e: unknown) { log.error('[tool:browserType] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }
   })
 
@@ -124,14 +84,17 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
-        return await agent.scroll(direction, amount)
-      } catch (err: any) {
-        log.error('[tool:browserScroll] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        const dist = amount || 400
+        let x = 0, y = 0
+        if (direction === 'up') y = -dist
+        else if (direction === 'down') y = dist
+        else if (direction === 'left') x = -dist
+        else if (direction === 'right') x = dist
+        await wc.executeJavaScript(`window.scrollBy(${x}, ${y})`)
+        return { success: true }
+      } catch (e: unknown) { log.error('[tool:browserScroll] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }
   })
 
@@ -142,12 +105,10 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info('[tool:browserScreenshot] executing...')
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
         const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
-
         try {
           const existing = await fs.readdir(screenshotDir)
           const pngs = existing.filter((f) => f.endsWith('.png')).sort()
@@ -155,25 +116,12 @@ export function browserTools(convId: string, modelSupportsVision = true) {
             await fs.rm(join(screenshotDir, old), { force: true })
           }
         } catch {}
-
-        const filename = `screenshot_${Date.now()}.png`
-        const screenshotPath = join(screenshotDir, filename)
-        const res = await agent.screenshot(screenshotPath)
-        if (res.success) {
-          return {
-            success: true,
-            message: 'Screenshot captured.',
-            filePath: `file://${screenshotPath}`,
-            filename
-          }
-        }
-        return res
-      } catch (err: any) {
-        log.error('[tool:browserScreenshot] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
+        await fs.writeFile(screenshotPath, png)
+        return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) }
+      } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
-    toModelOutput: async ({ output }: { output: any }) => {
+    toModelOutput: async ({ output }: { output: ScreenshotOutput & { buffer?: ArrayBuffer } }) => {
       if (output.success && output.filePath) {
         try {
           if (!modelSupportsVision) {
@@ -187,8 +135,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
               ]
             }
           }
-          const cleanPath = output.filePath.replace('file://', '')
-          const base64Image = (await fs.readFile(cleanPath)).toString('base64')
+          const base64Image = output.buffer ? Buffer.from(output.buffer).toString('base64') : (await fs.readFile(output.filePath.replace('file://', ''))).toString('base64')
           return {
             type: 'content',
             value: [
@@ -196,17 +143,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
               { type: 'text', text: `Screenshot captured: ${output.filePath}` }
             ]
           }
-        } catch (err: any) {
-          return {
-            type: 'content',
-            value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }]
-          }
-        }
+        } catch (e: unknown) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e instanceof Error ? e.message : String(e)}` }] } }
       }
-      return {
-        type: 'content',
-        value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }]
-      }
+      return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
     }
   })
 
@@ -221,37 +160,49 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
-        return await agent.mouseClickCoordinate(x, y, button)
-      } catch (err: any) {
-        log.error('[tool:browserMouseClickCoordinate] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        wc.sendInputEvent({ type: 'mouseDown', x, y, button: button || 'left', clickCount: 1 })
+        wc.sendInputEvent({ type: 'mouseUp', x, y, button: button || 'left', clickCount: 1 })
+        return { success: true }
+      } catch (e: unknown) { log.error('[tool:browserMouseClickCoordinate] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }
   })
 
   const browserGetPageContent = tool({
-    description:
-      'Extracts the page URL, title, visible text content, and interactive element definitions from the active browser viewport. Essential for text-only models that cannot see screenshots.',
+    description: 'Extracts the page URL, title, visible text content, and interactive element definitions from the active browser viewport. Essential for text-only models that cannot see screenshots.',
     inputSchema: z.object({}),
     execute: async () => {
       log.info('[tool:browserGetPageContent] executing...')
       const check = checkBrowserViewActive()
       if (check) return check
-      const agent = startBrowserAgentWorker()
-      if (!agent) return { success: false, error: 'Browser automation worker is unavailable.' }
+      const wc = getBrowserWebContents()!
       try {
-        return await agent.getPageContent()
-      } catch (err: any) {
-        log.error('[tool:browserGetPageContent] worker error:', err)
-        return { success: false, error: err.message }
-      }
+        const result = await wc.executeJavaScript(`
+          (() => {
+            const text = document.body.innerText || '';
+            const interactive = [];
+            document.querySelectorAll('button, input, select, textarea, a, [role="button"]').forEach((el) => {
+              if (interactive.length >= 100) return;
+              const rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                interactive.push({
+                  tagName: el.tagName.toLowerCase(), id: el.id || undefined, className: el.className || undefined,
+                  text: (el.textContent || '').trim().slice(0, 80) || undefined, placeholder: el.placeholder || undefined,
+                  name: el.name || undefined, type: el.type || undefined, value: el.value || undefined
+                });
+              }
+            });
+            return { url: window.location.href, title: document.title, text: text.slice(0, 15000), interactiveElements: interactive };
+          })()
+        `)
+        const wrappedText = `[UNTRUSTED WEB PAGE CONTENT START]\nURL: ${result.url}\nTitle: ${result.title}\n\nVisible Page Text:\n${result.text}\n[UNTRUSTED WEB PAGE CONTENT END]`
+        return { success: true, url: result.url, title: result.title, text: wrappedText, interactiveElements: result.interactiveElements }
+      } catch (e: unknown) { log.error('[tool:browserGetPageContent] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }
   })
 
-  return {
+  const tools = {
     browserNavigate,
     browserType,
     browserScroll,
@@ -259,4 +210,11 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     browserMouseClickCoordinate,
     browserGetPageContent
   }
+  if (process.type === 'utility') {
+    const { callMainProcessTool } = require('../agentWorker')
+    for (const [name, t] of Object.entries(tools)) {
+      t.execute = async (args: any) => callMainProcessTool(name, args)
+    }
+  }
+  return tools
 }

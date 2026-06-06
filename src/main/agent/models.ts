@@ -5,7 +5,7 @@ import type { ProviderOptions } from '@ai-sdk/provider-utils'
 import type { streamText } from 'ai'
 import { globalApiLimiter } from '../limiters'
 
-interface ModelInfo {
+export interface ModelInfo {
   id: string
   name: string
 }
@@ -27,27 +27,18 @@ export async function getAvailableModels(force = false): Promise<AvailableModels
   return cachedModels!
 }
 
-import { getCurrentSession } from '../auth'
-
 function fetchWithUserAuth(url: RequestInfo | URL, options?: RequestInit) {
-  const session = getCurrentSession()
-  const token = session ? session.idToken : process.env.SUPABASE_ANON_KEY
-  const headers = new Headers(options?.headers || {})
-  headers.set('Authorization', `Bearer ${token}`)
-  headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+  const token = process.env.SUPABASE_SESSION_TOKEN || process.env.SUPABASE_ANON_KEY
+  const headers = new Headers(options?.headers || {}); headers.set('Authorization', `Bearer ${token}`); headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
   return fetch(url, { ...options, headers })
 }
 
 function makeFetchWithAuth(extraHeaders?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers || {})
-    const session = getCurrentSession()
-    const token = session ? session.idToken : process.env.SUPABASE_ANON_KEY
-    headers.set('Authorization', `Bearer ${token}`)
-    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-    if (extraHeaders) {
-      for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v)
-    }
+    const token = process.env.SUPABASE_SESSION_TOKEN || process.env.SUPABASE_ANON_KEY
+    headers.set('Authorization', `Bearer ${token}`); headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+    if (extraHeaders) { for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v) }
     return fetch(url, { ...options, headers })
   }
 }

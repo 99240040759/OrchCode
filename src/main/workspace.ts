@@ -1,14 +1,11 @@
 import { join, extname, relative, resolve, normalize, sep, isAbsolute, dirname } from 'node:path'
 import { promises as fs, existsSync, readFileSync, realpathSync } from 'node:fs'
-import Bottleneck from 'bottleneck'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
 import { getConversationPath } from './paths'
 import { getUserSkillsPath } from './skills'
 
 Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
-
-const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
 export interface WorkspaceContext {
   conversationId: string; rootPath: string; artifactsPath: string; isUserWorkspace: boolean
@@ -128,9 +125,7 @@ async function traverseDir(dir: string, options: TraverseOptions, ig: Ignore, ro
     if (entry.isDirectory()) promises.push(traverseDir(fullPath, options, ig, rootPath, state))
     else if (entry.isFile() && !BINARY_EXTENSIONS.has(extname(name).toLowerCase())) {
       state.count++
-      promises.push(traverseLimiter.schedule(async () => {
-        try { const stat = await fs.stat(fullPath); await options.onFile(fullPath, name, stat.size) } catch {}
-      }))
+      try { options.onFile(fullPath, name, 0) } catch {}
     }
   }
   await Promise.all(promises)

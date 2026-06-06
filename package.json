@@ -1,6 +1,6 @@
 {
   "name": "orch-code",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Orch Code - AI-powered agentic code editor",
   "main": "./out/main/index.js",
   "author": "Orch",
@@ -33,7 +33,6 @@
     "ai": "^6.0.193",
     "better-sqlite3": "^12.10.0",
     "bottleneck": "^2.19.5",
-    "comlink": "^4.4.2",
     "dotenv": "^17.4.2",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.3.9",
@@ -43,8 +42,6 @@
     "lottie-react": "^2.4.1",
     "mime-types": "^3.0.2",
     "node-pty": "^1.1.0",
-    "playwright-core": "^1.60.0",
-    "semver": "^7.8.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -61,7 +58,6 @@
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@types/semver": "^7.7.1",
     "@vitejs/plugin-react": "^5.1.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -84,7 +80,6 @@
     "react-dom": "^19.2.1",
     "react-loading-skeleton": "^3.5.0",
     "react-markdown": "^10.1.0",
-    "react-resizable-panels": "^2.1.9",
     "react-textarea-autosize": "^8.5.9",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",

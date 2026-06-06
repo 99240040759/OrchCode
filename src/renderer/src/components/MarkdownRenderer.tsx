@@ -8,13 +8,15 @@ import { useSetAtom, useAtomValue } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
+import type { FileReadResult } from '../../../preload/index.d'
+
 interface MarkdownRendererProps { content: string; isArtifact?: boolean }
 type CodeChildProps = { className?: string; children?: React.ReactNode }
 
-const extractText = (node: any): string => {
+const extractText = (node: React.ReactNode): string => {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(extractText).join('')
-  return React.isValidElement<{ children?: any }>(node) ? extractText(node.props.children) : ''
+  if (Array.isArray(node)) return (node as React.ReactNode[]).map(extractText).join('')
+  return React.isValidElement<{ children?: React.ReactNode }>(node) ? extractText(node.props.children) : ''
 }
 
 export const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }) => {
@@ -31,7 +33,7 @@ export const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }
         const stripped = src.replace(/^file:\/\/\/?/, '')
         let filePath = decodeURIComponent(stripped)
         if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) filePath = '/' + filePath
-        const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
+        const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as FileReadResult | undefined
         if (active) {
           if (fileData?.isBinary && fileData.base64) setImgSrc(`data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
           else setError(true)
@@ -57,7 +59,7 @@ function useMarkdownComponents() {
 
   return React.useMemo(() => ({
     hr: () => null,
-    a: ({ href, children, ...props }: any) => {
+    a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: unknown }) => {
       if (href?.startsWith('file://')) {
         const stripped = href.replace(/^file:\/\/\/?/, '')
         let filePath = decodeURIComponent(stripped)
@@ -66,7 +68,7 @@ function useMarkdownComponents() {
           e.preventDefault()
           try {
             const { setActiveEditorFile: sae, setArtifactPanelMode: spm, setArtifactPanelOpen: sapo, conversationId: cid } = stateRef.current
-            const fileData = await window.api.invoke('file:read', { filePath, conversationId: cid }) as any
+            const fileData = await window.api.invoke('file:read', { filePath, conversationId: cid }) as FileReadResult | undefined
             if (fileData) { sae(fileData); spm('editor'); sapo(true) }
           } catch (err) { console.error(err) }
         }
@@ -79,7 +81,7 @@ function useMarkdownComponents() {
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
     },
-    pre: ({ children, ...props }: any) => {
+    pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'> & { node?: unknown }) => {
       const codeChild = React.Children.toArray(children)[0]
       const codeElement = React.isValidElement(codeChild) ? (codeChild as React.ReactElement<CodeChildProps>) : null
       const className = codeElement?.props?.className || ''
@@ -98,8 +100,8 @@ function useMarkdownComponents() {
       }
       return <pre {...props}>{children}</pre>
     },
-    code: ({ className, children, ...props }: any) => <code className={className} {...props}>{children}</code>,
-    img: ({ src, alt, ...props }: any) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
+    code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { node?: unknown }) => <code className={className} {...props}>{children}</code>,
+    img: ({ src, alt, ...props }: React.ComponentPropsWithoutRef<'img'> & { node?: unknown }) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
   }), [])
 }
 

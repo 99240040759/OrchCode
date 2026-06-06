@@ -7,15 +7,19 @@ import {
   type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
-import type { StreamChunk, ThreadEntry, ThreadMessage } from '../../../preload/index.d'
+import type { StreamChunk, ThreadEntry, ThreadMessage, StreamPayload } from '../../../preload/index.d'
 
 const invoke = <T>(cmd: string, payload?: unknown): Promise<T> => window.api.invoke(cmd, payload) as Promise<T>
-const isToolResultError = (r: any): boolean => !!r && typeof r === 'object' && (r.success === false || (typeof r.type === 'string' && (r.type === 'error-text' || r.type === 'error-json')))
+const isToolResultError = (r: unknown): boolean => {
+  if (!r || typeof r !== 'object') return false
+  const obj = r as Record<string, unknown>
+  return obj.success === false || (typeof obj.type === 'string' && (obj.type === 'error-text' || obj.type === 'error-json'))
+}
 
 export function useChat() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const setRunState = useSetAtom(agentRunStateAtom)
-  const [messages, setMessages] = useAtom(chatMessagesAtom)
+  const setMessages = useSetAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
@@ -26,8 +30,6 @@ export function useChat() {
   const setArtifacts = useSetAtom(artifactsAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
 
-  const messagesLengthRef = useRef(messages.length)
-  messagesLengthRef.current = messages.length
   const activeStreamThreadIdRef = useRef('')
   const rafIdRef = useRef<number | null>(null)
 
@@ -61,7 +63,7 @@ export function useChat() {
     setMessages([]); setSessionTokens(0); resetThreadScopedPanels()
     activeStreamThreadIdRef.current = threadId
 
-    let loadingTimer: any = setTimeout(() => {
+    let loadingTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
       if (activeStreamThreadIdRef.current === threadId) setIsThreadLoading(true)
       loadingTimer = null
     }, 200)
@@ -90,8 +92,8 @@ export function useChat() {
       if (checkStale()) return
 
       if (rawMessages?.length > 0) {
-        setMessages(rawMessages.filter((m): m is any => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
-          let blocks: any
+        setMessages(rawMessages.filter((m): m is ThreadMessage & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
+          let blocks: StreamBlock[] | undefined
           try { blocks = m.data ? JSON.parse(m.data) : undefined } catch {}
           return {
             id: m.id ?? `msg-${idx}`, role: m.role,
@@ -103,7 +105,7 @@ export function useChat() {
       }
 
       try {
-        const fresh = await invoke<any>('thread:get', { threadId })
+        const fresh = await invoke<ThreadEntry & { accumulatedTokens?: number } | null>('thread:get', { threadId })
         if (fresh && activeStreamThreadIdRef.current === threadId) setSessionTokens(fresh.accumulatedTokens ?? 0)
       } catch {
         setSessionTokens(threads.find(t => t.id === threadId)?.accumulatedTokens ?? 0)
@@ -177,9 +179,9 @@ export function useChat() {
     } catch (err) { console.error('[useChat] Open workspace error:', err); return null }
   }, [activeThreadId, newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels])
 
-  const run = useCallback(async (promptText: string, _mode?: string, attachments?: any[], forceThreadId?: string) => {
-    const isNewThread = !activeThreadId || messagesLengthRef.current === 0
+  const run = useCallback(async (promptText: string, _mode?: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
     const resolvedThreadId = forceThreadId || activeThreadId || `session-${crypto.randomUUID()}`
+    const isNewThread = !threads.some(t => t.id === resolvedThreadId) || threads.find(t => t.id === resolvedThreadId)?.title === 'New Chat'
     activeStreamThreadIdRef.current = resolvedThreadId
 
     if (resolvedThreadId !== activeThreadId) setActiveThreadId(resolvedThreadId)
@@ -246,8 +248,10 @@ export function useChat() {
         const delta = chunkData?.delta as string ?? ''
         const idx = orderedBlocks.findIndex(b => b.type === 'tool' && b.toolCallId === tcId)
         if (idx !== -1) {
-          const old = orderedBlocks[idx] as any
-          orderedBlocks[idx] = { ...old, argsDelta: (old.argsDelta || '') + delta }
+          const old = orderedBlocks[idx]
+          if (old.type === 'tool') {
+            orderedBlocks[idx] = { ...old, argsDelta: (old.argsDelta || '') + delta }
+          }
         }
         scheduleFlush()
       } else if (chunkType === 'tool-call') {
@@ -255,8 +259,10 @@ export function useChat() {
         const tcId = chunkData?.toolCallId as string ?? crypto.randomUUID()
         const idx = orderedBlocks.findIndex(b => b.type === 'tool' && b.toolCallId === tcId)
         if (idx !== -1) {
-          const old = orderedBlocks[idx] as any
-          orderedBlocks[idx] = { ...old, args: (chunkData?.args ?? {}) as Record<string, unknown>, argsDelta: undefined }
+          const old = orderedBlocks[idx]
+          if (old.type === 'tool') {
+            orderedBlocks[idx] = { ...old, args: (chunkData?.args ?? {}) as Record<string, unknown>, argsDelta: undefined }
+          }
         } else {
           orderedBlocks.push({ type: 'tool', toolCallId: tcId, toolName: chunkData?.toolName as string ?? 'unknown', args: (chunkData?.args ?? {}) as Record<string, unknown>, status: 'pending' })
         }
@@ -265,16 +271,19 @@ export function useChat() {
         const tcId = chunkData?.toolCallId as string
         const idx = orderedBlocks.findIndex(b => b.type === 'tool' && b.toolCallId === tcId)
         if (idx !== -1) {
-          const old = orderedBlocks[idx] as any
-          orderedBlocks[idx] = { ...old, result: chunkData?.result, status: isToolResultError(chunkData?.result) ? 'error' : 'complete', argsDelta: undefined }
+          const old = orderedBlocks[idx]
+          if (old.type === 'tool') {
+            orderedBlocks[idx] = { ...old, result: chunkData?.result, status: isToolResultError(chunkData?.result) ? 'error' : 'complete', argsDelta: undefined }
+          }
         }
         scheduleFlush()
         setRunState('streaming')
       } else if (chunkType === 'error') {
         assistantIsStreaming = false
         for (let i = 0; i < orderedBlocks.length; i++) {
-          if (orderedBlocks[i].type === 'tool' && (orderedBlocks[i] as any).status === 'pending') {
-            orderedBlocks[i] = { ...orderedBlocks[i], status: 'error' } as any
+          const b = orderedBlocks[i]
+          if (b.type === 'tool' && b.status === 'pending') {
+            orderedBlocks[i] = { ...b, status: 'error' }
           }
         }
         orderedBlocks.push({ type: 'error', message: cleanErrorMessage(chunk.payload) })
@@ -295,7 +304,7 @@ export function useChat() {
         if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
           window.api.invoke('thread:generate-title', { text: promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200), threadId: resolvedThreadId })
             .then(async () => {
-              try { setThreads((await window.api.invoke('thread:list') as any[]) ?? []) } catch {}
+              try { setThreads((await invoke<ThreadEntry[]>('thread:list')) ?? []) } catch {}
             }).catch(console.error)
         }
       }
@@ -304,18 +313,19 @@ export function useChat() {
     setRunState('streaming')
     try {
       await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments }, processChunk)
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
       console.error('[useChat] Invocation Error:', err)
       setMessages(prev => prev.map(m => {
         if (m.id !== assistantMsgId) return m
         return {
           ...m, isStreaming: false,
-          orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(err?.message || err) }]
+          orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(errorMsg) }]
         }
       }))
       setRunState('error')
     }
-  }, [activeThreadId, selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens])
+  }, [activeThreadId, selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, threads])
 
   return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace }
 }

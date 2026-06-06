@@ -53,8 +53,19 @@ contextBridge.exposeInMainWorld('api', {
         p.onmessageerror = () => { activePorts.delete(payload.threadId); resolve() }
         p.start()
         if (payload.attachments?.length) {
-          const bufs = payload.attachments.map(a => Uint8Array.from(atob(a.base64), c => c.charCodeAt(0)).buffer)
-          p.postMessage({ type: 'bufs', bufs }, bufs)
+          try {
+            const bufs = payload.attachments.map(a => {
+              const bin = atob(a.base64 || '')
+              const arr = new Uint8Array(bin.length)
+              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+              return arr.buffer
+            })
+            p.postMessage({ type: 'bufs', bufs }, bufs)
+          } catch (err: any) {
+            p.close(); activePorts.delete(payload.threadId)
+            reject(new Error(`Failed to decode attachments: ${err.message}`))
+            return
+          }
         }
       })
       const stripped = { ...payload, attachments: payload.attachments?.map(({ base64: _, ...r }) => r) }
@@ -73,6 +84,8 @@ contextBridge.exposeInMainWorld('api', {
    * Returns an unsubscribe function.
    */
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
+    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed']
+    if (!ALLOWED.includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)

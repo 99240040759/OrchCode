@@ -10,7 +10,7 @@ import type {
 export type { StreamBlock, ChatMessage, EditorFile } from './types'
 
 type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
-type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
+export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
 interface ModelInfo {
   id: string
   name: string

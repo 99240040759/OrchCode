@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
 
+import type { editor } from 'monaco-editor'
+
 interface CodeEditorViewProps {
   displayFile: { name: string; path: string; content?: string; language?: string; isBinary?: boolean }
   activeWorkspace: { path: string } | null
@@ -12,8 +14,8 @@ interface CodeEditorViewProps {
   isDiffMode: boolean
   setIsDiffMode: (val: boolean) => void
   originalContent: string | null
-  handleDiffEditorMount: (editor: any) => void
-  handleEditorMount: (editor: any) => void
+  handleDiffEditorMount: (editor: editor.IStandaloneDiffEditor) => void
+  handleEditorMount: (editor: editor.IStandaloneCodeEditor) => void
   handleSearchClick: () => void
 }
 

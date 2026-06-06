@@ -1,18 +1,16 @@
-import { app } from 'electron'
 import { join } from 'node:path'
 import { promises as fs, existsSync } from 'node:fs'
 import log from 'electron-log'
-
+function getAppInfo() {
+  if (process.env.USER_DATA_PATH) return { isPackaged: process.env.IS_PACKAGED === 'true', resourcesPath: process.env.RESOURCES_PATH || '', appPath: process.env.APP_PATH || '', userData: process.env.USER_DATA_PATH }
+  const { app } = require('electron')
+  return { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(), userData: app.getPath('userData') }
+}
 export function getSkillsPath(): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, 'resources', 'skills')
-  }
-  return join(app.getAppPath(), 'resources', 'skills')
+  const info = getAppInfo()
+  return info.isPackaged ? join(info.resourcesPath, 'resources', 'skills') : join(info.appPath, 'resources', 'skills')
 }
-
-export function getUserSkillsPath(): string {
-  return join(app.getPath('userData'), 'skills')
-}
+export function getUserSkillsPath(): string { return join(getAppInfo().userData, 'skills') }
 
 async function copyDirRecursive(src: string, dest: string): Promise<void> {
   await fs.mkdir(dest, { recursive: true })

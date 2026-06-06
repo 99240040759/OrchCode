@@ -48,8 +48,8 @@
 .titlebar-left-win { padding-left:12px; width:40px }
 .titlebar-center { flex:1; display:flex; justify-content:flex-start; align-items:center; padding-left:16px; font-size:var(--font-size-sm); font-weight:500; color:var(--text-secondary); letter-spacing:0.02em }
 .titlebar-right { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-shrink:0; -webkit-app-region:no-drag }
-.titlebar-right-mac { padding-right:16px }
-.titlebar-right-win { padding-right:154px }
+.titlebar-right-mac { padding-right:56px }
+.titlebar-right-win { padding-right:196px }
 .titlebar-toggle-btn { width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; background-color:transparent; transition:background-color 0.15s ease }
 .titlebar-toggle-btn:hover { background-color:rgba(255,255,255,0.06) }
 
