@@ -9,9 +9,9 @@ import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
 import { checkpointDB } from './db'
-import { registerAllIpc } from './ipc/commands'
+import { registerAllIpc, cleanupAllPtys } from './ipc/commands'
 import { registerStreamIpc } from './agent/stream'
-import { cleanupAllPtys } from './ipc/commands'
+import { pool } from './agent/workerPool'
 import WindowManager from './windowManager'
 import { APP_ID } from './paths'
 import { initializeSkills } from './skills'
@@ -273,4 +273,5 @@ app.on('window-all-closed', async () => {
 app.on('before-quit', () => {
   cleanupAllPtys()
   checkpointDB()
+  void pool.shutdown()
 })

@@ -5,18 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { activeThreadIdAtom } from '../store/agentStore'
-
-function createDebounce(fn: () => void, delay: number) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
-  const debounced = () => {
-    if (timeoutId) clearTimeout(timeoutId)
-    timeoutId = setTimeout(() => fn(), delay)
-  }
-  debounced.cancel = () => {
-    if (timeoutId) clearTimeout(timeoutId)
-  }
-  return debounced
-}
+import { createDebounce } from '../lib/debounce'
 
 export interface TerminalViewHandle {
   fit: () => void

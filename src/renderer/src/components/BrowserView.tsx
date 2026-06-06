@@ -2,16 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom } from '../store/agentStore'
-
-function createDebounce(fn: () => void, delay: number) {
-  let timeoutId: any = null
-  const debounced = () => {
-    if (timeoutId) clearTimeout(timeoutId)
-    timeoutId = setTimeout(() => fn(), delay)
-  }
-  debounced.cancel = () => { if (timeoutId) clearTimeout(timeoutId) }
-  return debounced
-}
+import { createDebounce } from '../lib/debounce'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)

@@ -1,7 +1,6 @@
 import { generateText, type ModelMessage } from 'ai'
 import log from 'electron-log'
 import { googleBypass } from './models'
-import { compactThreadHistory } from '../db'
 
 const SUMMARISE_MODEL = 'gemini-3.1-flash-lite'
 
@@ -46,5 +45,3 @@ export async function summariseContext(messages: ModelMessage[]): Promise<string
     return null
   }
 }
-
-export { compactThreadHistory }

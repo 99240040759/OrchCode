@@ -59,7 +59,7 @@ function useMarkdownComponents() {
 
   return React.useMemo(() => ({
     hr: () => null,
-    a: ({ href, children, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: unknown }) => {
+    a: ({ href, children, node, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: unknown }) => {
       if (href?.startsWith('file://')) {
         const stripped = href.replace(/^file:\/\/\/?/, '')
         let filePath = decodeURIComponent(stripped)
@@ -81,7 +81,7 @@ function useMarkdownComponents() {
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
     },
-    pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'> & { node?: unknown }) => {
+    pre: ({ children, node, ...props }: React.ComponentPropsWithoutRef<'pre'> & { node?: unknown }) => {
       const codeChild = React.Children.toArray(children)[0]
       const codeElement = React.isValidElement(codeChild) ? (codeChild as React.ReactElement<CodeChildProps>) : null
       const className = codeElement?.props?.className || ''
@@ -100,8 +100,8 @@ function useMarkdownComponents() {
       }
       return <pre {...props}>{children}</pre>
     },
-    code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { node?: unknown }) => <code className={className} {...props}>{children}</code>,
-    img: ({ src, alt, ...props }: React.ComponentPropsWithoutRef<'img'> & { node?: unknown }) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
+    code: ({ className, children, node, ...props }: React.ComponentPropsWithoutRef<'code'> & { node?: unknown }) => <code className={className} {...props}>{children}</code>,
+    img: ({ src, alt, node, ...props }: React.ComponentPropsWithoutRef<'img'> & { node?: unknown }) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
   }), [])
 }
 

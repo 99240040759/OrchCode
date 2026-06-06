@@ -47,10 +47,15 @@ contextBridge.exposeInMainWorld('api', {
         const p = ev.ports[0]; if (!p) return reject(new Error('No port'))
         activePorts.set(payload.threadId, p)
         p.onmessage = (e) => {
-          try { onChunk(e.data); if (['finish', 'error'].includes(e.data.type)) { p.close(); activePorts.delete(payload.threadId); resolve() } }
-          catch { activePorts.delete(payload.threadId); resolve() }
+          try {
+            onChunk(e.data)
+            if (['finish', 'error'].includes(e.data.type)) { p.close(); activePorts.delete(payload.threadId); resolve() }
+          } catch (err) {
+            activePorts.delete(payload.threadId); p.close()
+            reject(err instanceof Error ? err : new Error(String(err)))
+          }
         }
-        p.onmessageerror = () => { activePorts.delete(payload.threadId); resolve() }
+        p.onmessageerror = () => { activePorts.delete(payload.threadId); p.close(); reject(new Error('Message serialization error')) }
         p.start()
         if (payload.attachments?.length) {
           try {
@@ -84,7 +89,7 @@ contextBridge.exposeInMainWorld('api', {
    * Returns an unsubscribe function.
    */
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
-    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed']
+    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed']
     if (!ALLOWED.includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on(channel, listener)

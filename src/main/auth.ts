@@ -183,10 +183,31 @@ export async function handleAuthCallback(code: string): Promise<void> {
   }
 }
 
+function getJwtExpiry(token: string): number {
+  try { const parts = token.split('.'); if (parts.length !== 3) return 0; return (JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8')).exp || 0) * 1000 }
+  catch { return 0 }
+}
+export async function refreshSessionIfNeeded(): Promise<boolean> {
+  if (!currentSession?.refreshToken) return false
+  const exp = getJwtExpiry(currentSession.idToken)
+  if (exp && exp - Date.now() > 5 * 60 * 1000) return true
+  try {
+    log.info('[auth] Refreshing Supabase session token...')
+    const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_ANON_KEY! },
+      body: JSON.stringify({ refresh_token: currentSession.refreshToken })
+    })
+    if (!res.ok) return false
+    const data = await res.json()
+    if (!data.access_token || !data.refresh_token) return false
+    currentSession = { ...currentSession, idToken: data.access_token, refreshToken: data.refresh_token }
+    await saveSession(currentSession); broadcastUserStatus(currentSession.user)
+    return true
+  } catch (err) { log.error('[auth] Token refresh failed:', err); return false }
+}
 export async function initAuth() {
   currentSession = await loadSession()
-  if (currentSession) {
-    log.info('[auth] Recovered session for:', currentSession.user.email)
-    broadcastUserStatus(currentSession.user)
-  }
+  if (currentSession) { log.info('[auth] Recovered session for:', currentSession.user.email); broadcastUserStatus(currentSession.user); void refreshSessionIfNeeded() }
+  setInterval(() => { void refreshSessionIfNeeded() }, 5 * 60 * 1000)
 }

@@ -50,9 +50,8 @@ function getDB(): Database.Database {
   if (!threadCols.includes('accumulatedTokens')) {
     dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
   }
-  // Drop dead columns on existing installs if present — SQLite can't DROP COLUMN before 3.35
-  // so we leave them in place but never write/read them (they're nullable with no DEFAULT)
-  // New installs won't have them at all.
+  // Note: ALTER TABLE ... DROP COLUMN is fully supported in SQLite 3.35+.
+  // If there are any dead columns from old legacy installations, they can be dropped directly.
 
   return dbInstance
 }

@@ -1,4 +1,3 @@
-import 'dotenv/config'
 import crypto from 'node:crypto'
 import { streamText, stepCountIs, type ModelMessage, type UserContent } from 'ai'
 import log from 'electron-log'
@@ -11,9 +10,10 @@ import { getUserSkillsPath, listInstalledSkills } from '../skills'
 import { createCoreTools, browserTools } from '../tools'
 import {
   getThreadMessages, getThread, saveMessage, updateThreadAccumulatedTokens,
-  setThreadAccumulatedTokens, getThreadWorkspace, setThreadWorkspace, addOpenedWorkspace
+  setThreadAccumulatedTokens, getThreadWorkspace, setThreadWorkspace, addOpenedWorkspace,
+  compactThreadHistory
 } from '../db'
-import { summariseContext, compactThreadHistory } from './summarisation'
+import { summariseContext } from './summarisation'
 import { pushArtifactsChanged } from './artifacts'
 import { buildMessagesFromHistory, buildAttachmentParts, sanitizeMessages } from './schema'
 import type { ModelInfo } from './models'
@@ -46,9 +46,13 @@ export function registerStreamIpc() {
     }
     const { port1, port2 } = new MessageChannelMain()
     event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
-    const worker = pool.getOrCreateWorker(session.idToken)
-    pool.setJob(worker.pid!, `stream:${request.threadId}`)
-    const onExit = () => pool.clearJob(worker.pid!)
+    const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
+    const onExit = (code: number | null) => {
+      pool.clearJob(worker.pid!)
+      worker.off('message', onMsg)
+      const win = WindowManager.getMainWindow()
+      if (win && !win.isDestroyed()) win.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
+    }
     worker.once('exit', onExit)
     const onMsg = (msg: any) => {
       if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
@@ -74,6 +78,52 @@ export function registerStreamIpc() {
   })
 }
 
+function buildBrowserInstruction(isBrowserActive: boolean, modelSupportsVision: boolean): string {
+  const browserView = process.type === 'utility' ? null : WindowManager.getBrowserView()
+  return (browserView || isBrowserActive)
+    ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract inner text and elements.`}`
+    : ''
+}
+async function buildSkillsSection(): Promise<string> {
+  const installedSkills = await listInstalledSkills(), skillsRootPath = getUserSkillsPath().replace(/\\/g, '/')
+  return installedSkills.length > 0
+    ? `── ADVANCED SKILLS ──\nSkills directory: ${skillsRootPath}\nAvailable: ${installedSkills.map(s => `- ${s.name}${s.description ? ` (${s.description})` : ''}`).join('\n')}\nUse listDir/readFile to explore. Follow workflows inside.`
+    : ''
+}
+function buildSystemPrompt(threadId: string, rootPath: string, browserInstruction: string, skillsSection: string): string {
+  return `You are Orch Code, a highly capable AI developer assistant. Active thread: ${threadId}.
+── WORKSPACE ──
+Root: ${rootPath || 'No workspace selected'}
+Use searchWorkspace(query) to find files. Use listDir(path) to explore. Read before editing.
+${browserInstruction}
+${skillsSection}
+── ARTIFACTS ──
+Use the sandboxed system inside '.orch-artifacts/'. Manage with writeToFile, replaceFileContent:
+1. PLANNING: For non-trivial changes, write implementation plan at '.orch-artifacts/implementation_plan.md' and wait for user approval.
+2. NO WALKTHROUGHS: Never edit walkthrough markdown files.
+── TOOLS ──
+Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
+}
+async function setupStreamRequest(port: Electron.MessagePortMain, threadId: string, controller: AbortController, attachments?: any[]) {
+  activePorts.set(threadId, port)
+  port.on('message', (e) => {
+    if (e.data === 'abort') controller.abort()
+    if (e.data?.type === 'bufs') {
+      const resolver = attachmentResolvers.get(threadId)
+      if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
+    }
+  })
+  port.on('close', () => { log.info(`[stream] Port closed by renderer for ${threadId}. Aborting.`); controller.abort() })
+  port.start()
+  const attachmentPromise = pendingAttachments.get(threadId), bufs = attachmentPromise ? await attachmentPromise : []
+  pendingAttachments.delete(threadId)
+  if (attachments && bufs.length) {
+    attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
+    if (bufs.reduce((t, b) => t + b.length, 0) > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
+  }
+  const wsPath = getThreadWorkspace(threadId)
+  if (wsPath) await updateWorkspacePath(threadId, wsPath)
+}
 export async function handleAgentStreamRequest(
   port: Electron.MessagePortMain,
   threadId: string,
@@ -85,109 +135,52 @@ export async function handleAgentStreamRequest(
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
   const send = (msg: Record<string, unknown>) => { try { port.postMessage(msg) } catch {} }
-
   const existingController = activeAbortControllers.get(threadId)
   if (existingController) existingController.abort()
   const controller = new AbortController()
   activeAbortControllers.set(threadId, controller)
-
-  try {
-    activePorts.set(threadId, port)
-    port.on('message', (e) => {
-      if (e.data === 'abort') controller.abort()
-      if (e.data?.type === 'bufs') {
-        const resolver = attachmentResolvers.get(threadId)
-        if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
-      }
-    })
-    port.on('close', () => { log.info(`[stream] Port closed by renderer for ${threadId}. Aborting.`); controller.abort() })
-    port.start()
-
-    const attachmentPromise = pendingAttachments.get(threadId)
-    const bufs = attachmentPromise ? await attachmentPromise : []
-    pendingAttachments.delete(threadId)
-    if (attachments && bufs.length) {
-      attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
-      const bytes = bufs.reduce((t, b) => t + b.length, 0)
-      if (bytes > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
-    }
-
-    const wsPath = getThreadWorkspace(threadId)
-    if (wsPath) await updateWorkspacePath(threadId, wsPath)
-  } catch (err) { log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
-
-  let assistantMsgId = ''
-  let assistantContent = ''
+  try { await setupStreamRequest(port, threadId, controller, attachments) }
+  catch (err) { pendingAttachments.delete(threadId); attachmentResolvers.delete(threadId); log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
+  let assistantMsgId = '', assistantContent = ''
   const orderedBlocks: StreamBlock[] = []
   let sessionAccumulatedTokens = 0
-
   try {
     const history = await getThreadMessages(threadId)
     let persistedAccumulatedTokens = getThread(threadId)?.accumulatedTokens ?? 0
     const userMsgId = crypto.randomUUID()
     await saveMessage(threadId, { id: userMsgId, role: 'user', content: text, data: attachments?.length ? JSON.stringify({ attachments }) : undefined })
-
     const ctx = getWorkspaceContext(threadId) || (await getOrCreateWorkspaceContext(threadId))
     if (ctx.isUserWorkspace && !getThreadWorkspace(threadId)) {
       try { setThreadWorkspace(threadId, ctx.rootPath); addOpenedWorkspace(ctx.rootPath) } catch {}
     }
-
-    const models = await getAvailableModels()
-    const availableList = Object.values(models)
+    const models = await getAvailableModels(), availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
     const rawModel: ModelInfo | undefined = modelType ? models[modelType] : availableList[0]
     if (!rawModel) throw new Error(`Requested model "${modelType}" is not available.`)
-
     const modelSupportsVision = checkModelVisionSupport(rawModel.id)
     const modelSupportsNativeFiles = checkModelNativeFileSupport(rawModel.id)
     const { messages: historyMessages, systemInstructionSuffix } = buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
     const userContent = attachments?.length ? (buildAttachmentParts(text, attachments as Array<{ type: string; name: string; mimeType?: string; base64: string }>, modelSupportsVision, modelSupportsNativeFiles) as UserContent) : text
     historyMessages.push({ role: 'user', content: userContent })
     const messages = sanitizeMessages(historyMessages)
-
     const browserView = process.type === 'utility' ? null : WindowManager.getBrowserView()
-    const browserInstruction = browserView
-      ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract inner text and elements.`}`
-      : ''
-
-    const installedSkills = await listInstalledSkills()
-    const skillsRootPath = getUserSkillsPath().replace(/\\/g, '/')
-    const skillsSection = installedSkills.length > 0
-      ? `── ADVANCED SKILLS ──\nSkills directory: ${skillsRootPath}\nAvailable: ${installedSkills.map(s => `- ${s.name}${s.description ? ` (${s.description})` : ''}`).join('\n')}\nUse listDir/readFile to explore. Follow workflows inside.`
-      : ''
-
-    const systemInstruction = `You are Orch Code, a highly capable AI developer assistant. Active thread: ${threadId}.
-── WORKSPACE ──
-Root: ${ctx.rootPath || 'No workspace selected'}
-Use searchWorkspace(query) to find files. Use listDir(path) to explore. Read before editing.
-${browserInstruction}
-${skillsSection}
-── ARTIFACTS ──
-Use the sandboxed system inside '.orch-artifacts/'. Manage with writeToFile, replaceFileContent:
-1. PLANNING: For non-trivial changes, write implementation plan at '.orch-artifacts/implementation_plan.md' and wait for user approval.
-2. NO WALKTHROUGHS: Never edit walkthrough markdown files.
-── TOOLS ──
-Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
-
+    const browserInstruction = buildBrowserInstruction(!!isBrowserActive, modelSupportsVision)
+    const skillsSection = await buildSkillsSection()
+    const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection)
     const coreTools = createCoreTools(threadId, modelSupportsVision)
     const activeTools = { ...coreTools, ...((browserView || isBrowserActive) ? browserTools(threadId, modelSupportsVision) : {}) }
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
-
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
     assistantMsgId = crypto.randomUUID()
-    let currentReasoningStartMs = 0
-    let lastSaveMs = 0
+    let currentReasoningStartMs = 0, lastSaveMs = 0
     const saveProgress = async (force = false) => {
       const now = Date.now()
       if (!force && now - lastSaveMs < 1000) return
       if (assistantContent || orderedBlocks.length > 0) {
-        try {
-          await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) })
-          lastSaveMs = now
-        } catch (err) { log.error('[stream] Progressive save failed:', err) }
+        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = now }
+        catch (err) { log.error('[stream] Progressive save failed:', err) }
       }
     }
-
     const result = streamText({
       model: resolvedModel,
       system: systemInstruction + (systemInstructionSuffix || ''),
@@ -223,7 +216,6 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
       onAbort: () => { void saveProgress(true) },
       onError: async ({ error }) => { log.error('[stream] AI SDK error:', error); await saveProgress(true) }
     })
-
     for await (const part of result.fullStream) {
       if (controller.signal.aborted) break
       switch (part.type) {
@@ -246,11 +238,13 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
           await saveProgress(false); break
         }
         case 'tool-input-start': {
+          // AI SDK v6 standard event for tool call argument streaming start
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
           orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
           send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId }); break
         }
         case 'tool-input-delta': {
+          // AI SDK v6 standard event for tool call argument streaming delta
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', delta = p.argsTextDelta || p.delta || ''
           const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
@@ -287,6 +281,7 @@ Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, li
         }
         default: {
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
+          // Handle legacy/fallback event types from older AI SDK versions or other providers
           if (p.type === 'tool-call-streaming-start') {
             orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
             send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId })

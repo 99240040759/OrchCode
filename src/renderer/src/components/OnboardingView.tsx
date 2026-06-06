@@ -13,19 +13,11 @@ export const OnboardingView: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [user, setUser] = useState<{ name?: string; email?: string; photoUrl?: string } | null>(null)
-
+  const hasCalledRef = React.useRef(false)
+  React.useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 6000); return () => clearTimeout(timer) }, [])
   React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false)
-    }, 6000)
-    return () => clearTimeout(timer)
-  }, [])
-
-  React.useEffect(() => {
-    if (!user) return
-    const timer = setTimeout(() => {
-      window.api.invoke('auth:open-onboarding').catch(console.error)
-    }, 1600)
+    if (!user || hasCalledRef.current) return
+    const timer = setTimeout(() => { if (hasCalledRef.current) return; hasCalledRef.current = true; window.api.invoke('auth:open-onboarding').catch(console.error) }, 1600)
     return () => clearTimeout(timer)
   }, [user])
 

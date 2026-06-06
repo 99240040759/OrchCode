@@ -42,9 +42,6 @@ export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
 export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => message.id)
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
-
-
-
 export const sessionTokensAtom = atom<number>(0)
 
 export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)

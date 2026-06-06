@@ -35,8 +35,16 @@ export class WorkerPool {
     if (token) selected.postMessage({ type: 'update-token', token })
     return selected
   }
-
   public setJob(pid: number, jobName: string) { this.activeJobs.set(pid, jobName) }
   public clearJob(pid: number) { this.activeJobs.delete(pid) }
+  public allocateWorker(token: string, jobName: string): UtilityProcess {
+    const worker = this.getOrCreateWorker(token)
+    this.setJob(worker.pid!, jobName)
+    return worker
+  }
+  public async shutdown(): Promise<void> {
+    for (const w of this.workers) { try { w.kill() } catch {} }
+    this.workers = []; this.activeJobs.clear()
+  }
 }
 export const pool = new WorkerPool()
