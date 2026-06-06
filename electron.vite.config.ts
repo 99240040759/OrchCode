@@ -13,8 +13,8 @@ export default defineConfig({
       rollupOptions: {
         external: ['node-pty', 'playwright-core'],
         input: {
-          index: resolve(__dirname, 'src/main/main.ts'),
-          agentWorker: resolve(__dirname, 'src/main/agentWorker.ts')
+          index: resolve(__dirname, 'main/main.ts'),
+          agentWorker: resolve(__dirname, 'main/agentWorker.ts')
         }
       }
     },
@@ -28,7 +28,7 @@ export default defineConfig({
   renderer: {
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer/src')
+        '@renderer': resolve('renderer')
       }
     },
     plugins: [
