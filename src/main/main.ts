@@ -4,7 +4,7 @@ import { app, BrowserWindow, shell, session, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
-import { initAuth, getCurrentSession } from './auth'
+import { initAuth, getCurrentSession, handleAuthCallback } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../../resources/icon.png?asset'
@@ -16,6 +16,60 @@ import WindowManager from './windowManager'
 import { stopBrowserAgentWorker } from './tools'
 import { APP_ID } from './paths'
 import { initializeSkills } from './skills'
+
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('orch-code', process.execPath, [join(__dirname, '../../')])
+  }
+} else {
+  app.setAsDefaultProtocolClient('orch-code')
+}
+
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  log.info('[main] Another instance is running. Quitting.')
+  app.quit()
+  process.exit(0)
+}
+
+app.on('second-instance', (_event, commandLine) => {
+  const mainWin = WindowManager.getMainWindow()
+  if (mainWin) {
+    if (mainWin.isMinimized()) mainWin.restore()
+    mainWin.focus()
+  }
+  const onboardingWin = onboardingWindow
+  if (onboardingWin) {
+    if (onboardingWin.isMinimized()) onboardingWin.restore()
+    onboardingWin.focus()
+  }
+  const url = commandLine.pop()
+  if (url && url.startsWith('orch-code://')) {
+    handleAuthUrl(url)
+  }
+})
+
+function handleAuthUrl(urlStr: string) {
+  try {
+    const parsed = new URL(urlStr)
+    if (parsed.hostname === 'auth-callback') {
+      const code = parsed.searchParams.get('code')
+      if (code) {
+        log.info('[main] Forwarding auth callback code to auth module')
+        void handleAuthCallback(code)
+      }
+    }
+  } catch (err: any) {
+    log.error('[main] Failed to parse auth redirect URL:', err)
+  }
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  if (url.startsWith('orch-code://')) {
+    handleAuthUrl(url)
+  }
+})
 
 initSentry({
   dsn: process.env.SENTRY_DSN,

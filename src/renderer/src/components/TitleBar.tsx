@@ -1,17 +1,21 @@
 import React, { useEffect, useCallback } from 'react'
 import { useAtom } from 'jotai'
-import { updateStatusAtom, sidebarExpandedAtom, isArtifactPanelOpenAtom } from '../store/agentStore'
-import { PanelLeft, PanelRight } from 'lucide-react'
+import { updateStatusAtom } from '../store/agentStore'
+
 import type { UpdateStatus } from '../../../preload/index.d'
 
 interface TitleBarProps { title?: string; workspaceName?: string }
 
 const isMac = window.api.platform === 'darwin'
 
+const isNewerVersion = (l: string, c: string): boolean => {
+  const parse = (v: string) => v.replace(/^v/, '').split('.').map(Number)
+  const [lM, lm, lP] = parse(l), [cM, cm, cP] = parse(c)
+  return isNaN(lM) || isNaN(cM) ? l !== c : lM > cM || (lM === cM && (lm > cm || (lm === cm && lP > cP)))
+}
+
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
-  const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
-  const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
 
   const runMacWorkerCheck = useCallback(async () => {
     if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
@@ -24,7 +28,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
       if (!res.ok) { setUpdateStatus({ status: 'idle' }); return }
       const data = await res.json()
       const latestVersion: string = data.tag_name?.replace(/^v/, '') ?? ''
-      const hasUpdate = !!latestVersion && latestVersion !== currentVersion
+      const hasUpdate = !!latestVersion && isNewerVersion(latestVersion, currentVersion)
       setUpdateStatus(hasUpdate ? { status: 'available', version: latestVersion } : { status: 'idle', version: latestVersion })
     } catch (err: any) { setUpdateStatus({ status: 'error', error: err.message }) }
   }, [setUpdateStatus])
@@ -72,20 +76,10 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
   return (
     <header className="titlebar">
       <div className={`titlebar-left ${isMac ? 'titlebar-left-mac' : 'titlebar-left-win'}`}>
-        {!sidebarExpanded && (
-          <div className="titlebar-toggle-btn" onClick={() => setSidebarExpanded(true)} title="Expand Sidebar">
-            <PanelLeft size={16} strokeWidth={1.5} color="var(--text-secondary)" />
-          </div>
-        )}
       </div>
       <div className="titlebar-center">{workspaceName ? workspaceName : title}</div>
       <div className={`titlebar-right ${isMac ? 'titlebar-right-mac' : 'titlebar-right-win'}`}>
         {renderUpdateIndicator()}
-        {!isArtifactPanelOpen && (
-          <div className="titlebar-toggle-btn" onClick={() => setArtifactPanelOpen(true)} title="Expand Right Panel">
-            <PanelRight size={16} strokeWidth={1.5} color="var(--text-secondary)" />
-          </div>
-        )}
       </div>
     </header>
   )

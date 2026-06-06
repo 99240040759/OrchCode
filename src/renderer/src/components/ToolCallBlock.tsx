@@ -8,6 +8,7 @@ import { useSetAtom, useAtomValue } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../../preload/index.d'
+import { LocalImage } from './MarkdownRenderer'
 
 export const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
   <SymbolsFileIcon fileName={fileName} autoAssign={true} width={size} height={size} className={`${className} file-icon-wrapper`} />
@@ -59,6 +60,11 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>): {
   if (toolName === 'searchWeb') {
     return { operation: 'Searching web', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
   }
+  if (toolName === 'generateImage') {
+    const prompt = (args.prompt as string) ?? ''
+    const target = prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt
+    return { operation: 'Generating image', target, fullPath: null, isFile: false }
+  }
   // Default: just show tool name
   return { operation: toolName, target: '', fullPath: null, isFile: false }
 }
@@ -79,6 +85,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
     case 'listDir': return <FolderOpen size={15} className="icon-secondary" />
     case 'searchWorkspace': return <FileText size={15} className="icon-secondary" />
     case 'searchWeb': return <Globe size={15} className="icon-purple" />
+    case 'generateImage': return <Camera size={15} className="icon-blue" />
     default: return <Terminal size={15} className="icon-secondary" />
   }
 }
@@ -99,18 +106,40 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   }
 
   const Component = (isFile ? 'button' : 'div') as React.ElementType
+  const isImageGen = toolCall.toolName === 'generateImage'
+
   return (
-    <Component
-      onClick={isFile ? handleClick : undefined}
-      className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
-      title={isFile ? `Open ${fullPath}` : undefined}
-    >
-      <span className="muted-text">{operation}</span>
-      <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
-      <span className="target-text">{target}</span>
-      {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
-      {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
-    </Component>
+    <div className="tool-call-block-container" style={{ display: 'flex', flexDirection: 'column' }}>
+      <Component
+        onClick={isFile ? handleClick : undefined}
+        className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
+        title={isFile ? `Open ${fullPath}` : undefined}
+      >
+        <span className="muted-text">{operation}</span>
+        <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
+        <span className="target-text">{target}</span>
+        {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
+        {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
+      </Component>
+      {isImageGen && (
+        <div className="tool-image-preview-frame" style={{ marginTop: '4px' }}>
+          {toolCall.status === 'pending' && (
+            <div className="local-image-loading-frame">
+              <div className="tool-call-spinner" />
+              <span className="shimmer-text">Creating image...</span>
+            </div>
+          )}
+          {toolCall.status === 'error' && (
+            <div className="local-image-error-frame">
+              <span>Generation failed</span>
+            </div>
+          )}
+          {toolCall.status === 'complete' && toolCall.result && (toolCall.result as any).success && (
+            <LocalImage src={(toolCall.result as any).filePath} alt="Generated Image" />
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

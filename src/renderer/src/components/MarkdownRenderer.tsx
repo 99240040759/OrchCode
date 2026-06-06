@@ -11,16 +11,42 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 interface MarkdownRendererProps { content: string; isArtifact?: boolean }
 type CodeChildProps = { className?: string; children?: React.ReactNode }
 
-function extractText(node: any): string {
+const extractText = (node: any): string => {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
   if (Array.isArray(node)) return node.map(extractText).join('')
-  if (React.isValidElement<{ children?: any }>(node)) return extractText(node.props.children)
-  return ''
+  return React.isValidElement<{ children?: any }>(node) ? extractText(node.props.children) : ''
 }
 
-// L-3 FIX: The components object is truly static — no values from props are used inside.
-// Changed dep from [isArtifact] to [] so ReactMarkdown never re-mounts its tree.
-// isArtifact only affects the wrapper className, not the component definitions.
+export const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }) => {
+  const conversationId = useAtomValue(activeThreadIdAtom)
+  const [imgSrc, setImgSrc] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<boolean>(false)
+  const [loading, setLoading] = React.useState<boolean>(true)
+
+  React.useEffect(() => {
+    let active = true
+    const loadImage = async () => {
+      try {
+        setLoading(true); setError(false)
+        const stripped = src.replace(/^file:\/\/\/?/, '')
+        let filePath = decodeURIComponent(stripped)
+        if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) filePath = '/' + filePath
+        const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
+        if (active) {
+          if (fileData?.isBinary && fileData.base64) setImgSrc(`data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
+          else setError(true)
+        }
+      } catch (err) { console.error(err); if (active) setError(true) }
+      finally { if (active) setLoading(false) }
+    }
+    loadImage(); return () => { active = false }
+  }, [src, conversationId])
+
+  if (loading) return <div className="local-image-loading-frame"><div className="tool-call-spinner" /><span className="shimmer-text">Loading image...</span></div>
+  if (error || !imgSrc) return <div className="local-image-error-frame"><span>Failed to load image</span></div>
+  return <div className="local-image-container"><img src={imgSrc} alt={alt || 'Generated Image'} className="local-image-preview" /></div>
+}
+
 function useMarkdownComponents() {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
@@ -32,7 +58,7 @@ function useMarkdownComponents() {
   return React.useMemo(() => ({
     hr: () => null,
     a: ({ href, children, ...props }: any) => {
-      if (href && href.startsWith('file://')) {
+      if (href?.startsWith('file://')) {
         const stripped = href.replace(/^file:\/\/\/?/, '')
         let filePath = decodeURIComponent(stripped)
         if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) filePath = '/' + filePath
@@ -42,12 +68,11 @@ function useMarkdownComponents() {
             const { setActiveEditorFile: sae, setArtifactPanelMode: spm, setArtifactPanelOpen: sapo, conversationId: cid } = stateRef.current
             const fileData = await window.api.invoke('file:read', { filePath, conversationId: cid }) as any
             if (fileData) { sae(fileData); spm('editor'); sapo(true) }
-          } catch (err) { console.error('[MarkdownRenderer] Failed to open file:', err) }
+          } catch (err) { console.error(err) }
         }
-        const filename = filePath.split(/[/\\]/).pop() ?? ''
         return (
           <span onClick={handleFileClick} title={`Open ${filePath}`} className="file-link">
-            <SymbolsFileIcon fileName={filename} autoAssign={true} width={14} height={14} className="file-icon-wrapper" />
+            <SymbolsFileIcon fileName={filePath.split(/[/\\]/).pop() ?? ''} autoAssign width={14} height={14} className="file-icon-wrapper" />
             <span className="file-name-wrapper">{children}</span>
           </span>
         )
@@ -58,8 +83,7 @@ function useMarkdownComponents() {
       const codeChild = React.Children.toArray(children)[0]
       const codeElement = React.isValidElement(codeChild) ? (codeChild as React.ReactElement<CodeChildProps>) : null
       const className = codeElement?.props?.className || ''
-      const match = /language-(\w+)/.exec(className)
-      const language = match ? match[1] : ''
+      const match = /language-(\w+)/.exec(className), language = match ? match[1] : ''
       const codeString = codeElement?.props?.children ? extractText(codeElement.props.children).replace(/\n$/, '') : ''
       if (language) {
         return (
@@ -74,7 +98,8 @@ function useMarkdownComponents() {
       }
       return <pre {...props}>{children}</pre>
     },
-    code: ({ className, children, ...props }: any) => <code className={className} {...props}>{children}</code>
+    code: ({ className, children, ...props }: any) => <code className={className} {...props}>{children}</code>,
+    img: ({ src, alt, ...props }: any) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
   }), [])
 }
 

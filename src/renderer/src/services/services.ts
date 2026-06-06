@@ -20,6 +20,6 @@ export const workspaceService = {
   setActiveWorkspace: (conversationId: string, workspacePath: string) => invoke<WorkspaceContext>('workspace:set-active', { conversationId, workspacePath }),
   closeAndDeleteWorkspace: (workspacePath: string) => invoke<boolean>('workspace:close-and-delete', { workspacePath }),
   listWorkspaceFiles: (conversationId: string) => invoke<string[]>('workspace:list-files', { conversationId }),
-  readFile: (filePath: string, conversationId?: string) => invoke<FileReadResult>('file:read', { filePath, conversationId: conversationId || '' }),
+  readFile: (filePath: string, conversationId: string) => invoke<FileReadResult>('file:read', { filePath, conversationId }),
   readOriginalFile: (filePath: string, conversationId?: string) => invoke<{ content: string }>('file:read-original', { filePath, conversationId })
 }

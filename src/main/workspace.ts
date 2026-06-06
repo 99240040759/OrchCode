@@ -5,322 +5,140 @@ import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
 import { getConversationPath } from './paths'
 
-// Correct TypeScript/TSX mime types — override default MPEG-TS video mapping
-mime.types['ts'] = 'application/typescript'
-mime.types['tsx'] = 'application/typescript'
-mime.types['kt'] = 'text/x-kotlin'
-mime.types['kts'] = 'text/x-kotlin'
-mime.types['gradle'] = 'text/x-groovy'
-mime.types['properties'] = 'text/x-properties'
-mime.types['env'] = 'text/plain'
-mime.types['gitignore'] = 'text/plain'
-mime.types['editorconfig'] = 'text/plain'
+Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
 
 const traverseLimiter = new Bottleneck({ maxConcurrent: 20, minTime: 0 })
 
 export interface WorkspaceContext {
-  conversationId: string
-  rootPath: string
-  artifactsPath: string
-  isUserWorkspace: boolean
+  conversationId: string; rootPath: string; artifactsPath: string; isUserWorkspace: boolean
 }
 
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 
-function validateConversationId(conversationId: string) {
-  if (
-    !conversationId ||
-    typeof conversationId !== 'string' ||
-    !/^[a-zA-Z0-9-_]+$/.test(conversationId)
-  ) {
-    throw new Error(`Invalid conversationId format: ${conversationId}`)
-  }
-}
+const validateConversationId = (id: string) => { if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9-_]+$/.test(id)) throw new Error(`Invalid id: ${id}`) }
 
-export async function getOrCreateWorkspaceContext(
-  conversationId: string,
-  userSelectedPath?: string
-): Promise<WorkspaceContext> {
+export async function getOrCreateWorkspaceContext(conversationId: string, userSelectedPath?: string): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
-  if (workspaceRegistry.has(conversationId)) {
-    return workspaceRegistry.get(conversationId)!
-  }
-
-  if (initPromises.has(conversationId)) {
-    return initPromises.get(conversationId)!
-  }
-
+  if (workspaceRegistry.has(conversationId)) return workspaceRegistry.get(conversationId)!
+  if (initPromises.has(conversationId)) return initPromises.get(conversationId)!
   const promise = (async () => {
     try {
-      const isUserWorkspace = !!userSelectedPath
-      const rootPath = userSelectedPath ?? getConversationPath(conversationId)
-
-      const artifactsPath = join(rootPath, '.orch-artifacts')
-
+      const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId), artifactsPath = join(rootPath, '.orch-artifacts')
       await fs.mkdir(rootPath, { recursive: true })
-      if (isUserWorkspace) {
-        await fs.mkdir(artifactsPath, { recursive: true })
-      }
-
-      const ctx: WorkspaceContext = { conversationId, rootPath, artifactsPath, isUserWorkspace }
-      workspaceRegistry.set(conversationId, ctx)
-      return ctx
-    } finally {
-      initPromises.delete(conversationId)
-    }
+      if (isUserWorkspace) await fs.mkdir(artifactsPath, { recursive: true })
+      const ctx = { conversationId, rootPath, artifactsPath, isUserWorkspace }
+      workspaceRegistry.set(conversationId, ctx); return ctx
+    } finally { initPromises.delete(conversationId) }
   })()
-
-  initPromises.set(conversationId, promise)
-  return promise
+  initPromises.set(conversationId, promise); return promise
 }
 
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
-  validateConversationId(conversationId)
-  return workspaceRegistry.get(conversationId)
+  validateConversationId(conversationId); return workspaceRegistry.get(conversationId)
 }
 
 export function clearWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
   validateConversationId(conversationId)
   const context = workspaceRegistry.get(conversationId)
-  workspaceRegistry.delete(conversationId)
-  initPromises.delete(conversationId)
+  workspaceRegistry.delete(conversationId); initPromises.delete(conversationId)
   return context
 }
 
-export async function updateWorkspacePath(
-  conversationId: string,
-  newPath: string
-): Promise<WorkspaceContext> {
+export async function updateWorkspacePath(conversationId: string, newPath: string): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
   if (!isAbsolute(newPath)) throw new Error('Workspace path must be absolute.')
   const stat = await fs.stat(newPath)
   if (!stat.isDirectory()) throw new Error('Workspace path must point to a directory.')
   const artifactsPath = join(newPath, '.orch-artifacts')
-
   await fs.mkdir(artifactsPath, { recursive: true })
-
-  const ctx: WorkspaceContext = {
-    conversationId,
-    rootPath: newPath,
-    artifactsPath,
-    isUserWorkspace: true
-  }
-  workspaceRegistry.set(conversationId, ctx)
-  return ctx
+  const ctx = { conversationId, rootPath: newPath, artifactsPath, isUserWorkspace: true }
+  workspaceRegistry.set(conversationId, ctx); return ctx
 }
 
-/**
- * Validates that targetPath is inside rootPath.
- * Handles both absolute paths and relative paths correctly on Windows and macOS.
- */
-export function assertWithinWorkspace(
-  rootPath: string,
-  targetPath: string,
-  _conversationId?: string
-): string {
-  // Resolve root to an absolute normalised path with trailing sep
-  const resolvedRoot = normalize(resolve(rootPath))
-  const normalizedRoot = resolvedRoot + sep
-
-  // If targetPath is already absolute, resolve it directly.
-  // If it's relative (or has leading slash stripped), join with root first.
-  const resolvedTarget = normalize(
-    isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath)
-  )
-
+export function assertWithinWorkspace(rootPath: string, targetPath: string, _conversationId?: string): string {
+  const resolvedRoot = normalize(resolve(rootPath)), normalizedRoot = resolvedRoot + sep
+  const resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
   const isWindows = process.platform === 'win32'
   const rootCompare = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot
   const targetCompare = isWindows ? resolvedTarget.toLowerCase() : resolvedTarget
 
-  // Allow exact match (target === root) or target is inside root
-  const rootWithoutSep = rootCompare.slice(0, -1)
-  if (targetCompare !== rootWithoutSep && !targetCompare.startsWith(rootCompare)) {
-    throw new Error(
-      `Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`
-    )
+  if (targetCompare !== rootCompare.slice(0, -1) && !targetCompare.startsWith(rootCompare)) {
+    throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
   }
 
-  // Resolve existing symlinks for the target or its nearest existing parent.
-  // A lexical path can be inside the workspace while a symlink points outside it.
   let existingPath = resolvedTarget
   while (!existsSync(existingPath)) {
     const parent = dirname(existingPath)
     if (parent === existingPath) break
     existingPath = parent
   }
-  const realRoot = normalize(realpathSync(resolvedRoot))
-  const realExisting = normalize(realpathSync(existingPath))
-  const realRootWithSep = realRoot + sep
+  const realRoot = normalize(realpathSync(resolvedRoot)), realExisting = normalize(realpathSync(existingPath)), realRootWithSep = realRoot + sep
   const realRootCompare = isWindows ? realRootWithSep.toLowerCase() : realRootWithSep
   const realExistingCompare = isWindows ? realExisting.toLowerCase() : realExisting
-  if (
-    realExistingCompare !== realRootCompare.slice(0, -1) &&
-    !realExistingCompare.startsWith(realRootCompare)
-  ) {
+  if (realExistingCompare !== realRootCompare.slice(0, -1) && !realExistingCompare.startsWith(realRootCompare)) {
     throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
   }
-
   return resolvedTarget
 }
 
-// ─── Binary File Detection (shared single source of truth) ───────────────────
+const BINARY_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'application/zip', 'application/x-tar', 'application/pdf']
+const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/typescript']
 
-const BINARY_MIME_PREFIXES = [
-  'image/',
-  'video/',
-  'audio/',
-  'application/zip',
-  'application/x-tar',
-  'application/pdf'
-]
-
-const TEXT_MIME_PREFIXES = [
-  'text/',
-  'application/json',
-  'application/xml',
-  'application/javascript',
-  'application/typescript'
-]
-
-export function getMimeType(filePath: string): string {
-  return mime.lookup(filePath) || 'application/octet-stream'
-}
+export function getMimeType(filePath: string): string { return mime.lookup(filePath) || 'application/octet-stream' }
 
 export function isFileBinary(filePath: string, buf: Buffer): boolean {
-  const detectedMime = getMimeType(filePath)
-  if (TEXT_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return false
-  if (BINARY_MIME_PREFIXES.some((p) => detectedMime.startsWith(p))) return true
-  // Fallback: null-byte scan for unknown mime types
+  const m = getMimeType(filePath)
+  if (TEXT_MIME_PREFIXES.some(p => m.startsWith(p))) return false
+  if (BINARY_MIME_PREFIXES.some(p => m.startsWith(p))) return true
   return buf.subarray(0, 512).includes(0x00)
 }
 
-// M-3 FIX: escapeHtml removed — it was exported but never imported anywhere in the codebase.
-
-// ─── Workspace File Tree ──────────────────────────────────────────────────────
-
 const DEFAULT_IGNORED_DIRS = ['.git', '.orch-artifacts', '.gemini', 'node_modules']
-const BINARY_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.ico',
-  '.mp4',
-  '.zip',
-  '.gz',
-  '.tar',
-  '.exe',
-  '.dll',
-  '.sqlite',
-  '.db',
-  '.bin',
-  '.wasm'
-])
+const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
-interface TraverseOptions {
-  onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void
-}
-
-interface TraverseState {
-  count: number
-  max: number
-}
+interface TraverseOptions { onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void }
+interface TraverseState { count: number; max: number }
 
 const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
 
-// L-8 FIX: Exported so file write tools can invalidate stale listings immediately after a write.
-export function invalidateWorkspaceFilesCache(rootPath: string): void {
-  const resolvedRoot = resolve(rootPath)
-  workspaceFilesCache.delete(resolvedRoot)
-}
+export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(resolve(rootPath)) }
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore().add(DEFAULT_IGNORED_DIRS)
   try {
     const gitignorePath = join(rootPath, '.gitignore')
-    if (existsSync(gitignorePath)) {
-      const content = readFileSync(gitignorePath, 'utf8')
-      ig.add(content)
-    }
+    if (existsSync(gitignorePath)) ig.add(readFileSync(gitignorePath, 'utf8'))
   } catch {}
   return ig
 }
 
-async function traverseDir(
-  dir: string,
-  options: TraverseOptions,
-  ig: Ignore,
-  rootPath: string,
-  state: TraverseState
-): Promise<void> {
+async function traverseDir(dir: string, options: TraverseOptions, ig: Ignore, rootPath: string, state: TraverseState): Promise<void> {
   if (state.count >= state.max) return
-
   let entries: import('node:fs').Dirent[] = []
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-
+  try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
   const promises: Promise<void>[] = []
   for (const entry of entries) {
     if (state.count >= state.max) break
-
-    const name = entry.name
-    const fullPath = join(dir, name)
-    let relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-    if (entry.isDirectory()) relPath += '/'
-
+    const name = entry.name, fullPath = join(dir, name)
+    let relPath = relative(rootPath, fullPath).replace(/\\/g, '/') + (entry.isDirectory() ? '/' : '')
     if (ig.ignores(relPath)) continue
-
-    if (entry.isDirectory()) {
-      promises.push(traverseDir(fullPath, options, ig, rootPath, state))
-    } else if (entry.isFile()) {
-      const ext = extname(name).toLowerCase()
-      if (BINARY_EXTENSIONS.has(ext)) continue
+    if (entry.isDirectory()) promises.push(traverseDir(fullPath, options, ig, rootPath, state))
+    else if (entry.isFile() && !BINARY_EXTENSIONS.has(extname(name).toLowerCase())) {
       state.count++
-      promises.push(
-        traverseLimiter.schedule(async () => {
-          try {
-            const stat = await fs.stat(fullPath)
-            await options.onFile(fullPath, name, stat.size)
-          } catch {}
-        })
-      )
+      promises.push(traverseLimiter.schedule(async () => {
+        try { const stat = await fs.stat(fullPath); await options.onFile(fullPath, name, stat.size) } catch {}
+      }))
     }
   }
   await Promise.all(promises)
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
-  const resolvedRoot = resolve(rootPath)
-  const cached = workspaceFilesCache.get(resolvedRoot)
-  if (cached && Date.now() - cached.timestamp < 10000) {
-    return cached.files
-  }
-
-  const files: string[] = []
-  const ig = buildIgnore(rootPath)
-  const state: TraverseState = { count: 0, max: 5000 }
-
-  await traverseDir(
-    rootPath,
-    {
-      onFile: (fullPath) => {
-        try {
-          const relPath = relative(rootPath, fullPath).replace(/\\/g, '/')
-          files.push(relPath)
-        } catch {}
-      }
-    },
-    ig,
-    rootPath,
-    state
-  )
-
+  const resolved = resolve(rootPath), cached = workspaceFilesCache.get(resolved)
+  if (cached && Date.now() - cached.timestamp < 10000) return cached.files
+  const files: string[] = [], ig = buildIgnore(rootPath), state = { count: 0, max: 5000 }
+  await traverseDir(rootPath, { onFile: (fp) => { try { files.push(relative(rootPath, fp).replace(/\\/g, '/')) } catch {} } }, ig, rootPath, state)
   files.sort((a, b) => a.localeCompare(b))
-  workspaceFilesCache.set(resolvedRoot, { files, timestamp: Date.now() })
-  return files
+  workspaceFilesCache.set(resolved, { files, timestamp: Date.now() }); return files
 }

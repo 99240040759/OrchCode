@@ -1,18 +1,8 @@
 import { app, shell, BrowserWindow, safeStorage } from 'electron'
-import http from 'node:http'
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
 import { getSessionPath } from './paths'
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-}
 
 export interface UserProfile {
   uid: string
@@ -29,10 +19,11 @@ export interface AuthSession {
 
 const sessionFilePath = getSessionPath()
 let currentSession: AuthSession | null = null
-let tempServer: http.Server | null = null
-let pendingLoginReject: ((reason: Error) => void) | null = null
 let loginInProgress = false
 let loginTimeout: NodeJS.Timeout | null = null
+let activeVerifier = ''
+let pendingLoginResolve: ((user: UserProfile | null) => void) | null = null
+let pendingLoginReject: ((reason: Error) => void) | null = null
 
 function base64URLEncode(buffer: Buffer): string {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -48,36 +39,6 @@ function generatePKCE() {
   return { verifier, challenge }
 }
 
-async function postFormRequest(urlStr: string, formParams: Record<string, string>): Promise<any> {
-  const response = await fetch(urlStr, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams(formParams).toString()
-  })
-  const parsed = await response.json()
-  if (!response.ok) {
-    throw new Error(parsed.error_description || parsed.error || `HTTP ${response.status}`)
-  }
-  return parsed
-}
-
-async function postJsonRequest(urlStr: string, bodyObj: any): Promise<any> {
-  const response = await fetch(urlStr, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(bodyObj)
-  })
-  const parsed = await response.json()
-  if (!response.ok) {
-    throw new Error(parsed.error?.message || `HTTP ${response.status}`)
-  }
-  return parsed
-}
-
 export function getCurrentSession(): AuthSession | null {
   return currentSession
 }
@@ -88,15 +49,9 @@ async function loadSession(): Promise<AuthSession | null> {
     return null
   }
   try {
-    const exists = await fs
-      .stat(sessionFilePath)
-      .then(() => true)
-      .catch(() => false)
+    const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
     if (!exists) return null
-
-    const encrypted = await fs.readFile(sessionFilePath)
-    const result = safeStorage.decryptString(encrypted)
-    currentSession = JSON.parse(result)
+    currentSession = JSON.parse(safeStorage.decryptString(await fs.readFile(sessionFilePath)))
     return currentSession
   } catch (err) {
     log.error('[auth] Load session failed:', err)
@@ -109,13 +64,9 @@ async function saveSession(session: AuthSession | null) {
     await fs.rm(sessionFilePath, { force: true }).catch(() => {})
     return
   }
-  if (!safeStorage.isEncryptionAvailable()) {
-    log.error('[auth] safeStorage unavailable — session not persisted. Re-authentication will be required on next launch.')
-    return
-  }
+  if (!safeStorage.isEncryptionAvailable()) return
   try {
-    const encrypted = safeStorage.encryptString(JSON.stringify(session))
-    await fs.writeFile(sessionFilePath, encrypted)
+    await fs.writeFile(sessionFilePath, safeStorage.encryptString(JSON.stringify(session)))
   } catch (err) {
     log.error('[auth] Save session failed:', err)
   }
@@ -123,27 +74,7 @@ async function saveSession(session: AuthSession | null) {
 
 function broadcastUserStatus(user: UserProfile | null) {
   BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send('auth:status-changed', user)
-    }
-  })
-}
-
-async function closeTempServer(): Promise<void> {
-  if (loginTimeout) {
-    clearTimeout(loginTimeout)
-    loginTimeout = null
-  }
-  return new Promise((resolve) => {
-    if (!tempServer) {
-      resolve()
-      return
-    }
-    const s = tempServer
-    tempServer = null
-    s.close(() => {
-      resolve()
-    })
+    if (!win.isDestroyed()) win.webContents.send('auth:status-changed', user)
   })
 }
 
@@ -160,176 +91,93 @@ export async function logoutUser(): Promise<boolean> {
   return true
 }
 
-
 export async function startGoogleAuth(): Promise<UserProfile | null> {
-  if (loginInProgress) {
-    throw new Error('Login already in progress. Please wait or try again later.')
-  }
+  if (loginInProgress) throw new Error('Login already in progress.')
   loginInProgress = true
   try {
-    log.info('[auth] Triggering Google Sign-in flow...')
+    log.info('[auth] Triggering Supabase Google Sign-in flow...')
     if (pendingLoginReject) {
-      pendingLoginReject(new Error('Login cancelled: new login initiated'))
+      pendingLoginReject(new Error('Login cancelled'))
       pendingLoginReject = null
+      pendingLoginResolve = null
     }
-    await closeTempServer()
+    const { verifier, challenge } = generatePKCE()
+    activeVerifier = verifier
 
-      const { verifier, challenge } = generatePKCE()
-      const port = 9005
-      const clientId = process.env.GOOGLE_CLIENT_ID
-      const firebaseKey = process.env.FIREBASE_API_KEY
+    const supabaseUrl = process.env.SUPABASE_URL
+    if (!supabaseUrl) throw new Error('SUPABASE_URL config is missing.')
 
-      if (!clientId || !firebaseKey) {
-        log.error(
-          '[auth] Missing required GOOGLE_CLIENT_ID or FIREBASE_API_KEY environment variables.'
-        )
-        throw new Error('Authentication service configuration is missing.')
-      }
+    return await new Promise<UserProfile | null>((resolve, reject) => {
+      pendingLoginResolve = resolve
+      pendingLoginReject = reject
 
-      return await new Promise((resolve, reject) => {
-        pendingLoginReject = reject
-        tempServer = http.createServer(async (req, res) => {
-          try {
-            const reqUrl = req.url || ''
-            if (!reqUrl.includes('/callback')) {
-              res.writeHead(404)
-              res.end('Not Found')
-              return
-            }
+      const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({
+        provider: 'google',
+        redirect_to: 'orch-code://auth-callback',
+        code_challenge: challenge,
+        code_challenge_method: 's256'
+      }).toString()
 
-            const urlParams = new URLSearchParams(reqUrl.split('?')[1])
-            const authCode = urlParams.get('code')
-            const authError = urlParams.get('error')
+      loginTimeout = setTimeout(() => {
+        const rejectPending = pendingLoginReject
+        pendingLoginReject = null
+        pendingLoginResolve = null
+        rejectPending?.(new Error('Sign-in timed out.'))
+      }, 5 * 60 * 1000)
 
-            if (!authCode || authError) {
-              const reason = authError || 'No authorization code returned'
-              log.warn(`[auth] Auth callback received without code: ${reason}`)
-              res.writeHead(200, { 'Content-Type': 'text/html' })
-              res.end(
-                `<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Sign In Cancelled</h1><p style="color:#9c9c9c; font-size:14px;">Reason: ${escapeHtml(reason)}. You can close this tab and try again.</p></div></body></html>`
-              )
-              closeTempServer()
-              pendingLoginReject = null
-              reject(new Error(`Auth cancelled: ${reason}`))
-              return
-            }
-
-            res.writeHead(200, { 'Content-Type': 'text/html' })
-            res.end(
-              '<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #272727; text-align:center; max-width:400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);"><h1 style="color:#10b981; font-size:24px; margin-bottom:10px;">Login Successful</h1><p style="color:#9c9c9c; font-size:14px; margin-bottom:20px;">You have successfully signed in. You can close this tab and return to your app.</p></div></body></html>'
-            )
-
-            closeTempServer()
-
-            log.info('[auth] Received Google auth code, exchanging for tokens...')
-
-            const googleTokenParams: Record<string, string> = {
-              client_id: clientId,
-              code: authCode,
-              code_verifier: verifier,
-              grant_type: 'authorization_code',
-              redirect_uri: `http://localhost:${port}/callback`
-            }
-
-            if (process.env.GOOGLE_CLIENT_SECRET) {
-              googleTokenParams.client_secret = process.env.GOOGLE_CLIENT_SECRET
-            }
-
-            const googleTokens = await postFormRequest(
-              'https://oauth2.googleapis.com/token',
-              googleTokenParams
-            )
-
-            const googleIdToken = googleTokens.id_token
-            if (!googleIdToken) {
-              throw new Error('Google did not return an id_token')
-            }
-
-            log.info('[auth] Exchanging Google token with Firebase REST API...')
-
-            const firebaseAuthUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${firebaseKey}`
-            const firebaseSession = await postJsonRequest(firebaseAuthUrl, {
-              postBody: `id_token=${googleIdToken}&providerId=google.com`,
-              requestUri: 'http://localhost',
-              returnIdpCredential: true,
-              returnSecureToken: true
-            })
-
-            const user: UserProfile = {
-              uid: firebaseSession.localId,
-              name: firebaseSession.displayName,
-              email: firebaseSession.email,
-              photoUrl: firebaseSession.photoUrl
-            }
-
-            currentSession = {
-              idToken: firebaseSession.idToken,
-              refreshToken: firebaseSession.refreshToken,
-              user
-            }
-
-            await saveSession(currentSession)
-            log.info('[auth] Login completed. Authenticated user:', user.email)
-
-            pendingLoginReject = null
-            broadcastUserStatus(user)
-            resolve(user)
-          } catch (err: any) {
-            log.error('[auth] Login flow failed:', err)
-            closeTempServer()
-            if (!res.headersSent) {
-              res.writeHead(500, { 'Content-Type': 'text/html' })
-              res.end(
-                '<html><body style="font-family: sans-serif; background-color:#1e1e1e; color:#f3f3f3; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0;"><div style="background:#161616; padding:30px; border-radius:8px; border:1px solid #ef4444; text-align:center; max-width:400px;"><h1 style="color:#ef4444; font-size:24px; margin-bottom:10px;">Authentication Failed</h1><p style="color:#9c9c9c; font-size:14px;">Error: ' +
-                  escapeHtml(err.message) +
-                  '</p></div></body></html>'
-              )
-            }
-            pendingLoginReject = null
-            reject(err)
-          }
-        })
-
-        tempServer.on('error', (err: any) => {
-          log.error('[auth] Redirect server socket error:', err)
-          closeTempServer()
-          pendingLoginReject = null
-          reject(new Error(`Local authentication server error: ${err.message}`))
-        })
-
-        tempServer.listen(port, '127.0.0.1', () => {
-          const redirectUrl =
-            'https://accounts.google.com/o/oauth2/v2/auth?' +
-            new URLSearchParams({
-              client_id: clientId,
-              redirect_uri: `http://localhost:${port}/callback`,
-              response_type: 'code',
-              scope: 'openid email profile',
-              code_challenge: challenge,
-              code_challenge_method: 'S256'
-            }).toString()
-
-          loginTimeout = setTimeout(
-            () => {
-              const rejectPending = pendingLoginReject
-              pendingLoginReject = null
-              void closeTempServer()
-              rejectPending?.(new Error('Sign-in timed out. Please try again.'))
-            },
-            5 * 60 * 1000
-          )
-
-          void shell.openExternal(redirectUrl).catch((error) => {
-            const rejectPending = pendingLoginReject
-            pendingLoginReject = null
-            void closeTempServer()
-            rejectPending?.(error instanceof Error ? error : new Error(String(error)))
-          })
-        })
+      void shell.openExternal(redirectUrl).catch((err) => {
+        const rejectPending = pendingLoginReject
+        pendingLoginReject = null
+        pendingLoginResolve = null
+        rejectPending?.(err instanceof Error ? err : new Error(String(err)))
       })
-    } finally {
-      loginInProgress = false
+    })
+  } finally {
+    loginInProgress = false
+  }
+}
+
+export async function handleAuthCallback(code: string): Promise<void> {
+  if (!pendingLoginResolve || !pendingLoginReject) return
+  if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
+  const resolve = pendingLoginResolve
+  const reject = pendingLoginReject
+  pendingLoginResolve = null
+  pendingLoginReject = null
+
+  try {
+    log.info('[auth] Exchanging Supabase auth code for tokens...')
+    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
+
+    const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey!,
+        'Authorization': `Bearer ${supabaseAnonKey}`
+      },
+      body: JSON.stringify({ code_verifier: activeVerifier, auth_code: code })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error_description || data.error || `HTTP ${res.status}`)
+
+    const user: UserProfile = {
+      uid: data.user.id,
+      name: data.user.user_metadata?.full_name || data.user.email || 'User',
+      email: data.user.email || '',
+      photoUrl: data.user.user_metadata?.avatar_url || ''
     }
+
+    currentSession = { idToken: data.access_token, refreshToken: data.refresh_token, user }
+    await saveSession(currentSession)
+    log.info('[auth] Login completed:', user.email)
+    broadcastUserStatus(user)
+    resolve(user)
+  } catch (err: any) {
+    log.error('[auth] Callback failed:', err)
+    reject(err)
+  }
 }
 
 export async function initAuth() {

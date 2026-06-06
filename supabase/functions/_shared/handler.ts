@@ -2,7 +2,7 @@
  * Shared edge function middleware.
  * CORS, auth, env loading, error handling, and proxy utilities — all in one place.
  */
-import { validateAnonKey } from './auth.ts'
+import { validateAnonKey, validateUserJWT } from './auth.ts'
 
 export const ALLOWED_ORIGIN = 'app://orch-code'
 
@@ -26,12 +26,26 @@ export function createHandler(fn: HandlerFn) {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const projectRef = supabaseUrl ? new URL(supabaseUrl).hostname.split('.')[0] : ''
 
-    if (!expectedAnonKey) {
-      return errorResponse('Server Configuration Error: SUPABASE_ANON_KEY is missing.', 500)
+    if (!expectedAnonKey || !supabaseUrl) {
+      return errorResponse('Server Configuration Error: Configuration parameters are missing.', 500)
     }
 
-    if (!validateAnonKey(req, expectedAnonKey)) {
-      return errorResponse('Unauthorized', 401)
+    const url = new URL(req.url)
+    const isPublic = url.pathname === '/functions/v1/models' || url.pathname === '/models'
+
+    if (isPublic) {
+      if (!validateAnonKey(req, expectedAnonKey)) {
+        return errorResponse('Unauthorized Client', 401)
+      }
+    } else {
+      const apiKeyHeader = req.headers.get('apikey')
+      if (!apiKeyHeader || apiKeyHeader.trim() !== expectedAnonKey.trim()) {
+        return errorResponse('Unauthorized API Client', 401)
+      }
+      const user = await validateUserJWT(req, supabaseUrl, expectedAnonKey)
+      if (!user) {
+        return errorResponse('Unauthorized User: Invalid JWT', 401)
+      }
     }
 
     const env: EnvMap = {}

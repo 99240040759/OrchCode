@@ -11,9 +11,6 @@ permissions:
 
 env:
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-  FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-  GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-  GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   EP_TARGET_COMMITISH: main
@@ -24,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Create Draft Release
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |
@@ -62,7 +59,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
@@ -86,40 +83,23 @@ jobs:
       - name: Setup Node.js (x64)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          architecture: x64
+          cache: 'npm'
 
-      - name: Install Rosetta (for x64 emulation)
-        if: runner.os == 'macOS'
-        run: sudo softwareupdate --install-rosetta --agree-to-license
+      - name: Install Dependencies
+        run: npm ci
 
-      - name: Cache npm (x64)
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm/_cacache
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}-x64
-
-      - name: Install Dependencies (x64, Rosetta)
-        run: |
-          arch -x86_64 npm ci --ignore-scripts
-        env:
-          npm_config_arch: x64
-
-      - name: Build (x64 under Rosetta)
-        run: |
-          arch -x86_64 npm run build
+      - name: Compile Application
+        run: npm run build
 
       - name: Verify out/main exists (x64)
         run: |
           echo 'Checking for out/main/index.js'
           if [ -f out/main/index.js ]; then echo 'found out/main/index.js'; ls -la out/main; else echo 'out/main/index.js missing'; ls -la out || true; echo 'Showing dist as fallback'; ls -la dist || true; exit 1; fi
 
-      - name: Rebuild native deps for x64
-        run: |
-          arch -x86_64 npx electron-builder install-app-deps --arch x64
-
-      - name: Build and Publish DMG (x64 via Rosetta)
-        run: |
-          arch -x86_64 npx electron-builder --mac --x64 --publish always
+      - name: Build and Publish DMG (x64)
+        run: npx electron-builder --mac --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -135,7 +115,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
@@ -158,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Publish GitHub Release
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |

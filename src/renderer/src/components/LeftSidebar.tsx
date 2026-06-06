@@ -1,39 +1,30 @@
 import React from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useAtomValue } from 'jotai'
-import { PanelLeftClose, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/authService'
 
-// M-6 FIX: Removed unused uncontrolled `localExpanded` state.
-// LeftSidebar is always used as a controlled component (App.tsx always passes expanded prop).
-// The uncontrolled code path was dead code.
-
+// LeftSidebar is a controlled component (App.tsx passes expanded prop).
 interface SidebarProps {
   expanded: boolean
-  onToggle: (expanded: boolean) => void
   onStartConversation?: () => void
   threadListContent?: React.ReactNode
 }
 
 const isMac = window.api.platform === 'darwin'
 
-const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onToggle, onStartConversation, threadListContent }) => {
+const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onStartConversation, threadListContent }) => {
   const authUser = useAtomValue(authUserAtom)
 
   const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (err) { console.error('Google Sign-in failed:', err) } }
   const handleLogout = async () => { try { await authService.logout() } catch (err) { console.error('Logout failed:', err) } }
 
-  if (!expanded) return null
-
   return (
-    <aside className="sidebar-root sidebar-expanded">
+    <aside className={`sidebar-root ${expanded ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
       <div className="sidebar-inner">
         <div className={`sidebar-header-row app-region-drag ${isMac ? 'sidebar-header-row-mac' : 'sidebar-header-row-win'}`}>
-          <div className="sidebar-collapse-btn app-region-no-drag" onClick={() => onToggle(false)} title="Collapse Sidebar">
-            <PanelLeftClose size={16} strokeWidth={1.5} className="text-secondary" />
-          </div>
         </div>
 
         <div className="sidebar-top-section">
@@ -66,13 +57,13 @@ const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onToggle, onStartConver
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content asChild align="start" side="right" sideOffset={12}>
-                  <div className="profile-dropdown native-dropdown-content-ve">
+                  <div className="app-dropdown-panel">
                     <div className="profile-info">
                       <div className="profile-name">{authUser.name || 'Google User'}</div>
                       <div className="profile-email">{authUser.email}</div>
                     </div>
                     <DropdownMenu.Separator className="profile-separator" />
-                    <DropdownMenu.Item className="profile-item profile-item-logout" onSelect={handleLogout}>Log Out</DropdownMenu.Item>
+                    <DropdownMenu.Item className="app-dropdown-item profile-item-logout" onSelect={handleLogout}>Log Out</DropdownMenu.Item>
                   </div>
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>

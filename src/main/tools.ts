@@ -6,7 +6,7 @@ import { browserTools, startBrowserAgentWorker, stopBrowserAgentWorker } from '.
 export function createCoreTools(convId: string, modelSupportsVision = true) {
   const fileTools = createFileTools(convId, modelSupportsVision)
   const shellTools = createShellTools(convId)
-  const webTools = createWebTools()
+  const webTools = createWebTools(convId)
   return {
     ...fileTools,
     ...shellTools,

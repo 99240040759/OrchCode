@@ -51,3 +51,26 @@ export function validateAnonKey(
 
   return timingSafeEqual(cleanToken, cleanExpected)
 }
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+export async function validateUserJWT(
+  req: Request,
+  supabaseUrl: string,
+  supabaseAnonKey: string
+): Promise<any> {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
+
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: authHeader } }
+    })
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error || !user) return null
+    return user
+  } catch {
+    return null
+  }
+}

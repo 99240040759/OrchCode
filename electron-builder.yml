@@ -11,6 +11,8 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/@vscode/ripgrep*/**/*
+  - node_modules/node-pty/**/*
+  - node_modules/better-sqlite3/**/*
 win:
   executableName: Orch Code
 nsis:
@@ -22,6 +24,7 @@ mac:
   hardenedRuntime: true
   target:
     - dmg
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.

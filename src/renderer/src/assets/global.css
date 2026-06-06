@@ -4,17 +4,22 @@
   --font-mono: 'JetBrains Mono', monospace;
   --bg-app: #121212;
   --bg-sidebar: #1a1a1a;
-  --bg-editor: #121212;
-  --border-color: #333333;
-  --border-focus: #444444;
-  --text-primary: #ffffff;
-  --text-secondary: #b4b4b4;
-  --text-muted: #737373;
-  --text-dim: #525252;
-  --accent-blue: #3b82f6;
-  --accent-purple: #8b5cf6;
+  --bg-editor: #161616;
+  --bg-titlebar: #1a1a1a;
+  --bg-artifact-header: #222222;
+  --border-color: rgba(226, 168, 86, 0.08);
+  --border-focus: rgba(226, 168, 86, 0.25);
+  --text-primary: #f5f4f0;
+  --text-secondary: #a7a6a0;
+  --text-muted: #706f69;
+  --text-dim: #484742;
+  --accent-brass: #e2a856;
+  --accent-brass-glow: rgba(226, 168, 86, 0.15);
+  --accent-brass-dim: #b8833c;
+  --accent-blue: #e2a856;
+  --accent-purple: #c58c3f;
   --accent-green: #10b981;
-  --accent-orange: #f59e0b;
+  --accent-orange: #df9a44;
   --accent-red: #ef4444;
   --sidebar-width-expanded: 250px;
   --titlebar-height: 40px;
@@ -30,6 +35,15 @@
   --font-size-xl: 17px;
   --font-size-2xl: 20px;
   --font-size-3xl: 24px;
+
+  /* Premium Motion Design Tokens */
+  --transition-curve-default: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-speed-fast: 0.1s;
+  --transition-speed-normal: 0.15s;
+  --transition-speed-slow: 0.18s;
+  --transition-speed-panel: 0.2s;
+  --transition-speed-panel-opacity: 0.15s;
+  --transition-panel: width var(--transition-speed-panel) var(--transition-curve-default), opacity var(--transition-speed-panel-opacity) var(--transition-curve-default);
 }
 
 /* Base Reset */
@@ -40,7 +54,7 @@
   user-select: none;
 }
 
-img {
+a, img {
   -webkit-user-drag: none;
 }
 
@@ -110,13 +124,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsla(0, 0%, 100%, 0.08);
+  background: rgba(226, 168, 86, 0.12);
   border-radius: 9999px;
   border: 1px solid transparent;
   background-clip: padding-box;
+  transition: background 0.15s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsla(0, 0%, 100%, 0.16);
+  background: rgba(226, 168, 86, 0.3);
   border: 1px solid transparent;
   background-clip: padding-box;
 }
@@ -136,9 +151,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   50% { opacity: 0.9; }
 }
 
-@keyframes dropdown-fade-in {
-  from { opacity: 0; transform: scale(0.96) translateY(-6px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+@keyframes dropdown-open {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Utility Classes */

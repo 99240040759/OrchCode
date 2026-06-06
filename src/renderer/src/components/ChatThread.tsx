@@ -10,7 +10,7 @@ import {
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage } from '../store/types'
-import { ChevronDown, AlertTriangle } from 'lucide-react'
+import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
@@ -176,6 +176,10 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => (
 })
 AssistantMessage.displayName = 'AssistantMessage'
 
+const atomKeyMap = new WeakMap<object, string>()
+let atomKeyCounter = 0
+const getAtomKey = (a: object) => { let k = atomKeyMap.get(a); if (!k) atomKeyMap.set(a, k = `msg-${atomKeyCounter++}`); return k }
+
 const ChatThread: React.FC = () => {
   const messageAtoms = useAtomValue(chatMessageAtomsAtom)
   const runState = useAtomValue(agentRunStateAtom)
@@ -215,7 +219,7 @@ const ChatThread: React.FC = () => {
     <div ref={containerRef} onScroll={handleScroll} className="chat-thread-container">
       <div className="chat-thread-spacer-top" />
       {messageAtoms.map((messageAtom) => (
-        <MessageWrapper key={`${messageAtom}`} messageAtom={messageAtom} />
+        <MessageWrapper key={getAtomKey(messageAtom)} messageAtom={messageAtom} />
       ))}
       <div className="chat-thread-spacer-bottom" />
       <div className="chat-thread-anchor" />
@@ -225,9 +229,49 @@ const ChatThread: React.FC = () => {
 
 const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)
+  const [copied, setCopied] = React.useState(false)
+
+  const getMessageText = () => {
+    if (message.content) return message.content
+    if (message.orderedBlocks) {
+      return message.orderedBlocks
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.content)
+        .join('')
+    }
+    return ''
+  }
+
+  const textToCopy = getMessageText()
+
+  const handleCopy = () => {
+    if (!textToCopy) return
+    navigator.clipboard.writeText(textToCopy)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const formatTime = (ts: number) => {
+    if (!ts) return ''
+    const date = new Date(ts)
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
   return (
-    <div className="chat-thread-message-wrapper">
-      {message.role === 'user' ? <UserMessage message={message} /> : <AssistantMessage message={message} />}
+    <div className={`chat-thread-message-wrapper message-${message.role}`}>
+      <div className="message-bubble-wrapper">
+        {message.role === 'user' ? <UserMessage message={message} /> : <AssistantMessage message={message} />}
+        {!message.isStreaming && (
+          <div className="message-meta-actions">
+            <span className="message-timestamp">{formatTime(message.timestamp)}</span>
+            {!!textToCopy && (
+              <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 })

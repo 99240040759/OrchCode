@@ -39,7 +39,7 @@ export const agentRunStateAtom = atom<AgentRunState>('idle')
 
 export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
 
-export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
+export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => message.id)
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
 

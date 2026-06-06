@@ -55,7 +55,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       let fitTimeout: NodeJS.Timeout | null = null
 
       const rootStyle = getComputedStyle(document.documentElement)
-      const bgEditor = rootStyle.getPropertyValue('--bg-editor').trim() || '#0f0f11'
+      const bgApp = rootStyle.getPropertyValue('--bg-app').trim() || '#121212'
       const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
       const textMuted = rootStyle.getPropertyValue('--text-muted').trim() || '#71717a'
       const accentBlue = rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6'
@@ -66,7 +66,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       const term = new XTerm({
         theme: {
-          background: bgEditor,
+          background: bgApp,
           foreground: textPrimary,
           cursor: textPrimary,
           selectionBackground: 'rgba(255, 255, 255, 0.1)',

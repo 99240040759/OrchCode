@@ -169,9 +169,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="native-dropdown-content dropdown-menu-content dropdown-menu-content-sm">
-                  <DropdownMenu.Item onSelect={() => triggerFileSelect('image')} className="profile-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownMenu.Item>
-                  <DropdownMenu.Item onSelect={() => triggerFileSelect('document')} className="profile-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownMenu.Item>
+                <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-sm">
+                  <DropdownMenu.Item onSelect={() => triggerFileSelect('image')} className="app-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => triggerFileSelect('document')} className="app-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownMenu.Item>
                 </div>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -185,9 +185,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="native-dropdown-content dropdown-menu-content dropdown-menu-content-md">
+                <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-md">
                   {Object.entries(availableModels).map(([key, model]) => (
-                    <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`profile-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
+                    <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
                       <span className="font-medium">{model.name}</span>
                     </DropdownMenu.Item>
                   ))}

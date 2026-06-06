@@ -27,10 +27,23 @@ export async function getAvailableModels(force = false): Promise<AvailableModels
   return cachedModels!
 }
 
+import { getCurrentSession } from '../auth'
+
+function fetchWithUserAuth(url: RequestInfo | URL, options?: RequestInit) {
+  const session = getCurrentSession()
+  const token = session ? session.idToken : process.env.SUPABASE_ANON_KEY
+  const headers = new Headers(options?.headers || {})
+  headers.set('Authorization', `Bearer ${token}`)
+  headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+  return fetch(url, { ...options, headers })
+}
+
 function makeFetchWithAuth(extraHeaders?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers || {})
-    headers.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
+    const session = getCurrentSession()
+    const token = session ? session.idToken : process.env.SUPABASE_ANON_KEY
+    headers.set('Authorization', `Bearer ${token}`)
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
     if (extraHeaders) {
       for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v)
@@ -43,72 +56,28 @@ function makeFetchWithAuth(extraHeaders?: Record<string, string>) {
 const google = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
   apiKey: 'placeholder',
-  fetch: (url, options) =>
-    globalApiLimiter.schedule(() =>
-      fetch(url, {
-        ...options,
-        headers: (() => {
-          const h = new Headers(options?.headers || {})
-          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-          return h
-        })()
-      })
-    )
+  fetch: (url, options) => globalApiLimiter.schedule(() => fetchWithUserAuth(url, options))
 })
 
 // Nvidia provider — rate-limited via globalApiLimiter
 const nvidia = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
   apiKey: 'placeholder',
-  fetch: (url, options) =>
-    globalApiLimiter.schedule(() =>
-      fetch(url, {
-        ...options,
-        headers: (() => {
-          const h = new Headers(options?.headers || {})
-          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-          return h
-        })()
-      })
-    )
+  fetch: (url, options) => globalApiLimiter.schedule(() => fetchWithUserAuth(url, options))
 })
 
 // OpenCode provider — rate-limited via globalApiLimiter
 const opencode = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/opencode/v1`,
   apiKey: 'placeholder',
-  fetch: (url, options) =>
-    globalApiLimiter.schedule(() =>
-      fetch(url, {
-        ...options,
-        headers: (() => {
-          const h = new Headers(options?.headers || {})
-          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-          return h
-        })()
-      })
-    )
+  fetch: (url, options) => globalApiLimiter.schedule(() => fetchWithUserAuth(url, options))
 })
 
 // Z.AI provider — rate-limited via globalApiLimiter
 const zai = createOpenAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/z-ai/v1`,
   apiKey: 'placeholder',
-  fetch: (url, options) =>
-    globalApiLimiter.schedule(() =>
-      fetch(url, {
-        ...options,
-        headers: (() => {
-          const h = new Headers(options?.headers || {})
-          h.set('Authorization', `Bearer ${process.env.SUPABASE_ANON_KEY}`)
-          h.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-          return h
-        })()
-      })
-    )
+  fetch: (url, options) => globalApiLimiter.schedule(() => fetchWithUserAuth(url, options))
 })
 
 // Bypass provider for summarisation & title — no limiter, no compaction re-entry

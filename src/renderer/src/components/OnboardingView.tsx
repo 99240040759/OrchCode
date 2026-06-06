@@ -4,15 +4,26 @@ import { toast } from 'sonner'
 import Lottie from 'lottie-react'
 import onboardingAnimation from '../assets/onboarding.json'
 import onboardingEntryAnimation from '../assets/onboarding-entry.json'
+import onboardingCompleteAnimation from '../assets/onboarding-complete.json'
 
 export const OnboardingView: React.FC = () => {
+  const [showSplash, setShowSplash] = useState(true)
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [user, setUser] = useState<{ name?: string; email?: string; photoUrl?: string } | null>(null)
 
   React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false)
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  React.useEffect(() => {
     if (!user) return
-    const timer = setTimeout(() => window.api.invoke('auth:open-onboarding').catch(console.error), 1200)
+    const timer = setTimeout(() => {
+      window.api.invoke('auth:open-onboarding').catch(console.error)
+    }, 1600)
     return () => clearTimeout(timer)
   }, [user])
 
@@ -32,7 +43,15 @@ export const OnboardingView: React.FC = () => {
 
   return (
     <div className="onboarding-container">
-      {!user ? (
+      {showSplash ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 480, height: 480 }}>
+          <Lottie
+            animationData={onboardingEntryAnimation}
+            loop={false}
+            style={{ width: 480, height: 480 }}
+          />
+        </div>
+      ) : !user ? (
         <div className="onboarding-inner">
           <div className="onboarding-logo-container">
             <div className="onboarding-logo-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 200, height: 200, margin: '0 auto 8px' }}>
@@ -61,11 +80,11 @@ export const OnboardingView: React.FC = () => {
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 480, height: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: 300, height: 300 }}>
           <Lottie
-            animationData={onboardingEntryAnimation}
+            animationData={onboardingCompleteAnimation}
             loop={true}
-            style={{ width: 480, height: 480 }}
+            style={{ width: 300, height: 300 }}
           />
         </div>
       )}

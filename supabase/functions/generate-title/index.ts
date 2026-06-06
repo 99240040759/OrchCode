@@ -25,7 +25,7 @@ serve(
     }
 
     const payload = {
-      model: 'meta/llama-3.2-1b-instruct',
+      model: 'openai/gpt-oss-20b',
       messages: [
         {
           role: 'user',

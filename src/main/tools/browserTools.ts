@@ -38,8 +38,16 @@ export function startBrowserAgentWorker(): Remote<WorkerAPI> | null {
   // Send init data + port2 to the worker process
   workerProcess.postMessage({ mainWindowUrl, debuggingPort }, [port2])
 
-  // Wrap port1 directly — utilityProcess MessagePortMain is Comlink-compatible
-  automatedBrowser = wrap<WorkerAPI>(port1 as any)
+  const comlinkEndpoint = {
+    addEventListener: (t: string, l: any) => t === 'message' && port1.on('message', (e: any) => l({ data: e.data, ports: e.ports })),
+    removeEventListener: (t: string, l: any) => t === 'message' && port1.off('message', l),
+    postMessage: (m: any, tr?: any) => port1.postMessage(m, tr),
+    start: () => port1.start(),
+    close: () => port1.close()
+  }
+
+  // Wrap port1 via the adapter — utilityProcess MessagePortMain needs this translation layer
+  automatedBrowser = wrap<WorkerAPI>(comlinkEndpoint as any)
 
   workerProcess.on('exit', (code) => {
     log.warn(`[tools:browser] Worker process exited with code ${code}`)
