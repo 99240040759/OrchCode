@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow, shell, session } from 'electron'
+import { app, BrowserWindow, shell, session, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -47,17 +47,17 @@ function createOnboardingWindow(): BrowserWindow {
   }
   onboardingWindow = new BrowserWindow({
     width: 480,
-    height: 680,
+    height: 480,
     minWidth: 480,
-    minHeight: 680,
+    minHeight: 480,
     maxWidth: 480,
-    maxHeight: 680,
+    maxHeight: 480,
     resizable: false,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 16, y: 12 },
-    backgroundColor: '#0f0f11',
+    backgroundColor: '#121212',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -113,7 +113,7 @@ function createMainWindow(): BrowserWindow {
           }
         : false,
     trafficLightPosition: { x: 16, y: 12 },
-    backgroundColor: '#0f0f11',
+    backgroundColor: '#121212',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -153,6 +153,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  nativeTheme.themeSource = 'dark'
   electronApp.setAppUserModelId(APP_ID)
 
   app.on('browser-window-created', (_, window) => {

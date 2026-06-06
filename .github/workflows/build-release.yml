@@ -12,7 +12,6 @@ permissions:
 env:
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-  GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
   GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
   GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

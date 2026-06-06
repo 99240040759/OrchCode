@@ -1,6 +1,6 @@
 {
   "name": "orch-code",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Orch Code - AI-powered agentic code editor",
   "main": "./out/main/index.js",
   "author": "Orch",
@@ -40,6 +40,7 @@
     "electron-window-state": "^5.0.3",
     "execa": "^9.6.1",
     "ignore": "^7.0.5",
+    "lottie-react": "^2.4.1",
     "mime-types": "^3.0.2",
     "node-pty": "^1.1.0",
     "playwright-core": "^1.60.0",

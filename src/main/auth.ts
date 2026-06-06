@@ -3,8 +3,16 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
-import { escapeHtml } from './workspace'
 import { getSessionPath } from './paths'
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
 
 export interface UserProfile {
   uid: string

@@ -18,3 +18,7 @@ function getConversationsPath(): string {
 export function getConversationPath(conversationId: string): string {
   return join(getConversationsPath(), conversationId)
 }
+
+export function getConversationScreenshotsPath(conversationId: string): string {
+  return join(getConversationPath(conversationId), 'screenshots')
+}

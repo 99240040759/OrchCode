@@ -2,6 +2,8 @@ import React from 'react'
 import { useAtomValue } from 'jotai'
 import { ChevronDown, Code } from 'lucide-react'
 import TitleBar from './TitleBar'
+import Lottie from 'lottie-react'
+import emptyStateAnimation from '../assets/empty-state.json'
 import InputBar from './InputBar'
 import ChatThread from './ChatThread'
 import { isThreadLoadingAtom } from '../store/agentStore'
@@ -49,6 +51,13 @@ export const ChatPane = React.memo<ChatPaneProps>(
                       {workspaceName !== 'New Chat' ? workspaceName : 'Select Workspace'}
                     </span>
                   </h2>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: 220, marginBottom: 12 }}>
+                  <Lottie
+                    animationData={emptyStateAnimation}
+                    loop={true}
+                    style={{ width: 220, height: 220 }}
+                  />
                 </div>
                 <InputBar onSubmit={onSubmit} onStop={onStop} />
 
