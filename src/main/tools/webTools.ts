@@ -52,11 +52,12 @@ export function createWebTools(convId?: string) {
           }))
           return { query, answer: data.answer ?? null, results, totalResults: results.length }
         } catch (err: any) {
-          log.error('[tool:searchWeb] Tavily error:', err)
+          log.error('[tool:searchWeb] Tavily error:', err.message)
           return { success: false, error: `Web search failed: ${err.message}` }
         }
       })
-    }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Answer: ${output.answer || 'N/A'}\nResults:\n${JSON.stringify(output.results, null, 2)}` }] })
   })
 
   const generateImage = tool({
@@ -182,10 +183,11 @@ export function createWebTools(convId?: string) {
           message: `Image generated successfully and saved to ${targetPath}`
         }
       } catch (err: any) {
-        log.error('[tool:generateImage] Error:', err)
+        log.error('[tool:generateImage] Error:', err.message)
         return { success: false, error: `Image generation failed: ${err.message}` }
       }
-    }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.message }] })
   })
 
   return {

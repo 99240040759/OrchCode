@@ -130,10 +130,11 @@ export function createShellTools(convId: string) {
           cwd: runDir
         }
       } catch (err: any) {
-        log.error('[tool:runCommand] error:', err)
+        log.error('[tool:runCommand] error:', err.message)
         return { success: false, error: err.message, stdout: '', stderr: err.message, exitCode: 1 }
       }
-    }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false && output.error ? `Error: ${output.error}` : `Command finished with exit code ${output.exitCode}.\nCwd: ${output.cwd}\nStdout:\n${output.stdout}\nStderr:\n${output.stderr}` }] })
   })
 
   return { runCommand }

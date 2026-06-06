@@ -37,8 +37,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         const target = url.startsWith('http') ? url : `https://${url}`
         await wc.loadURL(target)
         return { success: true, url: wc.getURL() }
-      } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }
+      } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully navigated to ${output.url}` }] })
   })
 
   const browserType = tool({
@@ -70,8 +71,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
           })()
         `)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserType] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }
+      } catch (e: unknown) { log.error('[tool:browserType] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully typed text into element` }] })
   })
 
   const browserScroll = tool({
@@ -94,8 +96,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         else if (direction === 'right') x = dist
         await wc.executeJavaScript(`window.scrollBy(${x}, ${y})`)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserScroll] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }
+      } catch (e: unknown) { log.error('[tool:browserScroll] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully scrolled viewport` }] })
   })
 
   const browserScreenshot = tool({
@@ -119,7 +122,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
         await fs.writeFile(screenshotPath, png)
         return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) }
-      } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
     toModelOutput: async ({ output }: { output: ScreenshotOutput & { buffer?: ArrayBuffer } }) => {
       if (output.success && output.filePath) {
@@ -165,8 +168,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         wc.sendInputEvent({ type: 'mouseDown', x, y, button: button || 'left', clickCount: 1 })
         wc.sendInputEvent({ type: 'mouseUp', x, y, button: button || 'left', clickCount: 1 })
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserMouseClickCoordinate] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }
+      } catch (e: unknown) { log.error('[tool:browserMouseClickCoordinate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked coordinates` }] })
   })
 
   const browserGetPageContent = tool({
@@ -198,8 +202,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         `)
         const wrappedText = `[UNTRUSTED WEB PAGE CONTENT START]\nURL: ${result.url}\nTitle: ${result.title}\n\nVisible Page Text:\n${result.text}\n[UNTRUSTED WEB PAGE CONTENT END]`
         return { success: true, url: result.url, title: result.title, text: wrappedText, interactiveElements: result.interactiveElements }
-      } catch (e: unknown) { log.error('[tool:browserGetPageContent] error:', e); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }
+      } catch (e: unknown) { log.error('[tool:browserGetPageContent] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
   })
 
   const tools = {

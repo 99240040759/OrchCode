@@ -48,8 +48,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         }))
         entries.sort((a, b) => (a.isDirectory && !b.isDirectory) ? -1 : (!a.isDirectory && b.isDirectory) ? 1 : a.name.localeCompare(b.name))
         return { entries, dirPath: safePath, rootPath: ctx.rootPath }
-      } catch (err: any) { log.error('[tool:listDir] error:', err); return { success: false, error: err.message } }
-    }
+      } catch (err: any) { log.error('[tool:listDir] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : JSON.stringify(output.entries.map(e => ({ name: e.name, relativePath: e.relativePath, isDirectory: e.isDirectory, sizeBytes: e.sizeBytes, numChildren: e.numChildren }))) }] })
   })
 
   const viewFile = tool({
@@ -70,7 +71,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         const end = Math.min(totalLines, Math.min(requestedEnd, maxEnd)), wasTruncated = requestedEnd > maxEnd && totalLines > maxEnd
         const targetLines = allLines.slice(start - 1, end), numberedContent = targetLines.map((line, i) => `${start + i}: ${line}`).join('\n')
         return { content: numberedContent, rawContent: targetLines.join('\n'), absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
-      } catch (err: any) { log.error('[tool:viewFile] error:', err); return { success: false, error: err.message } }
+      } catch (err: any) { log.error('[tool:viewFile] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {
       if (output.isBinary && output.mimeType?.startsWith('image/') && output.base64Content) {
@@ -94,8 +95,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         await fs.writeFile(safePath, codeContent, 'utf-8')
         invalidateWorkspaceFilesCache(ctx.rootPath)
         return { success: true, absolutePath: safePath, created: !exists }
-      } catch (err: any) { log.error('[tool:writeToFile] error:', err); return { success: false, error: err.message } }
-    }
+      } catch (err: any) { log.error('[tool:writeToFile] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully wrote to file ${output.absolutePath}` }] })
   })
 
   const replaceFileContent = tool({
@@ -107,8 +109,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         await applyEditsToFile(safePath, [{ startLine, endLine, replacementContent }])
         invalidateWorkspaceFilesCache(ctx.rootPath)
         return { success: true, absolutePath: safePath }
-      } catch (err: any) { log.error('[tool:replaceFileContent] error:', err); return { success: false, error: err.message } }
-    }
+      } catch (err: any) { log.error('[tool:replaceFileContent] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully edited file ${output.absolutePath}` }] })
   })
 
   const multiReplaceFileContent = tool({
@@ -124,8 +127,9 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         await applyEditsToFile(safePath, replacementChunks)
         invalidateWorkspaceFilesCache(ctx.rootPath)
         return { success: true, absolutePath: safePath, chunksApplied: replacementChunks.length }
-      } catch (err: any) { log.error('[tool:multiReplaceFileContent] error:', err); return { success: false, error: err.message } }
-    }
+      } catch (err: any) { log.error('[tool:multiReplaceFileContent] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully applied ${output.chunksApplied} edits to file ${output.absolutePath}` }] })
   })
 
   const searchWorkspace = tool({
@@ -151,10 +155,11 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         if (lines.length > 200) return { success: true, results: lines.slice(0, 200).join('\n') + `\n\n... (truncated ${lines.length - 200} matches)` }
         return { success: true, results: cleaned }
       } catch (err: any) {
-        log.error('[tool:searchWorkspace] error:', err)
+        log.error('[tool:searchWorkspace] error:', err.message)
         return { success: false, error: err.code === 'ENOENT' ? 'ripgrep not found.' : err.message }
       }
-    }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.results }] })
   })
 
   return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, searchWorkspace }
