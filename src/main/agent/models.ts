@@ -24,7 +24,7 @@ function createAuthFetch(extraHeaders?: Record<string, string>) {
 
 export async function getAvailableModels(force = false): Promise<AvailableModels> {
   if (!force && cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
-  const response = await createAuthFetch()(`${process.env.SUPABASE_URL}/functions/v1/models`)
+  const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, { headers: { Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`, apikey: process.env.SUPABASE_ANON_KEY || '' } })
   if (!response.ok) throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   cachedModels = await response.json(); cachedModelsAt = Date.now()
   return cachedModels!
