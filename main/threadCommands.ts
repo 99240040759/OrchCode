@@ -84,7 +84,7 @@ export const threadCommands = {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
       try {
-        if (getActiveThreadId() === threadId) setActiveThreadId(null)
+        if (getActiveThreadId() === threadId) setActiveThreadId('')
         const wsPath = getThreadWorkspace(threadId), context = clearWorkspaceContext(threadId), deleted = deleteThread(threadId)
         if (!wsPath && context?.isUserWorkspace !== true) await fs.rm(getConversationPath(threadId), { recursive: true, force: true })
         return deleted

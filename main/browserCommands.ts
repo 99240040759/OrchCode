@@ -5,9 +5,13 @@ import WindowManager from './windowManager'
 function normalizeBrowserUrl(val: string): string {
   const c = val.trim()
   if (!c || c === 'about:blank') return 'about:blank'
-  const parsed = new URL(/^https?:\/\//i.test(c) ? c : `https://${c}`)
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error(`Unsupported protocol: ${parsed.protocol}`)
-  return parsed.toString()
+  const hasSpace = /\s/.test(c), hasDot = c.includes('.'), isLocal = c.startsWith('localhost') || c.includes('localhost:')
+  if (hasSpace || (!hasDot && !isLocal && !/^https?:\/\//i.test(c))) return `https://www.google.com/search?q=${encodeURIComponent(c)}`
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(c) ? c : `https://${c}`)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error(`Unsupported protocol: ${parsed.protocol}`)
+    return parsed.toString()
+  } catch { return `https://www.google.com/search?q=${encodeURIComponent(c)}` }
 }
 
 function normalizeBounds(b: { x: number; y: number; width: number; height: number }) {

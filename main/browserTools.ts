@@ -57,8 +57,8 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       try {
         await wc.executeJavaScript(`
           (() => {
-            const doc = ${frameSelector ? `document.querySelector('${frameSelector}').contentDocument` : 'document'};
-            const el = doc.querySelector('${selector}');
+            const doc = ${frameSelector ? `document.querySelector(${JSON.stringify(frameSelector)}).contentDocument` : 'document'};
+            const el = doc.querySelector(${JSON.stringify(selector)});
             if (!el) throw new Error('Element not found');
             el.focus();
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {

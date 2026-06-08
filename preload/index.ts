@@ -42,20 +42,27 @@ contextBridge.exposeInMainWorld('api', {
    */
   stream: (payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void> => {
     return new Promise((resolve, reject) => {
-      const ch = `stream:port:${payload.threadId}`
-      ipcRenderer.once(ch, (ev) => {
-        const p = ev.ports[0]; if (!p) return reject(new Error('No port'))
+      const ch = `stream:port:${payload.threadId}`, chCrashed = 'stream:worker-crashed'
+      const cleanup = () => {
+        ipcRenderer.off(ch, onPortReceived); ipcRenderer.off(chCrashed, onCrash)
+        const p = activePorts.get(payload.threadId); if (p) { p.close(); activePorts.delete(payload.threadId) }
+      }
+      const onCrash = (_ev: unknown, data: any) => {
+        if (data && data.threadId === payload.threadId) {
+          cleanup()
+          reject(new Error(`Utility worker process crashed (Exit code: ${data.code ?? 'unknown'})`))
+        }
+      }
+      const onPortReceived = (ev: Electron.IpcRendererEvent) => {
+        const p = ev.ports[0]; if (!p) { cleanup(); return reject(new Error('No port')) }
         activePorts.set(payload.threadId, p)
         p.onmessage = (e) => {
           try {
             onChunk(e.data)
-            if (['finish', 'error'].includes(e.data.type)) { p.close(); activePorts.delete(payload.threadId); resolve() }
-          } catch (err) {
-            activePorts.delete(payload.threadId); p.close()
-            reject(err instanceof Error ? err : new Error(String(err)))
-          }
+            if (['finish', 'error'].includes(e.data.type)) { cleanup(); resolve() }
+          } catch (err) { cleanup(); reject(err instanceof Error ? err : new Error(String(err))) }
         }
-        p.onmessageerror = () => { activePorts.delete(payload.threadId); p.close(); reject(new Error('Message serialization error')) }
+        p.onmessageerror = () => { cleanup(); reject(new Error('Message serialization error')) }
         p.start()
         if (payload.attachments?.length) {
           try {
@@ -66,15 +73,12 @@ contextBridge.exposeInMainWorld('api', {
               return arr.buffer
             })
             p.postMessage({ type: 'bufs', bufs }, bufs)
-          } catch (err: any) {
-            p.close(); activePorts.delete(payload.threadId)
-            reject(new Error(`Failed to decode attachments: ${err.message}`))
-            return
-          }
+          } catch (err: any) { cleanup(); reject(new Error(`Failed to decode attachments: ${err.message}`)) }
         }
-      })
+      }
+      ipcRenderer.once(ch, onPortReceived); ipcRenderer.on(chCrashed, onCrash)
       const stripped = { ...payload, attachments: payload.attachments?.map(({ base64: _, ...r }) => r) }
-      ipcRenderer.invoke('api:stream', stripped).catch((e) => { ipcRenderer.removeAllListeners(ch); reject(e) })
+      ipcRenderer.invoke('api:stream', stripped).catch((e) => { cleanup(); reject(e) })
     })
   },
 

@@ -59,6 +59,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(triggerIndex, triggerIndex) }, 0)
   }, [triggerIndex, activeWorkspace])
 
+  const showFileSuggestionsRef = React.useRef(showFileSuggestions)
+  React.useEffect(() => { showFileSuggestionsRef.current = showFileSuggestions }, [showFileSuggestions])
+
   const checkSuggestions = useCallback((val: string, selectionStart: number | null) => {
     if (selectionStart === null) return setShowFileSuggestions(false)
     const textBeforeCursor = val.slice(0, selectionStart)
@@ -66,13 +69,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     if (lastAtIdx !== -1) {
       const textAfterAt = textBeforeCursor.slice(lastAtIdx + 1)
       if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        if (!showFileSuggestions) fetchWorkspaceFiles()
+        if (!showFileSuggestionsRef.current) fetchWorkspaceFiles()
         setTriggerIndex(lastAtIdx); setSearchQuery(textAfterAt); setShowFileSuggestions(true); setSuggestionIndex(0)
         return
       }
     }
     setShowFileSuggestions(false)
-  }, [showFileSuggestions, fetchWorkspaceFiles])
+  }, [fetchWorkspaceFiles])
 
   const triggerFileSelect = useCallback((type: 'image' | 'document') => {
     if (fileInputRef.current) {

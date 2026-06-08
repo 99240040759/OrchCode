@@ -1,0 +1,54 @@
+import { Marked } from 'marked'
+import hljs from 'highlight.js'
+import { normalizeMarkdownLinks, stripFileProtocol } from './pathUtils'
+
+function getFileIconSvg(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  let color = '#94a3b8'
+  if (['js', 'jsx'].includes(ext)) color = '#f7df1e'
+  else if (['ts', 'tsx'].includes(ext)) color = '#3178c6'
+  else if (['py'].includes(ext)) color = '#3776ab'
+  else if (['go'].includes(ext)) color = '#00add8'
+  else if (['rs'].includes(ext)) color = '#dea584'
+  else if (['html'].includes(ext)) color = '#e34f26'
+  else if (['css'].includes(ext)) color = '#1572b6'
+  else if (['json'].includes(ext)) color = '#cbd5e1'
+  else if (['md'].includes(ext)) color = '#0891b2'
+  else if (['sh', 'bash'].includes(ext)) color = '#4caf50'
+  else if (['sql'].includes(ext)) color = '#00758f'
+  else if (['c', 'cpp', 'h'].includes(ext)) color = '#659ad2'
+  return `<svg class="file-icon-wrapper" style="color: ${color}; min-width: 14px;" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>`
+}
+
+const renderer = {
+  hr(): string { return '' },
+  code(token: { text: string; lang?: string }): string {
+    const code = token.text, lang = token.lang || ''
+    const language = hljs.getLanguage(lang) ? lang : 'plaintext'
+    const highlighted = hljs.highlight(code, { language }).value
+    const copyBtn = `<button class="code-block-copy-btn" title="Copy code"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button>`
+    if (lang) return `<pre class="language-${language} pre-wrapper"><span class="code-block-lang">${language}</span>${copyBtn}<code class="hljs language-${language}">${highlighted}</code></pre>`
+    return `<pre><code class="hljs">${highlighted}</code></pre>`
+  },
+  link(token: { href: string; title?: string | null; text: string }): string {
+    const { href, title, text } = token
+    if (href?.startsWith('file://')) {
+      const filePath = stripFileProtocol(href)
+      const fileName = filePath.split(/[/\\]/).pop() ?? ''
+      return `<span class="file-link" data-href="${href}" title="Open ${filePath}">${getFileIconSvg(fileName)}<span class="file-name-wrapper">${text}</span></span>`
+    }
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer"${title ? ` title="${title}"` : ''}>${text}</a>`
+  },
+  image(token: { href: string; title?: string | null; text: string }): string {
+    const { href, title, text } = token
+    return `<img src="${href}" alt="${text || 'Image'}"${title ? ` title="${title}"` : ''} />`
+  }
+}
+
+const marked = new Marked()
+marked.use({ renderer })
+
+export function parseMarkdown(content: string): string {
+  if (!content) return ''
+  return marked.parse(normalizeMarkdownLinks(content)) as string
+}

@@ -33,6 +33,9 @@ const SUMMARISE_THRESHOLD = 180_000
 const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
 const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/), modelType: z.string().max(255).optional(), attachments: z.array(AttachmentSchema).max(8).optional() })
 
+/** Shared file-write tool names — keep in sync with renderer/lib/toolConstants.ts */
+const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
+
 export function registerStreamIpc() {
   const { ipcMain, MessageChannelMain } = require('electron')
   ipcMain.handle('api:stream', async (event, rawPayload) => {
@@ -126,6 +129,7 @@ Use native tools (viewFile, writeToFile, multiReplaceFileContent, searchWorkspac
 }
 async function setupStreamRequest(port: Electron.MessagePortMain, threadId: string, controller: AbortController, attachments?: any[]) {
   activePorts.set(threadId, port)
+  let streamFinished = false
   port.on('message', (e) => {
     if (e.data === 'abort') controller.abort()
     if (e.data?.type === 'bufs') {
@@ -133,7 +137,15 @@ async function setupStreamRequest(port: Electron.MessagePortMain, threadId: stri
       if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
     }
   })
-  port.on('close', () => { log.info(`[stream] Port closed by renderer for ${threadId}. Aborting.`); controller.abort() })
+  // FIXED: only abort on unexpected port close, not on normal finish-triggered close
+  port.on('close', () => {
+    if (!streamFinished) {
+      log.info(`[stream] Port closed unexpectedly for ${threadId}. Aborting.`)
+      controller.abort()
+    }
+  })
+  // Expose a way for handleAgentStreamRequest to mark stream as done before closing port
+  ;(port as any).__markFinished = () => { streamFinished = true }
   port.start()
   const attachmentPromise = pendingAttachments.get(threadId), bufs = attachmentPromise ? await attachmentPromise : []
   pendingAttachments.delete(threadId)
@@ -200,13 +212,16 @@ export async function handleAgentStreamRequest(
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
     assistantMsgId = crypto.randomUUID()
-    let currentReasoningStartMs = 0, lastSaveMs = 0
+    let currentReasoningStartMs = 0, lastSaveMs = 0, saveInFlight = false
     const saveProgress = async (force = false) => {
       const now = Date.now()
       if (!force && now - lastSaveMs < 1000) return
+      if (saveInFlight) return // FIXED: prevent concurrent writes to same assistantMsgId
       if (assistantContent || orderedBlocks.length > 0) {
-        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = now }
+        saveInFlight = true
+        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = Date.now() }
         catch (err) { log.error('[stream] Progressive save failed:', err) }
+        finally { saveInFlight = false }
       }
     }
     const result = streamText({
@@ -216,7 +231,7 @@ export async function handleAgentStreamRequest(
       tools: activeTools,
       stopWhen: stepCountIs(100),
       abortSignal: controller.signal,
-      timeout: { totalMs: 60 * 60 * 1000, stepMs: 60 * 60 * 1000, chunkMs: 60 * 60 * 1000 },
+      // Note: AI SDK streamText does not accept a timeout object here; rely on abortSignal for cancellation
       ...(Object.keys(modelProviderOptions).length > 0 ? { providerOptions: modelProviderOptions } : {}),
       onStepFinish: async ({ usage }) => {
         if (usage) {
@@ -293,7 +308,7 @@ export async function handleAgentStreamRequest(
           const p = part as unknown as { toolCallId: string; toolName: string; result: unknown }, b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
           if (b && b.type === 'tool') { b.result = p.result; b.status = 'complete' }
           send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: p.result }, threadId })
-          if (['writeToFile', 'multiReplaceFileContent'].includes(p.toolName)) {
+          if (FILE_WRITE_TOOLS.includes(p.toolName)) {
             if (process.type === 'utility') (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
             else pushArtifactsChanged(threadId)
           }
@@ -309,25 +324,22 @@ export async function handleAgentStreamRequest(
           flushBuffers()
           const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }, u = p.totalUsage || {}, pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0, tot = pTokens + cTokens
           try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
+          // Mark finished BEFORE sending finish event so port.close() in finally doesn't trigger abort
+          ;(port as any).__markFinished?.()
           send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot) }, threadId })
           if (p.finishReason === 'length') { log.warn(`[stream] Token limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
           break
         }
         default: {
-          const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
-          // Handle legacy/fallback event types from older AI SDK versions or other providers
-          if (p.type === 'tool-call-streaming-start') {
-            orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
-            send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId })
-          } else if (p.type === 'tool-call-delta') {
-            const delta = p.argsTextDelta || p.delta || '', b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
-            if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
-            send({ type: 'tool-call-delta', payload: { toolCallId: tid, delta }, threadId })
-          } else if (p.type === 'tool-error') {
-            const errMsg = p.error instanceof Error ? p.error.message : String(p.error), b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
+          // Handle tool-error which has no dedicated case (not a duplicate of existing cases)
+          const p = part as unknown as ToolStreamPart
+          if (p.type === 'tool-error') {
+            const errMsg = p.error instanceof Error ? p.error.message : String(p.error)
+            const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
             if (b && b.type === 'tool') { b.result = { success: false, error: errMsg }; b.status = 'error' }
             send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: { success: false, error: errMsg } }, threadId })
           }
+          // tool-call-streaming-start and tool-call-delta are handled by tool-input-start/tool-input-delta cases above
         }
       }
     }
@@ -345,6 +357,8 @@ export async function handleAgentStreamRequest(
     throw err
   } finally {
     flushBuffers()
+    // Mark finished so the port 'close' handler (from setupStreamRequest) doesn't abort
+    ;(port as any).__markFinished?.()
     if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
     activePorts.delete(threadId)
     try { port.close() } catch {}

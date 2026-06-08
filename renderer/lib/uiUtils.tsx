@@ -76,3 +76,30 @@ export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
     />
   </svg>
 )
+
+export function sanitizeHtml(html: string): string {
+  const parser = new DOMParser(), doc = parser.parseFromString(html, 'text/html')
+  const clean = (node: Node) => {
+    let child = node.firstChild
+    while (child) {
+      const next = child.nextSibling
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement, tag = el.tagName.toLowerCase()
+        const ALLOWED = ['p', 'br', 'strong', 'em', 'code', 'pre', 'span', 'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'details', 'summary', 'svg', 'path', 'rect', 'polyline', 'button']
+        if (!ALLOWED.includes(tag)) el.remove()
+        else {
+          for (const attr of Array.from(el.attributes)) {
+            const name = attr.name.toLowerCase(), val = attr.value
+            if (name === 'onclick' && tag === 'button' && el.classList.contains('code-block-copy-btn') && val.includes('navigator.clipboard.writeText')) continue
+            if (name.startsWith('on')) el.removeAttribute(attr.name)
+            else if (name === 'href' && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('file://')) el.removeAttribute(attr.name)
+            else if (name === 'src' && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('file://') && !val.startsWith('data:')) el.removeAttribute(attr.name)
+          }
+          clean(child)
+        }
+      }
+      child = next
+    }
+  }
+  clean(doc.body); return doc.body.innerHTML
+}

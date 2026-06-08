@@ -34,9 +34,7 @@ const BrowserView: React.FC = () => {
   }, [])
 
   const navigate = useCallback((url: string) => {
-    const target = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
-    window.api.invoke('browser:navigate', { url: target }).catch(() => {})
-    setUrlInput(target)
+    window.api.invoke('browser:navigate', { url }).catch(() => {})
   }, [])
 
   const openBrowserWithBounds = useCallback(async () => {
@@ -46,7 +44,7 @@ const BrowserView: React.FC = () => {
       setIsLoaded(true); isLoadedRef.current = true
       window.api.invoke('browser:resize', getBounds()).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
-  }, [getBounds])
+  }, [getBounds, activeThreadId])
 
   // C-3 FIX: Merged all resize/open logic into a single effect.
   // Previously two effects both depended on panelMode+isOpen and fired simultaneously,

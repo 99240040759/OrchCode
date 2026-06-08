@@ -1,127 +1,138 @@
 import React from 'react'
-import ReactMarkdown from 'react-markdown'
-import rehypeHighlight from 'rehype-highlight'
-import remarkGfm from 'remark-gfm'
-import { Copy } from 'lucide-react'
-import { toast } from 'sonner'
 import { useSetAtom, useAtomValue } from 'jotai'
+import { toast } from 'sonner'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
-import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-
+import { stripFileProtocol } from '../lib/pathUtils'
+import { parseMarkdown } from '../lib/markdownParser'
 import type { FileReadResult } from '../../preload/index.d'
 
-interface MarkdownRendererProps { content: string; isArtifact?: boolean }
-type CodeChildProps = { className?: string; children?: React.ReactNode }
-
-const extractText = (node: React.ReactNode): string => {
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return (node as React.ReactNode[]).map(extractText).join('')
-  return React.isValidElement<{ children?: React.ReactNode }>(node) ? extractText(node.props.children) : ''
+interface MarkdownRendererProps {
+  content: string
+  isArtifact?: boolean
+  id?: string
+  isStreaming?: boolean
 }
 
-const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }) => {
-  const conversationId = useAtomValue(activeThreadIdAtom)
-  const [imgSrc, setImgSrc] = React.useState<string | null>(null)
-  const [error, setError] = React.useState<boolean>(false)
-  const [loading, setLoading] = React.useState<boolean>(true)
+const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>(
+  ({ content, isArtifact = false, id, isStreaming = false }, ref) => {
+    const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
+    const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
+    const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+    const conversationId = useAtomValue(activeThreadIdAtom)
 
-  React.useEffect(() => {
-    let active = true
-    const loadImage = async () => {
-      try {
-        setLoading(true); setError(false)
-        const stripped = src.replace(/^file:\/\/\/?/, '')
-        let filePath = decodeURIComponent(stripped)
-        if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) filePath = '/' + filePath
-        const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as FileReadResult | undefined
-        if (active) {
-          if (fileData?.isBinary && fileData.base64) setImgSrc(`data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
-          else setError(true)
-        }
-      } catch (err) { console.error(err); if (active) setError(true) }
-      finally { if (active) setLoading(false) }
-    }
-    loadImage(); return () => { active = false }
-  }, [src, conversationId])
+    const html = React.useMemo(() => isStreaming ? '' : parseMarkdown(content), [content, isStreaming])
+    const containerRef = React.useRef<HTMLDivElement | null>(null)
 
-  if (loading) return <div className="local-image-loading-frame"><div className="tool-call-spinner" /><span className="shimmer-text">Loading image...</span></div>
-  if (error || !imgSrc) return <div className="local-image-error-frame"><span>Failed to load image</span></div>
-  return <div className="local-image-container"><img src={imgSrc} alt={alt || 'Generated Image'} className="local-image-preview" /></div>
-}
+    React.useEffect(() => {
+      const el = containerRef.current
+      if (!el) return
+      let active = true
 
-function useMarkdownComponents() {
-  const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
-  const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
-  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
-  const conversationId = useAtomValue(activeThreadIdAtom)
-  const stateRef = React.useRef({ setArtifactPanelOpen, setActiveEditorFile, setArtifactPanelMode, conversationId })
-  stateRef.current = { setArtifactPanelOpen, setActiveEditorFile, setArtifactPanelMode, conversationId }
-
-  return React.useMemo(() => ({
-    hr: () => null,
-    a: ({ href, children, node, ...props }: React.ComponentPropsWithoutRef<'a'> & { node?: unknown }) => {
-      if (href?.startsWith('file://')) {
-        const stripped = href.replace(/^file:\/\/\/?/, '')
-        let filePath = decodeURIComponent(stripped)
-        if (!filePath.match(/^[a-zA-Z]:/) && !filePath.startsWith('/')) filePath = '/' + filePath
-        const handleFileClick = async (e: React.MouseEvent) => {
+      const handleGlobalClick = async (e: MouseEvent) => {
+        const fileLink = (e.target as HTMLElement).closest('.file-link')
+        if (fileLink) {
           e.preventDefault()
-          try {
-            const { setActiveEditorFile: sae, setArtifactPanelMode: spm, setArtifactPanelOpen: sapo, conversationId: cid } = stateRef.current
-            const fileData = await window.api.invoke('file:read', { filePath, conversationId: cid }) as FileReadResult | undefined
-            if (fileData) { sae(fileData); spm('editor'); sapo(true) }
-          } catch (err) { console.error(err) }
+          const href = fileLink.getAttribute('data-href')
+          if (href) {
+            const filePath = stripFileProtocol(href)
+            try {
+              const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as FileReadResult | undefined
+              if (fileData) {
+                setActiveEditorFile(fileData)
+                setArtifactPanelMode('editor')
+                setArtifactPanelOpen(true)
+              }
+            } catch (err) {
+              console.error(err)
+            }
+          }
+          return
         }
-        return (
-          <span onClick={handleFileClick} title={`Open ${filePath}`} className="file-link">
-            <SymbolsFileIcon fileName={filePath.split(/[/\\]/).pop() ?? ''} autoAssign width={14} height={14} className="file-icon-wrapper" />
-            <span className="file-name-wrapper">{children}</span>
-          </span>
-        )
+        const copyBtn = (e.target as HTMLElement).closest('.code-block-copy-btn')
+        if (copyBtn) {
+          e.preventDefault()
+          const codeEl = copyBtn.parentNode?.querySelector('code')
+          if (codeEl) {
+            navigator.clipboard.writeText(codeEl.innerText)
+            toast.success('Code copied to clipboard')
+            const orig = copyBtn.innerHTML
+            copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+            setTimeout(() => { copyBtn.innerHTML = orig }, 2000)
+          }
+        }
       }
-      return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
-    },
-    pre: ({ children, node, ...props }: React.ComponentPropsWithoutRef<'pre'> & { node?: unknown }) => {
-      const codeChild = React.Children.toArray(children)[0]
-      const codeElement = React.isValidElement(codeChild) ? (codeChild as React.ReactElement<CodeChildProps>) : null
-      const className = codeElement?.props?.className || ''
-      const match = /language-(\w+)/.exec(className), language = match ? match[1] : ''
-      const codeString = codeElement?.props?.children ? extractText(codeElement.props.children).replace(/\n$/, '') : ''
-      if (language) {
-        return (
-          <pre className={`${className} pre-wrapper`} {...props}>
-            <span className="code-block-lang">{language}</span>
-            <button className="code-block-copy-btn" onClick={(e) => { e.preventDefault(); navigator.clipboard.writeText(codeString); toast.success('Code copied to clipboard') }} title="Copy code">
-              <Copy size={13} />
-            </button>
-            {children}
-          </pre>
-        )
+
+      const resolveImages = async () => {
+        const imgs = el.querySelectorAll('img')
+        for (const img of Array.from(imgs)) {
+          const src = img.getAttribute('src')
+          if (src && (src.startsWith('file://') || src.startsWith('/') || src.match(/^[a-zA-Z]:/)) && !src.startsWith('data:')) {
+            let parent = img.parentElement
+            if (!parent || !parent.classList.contains('local-image-container')) {
+              const wrapper = document.createElement('div')
+              wrapper.className = 'local-image-container loading'
+              const loader = document.createElement('div')
+              loader.className = 'local-image-loading-frame'
+              loader.innerHTML = '<div class="tool-call-spinner"></div><span class="shimmer-text">Loading image...</span>'
+              img.parentNode?.insertBefore(wrapper, img)
+              wrapper.appendChild(loader)
+              wrapper.appendChild(img)
+              img.style.display = 'none'
+              parent = wrapper
+            }
+            try {
+              const fileData = await window.api.invoke('file:read', { filePath: stripFileProtocol(src), conversationId }) as FileReadResult | undefined
+              if (active && fileData?.isBinary && fileData.base64) {
+                img.setAttribute('src', `data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
+                img.style.display = ''
+                parent.querySelector('.local-image-loading-frame')?.remove()
+                parent.classList.remove('loading')
+              } else if (active) {
+                const f = parent.querySelector('.local-image-loading-frame')
+                if (f) { f.className = 'local-image-error-frame'; f.innerHTML = '<span>Failed to load image</span>' }
+              }
+            } catch {
+              if (active) {
+                const f = parent.querySelector('.local-image-loading-frame')
+                if (f) { f.className = 'local-image-error-frame'; f.innerHTML = '<span>Failed to load image</span>' }
+              }
+            }
+          }
+        }
       }
-      return <pre {...props}>{children}</pre>
-    },
-    code: ({ className, children, node, ...props }: React.ComponentPropsWithoutRef<'code'> & { node?: unknown }) => <code className={className} {...props}>{children}</code>,
-    img: ({ src, alt, node, ...props }: React.ComponentPropsWithoutRef<'img'> & { node?: unknown }) => (src?.startsWith('file://') || src?.startsWith('/') || src?.match(/^[a-zA-Z]:/)) ? <LocalImage src={src} alt={alt} {...props} /> : <img src={src} alt={alt} {...props} />
-  }), [])
-}
 
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact = false }) => {
-  const components = useMarkdownComponents()
-  const processed = React.useMemo(() => content.replace(/(!?\[.*?\])\((.*?)\)/g, (match, label, url) => {
-    const clean = url.replace(/\\/g, '/')
-    if (!clean.startsWith('file://') && !clean.startsWith('/') && !clean.match(/^[a-zA-Z]:/)) return match
-    let fmt = clean.replace(/^file:\/\/\/?/, 'file:///').replace(/^file:\/\/\/([a-zA-Z]:)/, 'file:///$1')
-    if (!fmt.startsWith('file:///')) fmt = fmt.startsWith('/') ? 'file://' + fmt : 'file:///' + fmt
-    try { fmt = encodeURI(decodeURI(fmt)) } catch { fmt = fmt.replace(/ /g, '%20') }
-    return `${label}(${fmt})`
-  }), [content])
-  return (
-    <div className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]} urlTransform={(value) => value} components={components}>
-        {processed}
-      </ReactMarkdown>
-    </div>
-  )
-}
+      el.addEventListener('click', handleGlobalClick)
+      resolveImages()
 
-export default React.memo(MarkdownRenderer, (prev, next) => prev.content === next.content && prev.isArtifact === next.isArtifact)
+      const obs = new MutationObserver(() => { resolveImages() })
+      obs.observe(el, { childList: true, subtree: true })
+
+      return () => {
+        active = false
+        el.removeEventListener('click', handleGlobalClick)
+        obs.disconnect()
+      }
+    }, [html, conversationId, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
+
+    return (
+      <div
+        ref={(node) => {
+          containerRef.current = node
+          if (typeof ref === 'function') ref(node)
+          else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node
+        }}
+        id={id}
+        className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}
+        dangerouslySetInnerHTML={isStreaming ? undefined : { __html: html }}
+      />
+    )
+  }
+)
+MarkdownRenderer.displayName = 'MarkdownRenderer'
+
+export default React.memo(MarkdownRenderer, (prev, next) =>
+  prev.content === next.content &&
+  prev.isArtifact === next.isArtifact &&
+  prev.id === next.id &&
+  prev.isStreaming === next.isStreaming
+)

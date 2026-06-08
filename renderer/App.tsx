@@ -26,7 +26,6 @@ function AppInner(): React.JSX.Element {
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
   const setSelectedModel = useSetAtom(selectedModelAtom)
-  const selectedModel = useAtomValue(selectedModelAtom)
   const activeThreadTitle = activeThread?.title || 'New Chat'
   const { run, stop, openWorkspace, newConversation, loadThreads, selectThread } = useChat()
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
@@ -52,9 +51,13 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     window.api.invoke('models:list').then((m: unknown) => {
       const models = m as Record<string, { id: string; name: string }> | undefined
-      if (models) { setAvailableModels(models); if (!selectedModel && Object.keys(models).length > 0) setSelectedModel(Object.keys(models)[0]) }
+      if (models) {
+        setAvailableModels(models)
+        // Only set default once — use functional update to read current value without adding to deps
+        setSelectedModel(prev => (!prev && Object.keys(models).length > 0) ? Object.keys(models)[0] : prev)
+      }
     }).catch(console.error)
-  }, [setAvailableModels, setSelectedModel, selectedModel])
+  }, [setAvailableModels, setSelectedModel])
 
   useEffect(() => {
     const unsubNew = window.api.on('command:new-conversation', () => {

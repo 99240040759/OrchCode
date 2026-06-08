@@ -9,20 +9,31 @@ import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, a
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
 
+const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
+
 const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
   <SymbolsFileIcon fileName={fileName} autoAssign={true} width={size} height={size} className={`${className} file-icon-wrapper`} />
 )
 
+/**
+ * Extract a string value from finalized args or streaming argsDelta JSON.
+ * Handles Windows paths with escaped backslashes correctly.
+ */
 function getStreamingVal(args: Record<string, unknown>, argsDelta: string | undefined, key: string): string {
   if (args[key] !== undefined && args[key] !== null) return String(args[key])
   if (!argsDelta) return ''
-  const m = argsDelta.match(new RegExp(`"${key}"\\s*:\\s*(?:"([^"]*)"|([0-9]+))`))
-  return m ? (m[1] !== undefined ? m[1] : m[2]).replace(/\\(.)/g, '$1') : ''
+  // Match both quoted strings and bare numbers; handle escaped chars including \\
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const m = argsDelta.match(new RegExp(`"${escapedKey}"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|(-?\\d+))`))
+  if (!m) return ''
+  if (m[2] !== undefined) return m[2]
+  // unescape JSON string escapes (handles \\ → \, \/ → /, \n \t etc)
+  try { return JSON.parse(`"${m[1]}"`) } catch { return m[1] }
 }
 
 function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta: string | undefined): string {
   let added = 0, removed = 0
-  if (toolName === 'multiReplaceFileContent') {
+  if (FILE_WRITE_TOOLS.includes(toolName) && toolName !== 'writeToFile') {
     const chunks = args.replacementChunks as Array<{ startLine: number; endLine: number; replacementContent: string }> | undefined
     if (chunks && Array.isArray(chunks)) {
       for (const c of chunks) {
@@ -30,35 +41,42 @@ function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta
         if (c.replacementContent) added += c.replacementContent.split(/\r?\n/).length
       }
     } else if (argsDelta) {
-      const startMatches = [...argsDelta.matchAll(/"startLine"\s*:\s*([0-9]+)/g)], endMatches = [...argsDelta.matchAll(/"endLine"\s*:\s*([0-9]+)/g)]
+      const startMatches = [...argsDelta.matchAll(/"startLine"\s*:\s*(-?\d+)/g)]
+      const endMatches = [...argsDelta.matchAll(/"endLine"\s*:\s*(-?\d+)/g)]
       for (let i = 0; i < Math.min(startMatches.length, endMatches.length); i++) {
         const s = Number(startMatches[i][1]), e = Number(endMatches[i][1])
-        if (s && e) removed += (e - s + 1)
+        if (s > 0 && e >= s) removed += (e - s + 1)
       }
+      // Count newlines in replacementContent fields from argsDelta
       const repMatches = [...argsDelta.matchAll(/"replacementContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
-      for (const m of repMatches) added += m[1].split(/\\n|\n/).length
+      for (const m of repMatches) {
+        // Count actual newlines (\\n in JSON) plus literal newlines
+        added += (m[1].match(/\\n/g) ?? []).length + (m[1].match(/\n/g) ?? []).length + 1
+      }
     }
   }
   return (added || removed) ? ` +${added}-${removed}` : ''
 }
 
-// Derive a human-readable label and target from the tool name + args natively
-function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: any): {
+function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: unknown): {
   operation: string; target: string; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
-  const fileWriteTools = ['writeToFile', 'multiReplaceFileContent']
-  if (fileWriteTools.includes(toolName)) {
-    const path = getStreamingVal(args, argsDelta, 'targetFile'), suffix = getDiffStats(toolName, args, argsDelta)
+  if (FILE_WRITE_TOOLS.includes(toolName)) {
+    const path = getStreamingVal(args, argsDelta, 'targetFile')
+    const suffix = toolName !== 'writeToFile' ? getDiffStats(toolName, args, argsDelta) : ''
     const targetName = (path.split(/[/\\]/).pop() ?? path) + suffix
-    const op = toolName === 'writeToFile' ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
+    const op = toolName === 'writeToFile'
+      ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing')
+      : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
     return { operation: op, target: targetName, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
     const path = getStreamingVal(args, argsDelta, 'absolutePath')
     const start = getStreamingVal(args, argsDelta, 'startLine')
     const end = getStreamingVal(args, argsDelta, 'endLine')
-    const suffix = start || end ? ` #L${start || 1}${end ? `-${end}` : ''}` : ''
+    // Only show suffix if a line range was explicitly provided (non-empty string)
+    const suffix = start || end ? ` #L${start || '1'}${end ? `-${end}` : ''}` : ''
     return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: (path.split(/[/\\]/).pop() ?? path) + suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'listDir') {
@@ -74,7 +92,8 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>, status?
   if (toolName === 'browserMouseClickCoordinate') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: `(${getStreamingVal(args, argsDelta, 'x')}, ${getStreamingVal(args, argsDelta, 'y')})`, fullPath: null, isFile: false }
   if (toolName === 'searchWeb') return { operation: isComp ? 'Searched web' : isErr ? 'Failed to search web' : 'Searching web', target: getStreamingVal(args, argsDelta, 'query').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'generateImage') {
-    const prompt = getStreamingVal(args, argsDelta, 'prompt'), imgResult = result as { success: boolean; filePath: string } | undefined
+    const prompt = getStreamingVal(args, argsDelta, 'prompt')
+    const imgResult = result as { success: boolean; filePath: string } | undefined
     const path = isComp && imgResult?.success ? imgResult.filePath : null
     return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target: prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt, fullPath: path || null, isFile: !!path }
   }
@@ -119,14 +138,9 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   }
 
   const Component = (isFile ? 'button' : 'div') as React.ElementType
-
   return (
     <div className="tool-call-block-container">
-      <Component
-        onClick={isFile ? handleClick : undefined}
-        className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
-        title={isFile ? `Open ${fullPath}` : undefined}
-      >
+      <Component onClick={isFile ? handleClick : undefined} className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`} title={isFile ? `Open ${fullPath}` : undefined}>
         <span className="muted-text">{operation}</span>
         <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
         <span className="target-text">{target}</span>
@@ -141,5 +155,6 @@ export default React.memo(ToolCallBlock, (prev, next) =>
   prev.toolCall.id === next.toolCall.id &&
   prev.toolCall.status === next.toolCall.status &&
   prev.toolCall.result === next.toolCall.result &&
-  prev.toolCall.args === next.toolCall.args
+  prev.toolCall.args === next.toolCall.args &&
+  prev.toolCall.argsDelta === next.toolCall.argsDelta  // FIXED: was missing, blocked live updates
 )
