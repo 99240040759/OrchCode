@@ -6,7 +6,7 @@ function getAppInfo() {
   const { app } = require('electron')
   return { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(), userData: app.getPath('userData') }
 }
-export function getSkillsPath(): string {
+function getSkillsPath(): string {
   const info = getAppInfo()
   return info.isPackaged ? join(info.resourcesPath, 'resources', 'skills') : join(info.appPath, 'resources', 'skills')
 }

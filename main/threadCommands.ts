@@ -14,7 +14,7 @@ import { listArtifacts } from './artifacts'
 import { getConversationPath } from './paths'
 import { getCurrentSession } from './auth'
 
-export const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
+const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 export const convIdSchema = z.string().min(1).max(256)
 
 export const threadCommands = {

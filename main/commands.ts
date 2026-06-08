@@ -6,6 +6,7 @@ import { terminalCommands } from './terminalCommands'
 import { browserCommands } from './browserCommands'
 import { authCommands } from './authCommands'
 import { updaterCommands } from './updaterCommands'
+import { captureException } from '@sentry/electron'
 
 export { cleanupAllPtys } from './terminalCommands'
 
@@ -20,10 +21,16 @@ const commands: Record<string, any> = {
 
 export function registerAllIpc() {
   ipcMain.handle('api:invoke', async (event, { command, payload }) => {
-    const handler = commands[command]
-    if (!handler) throw new Error(`Unknown command: ${command}`)
-    const parsed = handler.schema.parse(payload ?? {})
-    return handler.execute(parsed, event)
+    try {
+      const handler = commands[command]
+      if (!handler) throw new Error(`Unknown command: ${command}`)
+      const parsed = handler.schema.parse(payload ?? {})
+      return await handler.execute(parsed, event)
+    } catch (err) {
+      log.error(`[IPC Error] ${command}:`, err)
+      captureException(err)
+      throw err
+    }
   })
   log.info(`[router] Registered ${Object.keys(commands).length} commands on api:invoke`)
 }

@@ -22,7 +22,7 @@ proc.parentPort.on('message', async (e: any) => {
       proc.parentPort.postMessage({ type: 'stream-finished', threadId })
     } catch (err: any) {
       log.error(`[agentWorker] Stream error for thread ${threadId}:`, err)
-      proc.parentPort.postMessage({ type: 'stream-finished', threadId, error: err.message })
+      proc.parentPort.postMessage({ type: 'stream-finished', threadId, error: { message: err?.message || String(err), stack: err?.stack, name: err?.name } })
     }
   } else if (type === 'tool-response') {
     const { requestId, result, error } = e.data

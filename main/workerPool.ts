@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import log from 'electron-log'
 
-export class WorkerPool {
+class WorkerPool {
   private workers: UtilityProcess[] = []
   private activeJobs = new Map<number, string>()
   constructor(private maxWorkers = 4) {}

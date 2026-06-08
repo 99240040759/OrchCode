@@ -187,7 +187,7 @@ function getJwtExpiry(token: string): number {
   try { const parts = token.split('.'); if (parts.length !== 3) return 0; return (JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8')).exp || 0) * 1000 }
   catch { return 0 }
 }
-export async function refreshSessionIfNeeded(): Promise<boolean> {
+async function refreshSessionIfNeeded(): Promise<boolean> {
   if (!currentSession?.refreshToken) return false
   const exp = getJwtExpiry(currentSession.idToken)
   if (exp && exp - Date.now() > 5 * 60 * 1000) return true

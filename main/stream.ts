@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { streamText, stepCountIs, type ModelMessage, type UserContent } from 'ai'
 import log from 'electron-log'
+import { captureException } from '@sentry/electron'
 import { z } from 'zod'
 import WindowManager from './windowManager'
 import { getAvailableModels, resolveModel } from './models'
@@ -24,7 +25,7 @@ type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; cont
 interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
 export const activeAbortControllers = new Map<string, AbortController>()
-export const activePorts = new Map<string, Electron.MessagePortMain>()
+const activePorts = new Map<string, Electron.MessagePortMain>()
 const pendingAttachments = new Map<string, Promise<Buffer[]>>()
 const attachmentResolvers = new Map<string, (bufs: Buffer[]) => void>()
 const SUMMARISE_THRESHOLD = 180_000
@@ -35,53 +36,65 @@ const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), thre
 export function registerStreamIpc() {
   const { ipcMain, MessageChannelMain } = require('electron')
   ipcMain.handle('api:stream', async (event, rawPayload) => {
-    const session = getCurrentSession()
-    if (!session) throw new Error('Unauthorized: Please sign in to use agents.')
-    const request = StreamRequestSchema.parse(rawPayload ?? {})
-    if (request.attachments?.length) {
-      pendingAttachments.set(request.threadId, new Promise<Buffer[]>((resolve, reject) => {
-        const timeoutId = setTimeout(() => { attachmentResolvers.delete(request.threadId); reject(new Error('Attachment handshake timeout')) }, 10000)
-        attachmentResolvers.set(request.threadId, (bufs) => { clearTimeout(timeoutId); resolve(bufs) })
-      }))
-    }
-    const { port1, port2 } = new MessageChannelMain()
-    event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
-    const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
-    const win = WindowManager.getMainWindow()
-    if (win && !win.isDestroyed()) win.setProgressBar(2)
-    const onExit = (code: number | null) => {
-      pool.clearJob(worker.pid!)
-      worker.off('message', onMsg)
+    try {
+      const session = getCurrentSession()
+      if (!session) throw new Error('Unauthorized: Please sign in to use agents.')
+      const request = StreamRequestSchema.parse(rawPayload ?? {})
+      if (request.attachments?.length) {
+        pendingAttachments.set(request.threadId, new Promise<Buffer[]>((resolve, reject) => {
+          const timeoutId = setTimeout(() => { attachmentResolvers.delete(request.threadId); reject(new Error('Attachment handshake timeout')) }, 10000)
+          attachmentResolvers.set(request.threadId, (bufs) => { clearTimeout(timeoutId); resolve(bufs) })
+        }))
+      }
+      const { port1, port2 } = new MessageChannelMain()
+      event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
+      const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
       const win = WindowManager.getMainWindow()
-      if (win && !win.isDestroyed()) {
-        win.setProgressBar(-1)
-        win.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
-      }
-    }
-    worker.once('exit', onExit)
-    const onMsg = (msg: any) => {
-      if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
-      if (msg?.type === 'tool-request' && msg.threadId === request.threadId) {
-        const { requestId, toolName, args } = msg
-        const t = browserTools(request.threadId, true)[toolName]
-        if (t) {
-          t.execute(args).then((res: any) => {
-            const transfers = res && res.buffer instanceof ArrayBuffer ? [res.buffer] : []
-            worker.postMessage({ type: 'tool-response', requestId, result: res }, transfers)
-          }).catch((err: any) => worker.postMessage({ type: 'tool-response', requestId, error: err.message }))
-        } else worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
-      }
-      if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
+      if (win && !win.isDestroyed()) win.setProgressBar(2)
+      const onExit = (code: number | null) => {
         pool.clearJob(worker.pid!)
-        worker.off('message', onMsg); worker.off('exit', onExit)
+        worker.off('message', onMsg)
         const win = WindowManager.getMainWindow()
-        if (win && !win.isDestroyed()) win.setProgressBar(-1)
+        if (win && !win.isDestroyed()) {
+          win.setProgressBar(-1)
+          win.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
+        }
       }
+      worker.once('exit', onExit)
+      const onMsg = (msg: any) => {
+        if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
+        if (msg?.type === 'tool-request' && msg.threadId === request.threadId) {
+          const { requestId, toolName, args } = msg
+          const t = browserTools(request.threadId, true)[toolName]
+          if (t) {
+            t.execute(args).then((res: any) => {
+              const transfers = res && res.buffer instanceof ArrayBuffer ? [res.buffer] : []
+              worker.postMessage({ type: 'tool-response', requestId, result: res }, transfers)
+            }).catch((err: any) => worker.postMessage({ type: 'tool-response', requestId, error: err.message }))
+          } else worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
+        }
+        if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
+          pool.clearJob(worker.pid!)
+          worker.off('message', onMsg); worker.off('exit', onExit)
+          const win = WindowManager.getMainWindow()
+          if (win && !win.isDestroyed()) win.setProgressBar(-1)
+          if (msg.error) {
+            const errObj = typeof msg.error === 'string' ? { message: msg.error } : msg.error
+            const remoteError = new Error(errObj.message); remoteError.name = errObj.name || 'AgentWorkerError'
+            if (errObj.stack) remoteError.stack = errObj.stack
+            captureException(remoteError)
+          }
+        }
+      }
+      worker.on('message', onMsg)
+      const isBrowserActive = !!WindowManager.getBrowserView()
+      worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
+      return { ok: true }
+    } catch (err) {
+      log.error('[stream IPC Error]:', err)
+      captureException(err)
+      throw err
     }
-    worker.on('message', onMsg)
-    const isBrowserActive = !!WindowManager.getBrowserView()
-    worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
-    return { ok: true }
   })
 }
 

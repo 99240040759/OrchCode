@@ -19,7 +19,7 @@ const extractText = (node: React.ReactNode): string => {
   return React.isValidElement<{ children?: React.ReactNode }>(node) ? extractText(node.props.children) : ''
 }
 
-export const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }) => {
+const LocalImage: React.FC<{ src: string; alt?: string }> = ({ src, alt }) => {
   const conversationId = useAtomValue(activeThreadIdAtom)
   const [imgSrc, setImgSrc] = React.useState<string | null>(null)
   const [error, setError] = React.useState<boolean>(false)

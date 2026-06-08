@@ -9,7 +9,7 @@ import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, a
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
 
-export const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
+const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
   <SymbolsFileIcon fileName={fileName} autoAssign={true} width={size} height={size} className={`${className} file-icon-wrapper`} />
 )
 
