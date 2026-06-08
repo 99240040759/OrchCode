@@ -8,7 +8,6 @@ import { useSetAtom, useAtomValue } from 'jotai'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
-import { LocalImage } from './MarkdownRenderer'
 
 export const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
   <SymbolsFileIcon fileName={fileName} autoAssign={true} width={size} height={size} className={`${className} file-icon-wrapper`} />
@@ -48,7 +47,7 @@ function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta
 }
 
 // Derive a human-readable label and target from the tool name + args natively
-function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string): {
+function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: any): {
   operation: string; target: string; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
@@ -79,8 +78,9 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>, status?
   if (toolName === 'browserMouseClickCoordinate') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: `(${getStreamingVal(args, argsDelta, 'x')}, ${getStreamingVal(args, argsDelta, 'y')})`, fullPath: null, isFile: false }
   if (toolName === 'searchWeb') return { operation: isComp ? 'Searched web' : isErr ? 'Failed to search web' : 'Searching web', target: getStreamingVal(args, argsDelta, 'query').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'generateImage') {
-    const prompt = getStreamingVal(args, argsDelta, 'prompt')
-    return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target: prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt, fullPath: null, isFile: false }
+    const prompt = getStreamingVal(args, argsDelta, 'prompt'), imgResult = result as { success: boolean; filePath: string } | undefined
+    const path = isComp && imgResult?.success ? imgResult.filePath : null
+    return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target: prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt, fullPath: path || null, isFile: !!path }
   }
   return { operation: toolName, target: '', fullPath: null, isFile: false }
 }
@@ -108,7 +108,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
 }
 
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta)
+  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta, toolCall.result)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -123,8 +123,6 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   }
 
   const Component = (isFile ? 'button' : 'div') as React.ElementType
-  const isImageGen = toolCall.toolName === 'generateImage'
-  const imgResult = toolCall.result as { success: boolean; filePath: string } | undefined
 
   return (
     <div className="tool-call-block-container">
@@ -139,11 +137,6 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
         {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>
-      {isImageGen && toolCall.status === 'complete' && imgResult?.success && (
-        <div className="tool-image-preview-frame">
-          <LocalImage src={imgResult.filePath} alt="Generated Image" />
-        </div>
-      )}
     </div>
   )
 }

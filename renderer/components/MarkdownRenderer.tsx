@@ -107,10 +107,18 @@ function useMarkdownComponents() {
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, isArtifact = false }) => {
   const components = useMarkdownComponents()
+  const processed = React.useMemo(() => content.replace(/(!?\[.*?\])\((.*?)\)/g, (match, label, url) => {
+    const clean = url.replace(/\\/g, '/')
+    if (!clean.startsWith('file://') && !clean.startsWith('/') && !clean.match(/^[a-zA-Z]:/)) return match
+    let fmt = clean.replace(/^file:\/\/\/?/, 'file:///').replace(/^file:\/\/\/([a-zA-Z]:)/, 'file:///$1')
+    if (!fmt.startsWith('file:///')) fmt = fmt.startsWith('/') ? 'file://' + fmt : 'file:///' + fmt
+    try { fmt = encodeURI(decodeURI(fmt)) } catch { fmt = fmt.replace(/ /g, '%20') }
+    return `${label}(${fmt})`
+  }), [content])
   return (
     <div className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]} urlTransform={(value) => value} components={components}>
-        {content}
+        {processed}
       </ReactMarkdown>
     </div>
   )

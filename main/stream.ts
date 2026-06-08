@@ -98,9 +98,9 @@ Use searchWorkspace(query) to find files. Use listDir(path) to explore. Read bef
 ${browserInstruction}
 ${skillsSection}
 ── ARTIFACTS ──
-Use the sandboxed system inside '.orch-artifacts/'. Manage with writeToFile, replaceFileContent:
-1. PLANNING: For non-trivial changes, write implementation plan at '.orch-artifacts/implementation_plan.md' and wait for user approval.
-2. NO WALKTHROUGHS: Never edit walkthrough markdown files.
+Use the sandboxed system inside 'artifacts/'. Manage with writeToFile, replaceFileContent:
+1. PLANNING: For non-trivial changes, write implementation plan at 'artifacts/implementation_plan.md' and wait for user approval.
+2. ONLY PLANNING: Never create or edit other files in the artifacts directory. Do not write walkthroughs or task files.
 ── TOOLS ──
 Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
 }

@@ -23,9 +23,10 @@ export async function getOrCreateWorkspaceContext(conversationId: string, userSe
   if (initPromises.has(conversationId)) return initPromises.get(conversationId)!
   const promise = (async () => {
     try {
-      const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId), artifactsPath = join(rootPath, '.orch-artifacts')
+      const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId)
+      const artifactsPath = join(getConversationPath(conversationId), 'artifacts')
       await fs.mkdir(rootPath, { recursive: true })
-      if (isUserWorkspace) await fs.mkdir(artifactsPath, { recursive: true })
+      await fs.mkdir(artifactsPath, { recursive: true })
       const ctx = { conversationId, rootPath, artifactsPath, isUserWorkspace }
       workspaceRegistry.set(conversationId, ctx); return ctx
     } finally { initPromises.delete(conversationId) }
@@ -49,7 +50,7 @@ export async function updateWorkspacePath(conversationId: string, newPath: strin
   if (!isAbsolute(newPath)) throw new Error('Workspace path must be absolute.')
   const stat = await fs.stat(newPath)
   if (!stat.isDirectory()) throw new Error('Workspace path must point to a directory.')
-  const artifactsPath = join(newPath, '.orch-artifacts')
+  const artifactsPath = join(getConversationPath(conversationId), 'artifacts')
   await fs.mkdir(artifactsPath, { recursive: true })
   const ctx = { conversationId, rootPath: newPath, artifactsPath, isUserWorkspace: true }
   workspaceRegistry.set(conversationId, ctx); return ctx
@@ -62,7 +63,14 @@ const isWithin = (base: string, target: string) => {
 }
 
 export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
-  const resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
+  let resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
+  if (conversationId) {
+    const segs = resolvedTarget.split(/[/\\]/)
+    if (segs.includes('artifacts')) {
+      const filename = segs[segs.length - 1]
+      if (filename === 'implementation_plan.md') resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', filename))
+    }
+  }
   const isAllowed = isWithin(rootPath, resolvedTarget) || isWithin(getUserSkillsPath(), resolvedTarget) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget) : false)
   if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
   let existingPath = resolvedTarget

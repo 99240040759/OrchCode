@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from 'react'
-import { useAtom } from 'jotai'
-import { updateStatusAtom } from '../store/agentStore'
+import { useAtom, useAtomValue } from 'jotai'
+import { updateStatusAtom, sidebarExpandedAtom } from '../store/agentStore'
 
 import type { UpdateStatus } from '../../preload/index.d'
 
@@ -16,6 +16,7 @@ const isNewerVersion = (l: string, c: string): boolean => {
 
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
+  const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
 
   const runMacWorkerCheck = useCallback(async () => {
     if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
@@ -74,7 +75,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
   }
 
   return (
-    <header className="titlebar">
+    <header className={`titlebar ${sidebarExpanded ? 'titlebar-sidebar-expanded' : ''}`}>
       <div className={`titlebar-left ${isMac ? 'titlebar-left-mac' : 'titlebar-left-win'}`}>
       </div>
       <div className="titlebar-center">{workspaceName ? workspaceName : title}</div>

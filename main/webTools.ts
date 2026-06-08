@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { tavilyLimiter } from './limiters'
 import { getWorkspaceContext, assertWithinWorkspace, invalidateWorkspaceFilesCache } from './workspace'
 import { getCurrentSession } from './auth'
+import { getConversationPath } from './paths'
 
 export function createWebTools(convId?: string) {
   const searchWeb = tool({
@@ -155,33 +156,17 @@ export function createWebTools(convId?: string) {
           throw new Error(`No image data returned in API response: ${JSON.stringify(data)}`)
         }
 
-        // Get workspace path
         const ctx = getWorkspaceContext(convId)
-        if (!ctx) {
-          throw new Error(`Workspace context not found for conversation: ${convId}`)
-        }
-
-        const rootPath = ctx.rootPath
-        const folderPath = join(rootPath, 'generated-images')
+        if (!ctx) throw new Error(`Workspace context not found for conversation: ${convId}`)
+        const folderPath = join(getConversationPath(convId), 'generated')
         const fileName = `img-${Date.now()}.png`
         const targetPath = join(folderPath, fileName)
-
-        // Prevent directory traversal
-        assertWithinWorkspace(rootPath, targetPath, convId)
-
-        // Ensure folder exists and write the image file
+        assertWithinWorkspace(ctx.rootPath, targetPath, convId)
         await fs.mkdir(folderPath, { recursive: true })
         await fs.writeFile(targetPath, Buffer.from(base64Data, 'base64'))
-
-        // Invalidate workspace cache to make sure UI is immediately aware
-        invalidateWorkspaceFilesCache(rootPath)
-
+        invalidateWorkspaceFilesCache(ctx.rootPath)
         log.info(`[tool:generateImage] saved image to ${targetPath}`)
-        return {
-          success: true,
-          filePath: targetPath,
-          message: `Image generated successfully and saved to ${targetPath}`
-        }
+        return { success: true, filePath: targetPath, message: `Image generated successfully and saved to ${targetPath}` }
       } catch (err: any) {
         log.error('[tool:generateImage] Error:', err.message)
         return { success: false, error: `Image generation failed: ${err.message}` }

@@ -85,7 +85,7 @@ const ThreadList: React.FC = () => {
                         return (
                            <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)}>
                              <div className="thread-item-row">
-                               <span className={`thread-item-title-text ${active ? 'thread-item-active-title' : 'thread-item-title'}`}>{thread.title ?? 'New conversation'}</span>
+                               <span className={`thread-item-title-text thread-item-title ${active ? 'thread-item-active-title' : ''}`}>{thread.title ?? 'New conversation'}</span>
                                {active && agentRunState !== 'idle' && <Loader2 size={12} className="running-indicator" />}
                              </div>
                              <div className="thread-item-meta">
