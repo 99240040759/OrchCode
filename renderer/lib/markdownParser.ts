@@ -1,5 +1,6 @@
 import { Marked } from 'marked'
 import hljs from 'highlight.js'
+import katex from 'katex'
 import { normalizeMarkdownLinks, stripFileProtocol } from './pathUtils'
 
 function getFileIconSvg(fileName: string): string {
@@ -24,6 +25,7 @@ const renderer = {
   hr(): string { return '' },
   code(token: { text: string; lang?: string }): string {
     const code = token.text, lang = token.lang || ''
+    if (lang === 'mermaid') return `<div class="mermaid">${code}</div>`
     const language = hljs.getLanguage(lang) ? lang : 'plaintext'
     const highlighted = hljs.highlight(code, { language }).value
     const copyBtn = `<button class="code-block-copy-btn" title="Copy code"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button>`
@@ -50,5 +52,50 @@ marked.use({ renderer })
 
 export function parseMarkdown(content: string): string {
   if (!content) return ''
-  return marked.parse(normalizeMarkdownLinks(content)) as string
+  const mathBlocks: string[] = []
+  
+  // 1. Extract block equations: $$...$$ or \[...\]
+  let processed = content.replace(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\\\[[\s\S]*?\\\\\])/g, (match) => {
+    let rawMath = match
+    if (match.startsWith('$$')) rawMath = match.slice(2, -2)
+    else {
+      const s = match.indexOf('['), e = match.lastIndexOf(']')
+      if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e)
+    }
+    try {
+      const compiled = katex.renderToString(rawMath.trim(), { displayMode: true, throwOnError: false })
+      const placeholder = `__MATH_BLOCK_PLACEHOLDER_${mathBlocks.length}__`
+      mathBlocks.push(compiled)
+      return placeholder
+    } catch {
+      return match
+    }
+  })
+
+  // 2. Extract inline equations: \(...\) or $...$
+  processed = processed.replace(/(\\\([\s\S]*?\\\)|(?<!\\)\$[^\$\n]+?\$)/g, (match) => {
+    let rawMath = match
+    if (match.startsWith('$')) rawMath = match.slice(1, -1)
+    else {
+      const s = match.indexOf('('), e = match.lastIndexOf(')')
+      if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e)
+    }
+    try {
+      const compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
+      const placeholder = `__MATH_BLOCK_PLACEHOLDER_${mathBlocks.length}__`
+      mathBlocks.push(compiled)
+      return placeholder
+    } catch {
+      return match
+    }
+  })
+
+  // 3. Render markdown
+  let html = marked.parse(normalizeMarkdownLinks(processed)) as string
+
+  // 4. Restore compiled math HTML
+  for (let i = 0; i < mathBlocks.length; i++) {
+    html = html.replace(new RegExp(`__MATH_BLOCK_PLACEHOLDER_${i}__`, 'g'), () => mathBlocks[i])
+  }
+  return html
 }

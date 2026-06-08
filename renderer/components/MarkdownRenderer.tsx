@@ -1,10 +1,18 @@
 import React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { toast } from 'sonner'
+import mermaid from 'mermaid'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import { stripFileProtocol } from '../lib/pathUtils'
 import { parseMarkdown } from '../lib/markdownParser'
 import type { FileReadResult } from '../../preload/index.d'
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  securityLevel: 'loose',
+  flowchart: { useMaxWidth: true, htmlLabels: true }
+})
 
 interface MarkdownRendererProps {
   content: string
@@ -101,8 +109,22 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         }
       }
 
+      const resolveMermaid = async () => {
+        if (!isStreaming) {
+          const nodes = el.querySelectorAll('.mermaid') as NodeListOf<HTMLElement>
+          if (nodes.length > 0) {
+            try {
+              await mermaid.run({ nodes: Array.from(nodes) })
+            } catch (err) {
+              console.error('Mermaid render error:', err)
+            }
+          }
+        }
+      }
+
       el.addEventListener('click', handleGlobalClick)
       resolveImages()
+      resolveMermaid()
 
       const obs = new MutationObserver(() => { resolveImages() })
       obs.observe(el, { childList: true, subtree: true })
@@ -112,7 +134,7 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         el.removeEventListener('click', handleGlobalClick)
         obs.disconnect()
       }
-    }, [html, conversationId, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
+    }, [html, conversationId, isStreaming, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
 
     return (
       <div

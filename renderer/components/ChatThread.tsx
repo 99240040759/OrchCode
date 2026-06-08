@@ -239,7 +239,7 @@ AssistantMessage.displayName = 'AssistantMessage'
 const UserMessage = ({ message }: { message: ChatMessage }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
   if (message.data) {
-    try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch {}
+    try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch { }
   }
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)

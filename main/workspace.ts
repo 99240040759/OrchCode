@@ -65,11 +65,8 @@ const isWithin = (base: string, target: string) => {
 export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
   let resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
   if (conversationId) {
-    const segs = resolvedTarget.split(/[/\\]/)
-    if (segs.includes('artifacts')) {
-      const filename = segs[segs.length - 1]
-      if (filename === 'implementation_plan.md') resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', filename))
-    }
+    const segs = resolvedTarget.split(/[/\\]/), artIdx = segs.indexOf('artifacts')
+    if (artIdx !== -1) resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', segs.slice(artIdx + 1).join(sep)))
   }
   const isAllowed = isWithin(rootPath, resolvedTarget) || isWithin(getUserSkillsPath(), resolvedTarget) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget) : false)
   if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)

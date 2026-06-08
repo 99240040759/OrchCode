@@ -3309,3 +3309,34 @@
    width: 220px;
    height: 220px
 }
+
+.mermaid:not([data-processed="true"]) {
+   display: block;
+   font-family: var(--font-mono);
+   font-size: var(--font-size-xs-plus);
+   white-space: pre;
+   background-color: var(--bg-sidebar);
+   border: 1px solid var(--border-color);
+   border-radius: 8px;
+   padding: 16px;
+   margin: 16px 0;
+   overflow-x: auto;
+   color: #e5e5e5
+}
+
+.mermaid[data-processed="true"] {
+   display: flex;
+   justify-content: center;
+   align-items: center;
+   background-color: var(--bg-sidebar);
+   border: 1px solid var(--border-color);
+   border-radius: 8px;
+   padding: 16px;
+   margin: 16px 0;
+   overflow-x: auto
+}
+
+.mermaid[data-processed="true"] svg {
+   max-width: 100%;
+   height: auto
+}

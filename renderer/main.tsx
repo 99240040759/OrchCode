@@ -45,7 +45,7 @@ document.addEventListener('contextmenu', (e) => {
 
 // Google Fonts (must stay as CSS — no VE equivalent for @import url)
 import './assets/main.css'
-// Vanilla-extract global styles
+import 'katex/dist/katex.min.css'
 import './assets/styles'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
