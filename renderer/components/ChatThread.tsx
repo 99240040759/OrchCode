@@ -9,7 +9,7 @@ import {
   artifactPanelModeAtom
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
-import type { ChatMessage, StreamBlock } from '../store/types'
+import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/types'
 import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
@@ -112,6 +112,42 @@ const ReasoningBlock = React.memo(
 )
 ReasoningBlock.displayName = 'ReasoningBlock'
 
+const ToolGroupBlock = React.memo(({ tools, isStreaming }: { tools: ToolCallEntry[]; isStreaming?: boolean }) => {
+  const isPending = tools.some(t => t.status === 'pending')
+  const [isOpen, setIsOpen] = React.useState(isPending && isStreaming)
+  const [userToggled, setUserToggled] = React.useState(false)
+  React.useEffect(() => {
+    if (!userToggled) setIsOpen(isPending && isStreaming)
+  }, [isPending, isStreaming, userToggled])
+  const handleToggle = (e: React.SyntheticEvent) => {
+    const targetOpen = (e.target as HTMLDetailsElement).open
+    if (targetOpen !== isOpen) { setUserToggled(true); setIsOpen(targetOpen) }
+  }
+  const completeCount = tools.filter(t => t.status === 'complete').length
+  const errorCount = tools.filter(t => t.status === 'error').length
+  let label = 'Running operations'
+  if (isPending) {
+    label = `Running operation${tools.length > 1 ? 's' : ''} (${completeCount}/${tools.length})`
+  } else {
+    label = `Executed ${tools.length} operation${tools.length > 1 ? 's' : ''}`
+    if (errorCount > 0) label += ` (${errorCount} failed)`
+  }
+  return (
+    <details open={isOpen} onToggle={handleToggle} className="chat-reasoning-details chat-tool-group-details" style={{ marginBottom: 12 }}>
+      <summary className="chat-reasoning-summary">
+        <span>{label}</span>
+        <ChevronDown size={14} className="chat-reasoning-chevron" />
+      </summary>
+      <div className="chat-tool-group-body" style={{ marginTop: 8, paddingLeft: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {tools.map((t, idx) => (
+          <div key={`${t.id}-${idx}`}><ToolCallBlock toolCall={t} /></div>
+        ))}
+      </div>
+    </details>
+  )
+})
+ToolGroupBlock.displayName = 'ToolGroupBlock'
+
 const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
   let statusText = 'Thinking'
   if (message.orderedBlocks && message.orderedBlocks.length > 0) {
@@ -119,13 +155,37 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
     if (last.type === 'tool' && last.status === 'pending') statusText = 'Working'
     else if (last.type === 'text') statusText = 'Generating'
   }
+  const segments: Array<
+    | { type: 'reasoning'; block: StreamBlock & { type: 'reasoning' } }
+    | { type: 'text'; block: StreamBlock & { type: 'text' } }
+    | { type: 'error'; block: StreamBlock & { type: 'error' } }
+    | { type: 'tool-group'; tools: ToolCallEntry[]; key: string }
+  > = []
+  let currentGroup: ToolCallEntry[] = []
+  const flush = (idx: number) => {
+    if (currentGroup.length > 0) {
+      segments.push({ type: 'tool-group', tools: currentGroup, key: `tool-group-${idx}` })
+      currentGroup = []
+    }
+  }
+  message.orderedBlocks?.forEach((b, idx) => {
+    if (b.type === 'tool') {
+      currentGroup.push({ id: b.toolCallId, toolName: b.toolName, args: b.args, argsDelta: b.argsDelta, result: b.result, status: b.status })
+    } else {
+      flush(idx)
+      if (b.type === 'reasoning') segments.push({ type: 'reasoning', block: b })
+      else if (b.type === 'text') segments.push({ type: 'text', block: b })
+      else if (b.type === 'error') segments.push({ type: 'error', block: b })
+    }
+  })
+  flush(message.orderedBlocks?.length ?? 0)
   return (
     <div className="chat-message-assistant-container">
-      {message.orderedBlocks?.map((block: StreamBlock, i: number) => {
-        if (block.type === 'reasoning') return <ReasoningBlock key={`reasoning-${i}`} content={block.content} durationMs={block.durationMs} isStreaming={block.isStreaming} />
-        if (block.type === 'tool') return <div key={`tool-${i}`}><ToolCallBlock toolCall={{ id: block.toolCallId, toolName: block.toolName, args: block.args, argsDelta: block.argsDelta, result: block.result, status: block.status }} /></div>
-        if (block.type === 'text') return <div key={`text-${i}`} className="assistant-content chat-message-assistant"><MarkdownRenderer content={block.content} /></div>
-        if (block.type === 'error') return <div key={`error-${i}`} className="chat-error-container"><AlertTriangle size={15} className="chat-error-icon" /><span className="chat-error-message">{block.message}</span></div>
+      {segments.map((seg, i) => {
+        if (seg.type === 'reasoning') return <ReasoningBlock key={`reasoning-${i}`} content={seg.block.content} durationMs={seg.block.durationMs} isStreaming={seg.block.isStreaming} />
+        if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} isStreaming={message.isStreaming} />
+        if (seg.type === 'text') return <div key={`text-${i}`} className="assistant-content chat-message-assistant"><MarkdownRenderer content={seg.block.content} /></div>
+        if (seg.type === 'error') return <div key={`error-${i}`} className="chat-error-container"><AlertTriangle size={15} className="chat-error-icon" /><span className="chat-error-message">{seg.block.message}</span></div>
         return null
       })}
       {!message.orderedBlocks && message.content && <div className="assistant-content chat-message-assistant"><MarkdownRenderer content={message.content} /></div>}
