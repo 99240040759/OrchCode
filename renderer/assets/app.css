@@ -205,12 +205,14 @@
 .chat-thread-spacer-top { height:16px; flex-shrink:0 }
 @keyframes slide-up-fade { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
 .chat-thread-message-wrapper { padding:0 24px; overflow-anchor:none; animation:slide-up-fade var(--transition-speed-panel) var(--transition-curve-default) forwards; will-change:transform, opacity }
+.chat-section { position:relative; display:flex; flex-direction:column }
+.chat-thread-message-wrapper.message-user { position:sticky; top:0; z-index:50; background-color:var(--bg-app); padding:10px 24px; border-bottom:1px solid var(--border-color); box-shadow:0 4px 12px rgba(0,0,0,0.1) }
 .chat-thread-spacer-bottom { height:24px; flex-shrink:0; overflow-anchor:none }
 .chat-thread-anchor { overflow-anchor:auto; height:1px; margin-top:-1px }
 
 /* User message */
 .chat-message-user-container { display:flex; margin-bottom:24px; padding-left:0 }
-.chat-message-user { background:var(--bg-sidebar); border-radius:8px; padding:6px 16px; max-width:100%; width:100%; font-size:var(--font-size-lg); color:var(--text-primary); line-height:1.5; user-select:text }
+.chat-message-user { background-color:rgba(26,26,26,0.85); border:1px solid var(--border-color); border-radius:20px; backdrop-filter:blur(16px); box-shadow:0 12px 32px rgba(0,0,0,0.4),0 0 1px rgba(255,255,255,0.08); padding:10px 20px; max-width:100%; width:100%; font-size:var(--font-size-lg); color:var(--text-primary); line-height:1.5; user-select:text }
 .chat-message-user-content { display:flex; flex-direction:column; gap:8px }
 .message-attachments { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px }
 .message-attachment-chip { display:flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; background-color:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); cursor:pointer; font-size:var(--font-size-xs); color:var(--text-secondary); transition:background-color 0.15s ease; max-width:160px }
@@ -221,7 +223,7 @@
 
 /* Assistant message */
 .chat-message-assistant-container { margin-bottom:24px; padding-right:0; display:flex; flex-direction:column; gap:12px }
-.chat-message-assistant { font-size:var(--font-size-lg); color:var(--text-secondary); line-height:1.6; user-select:text; margin-bottom:0 }
+.chat-message-assistant { font-size:var(--font-size-lg); color:var(--text-assistant-body); line-height:1.6; user-select:text; margin-bottom:0 }
 .chat-message-generating-container { margin-top:0; padding:4px 0; margin-left:2px }
 .chat-message-generating-text { font-size:var(--font-size-sm) }
 
@@ -231,6 +233,7 @@
 .chat-reasoning-chevron { transform:rotate(-90deg); transition:transform 0.12s ease; flex-shrink:0; color:var(--text-secondary) }
 .chat-reasoning-details[open] .chat-reasoning-chevron { transform:rotate(0deg) }
 .chat-reasoning-body { margin-top:6px; padding-bottom:8px; color:var(--text-secondary); font-size:var(--font-size-sm); line-height:1.6; max-height:120px; overflow-y:auto }
+.chat-reasoning-body .markdown-content,.chat-reasoning-body .markdown-content td,.chat-reasoning-body .markdown-content blockquote { color:var(--text-secondary) }
 
 /* Error block */
 .chat-error-container { display:flex; align-items:flex-start; gap:10px; padding:12px 16px; border-radius:8px; background-color:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); margin:12px 0 }
@@ -302,20 +305,20 @@
 .file-icon-wrapper { display:inline-block; vertical-align:middle; flex-shrink:0 }
 
 /* MarkdownRenderer */
-.markdown-content { line-height:1.6; font-weight:400; color:var(--text-secondary) }
+.markdown-content { line-height:1.6; font-weight:400; color:var(--text-assistant-body) }
 .markdown-content strong { font-weight:600; color:var(--text-primary) }
 .markdown-content p { margin:4px 0 8px 0 }
 .markdown-content ul,.markdown-content ol { margin:4px 0 8px 16px; padding:0 }
 .markdown-content ul { list-style:disc }
 .markdown-content ol { list-style:decimal }
 .markdown-content li { margin-bottom:2px; line-height:1.55 }
-.markdown-content blockquote { border-left:2px solid var(--text-dim); padding-left:10px; margin:6px 0; color:var(--text-secondary); font-style:normal }
+.markdown-content blockquote { border-left:2px solid var(--text-dim); padding-left:10px; margin:6px 0; color:var(--text-assistant-body); font-style:normal }
 .markdown-content h1 { font-size:var(--font-size-2xl); font-weight:600; margin:14px 0 6px; color:var(--text-primary); line-height:1.2; letter-spacing:-0.02em }
 .markdown-content h2 { font-size:var(--font-size-xl); font-weight:600; margin:12px 0 6px; color:var(--text-primary); line-height:1.25; letter-spacing:-0.015em }
 .markdown-content h3 { font-size:var(--font-size-lg); font-weight:600; margin:10px 0 4px; color:var(--text-primary); line-height:1.3; letter-spacing:-0.01em }
 .markdown-content table { width:100%; border-collapse:collapse; margin:16px 0; font-size:var(--font-size-sm); border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.05) }
 .markdown-content th { background-color:rgba(255,255,255,0.03); color:var(--text-primary); font-weight:600; text-align:left; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.08) }
-.markdown-content td { padding:8px 12px; color:var(--text-secondary); border-bottom:1px solid rgba(255,255,255,0.04) }
+.markdown-content td { padding:8px 12px; color:var(--text-assistant-body); border-bottom:1px solid rgba(255,255,255,0.04) }
 .markdown-content tr:last-child td { border-bottom:none }
 .markdown-content tr:hover td { background-color:rgba(255,255,255,0.01) }
 .markdown-content :not(pre)>code { background-color:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.03); border-radius:4px; padding:2px 6px; font-family:var(--font-mono); font-size:var(--font-size-xs); color:#e2b473 }

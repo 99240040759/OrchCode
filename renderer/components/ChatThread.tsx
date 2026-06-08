@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom, useAtom } from 'jotai'
 import type { PrimitiveAtom } from 'jotai'
 import {
   chatMessageAtomsAtom,
+  chatMessagesAtom,
   agentRunStateAtom,
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
@@ -211,7 +212,24 @@ const getAtomKey = (a: object) => { let k = atomKeyMap.get(a); if (!k) atomKeyMa
 
 const ChatThread: React.FC = () => {
   const messageAtoms = useAtomValue(chatMessageAtomsAtom)
+  const messages = useAtomValue(chatMessagesAtom)
   const runState = useAtomValue(agentRunStateAtom)
+  const messageGroups = React.useMemo(() => {
+    const groups: Array<{ key: string; userAtom: any; assistantAtoms: any[] }> = []
+    let currentGroup: { key: string; userAtom: any; assistantAtoms: any[] } | null = null
+    messageAtoms.forEach((atom, idx) => {
+      const msg = messages[idx]
+      if (!msg) return
+      if (msg.role === 'user') {
+        currentGroup = { key: `group-${msg.id}`, userAtom: atom, assistantAtoms: [] }
+        groups.push(currentGroup)
+      } else {
+        if (currentGroup) currentGroup.assistantAtoms.push(atom)
+        else groups.push({ key: `group-init-${msg.id}`, userAtom: null, assistantAtoms: [atom] })
+      }
+    })
+    return groups
+  }, [messageAtoms, messages])
   const containerRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
   const prevLengthRef = React.useRef(messageAtoms.length)
@@ -247,8 +265,13 @@ const ChatThread: React.FC = () => {
   return (
     <div ref={containerRef} onScroll={handleScroll} className="chat-thread-container">
       <div className="chat-thread-spacer-top" />
-      {messageAtoms.map((messageAtom) => (
-        <MessageWrapper key={getAtomKey(messageAtom)} messageAtom={messageAtom} />
+      {messageGroups.map((group) => (
+        <div key={group.key} className="chat-section">
+          {group.userAtom && <MessageWrapper key={getAtomKey(group.userAtom)} messageAtom={group.userAtom} />}
+          {group.assistantAtoms.map((assistantAtom) => (
+            <MessageWrapper key={getAtomKey(assistantAtom)} messageAtom={assistantAtom} />
+          ))}
+        </div>
       ))}
       <div className="chat-thread-spacer-bottom" />
       <div className="chat-thread-anchor" />
