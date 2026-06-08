@@ -100,20 +100,6 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully wrote to file ${output.absolutePath}` }] })
   })
 
-  const replaceFileContent = tool({
-    description: 'Edit a SINGLE contiguous block in an existing file.',
-    inputSchema: z.object({ targetFile: z.string().describe('Absolute path to file.'), replacementContent: z.string().describe('Content to replace.'), startLine: z.number().int().min(1), endLine: z.number().int().min(1) }),
-    execute: async ({ targetFile, replacementContent, startLine, endLine }) => {
-      try {
-        const safePath = safe(targetFile), ctx = resolve()
-        await applyEditsToFile(safePath, [{ startLine, endLine, replacementContent }])
-        invalidateWorkspaceFilesCache(ctx.rootPath)
-        return { success: true, absolutePath: safePath }
-      } catch (err: any) { log.error('[tool:replaceFileContent] error:', err.message); return { success: false, error: err.message } }
-    },
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully edited file ${output.absolutePath}` }] })
-  })
-
   const multiReplaceFileContent = tool({
     description: 'Edit MULTIPLE non-contiguous blocks in an existing file.',
     inputSchema: z.object({ targetFile: z.string().describe('Absolute path to file.'), instruction: z.string().describe('Description of changes.'), replacementChunks: z.array(z.object({ startLine: z.number().int().min(1), endLine: z.number().int().min(1), replacementContent: z.string() })).min(1) }),
@@ -162,5 +148,5 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.results }] })
   })
 
-  return { listDir, viewFile, writeToFile, replaceFileContent, multiReplaceFileContent, searchWorkspace }
+  return { listDir, viewFile, writeToFile, multiReplaceFileContent, searchWorkspace }
 }

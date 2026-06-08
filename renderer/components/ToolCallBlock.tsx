@@ -22,11 +22,7 @@ function getStreamingVal(args: Record<string, unknown>, argsDelta: string | unde
 
 function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta: string | undefined): string {
   let added = 0, removed = 0
-  if (toolName === 'replaceFileContent') {
-    const start = Number(getStreamingVal(args, argsDelta, 'startLine')), end = Number(getStreamingVal(args, argsDelta, 'endLine')), rep = getStreamingVal(args, argsDelta, 'replacementContent')
-    removed = (start && end) ? (end - start + 1) : 0
-    added = rep ? rep.split(/\r?\n/).length : 0
-  } else if (toolName === 'multiReplaceFileContent') {
+  if (toolName === 'multiReplaceFileContent') {
     const chunks = args.replacementChunks as Array<{ startLine: number; endLine: number; replacementContent: string }> | undefined
     if (chunks && Array.isArray(chunks)) {
       for (const c of chunks) {
@@ -51,7 +47,7 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>, status?
   operation: string; target: string; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
-  const fileWriteTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
+  const fileWriteTools = ['writeToFile', 'multiReplaceFileContent']
   if (fileWriteTools.includes(toolName)) {
     const path = getStreamingVal(args, argsDelta, 'targetFile'), suffix = getDiffStats(toolName, args, argsDelta)
     const targetName = (path.split(/[/\\]/).pop() ?? path) + suffix

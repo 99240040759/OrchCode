@@ -98,11 +98,11 @@ Use searchWorkspace(query) to find files. Use listDir(path) to explore. Read bef
 ${browserInstruction}
 ${skillsSection}
 ── ARTIFACTS ──
-Use the sandboxed system inside 'artifacts/'. Manage with writeToFile, replaceFileContent:
+Use the sandboxed system inside 'artifacts/'. Manage with writeToFile, multiReplaceFileContent:
 1. PLANNING: For non-trivial changes, write implementation plan at 'artifacts/implementation_plan.md' and wait for user approval.
 2. ONLY PLANNING: Never create or edit other files in the artifacts directory. Do not write walkthroughs or task files.
 ── TOOLS ──
-Use native tools (viewFile, writeToFile, replaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
+Use native tools (viewFile, writeToFile, multiReplaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
 }
 async function setupStreamRequest(port: Electron.MessagePortMain, threadId: string, controller: AbortController, attachments?: any[]) {
   activePorts.set(threadId, port)
@@ -273,7 +273,7 @@ export async function handleAgentStreamRequest(
           const p = part as unknown as { toolCallId: string; toolName: string; result: unknown }, b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
           if (b && b.type === 'tool') { b.result = p.result; b.status = 'complete' }
           send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: p.result }, threadId })
-          if (['writeToFile', 'replaceFileContent', 'multiReplaceFileContent'].includes(p.toolName)) {
+          if (['writeToFile', 'multiReplaceFileContent'].includes(p.toolName)) {
             if (process.type === 'utility') (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
             else pushArtifactsChanged(threadId)
           }
