@@ -7,13 +7,28 @@ import log from 'electron-log'
 import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
 
 const BLOCKED_EXECUTABLES = new Set([
-  'sudo', 'su', 'runas', 'gksudo',
   'shutdown', 'reboot', 'init',
   'mkfs', 'fdisk', 'format', 'dd',
   'passwd', 'chroot',
   'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
   'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
 ])
+const WRAPPERS = new Set(['env', 'npx', 'pnpx', 'yarn', 'npm', 'pnpm', 'bun', 'sudo', 'su', 'runas', 'gksudo'])
+
+function checkBlocklist(tokens: string[]): string | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t.startsWith('-') || t.includes('=')) continue
+    const base = basename(t).toLowerCase()
+    if (BLOCKED_EXECUTABLES.has(base) || BLOCKED_EXECUTABLES.has(t.toLowerCase())) return t
+    if (WRAPPERS.has(base)) {
+      if ((base === 'npm' || base === 'yarn' || base === 'pnpm' || base === 'bun') && tokens[i+1] === 'run') i++
+      continue
+    }
+    break
+  }
+  return null
+}
 
 function tokenizeCommand(commandLine: string): string[] {
   return parse(commandLine).map(t => typeof t === 'string' ? t : ('pattern' in t ? t.pattern : ('op' in t ? t.op : ''))).filter(Boolean)
@@ -65,16 +80,12 @@ export function createShellTools(convId: string) {
 
         // M-9 FIX: Check both the raw executable string AND its basename to prevent
         // blocklist bypass via full paths like /usr/bin/sudo or C:\Windows\sudo.exe
-        const executableBasename = basename(executable).toLowerCase()
-        const executableLower = executable.toLowerCase()
-        if (
-          BLOCKED_EXECUTABLES.has(executableBasename) ||
-          BLOCKED_EXECUTABLES.has(executableLower)
-        ) {
+        const blockedCmd = checkBlocklist(tokens)
+        if (blockedCmd) {
           return {
             success: false,
             stdout: '',
-            stderr: `Command blocked: '${executable}' is not permitted.`,
+            stderr: `Command blocked: '${blockedCmd}' is not permitted.`,
             exitCode: 1
           }
         }

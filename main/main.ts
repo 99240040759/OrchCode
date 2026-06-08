@@ -64,9 +64,10 @@ function handleAuthUrl(urlStr: string) {
     const parsed = new URL(urlStr)
     if (parsed.hostname === 'auth-callback') {
       const code = parsed.searchParams.get('code')
-      if (code) {
+      const state = parsed.searchParams.get('state')
+      if (code && state) {
         log.info('[main] Forwarding auth callback code to auth module')
-        void handleAuthCallback(code)
+        void handleAuthCallback(code, state).catch(err => log.error('[main] Auth callback failed:', err))
       }
     }
   } catch (err: any) {
@@ -237,7 +238,7 @@ app.whenReady().then(async () => {
       try {
         const parsed = new URL(url)
         if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-          void shell.openExternal(parsed.toString())
+          shell.openExternal(parsed.toString()).catch(err => log.error('[main] Failed to open external URL:', err))
         }
       } catch {}
       return { action: 'deny' }
@@ -250,7 +251,7 @@ app.whenReady().then(async () => {
   registerAllIpc()
   registerStreamIpc()
 
-  await initializeSkills()
+  void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
   initUpdater()
   await initAuth()
   const authSession = getCurrentSession()
@@ -296,8 +297,14 @@ app.on('window-all-closed', async () => {
   }
 })
 
-app.on('before-quit', () => {
-  cleanupAllPtys()
-  checkpointDB()
-  void pool.shutdown()
+let isQuitting = false
+app.on('before-quit', async (e) => {
+  if (!isQuitting) {
+    e.preventDefault()
+    cleanupAllPtys()
+    try { await pool.shutdown() } catch {}
+    try { checkpointDB() } catch {}
+    isQuitting = true
+    app.quit()
+  }
 })

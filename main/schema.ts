@@ -63,7 +63,9 @@ export function parseAssistantMessageData(dataStr?: string | null): StreamBlock[
       const parsed = z.array(StreamBlockSchema).safeParse(raw)
       return parsed.success ? parsed.data : undefined
     }
-  } catch {}
+  } catch (err) {
+    log.error('[schema] Failed to parse assistant message data:', err)
+  }
   return undefined
 }
 
@@ -124,14 +126,15 @@ export function buildAttachmentParts(
 type RawMessage = { role: string; content: string; data?: string | null }
 
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
+  const clonedMessages = JSON.parse(JSON.stringify(messages)) as ModelMessage[]
   const result: ModelMessage[] = []
   const activeToolCallIds = new Set<string>()
-  for (const msg of messages) {
+  for (const msg of clonedMessages) {
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
       for (const part of msg.content) { if (part.type === 'tool-call') activeToolCallIds.add(part.toolCallId) }
     }
   }
-  for (const msg of messages) {
+  for (const msg of clonedMessages) {
     if (msg.role === 'tool') {
       if (Array.isArray(msg.content)) {
         const validParts = msg.content.filter((part: any) => part.type === 'tool-result' && activeToolCallIds.has(part.toolCallId))

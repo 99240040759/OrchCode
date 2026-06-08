@@ -12,8 +12,7 @@ interface SidebarProps {
   onStartConversation?: () => void
   threadListContent?: React.ReactNode
 }
-
-const isMac = window.api.platform === 'darwin'
+import { isMac } from '../lib/sharedUtils'
 
 const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onStartConversation, threadListContent }) => {
   const authUser = useAtomValue(authUserAtom)

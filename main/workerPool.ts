@@ -48,6 +48,15 @@ class WorkerPool {
     this.setJob(worker.pid!, jobName)
     return worker
   }
+  public killJob(jobName: string) {
+    this.activeJobs.forEach((name, pid) => {
+      if (name === jobName) {
+        const idx = this.workers.findIndex(w => w.pid === pid)
+        if (idx !== -1) { try { this.workers[idx].kill() } catch {}; this.workers.splice(idx, 1) }
+        this.activeJobs.delete(pid)
+      }
+    })
+  }
   public async shutdown(): Promise<void> {
     for (const w of this.workers) { try { w.kill() } catch {} }
     this.workers = []; this.activeJobs.clear()

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-const activePorts = new Map<string, MessagePort>()
+const activeStreams = new Map<string, { port: MessagePort; cleanup: () => void; abort: () => void }>()
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // Shared with renderer via window.api
@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('api', {
       const ch = `stream:port:${payload.threadId}`, chCrashed = 'stream:worker-crashed'
       const cleanup = () => {
         ipcRenderer.off(ch, onPortReceived); ipcRenderer.off(chCrashed, onCrash)
-        const p = activePorts.get(payload.threadId); if (p) { p.close(); activePorts.delete(payload.threadId) }
+        const st = activeStreams.get(payload.threadId); if (st) { st.port.close(); activeStreams.delete(payload.threadId) }
       }
       const onCrash = (_ev: unknown, data: any) => {
         if (data && data.threadId === payload.threadId) {
@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('api', {
       }
       const onPortReceived = (ev: Electron.IpcRendererEvent) => {
         const p = ev.ports[0]; if (!p) { cleanup(); return reject(new Error('No port')) }
-        activePorts.set(payload.threadId, p)
+        activeStreams.set(payload.threadId, { port: p, cleanup, abort: () => reject(new Error('Stream aborted locally')) })
         p.onmessage = (e) => {
           try {
             onChunk(e.data)
@@ -84,8 +84,8 @@ contextBridge.exposeInMainWorld('api', {
 
   /** Send abort signal on MessagePort to halt the stream session. */
   stopStream: (threadId: string): void => {
-    const p = activePorts.get(threadId)
-    if (p) { p.postMessage('abort'); p.close(); activePorts.delete(threadId) }
+    const st = activeStreams.get(threadId)
+    if (st) { st.port.postMessage('abort'); st.cleanup(); st.abort() }
   },
 
   /**

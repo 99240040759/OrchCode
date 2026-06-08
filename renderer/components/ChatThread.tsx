@@ -15,20 +15,10 @@ import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/types'
 import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import { sanitizeHtml } from '../lib/uiUtils'
+import { decodeBase64Utf8 } from '../lib/sharedUtils'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const decodeBase64Utf8 = (base64Str: string): string => {
-  try {
-    // Proper UTF-8 decode: base64 → bytes → TextDecoder
-    const binStr = atob(base64Str)
-    const bytes = new Uint8Array(binStr.length)
-    for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i)
-    return new TextDecoder('utf-8').decode(bytes)
-  } catch {
-    return 'Failed to decode content'
-  }
-}
 
 // ─── StreamingMarkdown — worker-patched, no ReactMarkdown during streaming ────
 
@@ -48,9 +38,10 @@ const StreamingMarkdown = React.memo(
       const handleUpdate = (e: Event) => {
         const { targetId: tid, html } = (e as CustomEvent<{ targetId: string; html: string }>).detail
         if (tid !== targetId || !containerRef.current) return
-        if (html === lastHtmlRef.current) return // skip identical patches
-        lastHtmlRef.current = html
-        morphdom(containerRef.current, `<div id="${tid}" class="markdown-content">${html}</div>`, {
+        const sanitizedHtml = sanitizeHtml(html)
+        if (sanitizedHtml === lastHtmlRef.current) return // skip identical patches
+        lastHtmlRef.current = sanitizedHtml
+        morphdom(containerRef.current, `<div id="${tid}" class="markdown-content">${sanitizedHtml}</div>`, {
           onBeforeElUpdated: (from, to) => !from.isEqualNode(to)
         })
         // auto-scroll if near bottom
@@ -67,7 +58,7 @@ const StreamingMarkdown = React.memo(
     // After streaming ends, render final content via ReactMarkdown for full fidelity
     return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming ? (lastHtmlRef.current ? '' : content) : content} isStreaming={isStreaming} />
   },
-  (prev, next) => prev.targetId === next.targetId && prev.isStreaming === next.isStreaming && (!next.isStreaming && prev.content === next.content)
+  (prev, next) => prev.targetId === next.targetId && prev.isStreaming === next.isStreaming && (next.isStreaming || prev.content === next.content)
 )
 StreamingMarkdown.displayName = 'StreamingMarkdown'
 

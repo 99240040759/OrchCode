@@ -23,20 +23,28 @@ const ThreadList: React.FC = () => {
 
   const allWorkspacePaths = useMemo(() => {
     const paths = threads.map(t => t.workspacePath || '')
-    const set = new Set(paths)
-    if (activeWorkspace?.path) set.add(activeWorkspace.path)
-    return Array.from(set).sort((a, b) => a === '' ? 1 : b === '' ? -1 : a.localeCompare(b))
+    if (activeWorkspace?.path) paths.push(activeWorkspace.path)
+    const seen = new Set<string>()
+    const uniquePaths: string[] = []
+    for (const p of paths) {
+      const normalized = p.toLowerCase().replace(/\\/g, '/')
+      if (!seen.has(normalized)) { seen.add(normalized); uniquePaths.push(p) }
+    }
+    return uniquePaths.sort((a, b) => a === '' ? 1 : b === '' ? -1 : a.localeCompare(b))
   }, [threads, activeWorkspace?.path])
 
   const threadsByWorkspace = useMemo(() => {
     const map: Record<string, typeof threads> = {}
+    for (const path of allWorkspacePaths) map[path] = []
     for (const t of threads) {
       const p = t.workspacePath || ''
-      if (!map[p]) map[p] = []
-      map[p].push(t)
+      const pNorm = p.toLowerCase().replace(/\\/g, '/')
+      const matchedKey = allWorkspacePaths.find(k => k.toLowerCase().replace(/\\/g, '/') === pNorm) ?? p
+      if (!map[matchedKey]) map[matchedKey] = []
+      map[matchedKey].push(t)
     }
     return map
-  }, [threads])
+  }, [threads, allWorkspacePaths])
 
   React.useEffect(() => {
     if (activeWorkspace?.path) setExpandedPaths(prev => ({ ...prev, [activeWorkspace.path]: prev[activeWorkspace.path] !== false }))

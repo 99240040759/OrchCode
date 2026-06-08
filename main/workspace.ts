@@ -95,7 +95,12 @@ const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.i
 
 const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
 
-export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(resolve(rootPath)) }
+function getCacheKey(p: string) {
+  const res = resolve(p)
+  return process.platform === 'win32' ? res.toLowerCase() : res
+}
+
+export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(getCacheKey(rootPath)) }
 export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear() }
 
 function buildIgnore(rootPath: string): Ignore {
@@ -108,11 +113,11 @@ function buildIgnore(rootPath: string): Ignore {
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
-  const resolved = resolve(rootPath), cached = workspaceFilesCache.get(resolved)
+  const resolved = resolve(rootPath), key = getCacheKey(rootPath), cached = workspaceFilesCache.get(key)
   if (cached && Date.now() - cached.timestamp < 10000) return cached.files
   const ig = buildIgnore(rootPath)
   const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
   const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
-  workspaceFilesCache.set(resolved, { files, timestamp: Date.now() }); return files
+  workspaceFilesCache.set(key, { files, timestamp: Date.now() }); return files
 }

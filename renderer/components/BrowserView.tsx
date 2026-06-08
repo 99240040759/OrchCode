@@ -12,7 +12,6 @@ const BrowserView: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const isLoadedRef = useRef(false)
-  const closedRef = useRef(false)
   const panelMode = useAtomValue(artifactPanelModeAtom)
   const isOpen = useAtomValue(isArtifactPanelOpenAtom)
   const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
@@ -40,9 +39,14 @@ const BrowserView: React.FC = () => {
   const openBrowserWithBounds = useCallback(async () => {
     setLoadError(null)
     try {
-      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds: getBounds(), conversationId: activeThreadId })
+      const bounds = getBounds()
+      if (bounds.width === 0 || bounds.height === 0) {
+        requestAnimationFrame(openBrowserWithBounds)
+        return
+      }
+      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds, conversationId: activeThreadId })
       setIsLoaded(true); isLoadedRef.current = true
-      window.api.invoke('browser:resize', getBounds()).catch(() => {})
+      window.api.invoke('browser:resize', bounds).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
   }, [getBounds, activeThreadId])
 
@@ -50,8 +54,11 @@ const BrowserView: React.FC = () => {
   // Previously two effects both depended on panelMode+isOpen and fired simultaneously,
   // sending two browser:resize IPC calls on each panel toggle.
   useEffect(() => {
+    return () => { window.api.invoke('browser:close').catch(() => {}) }
+  }, [])
+
+  useEffect(() => {
     if (panelMode !== 'browser' || !isOpen) return
-    closedRef.current = false
     let active = true
 
     const rafId = requestAnimationFrame(() => { if (!active) return; openBrowserWithBounds() })
@@ -59,7 +66,10 @@ const BrowserView: React.FC = () => {
     const unsubUrl = window.api.on('browser:url-changed', (u) => { if (active) { setDisplayUrl(u as string); setUrlInput(u as string) } })
 
     const debouncedResize = createDebounce(() => {
-      if (active && isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
+      if (active && isLoadedRef.current) {
+        const bounds = getBounds()
+        if (bounds.width > 0 && bounds.height > 0) window.api.invoke('browser:resize', bounds).catch(() => {})
+      }
     }, 50)
     window.addEventListener('resize', debouncedResize)
     const resizeObs = new ResizeObserver(debouncedResize)
@@ -73,12 +83,12 @@ const BrowserView: React.FC = () => {
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()
-      if (!closedRef.current) { closedRef.current = true; window.api.invoke('browser:close').catch(() => {}) }
+      if (!isOpenRef.current) window.api.invoke('browser:close').catch(() => {})
+      else window.api.invoke('browser:hide').catch(() => {})
       setIsLoaded(false); isLoadedRef.current = false
     }
   }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
 
-  // Sidebar expand/collapse still needs a resize push — but only when browser is already loaded
   useEffect(() => {
     if (isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
   }, [sidebarExpanded, getBounds])

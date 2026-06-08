@@ -19,26 +19,30 @@ const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }
  * Extract a string value from finalized args or streaming argsDelta JSON.
  * Handles Windows paths with escaped backslashes correctly.
  */
-function getStreamingVal(args: Record<string, unknown>, argsDelta: string | undefined, key: string): string {
-  if (args[key] !== undefined && args[key] !== null) return String(args[key])
+function getStreamingVal(args: Record<string, unknown> | undefined, argsDelta: string | undefined, key: string): string {
+  if (args && args[key] !== undefined && args[key] !== null) return String(args[key])
   if (!argsDelta) return ''
-  // Match both quoted strings and bare numbers; handle escaped chars including \\
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const m = argsDelta.match(new RegExp(`"${escapedKey}"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|(-?\\d+))`))
   if (!m) return ''
   if (m[2] !== undefined) return m[2]
-  // unescape JSON string escapes (handles \\ → \, \/ → /, \n \t etc)
   try { return JSON.parse(`"${m[1]}"`) } catch { return m[1] }
 }
 
-function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta: string | undefined): string {
+function getDiffStats(toolName: string, args: Record<string, unknown> | undefined, argsDelta: string | undefined): string {
   let added = 0, removed = 0
   if (FILE_WRITE_TOOLS.includes(toolName) && toolName !== 'writeToFile') {
-    const chunks = args.replacementChunks as Array<{ startLine: number; endLine: number; replacementContent: string }> | undefined
+    const chunks = args?.replacementChunks as Array<{ startLine?: number | string; endLine?: number | string; replacementContent?: string }> | undefined
     if (chunks && Array.isArray(chunks)) {
       for (const c of chunks) {
-        if (c.startLine && c.endLine) removed += (c.endLine - c.startLine + 1)
-        if (c.replacementContent) added += c.replacementContent.split(/\r?\n/).length
+        if (c.startLine !== undefined && c.endLine !== undefined) {
+          const s = Number(c.startLine), e = Number(c.endLine)
+          if (!isNaN(s) && !isNaN(e) && s > 0 && e >= s) removed += (e - s + 1)
+        }
+        if (c.replacementContent !== undefined && c.replacementContent !== null) {
+          const content = String(c.replacementContent)
+          added += content === '' ? 0 : content.split(/\r?\n/).length
+        }
       }
     } else if (argsDelta) {
       const startMatches = [...argsDelta.matchAll(/"startLine"\s*:\s*(-?\d+)/g)]
@@ -47,10 +51,8 @@ function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta
         const s = Number(startMatches[i][1]), e = Number(endMatches[i][1])
         if (s > 0 && e >= s) removed += (e - s + 1)
       }
-      // Count newlines in replacementContent fields from argsDelta
       const repMatches = [...argsDelta.matchAll(/"replacementContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
       for (const m of repMatches) {
-        // Count actual newlines (\\n in JSON) plus literal newlines
         added += (m[1].match(/\\n/g) ?? []).length + (m[1].match(/\n/g) ?? []).length + 1
       }
     }
@@ -58,7 +60,7 @@ function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta
   return (added || removed) ? ` +${added}-${removed}` : ''
 }
 
-function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: unknown): {
+function getToolDisplay(toolName: string, args: Record<string, unknown> | undefined, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: unknown): {
   operation: string; target: string; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
@@ -73,9 +75,7 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>, status?
   }
   if (toolName === 'viewFile') {
     const path = getStreamingVal(args, argsDelta, 'absolutePath')
-    const start = getStreamingVal(args, argsDelta, 'startLine')
-    const end = getStreamingVal(args, argsDelta, 'endLine')
-    // Only show suffix if a line range was explicitly provided (non-empty string)
+    const start = getStreamingVal(args, argsDelta, 'startLine'), end = getStreamingVal(args, argsDelta, 'endLine')
     const suffix = start || end ? ` #L${start || '1'}${end ? `-${end}` : ''}` : ''
     return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: (path.split(/[/\\]/).pop() ?? path) + suffix, fullPath: path || null, isFile: true }
   }

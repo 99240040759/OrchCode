@@ -13,6 +13,8 @@ import { activeAbortControllers } from './stream'
 import { listArtifacts } from './artifacts'
 import { getConversationPath } from './paths'
 import { getCurrentSession } from './auth'
+import { pool } from './workerPool'
+import { cleanupPtysForThread } from './terminalCommands'
 
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 export const convIdSchema = z.string().min(1).max(256)
@@ -85,8 +87,11 @@ export const threadCommands = {
     execute: async ({ threadId }: any) => {
       try {
         if (getActiveThreadId() === threadId) setActiveThreadId('')
-        const wsPath = getThreadWorkspace(threadId), context = clearWorkspaceContext(threadId), deleted = deleteThread(threadId)
-        if (!wsPath && context?.isUserWorkspace !== true) await fs.rm(getConversationPath(threadId), { recursive: true, force: true })
+        const ctrl = activeAbortControllers.get(threadId)
+        if (ctrl) { ctrl.abort(); activeAbortControllers.delete(threadId) }
+        pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
+        getThreadWorkspace(threadId); clearWorkspaceContext(threadId); const deleted = deleteThread(threadId)
+        await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
         return deleted
       } catch (err) { log.error('[commands] deleteThread:', err); throw err }
     }

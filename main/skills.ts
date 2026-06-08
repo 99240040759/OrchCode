@@ -71,7 +71,7 @@ export async function initializeSkills(): Promise<void> {
       if (folder.isDirectory()) {
         const src = join(srcSkillsDir, folder.name)
         const dest = join(destSkillsDir, folder.name)
-        if (!existsSync(dest)) await fs.cp(src, dest, { recursive: true })
+        await fs.cp(src, dest, { recursive: true, force: true })
       }
     }
 

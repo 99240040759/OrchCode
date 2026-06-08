@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { extname } from 'node:path'
+import { extname, relative } from 'node:path'
 import { dialog, BrowserWindow, app } from 'electron'
 import log from 'electron-log'
 import { z } from 'zod'
@@ -11,6 +11,9 @@ import { addOpenedWorkspace, setThreadWorkspace, deleteOpenedWorkspace, deleteWo
 import { getConversationPath } from './paths'
 import WindowManager from './windowManager'
 import { convIdSchema } from './threadCommands'
+import { activeAbortControllers } from './stream'
+import { pool } from './workerPool'
+import { cleanupPtysForThread } from './terminalCommands'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
@@ -62,7 +65,13 @@ export const workspaceCommands = {
       try {
         deleteOpenedWorkspace(workspacePath)
         const affected = await deleteWorkspaceThreads(workspacePath)
-        for (const tid of affected) { clearWorkspaceContext(tid); await fs.rm(getConversationPath(tid), { recursive: true, force: true }) }
+        for (const tid of affected) {
+          const ctrl = activeAbortControllers.get(tid)
+          if (ctrl) { ctrl.abort(); activeAbortControllers.delete(tid) }
+          pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)
+          clearWorkspaceContext(tid)
+          await fs.rm(getConversationPath(tid), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+        }
         return true
       } catch (err) { log.error('[commands] close-and-delete error:', err); throw err }
     }
@@ -85,7 +94,7 @@ export const workspaceCommands = {
       try {
         const { execa } = await import('execa'), ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
         const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
-        const relativePath = safePath.startsWith(ctx.rootPath) ? safePath.slice(ctx.rootPath.length).replace(/^[/\\]/, '') : safePath
+        const relativePath = relative(ctx.rootPath, safePath)
         const gitPath = relativePath.replace(/\\/g, '/')
         try {
           const { stdout } = await execa('git', ['show', `HEAD:${gitPath}`], { cwd: ctx.rootPath, timeout: 5000, reject: true, shell: false })

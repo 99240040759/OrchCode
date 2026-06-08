@@ -90,7 +90,6 @@ export function sanitizeHtml(html: string): string {
         else {
           for (const attr of Array.from(el.attributes)) {
             const name = attr.name.toLowerCase(), val = attr.value
-            if (name === 'onclick' && tag === 'button' && el.classList.contains('code-block-copy-btn') && val.includes('navigator.clipboard.writeText')) continue
             if (name.startsWith('on')) el.removeAttribute(attr.name)
             else if (name === 'href' && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('file://')) el.removeAttribute(attr.name)
             else if (name === 'src' && !val.startsWith('http://') && !val.startsWith('https://') && !val.startsWith('file://') && !val.startsWith('data:')) el.removeAttribute(attr.name)

@@ -5,8 +5,7 @@ import { updateStatusAtom, sidebarExpandedAtom } from '../store/agentStore'
 import type { UpdateStatus } from '../../preload/index.d'
 
 interface TitleBarProps { title?: string; workspaceName?: string }
-
-const isMac = window.api.platform === 'darwin'
+import { isMac } from '../lib/sharedUtils'
 
 const isNewerVersion = (l: string, c: string): boolean => {
   const parse = (v: string) => v.replace(/^v/, '').split('.').map(Number)
@@ -26,7 +25,11 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
       const res = await fetch('https://api.github.com/repos/sameer786ss/OrchCode/releases/latest', {
         headers: { Accept: 'application/vnd.github+json' }
       })
-      if (!res.ok) { setUpdateStatus({ status: 'idle' }); return }
+      if (!res.ok) {
+        if (res.status === 403 || res.status === 429) setUpdateStatus({ status: 'error', error: 'Rate limited by GitHub. Try again later.' })
+        else setUpdateStatus({ status: 'idle' })
+        return
+      }
       const data = await res.json()
       const latestVersion: string = data.tag_name?.replace(/^v/, '') ?? ''
       const hasUpdate = !!latestVersion && isNewerVersion(latestVersion, currentVersion)

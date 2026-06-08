@@ -5,6 +5,7 @@ import mermaid from 'mermaid'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import { stripFileProtocol } from '../lib/pathUtils'
 import { parseMarkdown } from '../lib/markdownParser'
+import { sanitizeHtml } from '../lib/uiUtils'
 import type { FileReadResult } from '../../preload/index.d'
 
 mermaid.initialize({
@@ -28,7 +29,7 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
     const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
     const conversationId = useAtomValue(activeThreadIdAtom)
 
-    const html = React.useMemo(() => isStreaming ? '' : parseMarkdown(content), [content, isStreaming])
+    const html = React.useMemo(() => isStreaming ? '' : sanitizeHtml(parseMarkdown(content)), [content, isStreaming])
     const containerRef = React.useRef<HTMLDivElement | null>(null)
 
     React.useEffect(() => {

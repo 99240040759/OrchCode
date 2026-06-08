@@ -4,7 +4,7 @@ import log from 'electron-log'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tavilyLimiter } from './limiters'
-import { getWorkspaceContext, assertWithinWorkspace, invalidateWorkspaceFilesCache } from './workspace'
+
 import { getCurrentSession } from './auth'
 import { getConversationPath } from './paths'
 
@@ -156,15 +156,11 @@ export function createWebTools(convId?: string) {
           throw new Error(`No image data returned in API response: ${JSON.stringify(data)}`)
         }
 
-        const ctx = getWorkspaceContext(convId)
-        if (!ctx) throw new Error(`Workspace context not found for conversation: ${convId}`)
         const folderPath = join(getConversationPath(convId), 'generated')
         const fileName = `img-${Date.now()}.png`
         const targetPath = join(folderPath, fileName)
-        assertWithinWorkspace(ctx.rootPath, targetPath, convId)
         await fs.mkdir(folderPath, { recursive: true })
         await fs.writeFile(targetPath, Buffer.from(base64Data, 'base64'))
-        invalidateWorkspaceFilesCache(ctx.rootPath)
         log.info(`[tool:generateImage] saved image to ${targetPath}`)
         return { success: true, filePath: targetPath, message: `Image generated successfully and saved to ${targetPath}` }
       } catch (err: any) {

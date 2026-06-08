@@ -22,6 +22,7 @@ let currentSession: AuthSession | null = null
 let loginInProgress = false
 let loginTimeout: NodeJS.Timeout | null = null
 let activeVerifier = ''
+let activeState = ''
 let pendingLoginResolve: ((user: UserProfile | null) => void) | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
 
@@ -94,54 +95,33 @@ export async function logoutUser(): Promise<boolean> {
   return true
 }
 
-export async function startGoogleAuth(): Promise<UserProfile | null> {
-  if (loginInProgress) throw new Error('Login already in progress.')
+export function startGoogleAuth(): Promise<UserProfile | null> {
+  if (loginInProgress) return Promise.reject(new Error('Login already in progress.'))
   loginInProgress = true
-  try {
+  const promise = new Promise<UserProfile | null>((resolve, reject) => {
     log.info('[auth] Triggering Supabase Google Sign-in flow...')
-    if (pendingLoginReject) {
-      pendingLoginReject(new Error('Login cancelled'))
-      pendingLoginReject = null
-      pendingLoginResolve = null
-    }
+    if (pendingLoginReject) { pendingLoginReject(new Error('Login cancelled')); pendingLoginReject = null; pendingLoginResolve = null }
     const { verifier, challenge } = generatePKCE()
     activeVerifier = verifier
-
+    activeState = crypto.randomBytes(16).toString('hex')
     const supabaseUrl = process.env.SUPABASE_URL
-    if (!supabaseUrl) throw new Error('SUPABASE_URL config is missing.')
-
-    return await new Promise<UserProfile | null>((resolve, reject) => {
-      pendingLoginResolve = resolve
-      pendingLoginReject = reject
-
-      const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({
-        provider: 'google',
-        redirect_to: 'orch-code://auth-callback',
-        code_challenge: challenge,
-        code_challenge_method: 's256'
-      }).toString()
-
-      loginTimeout = setTimeout(() => {
-        const rejectPending = pendingLoginReject
-        pendingLoginReject = null
-        pendingLoginResolve = null
-        rejectPending?.(new Error('Sign-in timed out.'))
-      }, 5 * 60 * 1000)
-
-      void shell.openExternal(redirectUrl).catch((err) => {
-        const rejectPending = pendingLoginReject
-        pendingLoginReject = null
-        pendingLoginResolve = null
-        rejectPending?.(err instanceof Error ? err : new Error(String(err)))
-      })
-    })
-  } finally {
-    loginInProgress = false
-  }
+    if (!supabaseUrl) { reject(new Error('SUPABASE_URL config is missing.')); return }
+    pendingLoginResolve = resolve; pendingLoginReject = reject
+    const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({ provider: 'google', redirect_to: 'orch-code://auth-callback', code_challenge: challenge, code_challenge_method: 's256', state: activeState }).toString()
+    if (loginTimeout) clearTimeout(loginTimeout)
+    loginTimeout = setTimeout(() => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(new Error('Sign-in timed out.')) }, 5 * 60 * 1000)
+    void shell.openExternal(redirectUrl).catch((err) => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(err instanceof Error ? err : new Error(String(err))) })
+  })
+  return promise.finally(() => { loginInProgress = false })
 }
 
-export async function handleAuthCallback(code: string): Promise<void> {
+export async function handleAuthCallback(code: string, state: string): Promise<void> {
   if (!pendingLoginResolve || !pendingLoginReject) return
+  if (!state || state !== activeState) {
+    const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null
+    r?.(new Error('Invalid CSRF state parameter in auth callback.'))
+    return
+  }
   if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
   const resolve = pendingLoginResolve
   const reject = pendingLoginReject
@@ -160,7 +140,7 @@ export async function handleAuthCallback(code: string): Promise<void> {
         'apikey': supabaseAnonKey!,
         'Authorization': `Bearer ${supabaseAnonKey}`
       },
-      body: JSON.stringify({ code_verifier: activeVerifier, auth_code: code })
+      body: JSON.stringify({ code_verifier: activeVerifier, code })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error_description || data.error || `HTTP ${res.status}`)
@@ -198,7 +178,13 @@ async function refreshSessionIfNeeded(): Promise<boolean> {
       headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_ANON_KEY! },
       body: JSON.stringify({ refresh_token: currentSession.refreshToken })
     })
-    if (!res.ok) return false
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 401) {
+        log.warn('[auth] Refresh failed with 400/401. Logging out.')
+        await logoutUser()
+      }
+      return false
+    }
     const data = await res.json()
     if (!data.access_token || !data.refresh_token) return false
     currentSession = { ...currentSession, idToken: data.access_token, refreshToken: data.refresh_token }

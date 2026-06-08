@@ -22,7 +22,7 @@ async function applyEditsToFile(filePath: string, edits: { startLine: number; en
   const sorted = [...edits].sort((a, b) => b.startLine - a.startLine)
   for (const edit of sorted) {
     if (edit.endLine < edit.startLine) throw new Error(`Invalid line range: endLine before startLine.`)
-    if (edit.startLine > lines.length || edit.endLine > lines.length) throw new Error(`Invalid line range ${edit.startLine}-${edit.endLine}: file has ${lines.length} lines.`)
+    if (edit.startLine > lines.length + 1 || edit.endLine > lines.length + 1) throw new Error(`Invalid line range ${edit.startLine}-${edit.endLine}: file has ${lines.length} lines.`)
     lines.splice(edit.startLine - 1, edit.endLine - edit.startLine + 1, ...edit.replacementContent.replace(/\r\n/g, '\n').split('\n'))
   }
   await fs.writeFile(filePath, isCrlf ? lines.join('\r\n') : lines.join('\n'), 'utf-8')
@@ -66,9 +66,11 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
           const mimeType = getMimeType(safePath)
           return { content: `[Binary File: ${mimeType}] Base64 data included.`, base64Content: rawBuffer.toString('base64'), mimeType, absolutePath: safePath, isBinary: true, sizeBytes: stat.size }
         }
+        if (startLine === undefined || endLine === undefined) throw new Error('Line ranges (startLine and endLine) are required for text files.')
+        if (endLine < startLine) throw new Error('Invalid line range: endLine cannot be less than startLine.')
+        if (endLine - startLine + 1 > 800) throw new Error('Line range limit exceeded: cannot read more than 800 lines at a time.')
         const content = rawBuffer.toString('utf-8'), allLines = content.split('\n'), totalLines = allLines.length
-        const start = Math.max(1, startLine ?? 1), maxEnd = start + 799, requestedEnd = endLine ?? maxEnd
-        const end = Math.min(totalLines, Math.min(requestedEnd, maxEnd)), wasTruncated = requestedEnd > maxEnd && totalLines > maxEnd
+        const start = Math.max(1, startLine), end = Math.min(totalLines, endLine), wasTruncated = endLine > totalLines
         const targetLines = allLines.slice(start - 1, end), numberedContent = targetLines.map((line, i) => `${start + i}: ${line}`).join('\n')
         return { content: numberedContent, rawContent: targetLines.join('\n'), absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
       } catch (err: any) { log.error('[tool:viewFile] error:', err.message); return { success: false, error: err.message } }

@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { activeThreadIdAtom } from '../store/agentStore'
 import { createDebounce } from '../lib/debounce'
+import { getOrchThemeColors } from '../lib/sharedUtils'
 
 export interface TerminalViewHandle {
   fit: () => void
@@ -43,15 +44,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       let active = true
       let fitTimeout: NodeJS.Timeout | null = null
 
-      const rootStyle = getComputedStyle(document.documentElement)
-      const bgApp = rootStyle.getPropertyValue('--bg-app').trim() || '#121212'
-      const textPrimary = rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3'
-      const textMuted = rootStyle.getPropertyValue('--text-muted').trim() || '#71717a'
-      const accentBlue = rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6'
-      const accentGreen = rootStyle.getPropertyValue('--accent-green').trim() || '#10b981'
-      const accentOrange = rootStyle.getPropertyValue('--accent-orange').trim() || '#f59e0b'
-      const accentPurple = rootStyle.getPropertyValue('--accent-purple').trim() || '#8b5cf6'
-      const accentRed = rootStyle.getPropertyValue('--accent-red').trim() || '#ef4444'
+      const { bgApp, textPrimary, textMuted, accentBlue, accentGreen, accentOrange, accentPurple, accentRed } = getOrchThemeColors()
 
       const term = new XTerm({
         theme: {

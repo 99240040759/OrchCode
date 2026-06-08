@@ -15,8 +15,9 @@ const MODELS_TTL_MS = 5 * 60 * 1000
 function createAuthFetch(extraHeaders?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers || {}), session = getCurrentSession()
-    const token = session?.idToken || process.env.SUPABASE_SESSION_TOKEN || process.env.SUPABASE_ANON_KEY
-    headers.set('Authorization', `Bearer ${token}`); headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+    const token = session?.idToken || process.env.SUPABASE_SESSION_TOKEN
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
     if (extraHeaders) { for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v) }
     return fetch(url, { ...options, headers })
   }

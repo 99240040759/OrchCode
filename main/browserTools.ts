@@ -116,7 +116,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
           const existing = await fs.readdir(screenshotDir)
           const pngs = existing.filter((f) => f.endsWith('.png')).sort()
           for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) {
-            await fs.rm(join(screenshotDir, old), { force: true })
+            await fs.rm(join(screenshotDir, old), { force: true }).catch(() => {})
           }
         } catch {}
         const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
@@ -186,8 +186,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
           (() => {
             const text = document.body.innerText || '';
             const interactive = [];
-            document.querySelectorAll('button, input, select, textarea, a, [role="button"]').forEach((el) => {
-              if (interactive.length >= 100) return;
+            const elements = document.querySelectorAll('button, input, select, textarea, a, [role="button"]');
+            for (const el of elements) {
+              if (interactive.length >= 100) break;
               const rect = el.getBoundingClientRect();
               if (rect.width > 0 && rect.height > 0) {
                 interactive.push({
@@ -196,7 +197,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
                   name: el.name || undefined, type: el.type || undefined, value: el.value || undefined
                 });
               }
-            });
+            }
             return { url: window.location.href, title: document.title, text: text.slice(0, 15000), interactiveElements: interactive };
           })()
         `)

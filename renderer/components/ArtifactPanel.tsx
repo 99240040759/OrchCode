@@ -21,7 +21,7 @@ import MarkdownView from './MarkdownView'
 import { EmptyState } from './Primitives'
 
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
-const isMac = window.api.platform === 'darwin'
+import { isMac } from '../lib/sharedUtils'
 
 interface HeaderProps {
   panelMode: string; openFiles: EditorFile[]; hoveredTabPath: string | null

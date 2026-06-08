@@ -47,6 +47,9 @@ export function registerStreamIpc() {
         pendingAttachments.set(request.threadId, new Promise<Buffer[]>((resolve, reject) => {
           const timeoutId = setTimeout(() => { attachmentResolvers.delete(request.threadId); reject(new Error('Attachment handshake timeout')) }, 10000)
           attachmentResolvers.set(request.threadId, (bufs) => { clearTimeout(timeoutId); resolve(bufs) })
+        }).catch(err => {
+          log.error('[stream] Attachment handshake error:', err)
+          return []
         }))
       }
       const { port1, port2 } = new MessageChannelMain()
@@ -212,16 +215,25 @@ export async function handleAgentStreamRequest(
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
     assistantMsgId = crypto.randomUUID()
-    let currentReasoningStartMs = 0, lastSaveMs = 0, saveInFlight = false
+    let currentReasoningStartMs = 0, lastSaveMs = 0, saveInFlight = false, saveQueued = false
     const saveProgress = async (force = false) => {
       const now = Date.now()
       if (!force && now - lastSaveMs < 1000) return
-      if (saveInFlight) return // FIXED: prevent concurrent writes to same assistantMsgId
+      if (saveInFlight) {
+        if (force) saveQueued = true
+        return
+      }
       if (assistantContent || orderedBlocks.length > 0) {
         saveInFlight = true
         try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = Date.now() }
         catch (err) { log.error('[stream] Progressive save failed:', err) }
-        finally { saveInFlight = false }
+        finally { 
+          saveInFlight = false 
+          if (saveQueued) {
+            saveQueued = false
+            void saveProgress(true)
+          }
+        }
       }
     }
     const result = streamText({
