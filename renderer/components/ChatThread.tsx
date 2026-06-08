@@ -123,7 +123,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
     <div className="chat-message-assistant-container">
       {message.orderedBlocks?.map((block: StreamBlock, i: number) => {
         if (block.type === 'reasoning') return <ReasoningBlock key={`reasoning-${i}`} content={block.content} durationMs={block.durationMs} isStreaming={block.isStreaming} />
-        if (block.type === 'tool') return <div key={`tool-${i}`}><ToolCallBlock toolCall={{ id: block.toolCallId, toolName: block.toolName, args: block.args, result: block.result, status: block.status }} /></div>
+        if (block.type === 'tool') return <div key={`tool-${i}`}><ToolCallBlock toolCall={{ id: block.toolCallId, toolName: block.toolName, args: block.args, argsDelta: block.argsDelta, result: block.result, status: block.status }} /></div>
         if (block.type === 'text') return <div key={`text-${i}`} className="assistant-content chat-message-assistant"><MarkdownRenderer content={block.content} /></div>
         if (block.type === 'error') return <div key={`error-${i}`} className="chat-error-container"><AlertTriangle size={15} className="chat-error-icon" /><span className="chat-error-message">{block.message}</span></div>
         return null

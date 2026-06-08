@@ -26,6 +26,7 @@ export interface ToolCallEntry {
   id: string
   toolName: string
   args: Record<string, unknown>
+  argsDelta?: string
   result?: unknown
   status: 'pending' | 'complete' | 'error'
 }

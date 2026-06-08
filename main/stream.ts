@@ -188,7 +188,7 @@ export async function handleAgentStreamRequest(
       tools: activeTools,
       stopWhen: stepCountIs(100),
       abortSignal: controller.signal,
-      timeout: { totalMs: 30 * 60 * 1000, stepMs: 5 * 60 * 1000, chunkMs: 90 * 1000 },
+      timeout: { totalMs: 60 * 60 * 1000, stepMs: 60 * 60 * 1000, chunkMs: 60 * 60 * 1000 },
       ...(Object.keys(modelProviderOptions).length > 0 ? { providerOptions: modelProviderOptions } : {}),
       onStepFinish: async ({ usage }) => {
         if (usage) {

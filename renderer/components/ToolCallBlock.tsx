@@ -14,39 +14,73 @@ export const FileIcon: React.FC<{ fileName: string; className?: string; size?: n
   <SymbolsFileIcon fileName={fileName} autoAssign={true} width={size} height={size} className={`${className} file-icon-wrapper`} />
 )
 
+function getStreamingVal(args: Record<string, unknown>, argsDelta: string | undefined, key: string): string {
+  if (args[key] !== undefined && args[key] !== null) return String(args[key])
+  if (!argsDelta) return ''
+  const m = argsDelta.match(new RegExp(`"${key}"\\s*:\\s*(?:"([^"]*)"|([0-9]+))`))
+  return m ? (m[1] !== undefined ? m[1] : m[2]).replace(/\\(.)/g, '$1') : ''
+}
+
+function getDiffStats(toolName: string, args: Record<string, unknown>, argsDelta: string | undefined): string {
+  let added = 0, removed = 0
+  if (toolName === 'replaceFileContent') {
+    const start = Number(getStreamingVal(args, argsDelta, 'startLine')), end = Number(getStreamingVal(args, argsDelta, 'endLine')), rep = getStreamingVal(args, argsDelta, 'replacementContent')
+    removed = (start && end) ? (end - start + 1) : 0
+    added = rep ? rep.split(/\r?\n/).length : 0
+  } else if (toolName === 'multiReplaceFileContent') {
+    const chunks = args.replacementChunks as Array<{ startLine: number; endLine: number; replacementContent: string }> | undefined
+    if (chunks && Array.isArray(chunks)) {
+      for (const c of chunks) {
+        if (c.startLine && c.endLine) removed += (c.endLine - c.startLine + 1)
+        if (c.replacementContent) added += c.replacementContent.split(/\r?\n/).length
+      }
+    } else if (argsDelta) {
+      const startMatches = [...argsDelta.matchAll(/"startLine"\s*:\s*([0-9]+)/g)], endMatches = [...argsDelta.matchAll(/"endLine"\s*:\s*([0-9]+)/g)]
+      for (let i = 0; i < Math.min(startMatches.length, endMatches.length); i++) {
+        const s = Number(startMatches[i][1]), e = Number(endMatches[i][1])
+        if (s && e) removed += (e - s + 1)
+      }
+      const repMatches = [...argsDelta.matchAll(/"replacementContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+      for (const m of repMatches) added += m[1].split(/\\n|\n/).length
+    }
+  }
+  return (added || removed) ? ` +${added}-${removed}` : ''
+}
+
 // Derive a human-readable label and target from the tool name + args natively
-function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error'): {
-  operation: string
-  target: string
-  fullPath: string | null
-  isFile: boolean
+function getToolDisplay(toolName: string, args: Record<string, unknown>, status?: 'pending' | 'complete' | 'error', argsDelta?: string): {
+  operation: string; target: string; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
   const fileWriteTools = ['writeToFile', 'replaceFileContent', 'multiReplaceFileContent']
   if (fileWriteTools.includes(toolName)) {
-    const path = (args.targetFile as string) ?? '', name = path.split(/[/\\]/).pop() ?? path
+    const path = getStreamingVal(args, argsDelta, 'targetFile'), suffix = getDiffStats(toolName, args, argsDelta)
+    const targetName = (path.split(/[/\\]/).pop() ?? path) + suffix
     const op = toolName === 'writeToFile' ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
-    return { operation: op, target: name, fullPath: path || null, isFile: true }
+    return { operation: op, target: targetName, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
-    const path = (args.absolutePath as string) ?? ''
-    return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: path.split(/[/\\]/).pop() ?? path, fullPath: path || null, isFile: true }
+    const path = getStreamingVal(args, argsDelta, 'absolutePath')
+    const start = getStreamingVal(args, argsDelta, 'startLine')
+    const end = getStreamingVal(args, argsDelta, 'endLine')
+    const suffix = start || end ? ` #L${start || 1}${end ? `-${end}` : ''}` : ''
+    return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: (path.split(/[/\\]/).pop() ?? path) + suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'listDir') {
-    const path = (args.directoryPath as string) ?? ''
+    const path = getStreamingVal(args, argsDelta, 'directoryPath')
     return { operation: isComp ? 'Listed' : isErr ? 'Failed to list' : 'Listing', target: path.split(/[/\\]/).pop() ?? path, fullPath: null, isFile: false }
   }
-  if (toolName === 'searchWorkspace') return { operation: isComp ? 'Searched' : isErr ? 'Failed to search' : 'Searching', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
-  if (toolName === 'runCommand') return { operation: isComp ? 'Ran' : isErr ? 'Failed to run' : 'Running', target: String(args.commandLine ?? '').slice(0, 40), fullPath: null, isFile: false }
-  if (toolName === 'browserNavigate') return { operation: isComp ? 'Navigated' : isErr ? 'Failed to navigate' : 'Navigating', target: String(args.url ?? '').replace(/^https?:\/\//, '').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'searchWorkspace') return { operation: isComp ? 'Searched' : isErr ? 'Failed to search' : 'Searching', target: getStreamingVal(args, argsDelta, 'query').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'runCommand') return { operation: isComp ? 'Ran' : isErr ? 'Failed to run' : 'Running', target: getStreamingVal(args, argsDelta, 'commandLine').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'browserNavigate') return { operation: isComp ? 'Navigated' : isErr ? 'Failed to navigate' : 'Navigating', target: getStreamingVal(args, argsDelta, 'url').replace(/^https?:\/\//, '').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'browserScreenshot') return { operation: isComp ? 'Captured' : isErr ? 'Failed to capture' : 'Capturing', target: 'screenshot', fullPath: null, isFile: false }
-  if (toolName === 'browserType') return { operation: isComp ? 'Typed' : isErr ? 'Failed to type' : 'Typing', target: String(args.selector ?? '').slice(0, 30), fullPath: null, isFile: false }
-  if (toolName === 'browserScroll') return { operation: isComp ? 'Scrolled' : isErr ? 'Failed to scroll' : 'Scrolling', target: String(args.direction ?? ''), fullPath: null, isFile: false }
-  if (toolName === 'browserMouseClickCoordinate') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: `(${args.x}, ${args.y})`, fullPath: null, isFile: false }
-  if (toolName === 'searchWeb') return { operation: isComp ? 'Searched web' : isErr ? 'Failed to search web' : 'Searching web', target: String(args.query ?? '').slice(0, 40), fullPath: null, isFile: false }
+  if (toolName === 'browserType') return { operation: isComp ? 'Typed' : isErr ? 'Failed to type' : 'Typing', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
+  if (toolName === 'browserScroll') return { operation: isComp ? 'Scrolled' : isErr ? 'Failed to scroll' : 'Scrolling', target: getStreamingVal(args, argsDelta, 'direction'), fullPath: null, isFile: false }
+  if (toolName === 'browserMouseClickCoordinate') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: `(${getStreamingVal(args, argsDelta, 'x')}, ${getStreamingVal(args, argsDelta, 'y')})`, fullPath: null, isFile: false }
+  if (toolName === 'searchWeb') return { operation: isComp ? 'Searched web' : isErr ? 'Failed to search web' : 'Searching web', target: getStreamingVal(args, argsDelta, 'query').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'generateImage') {
-    const prompt = (args.prompt as string) ?? '', target = prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt
-    return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target, fullPath: null, isFile: false }
+    const prompt = getStreamingVal(args, argsDelta, 'prompt')
+    return { operation: isComp ? 'Generated image' : isErr ? 'Failed to generate image' : 'Generating image', target: prompt.length > 30 ? prompt.slice(0, 30) + '...' : prompt, fullPath: null, isFile: false }
   }
   return { operation: toolName, target: '', fullPath: null, isFile: false }
 }
@@ -54,9 +88,10 @@ function getToolDisplay(toolName: string, args: Record<string, unknown>, status?
 function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   if (toolName === 'browserScreenshot') return <Camera size={15} className="icon-blue" />
   if (isFile) {
-    if (target === 'implementation_plan.md') return <ClipboardList size={15} className="icon-purple" />
-    if (target === 'walkthrough.md') return <BookOpen size={15} className="icon-green" />
-    return <FileIcon fileName={target} size={16} />
+    const cleanName = target.split(' ')[0]
+    if (cleanName === 'implementation_plan.md') return <ClipboardList size={15} className="icon-purple" />
+    if (cleanName === 'walkthrough.md') return <BookOpen size={15} className="icon-green" />
+    return <FileIcon fileName={cleanName} size={16} />
   }
   switch (toolName) {
     case 'browserNavigate': return <Globe size={15} className="icon-light-blue" />
@@ -73,7 +108,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
 }
 
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status)
+  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)

@@ -257,6 +257,8 @@ export function buildMessagesFromHistory(
                   : typeof outputVal === 'string' ? { type: 'text', value: outputVal } : { type: 'json', value: outputVal ?? null }
               }
               toolResults.push({ type: 'tool-result', toolCallId: block.toolCallId, toolName: block.toolName, output: formattedOutput as any })
+            } else {
+              toolResults.push({ type: 'tool-result', toolCallId: block.toolCallId, toolName: block.toolName, output: { type: 'error-text', value: 'Tool execution was interrupted or cancelled.' } })
             }
           }
         }
