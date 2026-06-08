@@ -266,7 +266,7 @@ export async function handleAgentStreamRequest(
           if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: delta })
           else last.content += delta
           queueTextDelta(delta)
-          await saveProgress(false); break
+          void saveProgress(false); break
         }
         case 'tool-input-start': {
           flushBuffers()
@@ -297,7 +297,7 @@ export async function handleAgentStreamRequest(
             if (process.type === 'utility') (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
             else pushArtifactsChanged(threadId)
           }
-          await saveProgress(false); break
+          void saveProgress(false); break
         }
         case 'error': {
           flushBuffers()
@@ -342,6 +342,7 @@ export async function handleAgentStreamRequest(
       }
       send({ type: 'error', payload: error.message, threadId })
     }
+    throw err
   } finally {
     flushBuffers()
     if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
