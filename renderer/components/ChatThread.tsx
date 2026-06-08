@@ -112,13 +112,13 @@ const ReasoningBlock = React.memo(
 )
 ReasoningBlock.displayName = 'ReasoningBlock'
 
-const ToolGroupBlock = React.memo(({ tools, isStreaming }: { tools: ToolCallEntry[]; isStreaming?: boolean }) => {
+const ToolGroupBlock = React.memo(({ tools, isStreaming, isLast }: { tools: ToolCallEntry[]; isStreaming?: boolean; isLast: boolean }) => {
   const isPending = tools.some(t => t.status === 'pending')
-  const [isOpen, setIsOpen] = React.useState(isPending && isStreaming)
+  const [isOpen, setIsOpen] = React.useState(isPending || (isLast && isStreaming))
   const [userToggled, setUserToggled] = React.useState(false)
   React.useEffect(() => {
-    if (!userToggled) setIsOpen(isPending && isStreaming)
-  }, [isPending, isStreaming, userToggled])
+    if (!userToggled) setIsOpen(isPending || (isLast && isStreaming))
+  }, [isPending, isStreaming, isLast, userToggled])
   const handleToggle = (e: React.SyntheticEvent) => {
     const targetOpen = (e.target as HTMLDetailsElement).open
     if (targetOpen !== isOpen) { setUserToggled(true); setIsOpen(targetOpen) }
@@ -133,12 +133,12 @@ const ToolGroupBlock = React.memo(({ tools, isStreaming }: { tools: ToolCallEntr
     if (errorCount > 0) label += ` (${errorCount} failed)`
   }
   return (
-    <details open={isOpen} onToggle={handleToggle} className="chat-reasoning-details chat-tool-group-details" style={{ marginBottom: 12 }}>
+    <details open={isOpen} onToggle={handleToggle} className="chat-reasoning-details chat-tool-group-details">
       <summary className="chat-reasoning-summary">
         <span>{label}</span>
         <ChevronDown size={14} className="chat-reasoning-chevron" />
       </summary>
-      <div className="chat-tool-group-body" style={{ marginTop: 8, paddingLeft: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div className="chat-tool-group-body" style={{ marginTop: 8, paddingLeft: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {tools.map((t, idx) => (
           <div key={`${t.id}-${idx}`}><ToolCallBlock toolCall={t} /></div>
         ))}
@@ -182,8 +182,9 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
   return (
     <div className="chat-message-assistant-container">
       {segments.map((seg, i) => {
+        const isLast = i === segments.length - 1
         if (seg.type === 'reasoning') return <ReasoningBlock key={`reasoning-${i}`} content={seg.block.content} durationMs={seg.block.durationMs} isStreaming={seg.block.isStreaming} />
-        if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} isStreaming={message.isStreaming} />
+        if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} isStreaming={message.isStreaming} isLast={isLast} />
         if (seg.type === 'text') return <div key={`text-${i}`} className="assistant-content chat-message-assistant"><MarkdownRenderer content={seg.block.content} /></div>
         if (seg.type === 'error') return <div key={`error-${i}`} className="chat-error-container"><AlertTriangle size={15} className="chat-error-icon" /><span className="chat-error-message">{seg.block.message}</span></div>
         return null

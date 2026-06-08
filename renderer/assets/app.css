@@ -224,7 +224,7 @@
 .chat-message-generating-text { font-size:var(--font-size-sm) }
 
 /* Reasoning block */
-.chat-reasoning-details { margin-bottom:0 }
+.chat-reasoning-details { margin-top:-4px; margin-bottom:-4px }
 .chat-reasoning-summary { cursor:pointer; font-size:var(--font-size-md); color:var(--text-secondary); display:inline-flex; align-items:center; gap:6px; user-select:none; list-style:none }
 .chat-reasoning-chevron { transform:rotate(-90deg); transition:transform 0.12s ease; flex-shrink:0; color:var(--text-secondary) }
 .chat-reasoning-details[open] .chat-reasoning-chevron { transform:rotate(0deg) }

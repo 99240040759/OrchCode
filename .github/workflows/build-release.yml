@@ -48,26 +48,47 @@ jobs:
               console.log(`Draft release for tag ${tag} already exists (ID: ${release.id})`);
             }
 
-  release-windows:
-    name: Build & Publish Windows x64
-    needs: [create-draft]
-    runs-on: windows-latest
+  compile:
+    name: Compile Application
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
-
       - name: Install Dependencies
         run: npm ci
-
       - name: Compile Application
         run: npm run build
+      - name: Upload Compilation Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: compilation-output
+          path: out/
+          retention-days: 1
 
+  release-windows:
+    name: Build & Publish Windows x64
+    needs: [create-draft, compile]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Install Dependencies
+        run: npm ci
+      - name: Download Compilation Output
+        uses: actions/download-artifact@v4
+        with:
+          name: compilation-output
+          path: out/
       - name: Build and Publish Installer
         run: npx electron-builder --win --x64 --publish always
         env:
@@ -75,7 +96,7 @@ jobs:
 
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
-    needs: [create-draft]
+    needs: [create-draft, compile]
     runs-on: macos-15
     steps:
       - name: Checkout Source Code
@@ -86,18 +107,13 @@ jobs:
           node-version: 22
           architecture: x64
           cache: 'npm'
-
       - name: Install Dependencies
         run: npm ci
-
-      - name: Compile Application
-        run: npm run build
-
-      - name: Verify out/main exists (x64)
-        run: |
-          echo 'Checking for out/main/index.js'
-          if [ -f out/main/index.js ]; then echo 'found out/main/index.js'; ls -la out/main; else echo 'out/main/index.js missing'; ls -la out || true; echo 'Showing dist as fallback'; ls -la dist || true; exit 1; fi
-
+      - name: Download Compilation Output
+        uses: actions/download-artifact@v4
+        with:
+          name: compilation-output
+          path: out/
       - name: Build and Publish DMG (x64)
         run: npx electron-builder --mac --x64 --publish always
         env:
@@ -106,26 +122,23 @@ jobs:
 
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
-    needs: [create-draft]
+    needs: [create-draft, compile]
     runs-on: macos-15
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
-
       - name: Install Dependencies
         run: npm ci
-
-      - name: Compile Application
-        run: npm run build
-
-      # Diagnostic dump removed: silicon build is known to produce `out`
-
+      - name: Download Compilation Output
+        uses: actions/download-artifact@v4
+        with:
+          name: compilation-output
+          path: out/
       - name: Build and Publish DMG
         run: npx electron-builder --mac --arm64 --publish always
         env:
