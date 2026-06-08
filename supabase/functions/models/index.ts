@@ -4,7 +4,7 @@ import { createHandler, jsonResponse } from '../_shared/handler.ts'
 // Each entry: [envKeyPrefix, defaultId, defaultName]
 // Env vars follow the pattern: <PREFIX>_MODEL_ID and <PREFIX>_MODEL_NAME
 const MODEL_DEFINITIONS = [
-  ['GEMINI',           'gemini-3.1-flash-lite',              'Gemini 3.1 Flash Lite (Fastest)'],
+  ['GEMINI',           'gemini-3.5-flash',              'Gemini 3.5 Flash (Fastest)'],
   ['GEMMA',            'gemma-4-31b-it',                     'Gemma 4 31B (Thinking)'],
   ['KIMI',             'nvidia/moonshotai/kimi-k2.6',        'Kimi K2.6 (Fast Think)'],
   ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',                  'GLM 4.5 Flash (Thinking)'],

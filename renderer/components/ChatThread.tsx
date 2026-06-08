@@ -235,6 +235,12 @@ const ChatThread: React.FC = () => {
   const prevLengthRef = React.useRef(messageAtoms.length)
   const prevRunStateRef = React.useRef(runState)
 
+  React.useLayoutEffect(() => {
+    if ((runState === 'streaming' || runState === 'tool-calling') && isAtBottomRef.current && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    }
+  })
+
   const handleScroll = () => {
     if (!containerRef.current) return
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current

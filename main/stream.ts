@@ -135,6 +135,14 @@ export async function handleAgentStreamRequest(
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
   const send = (msg: Record<string, unknown>) => { try { port.postMessage(msg) } catch {} }
+  let bufferedText = '', bufferedReasoning = '', flushTimeout: NodeJS.Timeout | null = null
+  const flushBuffers = () => {
+    if (flushTimeout) { clearTimeout(flushTimeout); flushTimeout = null }
+    if (bufferedText) { send({ type: 'text-delta', payload: bufferedText, threadId }); bufferedText = '' }
+    if (bufferedReasoning) { send({ type: 'reasoning-delta', payload: bufferedReasoning, threadId }); bufferedReasoning = '' }
+  }
+  const queueTextDelta = (text: string) => { bufferedText += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
+  const queueReasoningDelta = (text: string) => { bufferedReasoning += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
   const existingController = activeAbortControllers.get(threadId)
   if (existingController) existingController.abort()
   const controller = new AbortController()
@@ -220,37 +228,40 @@ export async function handleAgentStreamRequest(
       if (controller.signal.aborted) break
       switch (part.type) {
         case 'reasoning-start':
+          flushBuffers()
           currentReasoningStartMs = Date.now(); orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
           send({ type: 'reasoning-start', threadId }); break
         case 'reasoning-delta': {
           const last = orderedBlocks[orderedBlocks.length - 1]
-          if (last?.type === 'reasoning') { last.content += part.text || ''; last.durationMs = Date.now() - currentReasoningStartMs }
-          send({ type: 'reasoning-delta', payload: part.text || '', threadId }); break
+          const delta = part.text || ''
+          if (last?.type === 'reasoning') { last.content += delta; last.durationMs = Date.now() - currentReasoningStartMs }
+          queueReasoningDelta(delta); break
         }
         case 'reasoning-end':
+          flushBuffers()
           send({ type: 'reasoning-end', threadId }); break
         case 'text-delta': {
           const delta = part.text || ''; assistantContent += delta
           const last = orderedBlocks[orderedBlocks.length - 1]
           if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: delta })
           else last.content += delta
-          send({ type: 'text-delta', payload: delta, threadId })
+          queueTextDelta(delta)
           await saveProgress(false); break
         }
         case 'tool-input-start': {
-          // AI SDK v6 standard event for tool call argument streaming start
+          flushBuffers()
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
           orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
           send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId }); break
         }
         case 'tool-input-delta': {
-          // AI SDK v6 standard event for tool call argument streaming delta
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', delta = p.argsTextDelta || p.delta || ''
           const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
           send({ type: 'tool-call-delta', payload: { toolCallId: tid, delta }, threadId }); break
         }
         case 'tool-call': {
+          flushBuffers()
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', args = (p.args || p.input || {}) as Record<string, unknown>
           const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') { b.args = args; b.argsDelta = undefined }
@@ -258,6 +269,7 @@ export async function handleAgentStreamRequest(
           send({ type: 'tool-call', payload: { toolCallId: tid, toolName: p.toolName || '', args }, threadId }); break
         }
         case 'tool-result': {
+          flushBuffers()
           const p = part as unknown as { toolCallId: string; toolName: string; result: unknown }, b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
           if (b && b.type === 'tool') { b.result = p.result; b.status = 'complete' }
           send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: p.result }, threadId })
@@ -268,11 +280,13 @@ export async function handleAgentStreamRequest(
           await saveProgress(false); break
         }
         case 'error': {
+          flushBuffers()
           const errMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
           log.error(`[stream] error: "${errMsg}"`); for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
           send({ type: 'error', payload: errMsg, threadId }); break
         }
         case 'finish': {
+          flushBuffers()
           const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }, u = p.totalUsage || {}, pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0, tot = pTokens + cTokens
           try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
           send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot) }, threadId })
@@ -309,6 +323,7 @@ export async function handleAgentStreamRequest(
       send({ type: 'error', payload: error.message, threadId })
     }
   } finally {
+    flushBuffers()
     if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
     activePorts.delete(threadId)
     try { port.close() } catch {}
