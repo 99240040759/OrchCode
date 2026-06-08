@@ -2,6 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { execa } from 'execa'
 import { basename } from 'node:path'
+import { parse } from 'shell-quote'
 import log from 'electron-log'
 import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
 
@@ -14,42 +15,8 @@ const BLOCKED_EXECUTABLES = new Set([
   'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
 ])
 
-// L-7 FIX: Proper shell-quote tokenizer that handles:
-// - Quoted strings with spaces: git commit -m "fix: my message"
-// - Single-quoted strings: echo 'hello world'
-// - Paths with spaces: "C:\Program Files\app.exe"
-// - Escaped quotes within strings
 function tokenizeCommand(commandLine: string): string[] {
-  const tokens: string[] = []
-  let current = ''
-  let inSingle = false
-  let inDouble = false
-  let i = 0
-
-  while (i < commandLine.length) {
-    const ch = commandLine[i]
-
-    if (ch === '\\' && inDouble && i + 1 < commandLine.length && (commandLine[i + 1] === '"' || commandLine[i + 1] === '\\')) {
-      // Escape sequences inside double quotes (only double quotes or backslashes)
-      i++
-      current += commandLine[i]
-    } else if (ch === "'" && !inDouble) {
-      inSingle = !inSingle
-    } else if (ch === '"' && !inSingle) {
-      inDouble = !inDouble
-    } else if ((ch === ' ' || ch === '\t') && !inSingle && !inDouble) {
-      if (current.length > 0) {
-        tokens.push(current)
-        current = ''
-      }
-    } else {
-      current += ch
-    }
-    i++
-  }
-
-  if (current.length > 0) tokens.push(current)
-  return tokens
+  return parse(commandLine).map(t => typeof t === 'string' ? t : ('pattern' in t ? t.pattern : ('op' in t ? t.op : ''))).filter(Boolean)
 }
 
 function resolveWorkspace(convId: string) {

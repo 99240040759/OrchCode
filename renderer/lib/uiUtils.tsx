@@ -13,7 +13,7 @@ export function getDisplayName(fileName: string): string {
   if (fileName === 'implementation_plan.md') return 'Implementation Plan'
   if (fileName === 'walkthrough.md') return 'Walkthrough'
   if (fileName === 'task.md') return 'Task List'
-  return fileName
+  return fileName.split(/[/\\]/).pop() ?? fileName
 }
 
 /** Single source of truth for artifact icons — uses Lucide. */

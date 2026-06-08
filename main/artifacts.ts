@@ -10,44 +10,25 @@ export interface ArtifactEntry {
   modified: string
 }
 
-export async function pushArtifactsChanged(conversationId: string): Promise<void> {
-  const mainWindow = WindowManager.getMainWindow()
-  if (!mainWindow) return
-  const ctx = getWorkspaceContext(conversationId)
-  if (!ctx) return
+async function readArtifacts(dir: string): Promise<ArtifactEntry[]> {
   try {
-    const entries = await fs.readdir(ctx.artifactsPath, { withFileTypes: true })
-    const artifacts = await Promise.all(
-      entries
-        .filter((e) => e.isFile())
-        .map(async (e) => {
-          const p = join(ctx.artifactsPath, e.name)
-          const stat = await fs.stat(p)
-          return { name: e.name, path: p, size: stat.size, modified: stat.mtime.toISOString() }
-        })
-    )
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+    return Promise.all(entries.filter(e => e.isFile()).map(async e => {
+      const p = join(dir, e.name), stat = await fs.stat(p)
+      return { name: e.name, path: p, size: stat.size, modified: stat.mtime.toISOString() }
+    }))
+  } catch (err: any) { if (err.code === 'ENOENT') return []; throw err }
+}
+
+export async function pushArtifactsChanged(conversationId: string): Promise<void> {
+  const mainWindow = WindowManager.getMainWindow(), ctx = getWorkspaceContext(conversationId)
+  if (mainWindow && ctx) {
+    const artifacts = await readArtifacts(ctx.artifactsPath)
     mainWindow.webContents.send('artifacts:changed', { conversationId, artifacts })
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') throw err
   }
 }
 
 export async function listArtifacts(conversationId: string): Promise<ArtifactEntry[]> {
   const ctx = getWorkspaceContext(conversationId)
-  if (!ctx) return []
-  try {
-    const entries = await fs.readdir(ctx.artifactsPath, { withFileTypes: true })
-    return Promise.all(
-      entries
-        .filter((e) => e.isFile())
-        .map(async (e) => {
-          const p = join(ctx.artifactsPath, e.name)
-          const stat = await fs.stat(p)
-          return { name: e.name, path: p, size: stat.size, modified: stat.mtime.toISOString() }
-        })
-    )
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return []
-    throw err
-  }
+  return ctx ? readArtifacts(ctx.artifactsPath) : []
 }

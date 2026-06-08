@@ -52,7 +52,17 @@ export const isArtifactPanelOpenAtom = atom<boolean>(false)
 export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
 export const openFilesAtom = atom<import('./types').EditorFile[]>([])
 
-export const activeEditorFileAtom = atom<import('./types').EditorFile | null>(null)
+const baseActiveEditorFileAtom = atom<import('./types').EditorFile | null>(null)
+export const activeEditorFileAtom = atom(
+  (get) => get(baseActiveEditorFileAtom),
+  (get, set, file: import('./types').EditorFile | null) => {
+    set(baseActiveEditorFileAtom, file)
+    if (file) {
+      const open = get(openFilesAtom)
+      set(openFilesAtom, open.some(f => f.path === file.path) ? open.map(f => f.path === file.path ? file : f) : [...open, file])
+    }
+  }
+)
 
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 

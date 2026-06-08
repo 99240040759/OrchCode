@@ -2,6 +2,7 @@ import { join, extname, relative, resolve, normalize, sep, isAbsolute, dirname }
 import { promises as fs, existsSync, readFileSync, realpathSync } from 'node:fs'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
+import fg from 'fast-glob'
 import { getConversationPath } from './paths'
 import { getUserSkillsPath } from './skills'
 
@@ -54,27 +55,20 @@ export async function updateWorkspacePath(conversationId: string, newPath: strin
   workspaceRegistry.set(conversationId, ctx); return ctx
 }
 
-const isWithin = (base: string, target: string, isWindows: boolean) => {
-  try {
-    const b = normalize(resolve(base)) + sep, t = normalize(resolve(target))
-    const cb = isWindows ? b.toLowerCase() : b, ct = isWindows ? t.toLowerCase() : t
-    return ct === cb.slice(0, -1) || ct.startsWith(cb)
-  } catch { return false }
+const isWithin = (base: string, target: string) => {
+  const b = resolve(base), t = resolve(target), win = process.platform === 'win32'
+  const rel = relative(win ? b.toLowerCase() : b, win ? t.toLowerCase() : t)
+  return !isAbsolute(rel) && !rel.startsWith('..' + sep) && rel !== '..'
 }
 
 export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
   const resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
-  const isWindows = process.platform === 'win32'
-  const isAllowed = isWithin(rootPath, resolvedTarget, isWindows) || isWithin(getUserSkillsPath(), resolvedTarget, isWindows) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget, isWindows) : false)
+  const isAllowed = isWithin(rootPath, resolvedTarget) || isWithin(getUserSkillsPath(), resolvedTarget) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget) : false)
   if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
   let existingPath = resolvedTarget
-  while (!existsSync(existingPath)) {
-    const parent = dirname(existingPath)
-    if (parent === existingPath) break
-    existingPath = parent
-  }
+  while (!existsSync(existingPath)) { const parent = dirname(existingPath); if (parent === existingPath) break; existingPath = parent }
   const realExisting = realpathSync(existingPath)
-  const isRealAllowed = isWithin(realpathSync(resolve(rootPath)), realExisting, isWindows) || isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting, isWindows) || (conversationId ? isWithin(realpathSync(resolve(getConversationPath(conversationId))), realExisting, isWindows) : false)
+  const isRealAllowed = isWithin(realpathSync(resolve(rootPath)), realExisting) || isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting) || (conversationId ? isWithin(realpathSync(resolve(getConversationPath(conversationId))), realExisting) : false)
   if (!isRealAllowed) throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
   return resolvedTarget
 }
@@ -94,9 +88,6 @@ export function isFileBinary(filePath: string, buf: Buffer): boolean {
 const DEFAULT_IGNORED_DIRS = ['.git', '.gemini', 'node_modules', 'dist', 'out', 'build', 'target', 'coverage', '.cache', '.idea', '.vscode', '.next', '.nuxt', '.venv', 'venv', 'env', '__pycache__']
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
-interface TraverseOptions { onFile: (fullPath: string, name: string, sizeBytes: number) => Promise<void> | void }
-interface TraverseState { count: number; max: number }
-
 const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
 
 export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(resolve(rootPath)) }
@@ -110,30 +101,12 @@ function buildIgnore(rootPath: string): Ignore {
   return ig
 }
 
-async function traverseDir(dir: string, options: TraverseOptions, ig: Ignore, rootPath: string, state: TraverseState): Promise<void> {
-  if (state.count >= state.max) return
-  let entries: import('node:fs').Dirent[] = []
-  try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
-  const promises: Promise<void>[] = []
-  for (const entry of entries) {
-    if (state.count >= state.max) break
-    const name = entry.name, fullPath = join(dir, name)
-    let relPath = relative(rootPath, fullPath).replace(/\\/g, '/') + (entry.isDirectory() ? '/' : '')
-    if (ig.ignores(relPath)) continue
-    if (entry.isDirectory()) promises.push(traverseDir(fullPath, options, ig, rootPath, state))
-    else if (entry.isFile() && !BINARY_EXTENSIONS.has(extname(name).toLowerCase())) {
-      state.count++
-      try { options.onFile(fullPath, name, 0) } catch {}
-    }
-  }
-  await Promise.all(promises)
-}
-
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const resolved = resolve(rootPath), cached = workspaceFilesCache.get(resolved)
   if (cached && Date.now() - cached.timestamp < 10000) return cached.files
-  const files: string[] = [], ig = buildIgnore(rootPath), state = { count: 0, max: 5000 }
-  await traverseDir(rootPath, { onFile: (fp) => { try { files.push(relative(rootPath, fp).replace(/\\/g, '/')) } catch {} } }, ig, rootPath, state)
+  const ig = buildIgnore(rootPath)
+  const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
+  const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
   workspaceFilesCache.set(resolved, { files, timestamp: Date.now() }); return files
 }

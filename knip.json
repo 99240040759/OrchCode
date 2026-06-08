@@ -2,15 +2,16 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
     "electron.vite.config.ts",
-    "src/main/main.ts",
-    "src/main/browserWorker.ts",
-    "src/preload/index.ts",
-    "src/renderer/src/main.tsx"
+    "main/main.ts",
+    "main/agentWorker.ts",
+    "preload/index.ts",
+    "renderer/main.tsx"
   ],
-  "project": ["src/**/*.{ts,tsx}"],
+  "project": ["main/**/*.ts", "preload/**/*.ts", "renderer/**/*.{ts,tsx}"],
   "ignore": ["**/*.d.ts"],
   "paths": {
-    "@renderer/*": ["src/renderer/src/*"]
+    "@renderer/*": ["renderer/*"]
   },
   "ignoreDependencies": ["babel-plugin-react-compiler"]
 }
+

@@ -12,19 +12,6 @@ export function getSkillsPath(): string {
 }
 export function getUserSkillsPath(): string { return join(getAppInfo().userData, 'skills') }
 
-async function copyDirRecursive(src: string, dest: string): Promise<void> {
-  await fs.mkdir(dest, { recursive: true })
-  const entries = await fs.readdir(src, { withFileTypes: true })
-  for (const entry of entries) {
-    const srcPath = join(src, entry.name)
-    const destPath = join(dest, entry.name)
-    if (entry.isDirectory()) {
-      await copyDirRecursive(srcPath, destPath)
-    } else if (entry.isFile()) {
-      await fs.copyFile(srcPath, destPath)
-    }
-  }
-}
 
 /**
  * Scans the installed skills directory and returns metadata for each skill:
@@ -84,7 +71,7 @@ export async function initializeSkills(): Promise<void> {
       if (folder.isDirectory()) {
         const src = join(srcSkillsDir, folder.name)
         const dest = join(destSkillsDir, folder.name)
-        if (!existsSync(dest)) await copyDirRecursive(src, dest)
+        if (!existsSync(dest)) await fs.cp(src, dest, { recursive: true })
       }
     }
 
