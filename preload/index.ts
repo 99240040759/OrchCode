@@ -89,7 +89,7 @@ contextBridge.exposeInMainWorld('api', {
    * Returns an unsubscribe function.
    */
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
-    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed']
+    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed', 'command:new-conversation', 'command:open-workspace']
     if (!ALLOWED.includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on(channel, listener)
