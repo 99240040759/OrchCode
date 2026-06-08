@@ -47,11 +47,16 @@ export function registerStreamIpc() {
     const { port1, port2 } = new MessageChannelMain()
     event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
     const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
+    const win = WindowManager.getMainWindow()
+    if (win && !win.isDestroyed()) win.setProgressBar(2)
     const onExit = (code: number | null) => {
       pool.clearJob(worker.pid!)
       worker.off('message', onMsg)
       const win = WindowManager.getMainWindow()
-      if (win && !win.isDestroyed()) win.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
+      if (win && !win.isDestroyed()) {
+        win.setProgressBar(-1)
+        win.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
+      }
     }
     worker.once('exit', onExit)
     const onMsg = (msg: any) => {
@@ -69,6 +74,8 @@ export function registerStreamIpc() {
       if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
         pool.clearJob(worker.pid!)
         worker.off('message', onMsg); worker.off('exit', onExit)
+        const win = WindowManager.getMainWindow()
+        if (win && !win.isDestroyed()) win.setProgressBar(-1)
       }
     }
     worker.on('message', onMsg)

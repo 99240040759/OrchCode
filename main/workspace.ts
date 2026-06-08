@@ -99,6 +99,7 @@ const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.i
 const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
 
 export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(resolve(rootPath)) }
+export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear() }
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore().add(DEFAULT_IGNORED_DIRS)

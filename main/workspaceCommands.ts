@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { extname } from 'node:path'
-import { dialog, BrowserWindow } from 'electron'
+import { dialog, BrowserWindow, app } from 'electron'
 import log from 'electron-log'
 import { z } from 'zod'
 import {
@@ -31,7 +31,7 @@ export const workspaceCommands = {
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
       const selectedPath = result.filePaths[0]
-      addOpenedWorkspace(selectedPath)
+      addOpenedWorkspace(selectedPath); app.addRecentDocument(selectedPath)
       const ctx = await updateWorkspacePath(conversationId, selectedPath)
       try { setThreadWorkspace(conversationId, selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
@@ -42,7 +42,7 @@ export const workspaceCommands = {
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
       const ctx = await updateWorkspacePath(conversationId, workspacePath)
-      addOpenedWorkspace(workspacePath)
+      addOpenedWorkspace(workspacePath); app.addRecentDocument(workspacePath)
       try { setThreadWorkspace(conversationId, workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
     }

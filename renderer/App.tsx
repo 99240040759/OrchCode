@@ -56,6 +56,19 @@ function AppInner(): React.JSX.Element {
     }).catch(console.error)
   }, [setAvailableModels, setSelectedModel, selectedModel])
 
+  useEffect(() => {
+    const unsubNew = window.api.on('command:new-conversation', () => {
+      newConversation().catch(console.error)
+    })
+    const unsubOpen = window.api.on('command:open-workspace', () => {
+      openWorkspace().catch(console.error)
+    })
+    return () => {
+      unsubNew()
+      unsubOpen()
+    }
+  }, [newConversation, openWorkspace])
+
   return (
     <div className="app-root">
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />

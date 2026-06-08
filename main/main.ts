@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
-import { app, BrowserWindow, shell, nativeTheme } from 'electron'
+import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -15,6 +15,10 @@ import { pool } from './workerPool'
 import WindowManager from './windowManager'
 import { APP_ID } from './paths'
 import { initializeSkills } from './skills'
+import { clearAllWorkspaceFilesCache } from './workspace'
+
+app.setName('Orch Code')
+nativeTheme.themeSource = 'dark'
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -36,6 +40,12 @@ app.on('second-instance', (_event, commandLine) => {
   if (mainWin) {
     if (mainWin.isMinimized()) mainWin.restore()
     mainWin.focus()
+    if (commandLine.includes('--new-conversation')) mainWin.webContents.send('command:new-conversation')
+    if (commandLine.includes('--open-workspace')) mainWin.webContents.send('command:open-workspace')
+    if (commandLine.includes('--clear-cache')) {
+      clearAllWorkspaceFilesCache()
+      dialog.showMessageBox(mainWin, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
+    }
   }
   const onboardingWin = onboardingWindow
   if (onboardingWin) {
@@ -176,6 +186,12 @@ function createMainWindow(): BrowserWindow {
   mainWindow.on('ready-to-show', () => {
     mainWindow!.show()
     log.info('[main] Window ready')
+    if (process.argv.includes('--new-conversation')) mainWindow!.webContents.send('command:new-conversation')
+    if (process.argv.includes('--open-workspace')) mainWindow!.webContents.send('command:open-workspace')
+    if (process.argv.includes('--clear-cache')) {
+      clearAllWorkspaceFilesCache()
+      dialog.showMessageBox(mainWindow!, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
+    }
   })
   mainWindow.on('closed', () => {
     const browserView = WindowManager.getBrowserView()
@@ -201,6 +217,21 @@ function createMainWindow(): BrowserWindow {
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'dark'
   electronApp.setAppUserModelId(APP_ID)
+
+  if (process.platform === 'darwin' && app.dock) {
+    const dockMenu = Menu.buildFromTemplate([
+      { label: 'New Conversation', click() { const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('command:new-conversation') } } },
+      { label: 'Open Project Folder...', click() { const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('command:open-workspace') } } },
+      { label: 'Clear Workspace Cache', click() { clearAllWorkspaceFilesCache(); const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) dialog.showMessageBox(win, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' }) } }
+    ])
+    app.dock.setMenu(dockMenu)
+  } else if (process.platform === 'win32') {
+    app.setUserTasks([
+      { program: process.execPath, arguments: '--new-conversation', iconPath: process.execPath, iconIndex: 0, title: 'New Conversation', description: 'Start a new chat thread' },
+      { program: process.execPath, arguments: '--open-workspace', iconPath: process.execPath, iconIndex: 0, title: 'Open Project Folder...', description: 'Select and open a project folder' },
+      { program: process.execPath, arguments: '--clear-cache', iconPath: process.execPath, iconIndex: 0, title: 'Clear Workspace Cache', description: 'Reset cached project files list' }
+    ])
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
