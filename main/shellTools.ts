@@ -11,7 +11,8 @@ const BLOCKED_EXECUTABLES = new Set([
   'mkfs', 'fdisk', 'format', 'dd',
   'passwd', 'chroot',
   'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
-  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
+  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh',
+  'node', 'python', 'python3', 'perl', 'ruby', 'php'
 ])
 const WRAPPERS = new Set(['env', 'npx', 'pnpx', 'yarn', 'npm', 'pnpm', 'bun', 'sudo', 'su', 'runas', 'gksudo'])
 

@@ -1,9 +1,4 @@
 import { init as initSentry } from '@sentry/electron/renderer'
-
-window.addEventListener('beforeunload', () => {
-  // No worker to terminate — telemetry worker removed
-})
-
 initSentry()
 
 // --- Native Desktop Refinements ---

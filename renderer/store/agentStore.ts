@@ -7,7 +7,7 @@ import type {
   UserProfile
 } from '../../preload/index.d'
 
-export type { StreamBlock, EditorFile } from './types'
+export type { StreamBlock, EditorFile, ChatMessage, ToolCallEntry } from './types'
 
 type AgentRunState = 'idle' | 'thinking' | 'streaming' | 'tool-calling' | 'error'
 export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'

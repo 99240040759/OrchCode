@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { activeThreadIdAtom } from '../store/agentStore'
-import { createDebounce } from '../lib/debounce'
+import debounce from 'lodash.debounce'
 import { getOrchThemeColors } from '../lib/sharedUtils'
 
 export interface TerminalViewHandle {
@@ -21,7 +21,9 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
     const conversationId = useAtomValue(activeThreadIdAtom)
 
     const conversationIdRef = useRef(conversationId)
+    const workspacePathRef = useRef(workspacePath)
     conversationIdRef.current = conversationId
+    workspacePathRef.current = workspacePath
 
     const termContainerRef = useRef<HTMLDivElement>(null)
     const fitAddonRef = useRef<FitAddon | null>(null)
@@ -85,11 +87,14 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       term.loadAddon(webLinksAddon)
       term.open(termContainerRef.current)
 
+      try { fitAddon.fit() } catch {}
+
       fitTimeout = setTimeout(() => {
-        if (active) {
-          try {
-            fitAddon.fit()
-          } catch {}
+        if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
+          try { fitAddon.fit() } catch {}
+          if (ptyIdRef.current) {
+            window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
+          }
         }
       }, 50)
 
@@ -100,7 +105,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       window.api.invoke('terminal:create', {
         cols,
         rows,
-        cwd: workspacePath,
+        cwd: workspacePathRef.current,
         conversationId: conversationIdRef.current
       })
         .then((result) => {
@@ -132,7 +137,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
           if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
         })
 
-      const debouncedResize = createDebounce(() => {
+      const debouncedResize = debounce(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
           try { fitAddon.fit() } catch {}
           if (ptyIdRef.current) {
@@ -159,7 +164,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
         term.dispose()
       }
-    }, [workspacePath, conversationId])
+    }, [])
 
     return <div ref={termContainerRef} className="terminal-container" />
   }

@@ -18,7 +18,7 @@ const isToolResultError = (r: unknown): boolean => {
 
 export function useChat() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
-  const setRunState = useSetAtom(agentRunStateAtom)
+  const [runState, setRunState] = useAtom(agentRunStateAtom)
   const setMessages = useSetAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
@@ -100,13 +100,13 @@ export function useChat() {
 
   const stop = useCallback(() => {
     const tid = activeStreamThreadIdRef.current
+    window.api.stopStream(tid)
     setRunState('idle')
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
     setMessages(prev => prev.map(m => !m.isStreaming ? m : {
       ...m, isStreaming: false,
       orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
     }))
-    window.api.stopStream(tid)
   }, [setRunState, setMessages])
 
   const activeThreadIdRef = useRef(activeThreadId)
@@ -146,7 +146,7 @@ export function useChat() {
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
         setMessages(loadedMsgs)
-        setSessionTokens(fresh?.accumulatedTokens ?? threadsRef.current.find(t => t.id === threadId)?.accumulatedTokens ?? 0)
+        setSessionTokens(fresh?.accumulatedTokens ?? 0)
         resetThreadScopedPanels()
         setActiveThreadId(threadId)
         setIsThreadLoading(false)
@@ -216,11 +216,12 @@ export function useChat() {
   }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels])
 
   const run = useCallback(async (promptText: string, _mode?: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
+    if (runState !== 'idle') return
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
     // clear version map for new stream
     workerVersionRef.current.clear()
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
-    const existingThread = await threadService.getThread(resolvedThreadId)
+    const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
     const isNewThread = !existingThread || existingThread.title === 'New Chat'
     activeStreamThreadIdRef.current = resolvedThreadId
     if (resolvedThreadId !== activeThreadIdRef.current && isMountedRef.current) setActiveThreadId(resolvedThreadId)
@@ -285,7 +286,7 @@ export function useChat() {
         fullContent += chunkText
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') {
-          last.isStreaming = false
+          orderedBlocks[orderedBlocks.length - 1] = { ...last, isStreaming: false }
           orderedBlocks.push({ type: 'text', content: chunkText })
           postToWorker(chunkText, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
           flushNow()
@@ -302,7 +303,7 @@ export function useChat() {
       } else if (chunkType === 'tool-call-streaming-start') {
         setRunState('tool-calling')
         const last = orderedBlocks[orderedBlocks.length - 1]
-        if (last?.type === 'reasoning') last.isStreaming = false
+        if (last?.type === 'reasoning') orderedBlocks[orderedBlocks.length - 1] = { ...last, isStreaming: false }
         orderedBlocks.push({ type: 'tool', toolCallId: chunkData?.toolCallId as string ?? crypto.randomUUID(), toolName: chunkData?.toolName as string ?? 'unknown', args: {} as Record<string, unknown>, argsDelta: '', status: 'pending' })
         flushNow()
       } else if (chunkType === 'tool-call-delta') {
@@ -373,7 +374,7 @@ export function useChat() {
         setRunState('error')
       }
     }
-  }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker])
+  }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker, runState])
 
   return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace }
 }

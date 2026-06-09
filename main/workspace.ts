@@ -8,9 +8,7 @@ import { getUserSkillsPath } from './skills'
 
 Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
 
-export interface WorkspaceContext {
-  conversationId: string; rootPath: string; artifactsPath: string; isUserWorkspace: boolean
-}
+import type { WorkspaceContext } from '../preload/types'
 
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
@@ -104,7 +102,7 @@ export function invalidateWorkspaceFilesCache(rootPath: string): void { workspac
 export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear() }
 
 function buildIgnore(rootPath: string): Ignore {
-  const ig = ignore().add(DEFAULT_IGNORED_DIRS)
+  const ig = ignore()
   try {
     const gitignorePath = join(rootPath, '.gitignore')
     if (existsSync(gitignorePath)) ig.add(readFileSync(gitignorePath, 'utf8'))

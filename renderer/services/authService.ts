@@ -16,10 +16,7 @@ export const authService = {
     catch (err) { console.error('[authService] getAuthUser failed:', err); throw err }
   },
 
-  openMainAndCloseOnboarding: async (): Promise<void> => {
-    try { await window.api.invoke('auth:open-onboarding') }
-    catch (err) { console.error('[authService] openMainAndCloseOnboarding failed:', err); throw err }
-  },
+
 
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
     return window.api.on('auth:status-changed', (user) => {

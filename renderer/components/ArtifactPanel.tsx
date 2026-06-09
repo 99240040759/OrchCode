@@ -89,13 +89,16 @@ const ArtifactPanel: React.FC = () => {
         .then((res) => setOriginalContent((res as { content?: string })?.content ?? ''))
         .catch(() => setOriginalContent(''))
     } else setOriginalContent(null)
-  }, [activeFile?.path, isDiffMode, convId])
+  }, [activeFile?.path, activeFile?.content, isDiffMode, convId])
+
+  const lastArtifactsUpdateRef = useRef(0)
 
   useEffect(() => {
     if (!convId) return
     let active = true; setLoading(true)
+    const fetchTime = Date.now()
     window.api.invoke('artifacts:list', { conversationId: convId })
-      .then((data) => { if (active) { setArtifacts(data as ArtifactEntry[]); setLoading(false) } })
+      .then((data) => { if (active && fetchTime >= lastArtifactsUpdateRef.current) { setArtifacts(data as ArtifactEntry[]); setLoading(false) } })
       .catch(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [convId, setArtifacts])
@@ -103,7 +106,10 @@ const ArtifactPanel: React.FC = () => {
   useEffect(() => {
     return window.api.on('artifacts:changed', (payload: unknown) => {
       const p = payload as { conversationId: string; artifacts?: ArtifactEntry[] } | undefined
-      if (p?.conversationId === convIdRef.current) setArtifacts(p.artifacts ?? [])
+      if (p?.conversationId === convIdRef.current) {
+        lastArtifactsUpdateRef.current = Date.now()
+        setArtifacts(p.artifacts ?? [])
+      }
     })
   }, [setArtifacts])
 
@@ -133,6 +139,8 @@ const ArtifactPanel: React.FC = () => {
     if (panelMode === 'terminal') requestAnimationFrame(() => terminalRef.current?.fit())
   }, [panelMode])
 
+  useEffect(() => { setIsDiffMode(false) }, [activeFile?.path])
+
   useEffect(() => {
     if (!isOpen && browserWasOpenedRef.current) { window.api.invoke('browser:close').catch(() => {}); browserWasOpenedRef.current = false }
   }, [isOpen])
@@ -141,13 +149,13 @@ const ArtifactPanel: React.FC = () => {
     const handleLayout = () => { try { editorRef.current?.layout(); diffEditorRef.current?.layout() } catch {} }
     window.addEventListener('resize', handleLayout)
     const panelEl = document.querySelector('.artifact-pane-wrapper')
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let rafId: number
     const obs = new ResizeObserver(() => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => requestAnimationFrame(handleLayout), 50)
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(handleLayout)
     })
     if (panelEl) obs.observe(panelEl)
-    return () => { window.removeEventListener('resize', handleLayout); if (timer) clearTimeout(timer); obs.disconnect() }
+    return () => { window.removeEventListener('resize', handleLayout); cancelAnimationFrame(rafId); obs.disconnect() }
   }, [])
 
   const handleTabChange = useCallback((val: string) => {

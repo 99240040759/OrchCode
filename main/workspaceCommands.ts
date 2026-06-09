@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { extname, relative } from 'node:path'
+import { execa } from 'execa'
 import { dialog, BrowserWindow, app } from 'electron'
 import log from 'electron-log'
 import { z } from 'zod'
@@ -14,6 +15,7 @@ import { convIdSchema } from './threadCommands'
 import { activeAbortControllers } from './stream'
 import { pool } from './workerPool'
 import { cleanupPtysForThread } from './terminalCommands'
+import { MAX_FILE_READ_BYTES } from './fileTools'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
@@ -23,7 +25,7 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   '.gradle': 'groovy', '.properties': 'properties', '.java': 'java',
   '.c': 'c', '.cpp': 'cpp', '.cs': 'csharp', '.rb': 'ruby', '.php': 'php'
 }
-const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
+
 
 export const workspaceCommands = {
   'workspace:select': {
@@ -70,6 +72,7 @@ export const workspaceCommands = {
           if (ctrl) { ctrl.abort(); activeAbortControllers.delete(tid) }
           pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)
           clearWorkspaceContext(tid)
+          await new Promise(resolve => setTimeout(resolve, 200))
           await fs.rm(getConversationPath(tid), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
         }
         return true
@@ -90,9 +93,9 @@ export const workspaceCommands = {
   'file:read-original': {
     schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema.optional() }),
     execute: async ({ filePath, conversationId }: any) => {
-      if (!conversationId) return { content: '' }
+      if (!conversationId) { try { return { content: await fs.readFile(filePath, 'utf-8') } } catch (fsErr) { log.error('[commands] disk read failed:', fsErr); throw fsErr } }
       try {
-        const { execa } = await import('execa'), ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
+        const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
         const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
         const relativePath = relative(ctx.rootPath, safePath)
         const gitPath = relativePath.replace(/\\/g, '/')

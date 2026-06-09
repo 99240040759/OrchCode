@@ -53,6 +53,7 @@ marked.use({ renderer })
 export function parseMarkdown(content: string): string {
   if (!content) return ''
   const mathBlocks: string[] = []
+  const mathSessionId = Math.random().toString(36).substring(2, 10)
   
   // 1. Extract block equations: $$...$$ or \[...\]
   let processed = content.replace(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\\\[[\s\S]*?\\\\\])/g, (match) => {
@@ -64,7 +65,7 @@ export function parseMarkdown(content: string): string {
     }
     try {
       const compiled = katex.renderToString(rawMath.trim(), { displayMode: true, throwOnError: false })
-      const placeholder = `__MATH_BLOCK_PLACEHOLDER_${mathBlocks.length}__`
+      const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
       mathBlocks.push(compiled)
       return placeholder
     } catch {
@@ -82,7 +83,7 @@ export function parseMarkdown(content: string): string {
     }
     try {
       const compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
-      const placeholder = `__MATH_BLOCK_PLACEHOLDER_${mathBlocks.length}__`
+      const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
       mathBlocks.push(compiled)
       return placeholder
     } catch {
@@ -95,7 +96,7 @@ export function parseMarkdown(content: string): string {
 
   // 4. Restore compiled math HTML
   for (let i = 0; i < mathBlocks.length; i++) {
-    html = html.replace(new RegExp(`__MATH_BLOCK_PLACEHOLDER_${i}__`, 'g'), () => mathBlocks[i])
+    html = html.replace(new RegExp(`__MATH_BLOCK_${mathSessionId}_${i}__`, 'g'), () => mathBlocks[i])
   }
   return html
 }

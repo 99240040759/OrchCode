@@ -4,7 +4,6 @@ import Skeleton from 'react-loading-skeleton'
 import { Info, Package } from 'lucide-react'
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../preload/index.d'
-import { Panel } from './Primitives'
 
 interface OverviewPanelProps {
   artifacts: ArtifactEntry[]
@@ -22,7 +21,7 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
             <h2 className="overview-title">Session Overview</h2>
           </div>
           <div className="overview-grid">
-            <Panel className="overview-panel">
+            <div className="panel-root overview-panel">
               <div className="panel-header">
                 <div className="panel-header-left"><Package size={14} color="var(--text-secondary)" /><span>Artifacts</span></div>
               </div>
@@ -36,7 +35,7 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
                     </div>
                   ))}
               </div>
-            </Panel>
+            </div>
           </div>
         </div>
       </ScrollArea.Viewport>

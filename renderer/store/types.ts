@@ -22,14 +22,8 @@ export interface ChatMessage {
   isStreaming?: boolean
 }
 
-export interface ToolCallEntry {
-  id: string
-  toolName: string
-  args: Record<string, unknown>
-  argsDelta?: string
-  result?: unknown
-  status: 'pending' | 'complete' | 'error'
-}
+export type ToolStreamBlock = Extract<StreamBlock, { type: 'tool' }>
+export type ToolCallEntry = Omit<ToolStreamBlock, 'type' | 'toolCallId'> & { id: string }
 
 
 export interface EditorFile {

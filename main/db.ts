@@ -117,7 +117,8 @@ export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'crea
     } else { db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId) }
     saved = db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET role = excluded.role, threadId = excluded.threadId, content = excluded.content, data = excluded.data, createdAt = excluded.createdAt RETURNING id, role, content, data, createdAt`).get(msg) as ThreadMessage
   })()
-  return { id: saved!.id, role: saved!.role as 'user' | 'assistant' | 'system', content: saved!.content, data: saved!.data || undefined, createdAt: saved!.createdAt }
+  if (!saved) throw new Error('[db] Failed to save message')
+  return { id: saved.id, role: saved.role as 'user' | 'assistant' | 'system', content: saved.content, data: saved.data || undefined, createdAt: saved.createdAt }
 }
 
 export function deleteThread(threadId: string): boolean {

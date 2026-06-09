@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom } from '../store/agentStore'
-import { createDebounce } from '../lib/debounce'
+import debounce from 'lodash.debounce'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -22,9 +22,11 @@ const BrowserView: React.FC = () => {
   const panelModeRef = useRef(panelMode)
   const isOpenRef = useRef(isOpen)
   const urlInputRef = useRef(urlInput)
+  const activeThreadIdRef = useRef(activeThreadId)
   panelModeRef.current = panelMode
   isOpenRef.current = isOpen
   urlInputRef.current = urlInput
+  activeThreadIdRef.current = activeThreadId
 
   const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
     if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) return { x: 0, y: 0, width: 0, height: 0 }
@@ -44,18 +46,11 @@ const BrowserView: React.FC = () => {
         requestAnimationFrame(openBrowserWithBounds)
         return
       }
-      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds, conversationId: activeThreadId })
+      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds, conversationId: activeThreadIdRef.current })
       setIsLoaded(true); isLoadedRef.current = true
       window.api.invoke('browser:resize', bounds).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
-  }, [getBounds, activeThreadId])
-
-  // C-3 FIX: Merged all resize/open logic into a single effect.
-  // Previously two effects both depended on panelMode+isOpen and fired simultaneously,
-  // sending two browser:resize IPC calls on each panel toggle.
-  useEffect(() => {
-    return () => { window.api.invoke('browser:close').catch(() => {}) }
-  }, [])
+  }, [getBounds])
 
   useEffect(() => {
     if (panelMode !== 'browser' || !isOpen) return
@@ -65,7 +60,7 @@ const BrowserView: React.FC = () => {
     const unsubTitle = window.api.on('browser:title-updated', (t) => { if (active) setTitle(t as string) })
     const unsubUrl = window.api.on('browser:url-changed', (u) => { if (active) { setDisplayUrl(u as string); setUrlInput(u as string) } })
 
-    const debouncedResize = createDebounce(() => {
+    const debouncedResize = debounce(() => {
       if (active && isLoadedRef.current) {
         const bounds = getBounds()
         if (bounds.width > 0 && bounds.height > 0) window.api.invoke('browser:resize', bounds).catch(() => {})
@@ -90,8 +85,8 @@ const BrowserView: React.FC = () => {
   }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
 
   useEffect(() => {
-    if (isLoadedRef.current) window.api.invoke('browser:resize', getBounds()).catch(() => {})
-  }, [sidebarExpanded, getBounds])
+    if (isLoaded) window.api.invoke('browser:resize', getBounds()).catch(() => {})
+  }, [sidebarExpanded, getBounds, isLoaded])
 
   return (
     <div className="browser-container">

@@ -14,8 +14,7 @@ import { ChatPane } from './components/ChatPane'
 import { authService } from './services/authService'
 import { threadService } from './services/services'
 import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react'
-
-const isMac = window.api.platform === 'darwin'
+import { isMac } from './lib/sharedUtils'
 
 function AppInner(): React.JSX.Element {
   const setAvailableModels = useSetAtom(availableModelsAtom)
@@ -33,7 +32,17 @@ function AppInner(): React.JSX.Element {
   const sessionInitialized = useRef(false)
 
   useEffect(() => {
-    if (globalPrompt && Object.keys(availableModels).length > 0) { run(globalPrompt.prompt, globalPrompt.mode, undefined, globalPrompt.threadId); setGlobalPrompt(null) }
+    let cb: (() => void) | undefined
+    if (globalPrompt) {
+      if (Object.keys(availableModels).length > 0) {
+        run(globalPrompt.prompt, globalPrompt.mode, undefined, globalPrompt.threadId)
+        setGlobalPrompt(null)
+      } else {
+        const timer = setTimeout(() => setGlobalPrompt(null), 5000)
+        cb = () => clearTimeout(timer)
+      }
+    }
+    return cb
   }, [globalPrompt, run, setGlobalPrompt, availableModels])
 
   useEffect(() => {

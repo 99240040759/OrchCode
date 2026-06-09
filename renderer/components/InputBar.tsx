@@ -53,14 +53,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     setShowFileSuggestions(false)
     const wsPath = activeWorkspace?.path ?? ''
     const sep = wsPath.includes('\\') ? '\\' : '/'
-    const absolutePath = wsPath ? `${wsPath}${sep}${selectedFile}` : `/${selectedFile}`
+    const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
+    const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
     const name = selectedFile.split(/[/\\]/).pop() || selectedFile
     setFileReferences((prev) => prev.some((p) => p.path === absolutePath) ? prev : [...prev, { name, path: absolutePath }])
     setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(triggerIndex, triggerIndex) }, 0)
   }, [triggerIndex, activeWorkspace])
 
-  const showFileSuggestionsRef = React.useRef(showFileSuggestions)
-  React.useEffect(() => { showFileSuggestionsRef.current = showFileSuggestions }, [showFileSuggestions])
 
   const checkSuggestions = useCallback((val: string, selectionStart: number | null) => {
     if (selectionStart === null) return setShowFileSuggestions(false)
@@ -69,7 +68,6 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     if (lastAtIdx !== -1) {
       const textAfterAt = textBeforeCursor.slice(lastAtIdx + 1)
       if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        if (!showFileSuggestionsRef.current) fetchWorkspaceFiles()
         setTriggerIndex(lastAtIdx); setSearchQuery(textAfterAt); setShowFileSuggestions(true); setSuggestionIndex(0)
         return
       }
@@ -90,7 +88,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     if (!files || files.length === 0) return
     const type = (fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document') || 'document'
     const selectedFiles = Array.from(files)
-    const existingBytes = attachments.reduce((total, att) => total + Math.ceil((att.base64.length * 3) / 4), 0)
+    const existingBytes = attachments.reduce((total, att) => total + Math.ceil(att.base64.length * 0.75), 0)
     const accepted: File[] = []; let totalBytes = existingBytes
     for (const file of selectedFiles) {
       if (attachments.length + accepted.length >= MAX_ATTACHMENTS) { toast.error(`You can attach up to ${MAX_ATTACHMENTS} files.`); break }

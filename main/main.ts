@@ -19,7 +19,6 @@ import { initializeSkills } from './skills'
 import { clearAllWorkspaceFilesCache } from './workspace'
 
 app.setName('Orch Code')
-nativeTheme.themeSource = 'dark'
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -37,6 +36,7 @@ if (!gotTheLock) {
 }
 
 app.on('second-instance', (_event, commandLine) => {
+  log.info('[main] second-instance event received with commandLine:', commandLine)
   const mainWin = WindowManager.getMainWindow()
   if (mainWin) {
     if (mainWin.isMinimized()) mainWin.restore()
@@ -53,21 +53,22 @@ app.on('second-instance', (_event, commandLine) => {
     if (onboardingWin.isMinimized()) onboardingWin.restore()
     onboardingWin.focus()
   }
-  const url = commandLine.pop()
-  if (url && url.startsWith('orch-code://')) {
-    handleAuthUrl(url)
-  }
+  const url = commandLine.find((arg) => arg.toLowerCase().includes('orch-code://'))
+  if (url) handleAuthUrl(url)
 })
 
 function handleAuthUrl(urlStr: string) {
   try {
-    const parsed = new URL(urlStr)
+    const cleanedUrl = urlStr.replace(/^"+|"+$/g, '').trim()
+    log.info('[main] Handling auth redirect URL:', cleanedUrl)
+    const parsed = new URL(cleanedUrl)
     if (parsed.hostname === 'auth-callback') {
       const code = parsed.searchParams.get('code')
       const state = parsed.searchParams.get('state')
-      if (code && state) {
-        log.info('[main] Forwarding auth callback code to auth module')
-        void handleAuthCallback(code, state).catch(err => log.error('[main] Auth callback failed:', err))
+      const errorMsg = parsed.searchParams.get('error_description') || parsed.searchParams.get('error')
+      if (code || errorMsg) {
+        log.info('[main] Forwarding auth callback to auth module')
+        void handleAuthCallback(code || '', state || '', errorMsg).catch(err => log.error('[main] Auth callback failed:', err))
       }
     }
   } catch (err: any) {
@@ -77,7 +78,7 @@ function handleAuthUrl(urlStr: string) {
 
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  if (url.startsWith('orch-code://')) {
+  if (url.toLowerCase().includes('orch-code://')) {
     handleAuthUrl(url)
   }
 })
@@ -254,6 +255,10 @@ app.whenReady().then(async () => {
   void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
   initUpdater()
   await initAuth()
+  const startupUrl = process.argv.find((arg) => arg.toLowerCase().includes('orch-code://'))
+  if (startupUrl) {
+    handleAuthUrl(startupUrl)
+  }
   const authSession = getCurrentSession()
   if (authSession) {
     createMainWindow()

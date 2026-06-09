@@ -9,6 +9,7 @@ import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, a
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
 
+// Shared file-write tool names — keep in sync with main/stream.ts
 const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
 
 const FileIcon: React.FC<{ fileName: string; className?: string; size?: number }> = ({ fileName, className = '', size = 16 }) => (
@@ -53,7 +54,7 @@ function getDiffStats(toolName: string, args: Record<string, unknown> | undefine
       }
       const repMatches = [...argsDelta.matchAll(/"replacementContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
       for (const m of repMatches) {
-        added += (m[1].match(/\\n/g) ?? []).length + (m[1].match(/\n/g) ?? []).length + 1
+        added += (m[1].match(/\\r?\\n/g) ?? []).length + (m[1].match(/\r?\n/g) ?? []).length + 1
       }
     }
   }

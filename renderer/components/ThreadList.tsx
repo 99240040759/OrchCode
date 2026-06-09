@@ -14,12 +14,29 @@ const formatConversationDate = (dateStr: string): string => {
 }
 
 const ThreadList: React.FC = () => {
-  const threads = useAtomValue(threadListAtom)
+  const rawThreads = useAtomValue(threadListAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const agentRunState = useAtomValue(agentRunStateAtom)
   const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace } = useChat()
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
+
+  const threads = useMemo(() => {
+    if (activeThreadId && !rawThreads.some(t => t.id === activeThreadId)) {
+      return [
+        {
+          id: activeThreadId,
+          title: 'New conversation',
+          resourceId: 'local-user',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          workspacePath: activeWorkspace?.path || null
+        },
+        ...rawThreads
+      ]
+    }
+    return rawThreads
+  }, [rawThreads, activeThreadId, activeWorkspace?.path])
 
   const allWorkspacePaths = useMemo(() => {
     const paths = threads.map(t => t.workspacePath || '')

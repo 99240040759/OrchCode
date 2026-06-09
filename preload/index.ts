@@ -5,23 +5,8 @@ const activeStreams = new Map<string, { port: MessagePort; cleanup: () => void; 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // Shared with renderer via window.api
 
-export type StreamChunk = {
-  type: string
-  payload?: unknown
-  threadId?: string
-}
-
-export type StreamPayload = {
-  promptText: string
-  threadId: string
-  modelType?: string
-  attachments?: Array<{
-    type: 'image' | 'document'
-    name: string
-    mimeType?: string
-    base64: string
-  }>
-}
+import type { StreamChunk, StreamPayload } from './types'
+export type { StreamChunk, StreamPayload }
 
 // ─── Bridge ───────────────────────────────────────────────────────────────────
 

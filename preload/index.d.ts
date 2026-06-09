@@ -1,9 +1,4 @@
-export interface WorkspaceContext {
-  conversationId: string
-  rootPath: string
-  artifactsPath: string
-  isUserWorkspace: boolean
-}
+export type { WorkspaceContext } from './types'
 
 export interface ArtifactEntry {
   name: string
@@ -60,23 +55,7 @@ export type FileReadResult =
       language: string
     }
 
-export type StreamChunk = {
-  type: string
-  payload?: unknown
-  threadId?: string
-}
-
-export type StreamPayload = {
-  promptText: string
-  threadId: string
-  modelType?: string
-  attachments?: Array<{
-    type: 'image' | 'document'
-    name: string
-    mimeType?: string
-    base64: string
-  }>
-}
+export type { StreamChunk, StreamPayload } from './types'
 
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>

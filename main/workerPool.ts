@@ -5,11 +5,11 @@ import log from 'electron-log'
 
 class WorkerPool {
   private workers: UtilityProcess[] = []
-  private activeJobs = new Map<number, string>()
+  private activeJobs = new Map<UtilityProcess, string>()
   constructor(private maxWorkers = 4) {}
 
   public getOrCreateWorker(token?: string): UtilityProcess {
-    const idle = this.workers.find(w => w.pid !== undefined && !this.activeJobs.has(w.pid))
+    const idle = this.workers.find(w => !this.activeJobs.has(w))
     if (idle) {
       if (token) idle.postMessage({ type: 'update-token', token })
       return idle
@@ -24,20 +24,19 @@ class WorkerPool {
     })
     child.on('exit', (code) => {
       log.info(`[workerPool] Worker pid ${child.pid} exited with code ${code}`)
-      this.workers = this.workers.filter(w => w.pid !== child.pid)
-      this.activeJobs.delete(child.pid!)
+      this.workers = this.workers.filter(w => w !== child)
+      this.activeJobs.delete(child)
     })
     this.workers.push(child)
     return child
   }
-  public setJob(pid: number, jobName: string) { this.activeJobs.set(pid, jobName) }
-  public clearJob(pid: number) {
-    this.activeJobs.delete(pid)
+  public setJob(worker: UtilityProcess, jobName: string) { this.activeJobs.set(worker, jobName) }
+  public clearJob(worker: UtilityProcess) {
+    this.activeJobs.delete(worker)
     if (this.workers.length > this.maxWorkers) {
-      const idx = this.workers.findIndex(w => w.pid === pid)
+      const idx = this.workers.indexOf(worker)
       if (idx !== -1) {
-        const worker = this.workers[idx]
-        log.info(`[workerPool] Terminating temporary worker pid ${pid} to scale down pool.`)
+        log.info(`[workerPool] Terminating temporary worker pid ${worker.pid} to scale down pool.`)
         try { worker.kill() } catch {}
         this.workers.splice(idx, 1)
       }
@@ -45,17 +44,19 @@ class WorkerPool {
   }
   public allocateWorker(token: string, jobName: string): UtilityProcess {
     const worker = this.getOrCreateWorker(token)
-    this.setJob(worker.pid!, jobName)
+    this.setJob(worker, jobName)
     return worker
   }
   public killJob(jobName: string) {
-    this.activeJobs.forEach((name, pid) => {
-      if (name === jobName) {
-        const idx = this.workers.findIndex(w => w.pid === pid)
-        if (idx !== -1) { try { this.workers[idx].kill() } catch {}; this.workers.splice(idx, 1) }
-        this.activeJobs.delete(pid)
-      }
+    const workersToKill: UtilityProcess[] = []
+    this.activeJobs.forEach((name, w) => {
+      if (name === jobName) workersToKill.push(w)
     })
+    for (const w of workersToKill) {
+      const idx = this.workers.indexOf(w)
+      if (idx !== -1) { try { w.kill() } catch {} ; this.workers.splice(idx, 1) }
+      this.activeJobs.delete(w)
+    }
   }
   public async shutdown(): Promise<void> {
     for (const w of this.workers) { try { w.kill() } catch {} }

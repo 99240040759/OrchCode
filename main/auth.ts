@@ -21,8 +21,8 @@ const sessionFilePath = getSessionPath()
 let currentSession: AuthSession | null = null
 let loginInProgress = false
 let loginTimeout: NodeJS.Timeout | null = null
+let refreshInterval: NodeJS.Timeout | null = null
 let activeVerifier = ''
-let activeState = ''
 let pendingLoginResolve: ((user: UserProfile | null) => void) | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
 
@@ -45,6 +45,13 @@ export function getCurrentSession(): AuthSession | null {
     return { idToken: process.env.SUPABASE_SESSION_TOKEN, refreshToken: '', user: { uid: 'worker', name: 'Worker', email: 'worker@orch.live', photoUrl: '' } }
   }
   return currentSession
+}
+
+export function requireAuthToken(): string {
+  const session = getCurrentSession()
+  const token = session?.idToken || process.env.SUPABASE_SESSION_TOKEN
+  if (!token) throw new Error('Unauthenticated: Please sign in.')
+  return token
 }
 
 async function loadSession(): Promise<AuthSession | null> {
@@ -103,11 +110,10 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
     if (pendingLoginReject) { pendingLoginReject(new Error('Login cancelled')); pendingLoginReject = null; pendingLoginResolve = null }
     const { verifier, challenge } = generatePKCE()
     activeVerifier = verifier
-    activeState = crypto.randomBytes(16).toString('hex')
     const supabaseUrl = process.env.SUPABASE_URL
     if (!supabaseUrl) { reject(new Error('SUPABASE_URL config is missing.')); return }
     pendingLoginResolve = resolve; pendingLoginReject = reject
-    const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({ provider: 'google', redirect_to: 'orch-code://auth-callback', code_challenge: challenge, code_challenge_method: 's256', state: activeState }).toString()
+    const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({ provider: 'google', redirect_to: 'orch-code://auth-callback', code_challenge: challenge, code_challenge_method: 's256' }).toString()
     if (loginTimeout) clearTimeout(loginTimeout)
     loginTimeout = setTimeout(() => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(new Error('Sign-in timed out.')) }, 5 * 60 * 1000)
     void shell.openExternal(redirectUrl).catch((err) => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(err instanceof Error ? err : new Error(String(err))) })
@@ -115,18 +121,18 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
   return promise.finally(() => { loginInProgress = false })
 }
 
-export async function handleAuthCallback(code: string, state: string): Promise<void> {
+export async function handleAuthCallback(code: string, _state: string, errorMsg?: string | null): Promise<void> {
   if (!pendingLoginResolve || !pendingLoginReject) return
-  if (!state || state !== activeState) {
-    const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null
-    r?.(new Error('Invalid CSRF state parameter in auth callback.'))
-    return
-  }
   if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
   const resolve = pendingLoginResolve
   const reject = pendingLoginReject
   pendingLoginResolve = null
   pendingLoginReject = null
+
+  if (errorMsg) {
+    reject(new Error(errorMsg))
+    return
+  }
 
   try {
     log.info('[auth] Exchanging Supabase auth code for tokens...')
@@ -140,7 +146,7 @@ export async function handleAuthCallback(code: string, state: string): Promise<v
         'apikey': supabaseAnonKey!,
         'Authorization': `Bearer ${supabaseAnonKey}`
       },
-      body: JSON.stringify({ code_verifier: activeVerifier, code })
+      body: JSON.stringify({ code_verifier: activeVerifier, auth_code: code })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error_description || data.error || `HTTP ${res.status}`)
@@ -195,5 +201,6 @@ async function refreshSessionIfNeeded(): Promise<boolean> {
 export async function initAuth() {
   currentSession = await loadSession()
   if (currentSession) { log.info('[auth] Recovered session for:', currentSession.user.email); broadcastUserStatus(currentSession.user); void refreshSessionIfNeeded() }
-  setInterval(() => { void refreshSessionIfNeeded() }, 5 * 60 * 1000)
+  if (refreshInterval) clearInterval(refreshInterval)
+  refreshInterval = setInterval(() => { void refreshSessionIfNeeded() }, 5 * 60 * 1000)
 }

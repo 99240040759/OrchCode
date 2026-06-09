@@ -15,7 +15,7 @@ export function callMainProcessTool(toolName: string, args: any, threadId?: stri
   })
 }
 proc.parentPort.on('message', async (e: any) => {
-  const { type, threadId, modelType, attachments, promptText, token, isBrowserActive } = e.data
+  const { type, threadId, modelType, attachments, promptText, token, isBrowserActive, requestId, result, error } = e.data
   if (token) process.env.SUPABASE_SESSION_TOKEN = token
   if (type === 'start-stream') {
     const [port] = e.ports
@@ -30,7 +30,7 @@ proc.parentPort.on('message', async (e: any) => {
       else proc.parentPort.postMessage({ type: 'stream-finished', threadId })
     }
   } else if (type === 'tool-response') {
-    const { requestId, result, error } = e.data
+
     const pending = pendingRequests.get(requestId)
     if (pending) {
       pendingRequests.delete(requestId)

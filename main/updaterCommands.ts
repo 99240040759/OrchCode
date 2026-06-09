@@ -13,7 +13,7 @@ export const updaterCommands = {
       if (process.platform === 'darwin') {
         const { shell } = await import('electron')
         await shell.openExternal('https://github.com/sameer786ss/OrchCode/releases/latest')
-        app.quit()
+        setTimeout(() => app.quit(), 500)
       }
     }
   }

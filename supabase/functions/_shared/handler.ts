@@ -2,7 +2,7 @@
  * Shared edge function middleware.
  * CORS, auth, env loading, error handling, and proxy utilities — all in one place.
  */
-import { validateAnonKey, validateUserJWT } from './auth.ts'
+import { validateAnonKey, validateUserJWT, timingSafeEqual } from './auth.ts'
 
 export const ALLOWED_ORIGIN = 'app://orch-code'
 
@@ -39,7 +39,7 @@ export function createHandler(fn: HandlerFn) {
       }
     } else {
       const apiKeyHeader = req.headers.get('apikey')
-      if (!apiKeyHeader || apiKeyHeader.trim() !== expectedAnonKey.trim()) {
+      if (!apiKeyHeader || !timingSafeEqual(apiKeyHeader.trim(), expectedAnonKey.trim())) {
         return errorResponse('Unauthorized API Client', 401)
       }
       const user = await validateUserJWT(req, supabaseUrl, expectedAnonKey)

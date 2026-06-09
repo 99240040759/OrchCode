@@ -12,7 +12,7 @@ import { getAvailableModels } from './models'
 import { activeAbortControllers } from './stream'
 import { listArtifacts } from './artifacts'
 import { getConversationPath } from './paths'
-import { getCurrentSession } from './auth'
+import { requireAuthToken } from './auth'
 import { pool } from './workerPool'
 import { cleanupPtysForThread } from './terminalCommands'
 
@@ -35,8 +35,7 @@ export const threadCommands = {
     schema: z.object({ text: z.string().max(5000), threadId: threadIdSchema }),
     execute: async ({ text, threadId }: any) => {
       try {
-        const session = getCurrentSession(), token = session?.idToken
-        if (!token) throw new Error('Unauthenticated: Please sign in to generate titles.')
+        const token = requireAuthToken()
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
         const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/generate-title`, {
@@ -86,7 +85,7 @@ export const threadCommands = {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
       try {
-        if (getActiveThreadId() === threadId) setActiveThreadId('')
+        if (getActiveThreadId() === threadId) setActiveThreadId(null)
         const ctrl = activeAbortControllers.get(threadId)
         if (ctrl) { ctrl.abort(); activeAbortControllers.delete(threadId) }
         pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)

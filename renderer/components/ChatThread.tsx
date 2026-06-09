@@ -11,7 +11,7 @@ import {
   artifactPanelModeAtom
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
-import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/types'
+import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStore'
 import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
@@ -56,9 +56,14 @@ const StreamingMarkdown = React.memo(
     }, [isStreaming, targetId])
 
     // After streaming ends, render final content via ReactMarkdown for full fidelity
-    return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming ? (lastHtmlRef.current ? '' : content) : content} isStreaming={isStreaming} />
+    const noHtmlYet = isStreaming && !lastHtmlRef.current
+    return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming && lastHtmlRef.current ? '' : content} isStreaming={isStreaming && !noHtmlYet} />
   },
-  (prev, next) => prev.targetId === next.targetId && prev.isStreaming === next.isStreaming && (next.isStreaming || prev.content === next.content)
+  (prev, next) => {
+    if (prev.targetId !== next.targetId) return false
+    if (prev.isStreaming !== next.isStreaming) return false
+    return next.isStreaming || prev.content === next.content
+  }
 )
 StreamingMarkdown.displayName = 'StreamingMarkdown'
 
@@ -74,8 +79,15 @@ const ReasoningBlock = React.memo(
       if (!userToggled) setIsOpen(!!isStreaming)
     }, [isStreaming, userToggled])
 
-    React.useLayoutEffect(() => {
-      if (isStreaming && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    React.useEffect(() => {
+      let cb: (() => void) | undefined
+      if (isStreaming) {
+        const raf = requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        })
+        cb = () => cancelAnimationFrame(raf)
+      }
+      return cb
     }, [content, isStreaming])
 
     const seconds = durationMs ? Math.round(durationMs / 1000).toString() : ''
@@ -114,6 +126,14 @@ const ToolGroupBlock = React.memo(({ tools, isStreaming, isLast }: { tools: Tool
   const isPending = tools.some(t => t.status === 'pending')
   const [isOpen, setIsOpen] = React.useState(isPending || (isLast && !!isStreaming))
   const [userToggled, setUserToggled] = React.useState(false)
+  const prevToolCountRef = React.useRef(tools.length)
+  React.useEffect(() => {
+    if (tools.length > prevToolCountRef.current) {
+      setUserToggled(false)
+      setIsOpen(true)
+    }
+    prevToolCountRef.current = tools.length
+  }, [tools.length])
   React.useEffect(() => { if (!userToggled) setIsOpen(isPending || (isLast && !!isStreaming)) }, [isPending, isStreaming, isLast, userToggled])
   const completeCount = tools.filter(t => t.status === 'complete').length
   const errorCount = tools.filter(t => t.status === 'error').length
@@ -227,7 +247,7 @@ AssistantMessage.displayName = 'AssistantMessage'
 
 // ─── UserMessage ─────────────────────────────────────────────────────────────
 
-const UserMessage = ({ message }: { message: ChatMessage }) => {
+const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActions?: React.ReactNode }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
   if (message.data) {
     try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch { }
@@ -255,18 +275,14 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
           </div>
         )}
         {message.content && <div><MarkdownRenderer content={message.content} /></div>}
+        {metaActions}
       </div>
     </div>
   )
 }
 UserMessage.displayName = 'UserMessage'
 
-// ─── Atom key map (stable identity) ──────────────────────────────────────────
-
-const atomKeyMap = new WeakMap<object, string>()
-let atomKeyCounter = 0
-const getAtomKey = (a: object) => { let k = atomKeyMap.get(a); if (!k) atomKeyMap.set(a, k = `msg-${atomKeyCounter++}`); return k }
-
+// Removed custom atom key generator since Jotai atoms have stable toString()
 // ─── ChatThread ───────────────────────────────────────────────────────────────
 
 const ChatThread: React.FC = () => {
@@ -340,9 +356,9 @@ const ChatThread: React.FC = () => {
       <div className="chat-thread-spacer-top" />
       {messageGroups.map((group) => (
         <div key={group.key} className="chat-section">
-          {group.userAtom && <MessageWrapper key={getAtomKey(group.userAtom)} messageAtom={group.userAtom} />}
+          {group.userAtom && <MessageWrapper key={`${group.userAtom}`} messageAtom={group.userAtom} />}
           {group.assistantAtoms.map((assistantAtom) => (
-            <MessageWrapper key={getAtomKey(assistantAtom)} messageAtom={assistantAtom} />
+            <MessageWrapper key={`${assistantAtom}`} messageAtom={assistantAtom} />
           ))}
         </div>
       ))}
@@ -378,16 +394,36 @@ const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom
   return (
     <div className={`chat-thread-message-wrapper message-${message.role}`}>
       <div className="message-bubble-wrapper">
-        {message.role === 'user' ? <UserMessage message={message} /> : <AssistantMessage message={message} />}
-        {!message.isStreaming && (
-          <div className="message-meta-actions">
-            <span className="message-timestamp">{timeStr}</span>
-            {!!textToCopy && (
-              <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-              </button>
+        {message.role === 'user' ? (
+          <UserMessage
+            message={message}
+            metaActions={
+              !message.isStreaming && (
+                <div className="message-meta-actions">
+                  <span className="message-timestamp">{timeStr}</span>
+                  {!!textToCopy && (
+                    <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
+                      {copied ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  )}
+                </div>
+              )
+            }
+          />
+        ) : (
+          <>
+            <AssistantMessage message={message} />
+            {!message.isStreaming && (
+              <div className="message-meta-actions">
+                <span className="message-timestamp">{timeStr}</span>
+                {!!textToCopy && (
+                  <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
+                    {copied ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

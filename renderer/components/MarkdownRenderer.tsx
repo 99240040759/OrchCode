@@ -7,6 +7,7 @@ import { stripFileProtocol } from '../lib/pathUtils'
 import { parseMarkdown } from '../lib/markdownParser'
 import { sanitizeHtml } from '../lib/uiUtils'
 import type { FileReadResult } from '../../preload/index.d'
+import debounce from 'lodash.debounce'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -113,9 +114,10 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
       const resolveMermaid = async () => {
         if (!isStreaming) {
           const nodes = el.querySelectorAll('.mermaid') as NodeListOf<HTMLElement>
-          if (nodes.length > 0) {
+          const unrendered = Array.from(nodes).filter(n => n.getAttribute('data-processed') !== 'true')
+          if (unrendered.length > 0) {
             try {
-              await mermaid.run({ nodes: Array.from(nodes) })
+              await mermaid.run({ nodes: unrendered })
             } catch (err) {
               console.error('Mermaid render error:', err)
             }
@@ -127,7 +129,8 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
       resolveImages()
       resolveMermaid()
 
-      const obs = new MutationObserver(() => { resolveImages() })
+      const debouncedResolveImages = debounce(() => { if (active) resolveImages() }, 500)
+      const obs = new MutationObserver(() => { debouncedResolveImages() })
       obs.observe(el, { childList: true, subtree: true })
 
       return () => {

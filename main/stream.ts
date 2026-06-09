@@ -22,6 +22,7 @@ import { pool } from './workerPool'
 import { getCurrentSession } from './auth'
 
 type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; content: string; durationMs: number } | { type: 'tool'; toolCallId: string; toolName: string; args: Record<string, unknown>; argsDelta?: string; result?: unknown; status: 'pending' | 'complete' | 'error' } | { type: 'error'; message: string }
+// Duality: AI SDK versions >= 3.x use 'toolCallId', while legacy or certain provider parts use 'id'
 interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
 export const activeAbortControllers = new Map<string, AbortController>()
@@ -33,7 +34,7 @@ const SUMMARISE_THRESHOLD = 180_000
 const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
 const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/), modelType: z.string().max(255).optional(), attachments: z.array(AttachmentSchema).max(8).optional() })
 
-/** Shared file-write tool names — keep in sync with renderer/lib/toolConstants.ts */
+/** Shared file-write tool names — keep in sync with renderer/components/ToolCallBlock.tsx */
 const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
 
 export function registerStreamIpc() {
@@ -58,7 +59,7 @@ export function registerStreamIpc() {
       const win = WindowManager.getMainWindow()
       if (win && !win.isDestroyed()) win.setProgressBar(2)
       const onExit = (code: number | null) => {
-        pool.clearJob(worker.pid!)
+        pool.clearJob(worker)
         worker.off('message', onMsg)
         const win = WindowManager.getMainWindow()
         if (win && !win.isDestroyed()) {
@@ -80,7 +81,7 @@ export function registerStreamIpc() {
           } else worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
         }
         if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
-          pool.clearJob(worker.pid!)
+          pool.clearJob(worker)
           worker.off('message', onMsg); worker.off('exit', onExit)
           const win = WindowManager.getMainWindow()
           if (win && !win.isDestroyed()) win.setProgressBar(-1)
@@ -336,8 +337,6 @@ export async function handleAgentStreamRequest(
           flushBuffers()
           const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }, u = p.totalUsage || {}, pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0, tot = pTokens + cTokens
           try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
-          // Mark finished BEFORE sending finish event so port.close() in finally doesn't trigger abort
-          ;(port as any).__markFinished?.()
           send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot) }, threadId })
           if (p.finishReason === 'length') { log.warn(`[stream] Token limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
           break

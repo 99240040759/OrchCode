@@ -3,7 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import type { ProviderOptions } from '@ai-sdk/provider-utils'
 import type { streamText } from 'ai'
 import { globalApiLimiter } from './limiters'
-import { getCurrentSession } from './auth'
+import { requireAuthToken } from './auth'
 
 export interface ModelInfo { id: string; name: string }
 export type AvailableModels = Record<string, ModelInfo>
@@ -12,20 +12,19 @@ let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
 
-function createAuthFetch(extraHeaders?: Record<string, string>) {
+function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
-    const headers = new Headers(options?.headers || {}), session = getCurrentSession()
-    const token = session?.idToken || process.env.SUPABASE_SESSION_TOKEN
-    if (token) headers.set('Authorization', `Bearer ${token}`)
+    const headers = new Headers(options?.headers || {})
+    headers.set('Authorization', `Bearer ${useAnon ? (process.env.SUPABASE_ANON_KEY || '') : requireAuthToken()}`)
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-    if (extraHeaders) { for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v) }
+    if (extra) { for (const [k, v] of Object.entries(extra)) headers.set(k, v) }
     return fetch(url, { ...options, headers })
   }
 }
 
 export async function getAvailableModels(force = false): Promise<AvailableModels> {
   if (!force && cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
-  const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/models`, { headers: { Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`, apikey: process.env.SUPABASE_ANON_KEY || '' } })
+  const response = await createAuthFetch(true)(`${process.env.SUPABASE_URL}/functions/v1/models`)
   if (!response.ok) throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   cachedModels = await response.json(); cachedModelsAt = Date.now()
   return cachedModels!

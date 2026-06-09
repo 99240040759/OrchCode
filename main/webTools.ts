@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tavilyLimiter } from './limiters'
 
-import { getCurrentSession } from './auth'
+import { requireAuthToken } from './auth'
 import { getConversationPath } from './paths'
 
 export function createWebTools(convId?: string) {
@@ -28,9 +28,7 @@ export function createWebTools(convId?: string) {
       return tavilyLimiter.schedule(async () => {
         log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'}`)
         try {
-          const session = getCurrentSession()
-          const token = session?.idToken
-          if (!token) throw new Error('Unauthenticated user. Please sign in to search the web.')
+          const token = requireAuthToken()
           const anonKey = process.env.SUPABASE_ANON_KEY
           if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
 
@@ -101,9 +99,7 @@ export function createWebTools(convId?: string) {
           throw new Error('No active conversation ID provided. Image generation cannot resolve workspace.')
         }
 
-        const session = getCurrentSession()
-        const token = session?.idToken
-        if (!token) throw new Error('Unauthenticated user. Please sign in to generate images.')
+        const token = requireAuthToken()
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
 

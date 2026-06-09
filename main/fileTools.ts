@@ -7,7 +7,7 @@ import { rgPath } from '@vscode/ripgrep'
 import log from 'electron-log'
 import { getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType, invalidateWorkspaceFilesCache } from './workspace'
 
-const MAX_TOOL_FILE_READ_BYTES = 25 * 1024 * 1024
+export const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
 
 const wctx = (convId: string) => {
   const ctx = getWorkspaceContext(convId)
@@ -60,7 +60,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
       try {
         const safePath = safe(absolutePath), stat = await fs.stat(safePath)
         if (!stat.isFile()) throw new Error(`Not a file: "${safePath}"`)
-        if (stat.size > MAX_TOOL_FILE_READ_BYTES) throw new Error('File exceeds 25 MB read limit.')
+        if (stat.size > MAX_FILE_READ_BYTES) throw new Error('File exceeds 25 MB read limit.')
         const rawBuffer = await fs.readFile(safePath)
         if (isFileBinary(safePath, rawBuffer)) {
           const mimeType = getMimeType(safePath)
@@ -72,7 +72,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         const content = rawBuffer.toString('utf-8'), allLines = content.split('\n'), totalLines = allLines.length
         const start = Math.max(1, startLine), end = Math.min(totalLines, endLine), wasTruncated = endLine > totalLines
         const targetLines = allLines.slice(start - 1, end), numberedContent = targetLines.map((line, i) => `${start + i}: ${line}`).join('\n')
-        return { content: numberedContent, rawContent: targetLines.join('\n'), absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
+        return { content: numberedContent, absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
       } catch (err: any) { log.error('[tool:viewFile] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {

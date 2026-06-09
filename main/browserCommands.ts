@@ -26,9 +26,9 @@ export const browserCommands = {
       const mainWindow = WindowManager.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       let bv = WindowManager.getBrowserView()
-      if (bv && (bv as any).conversationId !== conversationId) {
+      if (bv && WindowManager.getBrowserConversationId() !== conversationId) {
         try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch {}
-        bv = null; WindowManager.setBrowserView(null)
+        bv = null; WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
       const setupListeners = (view: any, sender: any) => {
         view.webContents.removeAllListeners('page-title-updated')
@@ -47,8 +47,7 @@ export const browserCommands = {
       }
       const partition = conversationId ? `persist:conversation_${conversationId}` : undefined
       bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } })
-      ;(bv as any).conversationId = conversationId
-      WindowManager.setBrowserView(bv); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
+      WindowManager.setBrowserView(bv); WindowManager.setBrowserConversationId(conversationId || null); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
       setupListeners(bv, event.sender)
       await bv.webContents.loadURL(normalizeBrowserUrl(url || 'https://google.com'))
     }
@@ -72,7 +71,7 @@ export const browserCommands = {
       if (bv) {
         if (win) { try { win.contentView.removeChildView(bv) } catch {} }
         try { bv.webContents.close() } catch {}
-        WindowManager.setBrowserView(null)
+        WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
     }
   }
