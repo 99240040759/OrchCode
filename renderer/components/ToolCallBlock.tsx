@@ -90,10 +90,11 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     let extractedEnd = res?.readEnd !== undefined ? String(res.readEnd) : ''
     
     if (!extractedStart && !extractedEnd && textOutput && !isBinary) {
-      const firstLineMatch = textOutput.match(/^(\d+):/)
+      const trimmed = textOutput.trim()
+      const firstLineMatch = trimmed.match(/^(\d+):/)
       if (firstLineMatch) extractedStart = firstLineMatch[1]
-      const lines = textOutput.trimEnd().split('\n')
-      const lastLineMatch = lines[lines.length - 1]?.match(/^(\d+):/)
+      const lines = trimmed.split('\n')
+      const lastLineMatch = lines[lines.length - 1]?.trim().match(/^(\d+):/)
       if (lastLineMatch) extractedEnd = lastLineMatch[1]
     }
     

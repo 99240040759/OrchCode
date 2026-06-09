@@ -189,7 +189,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
       } else {
         flush()
         if (b.type === 'reasoning') result.push({ type: 'reasoning', block: b, blockIndex: idx })
-        else if (b.type === 'text') result.push({ type: 'text', block: b, blockIndex: idx })
+        else if (b.type === 'text') { if (b.content.trim() || message.isStreaming) result.push({ type: 'text', block: b, blockIndex: idx }) }
         else if (b.type === 'error') result.push({ type: 'error', block: b, blockIndex: idx })
       }
     })

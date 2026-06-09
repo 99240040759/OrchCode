@@ -27,9 +27,8 @@ export function registerAllIpc() {
       const parsed = handler.schema.parse(payload ?? {})
       return await handler.execute(parsed, event)
     } catch (err) {
-      log.error(`[IPC Error] ${command}:`, err)
-      captureException(err)
-      throw err
+      log.error(`[IPC Error] ${command}:`, err); captureException(err)
+      const e = new Error(err instanceof Error ? err.message : String(err)); e.name = err instanceof Error ? err.name : 'Error'; e.stack = err instanceof Error ? err.stack : undefined; throw e
     }
   })
   log.info(`[router] Registered ${Object.keys(commands).length} commands on api:invoke`)

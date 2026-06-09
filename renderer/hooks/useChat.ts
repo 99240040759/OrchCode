@@ -19,7 +19,7 @@ const isToolResultError = (r: unknown): boolean => {
 export function useChat() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
   const [runState, setRunState] = useAtom(agentRunStateAtom)
-  const setMessages = useSetAtom(chatMessagesAtom)
+  const [messages, setMessages] = useAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
@@ -95,6 +95,7 @@ export function useChat() {
   useEffect(() => {
     const unsub = window.api.on('stream:worker-crashed', (payload: any) => {
       if (payload?.threadId !== activeStreamThreadIdRef.current) return
+      if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
       setRunState('error')
       setMessages(prev => {
         const lastMsg = prev[prev.length - 1]
@@ -199,16 +200,6 @@ export function useChat() {
     } catch (err) { console.error('[useChat] Delete thread error:', err); throw err }
   }, [setThreads, setActiveThreadId, setMessages, setSessionTokens, setActiveWorkspace, resetThreadScopedPanels, setRunState])
 
-  const switchWorkspace = useCallback(async (path: string) => {
-    try {
-      let currentId = activeThreadIdRef.current
-      if (!currentId) { const newId = await newConversation(); currentId = newId }
-      const ctx = await workspaceService.setActiveWorkspace(currentId, path)
-      if (ctx) { resetThreadScopedPanels(); setActiveWorkspace({ name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath }); return ctx }
-      return null
-    } catch (err) { console.error('[useChat] Switch workspace error:', err); throw err }
-  }, [newConversation, setActiveWorkspace, resetThreadScopedPanels])
-
   const closeAndDeleteWorkspace = useCallback(async (path: string) => {
     try {
       if (activeWorkspace?.path === path) {
@@ -224,13 +215,26 @@ export function useChat() {
 
   const openWorkspace = useCallback(async () => {
     try {
-      let currentId = activeThreadIdRef.current
-      if (!currentId) { const newId = await newConversation(); currentId = newId }
+      const prevId = activeThreadIdRef.current; let currentId = prevId; let createdNew = false
+      if (!currentId || messages.length > 0) { currentId = await newConversation(); createdNew = true }
       const ctx = await workspaceService.selectWorkspace(currentId)
-      if (ctx) { resetThreadScopedPanels(); setActiveWorkspace({ name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath }); await loadThreads(); return ctx }
+      if (ctx) {
+        resetThreadScopedPanels(); setActiveWorkspace({ name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath })
+        const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? [])
+        const wThreads = (tList ?? []).filter(t => t.workspacePath && t.workspacePath.toLowerCase().replace(/\\/g, '/') === ctx.rootPath.toLowerCase().replace(/\\/g, '/'))
+        if (wThreads.length > 0) {
+          wThreads.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
+          if (createdNew) await threadService.deleteThread(currentId)
+          await selectThread(wThreads[0].id)
+        } else { await selectThread(currentId) }
+        await loadThreads(); return ctx
+      } else if (createdNew) {
+        await threadService.deleteThread(currentId); if (prevId) await selectThread(prevId); else setActiveThreadId('')
+        await loadThreads()
+      }
       return null
     } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
-  }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels])
+  }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels, messages, selectThread, setActiveThreadId])
 
   const run = useCallback(async (promptText: string, _mode?: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
     if (runState !== 'idle') return
@@ -357,6 +361,7 @@ export function useChat() {
         orderedBlocks.push({ type: 'error', message: cleanErrorMessage(chunk.payload) })
         flushNow(); setRunState('error')
       } else if (chunkType === 'step-limit') {
+        assistantIsStreaming = false
         orderedBlocks.push({ type: 'text', content: '\n\n> **⚠️ The model hit its context limit.** You can ask me to continue from where I left off.' })
         flushNow()
       } else if (chunkType === 'token-update') {
@@ -382,6 +387,8 @@ export function useChat() {
       await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments }, processChunk)
     } catch (err: unknown) {
       if (!isMountedRef.current) return
+      if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+      assistantIsStreaming = false
       // Only show error if NOT already handled by the worker-crash useEffect
       // The crash event fires independently; if stream() rejects due to crash,
       // worker-crash useEffect already added the error block. So we skip duplicate.
@@ -406,5 +413,5 @@ export function useChat() {
     }
   }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker, runState])
 
-  return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, switchWorkspace, closeAndDeleteWorkspace }
+  return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, closeAndDeleteWorkspace }
 }

@@ -81,10 +81,10 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     },
     toModelOutput: ({ output }: any) => {
       if (output.isBinary && output.mimeType?.startsWith('image/') && output.base64Content) {
-        if (!modelSupportsVision) return { type: 'content', value: [{ type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Vision not supported.` }] }
-        return { type: 'content', value: [{ type: 'image-data', data: output.base64Content, mediaType: output.mimeType }, { type: 'text', text: `Successfully analyzed binary image: ${output.absolutePath}` }] }
+        if (!modelSupportsVision) return { type: 'content', value: [{ type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Vision not supported.` }], isBinary: true }
+        return { type: 'content', value: [{ type: 'image-data', data: output.base64Content, mediaType: output.mimeType }, { type: 'text', text: `Successfully analyzed binary image: ${output.absolutePath}` }], isBinary: true }
       }
-      return { type: 'content', value: [{ type: 'text', text: output.content || output.error || 'No content' }] }
+      return { type: 'content', value: [{ type: 'text', text: output.content || output.error || 'No content' }], readStart: output.readStart, readEnd: output.readEnd, isBinary: output.isBinary }
     }
   })
  

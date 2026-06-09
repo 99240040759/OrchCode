@@ -39,7 +39,7 @@ const ThreadList: React.FC = () => {
   }, [rawThreads, activeThreadId, activeWorkspace?.path])
 
   const allWorkspacePaths = useMemo(() => {
-    const paths = threads.map(t => t.workspacePath || '')
+    const paths = ['', ...threads.map(t => t.workspacePath || '')]
     if (activeWorkspace?.path) paths.push(activeWorkspace.path)
     const seen = new Set<string>()
     const uniquePaths: string[] = []
@@ -64,7 +64,8 @@ const ThreadList: React.FC = () => {
   }, [threads, allWorkspacePaths])
 
   React.useEffect(() => {
-    if (activeWorkspace?.path) setExpandedPaths(prev => ({ ...prev, [activeWorkspace.path]: prev[activeWorkspace.path] !== false }))
+    const p = activeWorkspace?.path || ''
+    setExpandedPaths(prev => ({ ...prev, [p]: prev[p] !== false }))
   }, [activeWorkspace?.path])
 
   const toggleExpand = useCallback((path: string) => setExpandedPaths(prev => ({ ...prev, [path]: !prev[path] })), [])

@@ -86,9 +86,8 @@ export function registerStreamIpc() {
       worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
       return { ok: true }
     } catch (err) {
-      log.error('[stream IPC Error]:', err)
-      captureException(err)
-      throw err
+      log.error('[stream IPC Error]:', err); captureException(err)
+      const e = new Error(err instanceof Error ? err.message : String(err)); e.name = err instanceof Error ? err.name : 'Error'; e.stack = err instanceof Error ? err.stack : undefined; throw e
     }
   })
 }
@@ -224,9 +223,9 @@ export async function handleAgentStreamRequest(
       system: systemInstruction + (systemInstructionSuffix || ''),
       messages,
       tools: activeTools,
+      maxRetries: 3,
       stopWhen: stepCountIs(100),
       abortSignal: controller.signal,
-      // Note: AI SDK streamText does not accept a timeout object here; rely on abortSignal for cancellation
       ...(Object.keys(modelProviderOptions).length > 0 ? { providerOptions: modelProviderOptions } : {}),
       onStepFinish: async ({ usage }) => {
         if (usage) {
