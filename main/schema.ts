@@ -128,20 +128,22 @@ type RawMessage = { role: string; content: string; data?: string | null }
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
   const clonedMessages = JSON.parse(JSON.stringify(messages)) as ModelMessage[]
   const result: ModelMessage[] = []
-  const activeToolCallIds = new Set<string>()
+  const seenToolCallIds = new Set<string>()
   for (const msg of clonedMessages) {
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      for (const part of msg.content) { if (part.type === 'tool-call') activeToolCallIds.add(part.toolCallId) }
-    }
-  }
-  for (const msg of clonedMessages) {
-    if (msg.role === 'tool') {
+      for (const part of msg.content as any[]) {
+        if (part.type === 'tool-call') seenToolCallIds.add(part.toolCallId)
+      }
+      result.push(msg)
+    } else if (msg.role === 'tool') {
       if (Array.isArray(msg.content)) {
-        const validParts = msg.content.filter((part: any) => part.type === 'tool-result' && activeToolCallIds.has(part.toolCallId))
+        const validParts = (msg.content as any[]).filter(
+          (part: any) => part.type === 'tool-result' && seenToolCallIds.has(part.toolCallId)
+        )
         if (validParts.length > 0) result.push({ role: 'tool', content: validParts as any })
       } else {
         const toolCallId = (msg as any).toolCallId
-        if (!toolCallId || activeToolCallIds.has(toolCallId)) result.push(msg)
+        if (!toolCallId || seenToolCallIds.has(toolCallId)) result.push(msg)
       }
     } else {
       result.push(msg)

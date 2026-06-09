@@ -251,7 +251,7 @@ AssistantMessage.displayName = 'AssistantMessage'
 const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActions?: React.ReactNode }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
   if (message.data) {
-    try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch { }
+    try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch (err) { console.error('[ChatThread] Error parsing attachments:', err) }
   }
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)

@@ -19,17 +19,7 @@ function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
     if (extra) { for (const [k, v] of Object.entries(extra)) headers.set(k, v) }
     
-    const fetchOptions: RequestInit & { dispatcher?: any } = { ...options, headers }
-    try {
-      const undici = require('undici')
-      if (!(globalThis as any)._customUndiciAgent) {
-        (globalThis as any)._customUndiciAgent = new undici.Agent({ headersTimeout: 15 * 60 * 1000, bodyTimeout: 15 * 60 * 1000 })
-      }
-      fetchOptions.dispatcher = (globalThis as any)._customUndiciAgent
-    } catch (e) {
-      // Ignore if undici isn't available
-    }
-
+    const fetchOptions: RequestInit = { ...options, headers }
     return fetch(url, fetchOptions)
   }
 }

@@ -27,19 +27,19 @@ export const browserCommands = {
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       let bv = WindowManager.getBrowserView()
       if (bv && WindowManager.getBrowserConversationId() !== conversationId) {
-        try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch {}
+        try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch (err) { console.debug('[browser] Cleanup error:', err) }
         bv = null; WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
       const setupListeners = (view: any, sender: any) => {
         view.webContents.removeAllListeners('page-title-updated')
         view.webContents.removeAllListeners('did-navigate')
         view.webContents.removeAllListeners('did-navigate-in-page')
-        view.webContents.on('page-title-updated', (_e: any, title: string) => { try { sender.send('browser:title-updated', title) } catch {} })
-        const onNavigate = (_e: any, navUrl: string) => { try { sender.send('browser:url-changed', navUrl) } catch {} }
+        view.webContents.on('page-title-updated', (_e: any, title: string) => { try { sender.send('browser:title-updated', title) } catch (err) { console.debug('[browser] IPC send error:', err) } })
+        const onNavigate = (_e: any, navUrl: string) => { try { sender.send('browser:url-changed', navUrl) } catch (err) { console.debug('[browser] IPC send error:', err) } }
         view.webContents.on('did-navigate', onNavigate); view.webContents.on('did-navigate-in-page', onNavigate)
       }
       if (bv) {
-        bv.setBounds(normalizeBounds(bounds)); try { mainWindow.contentView.addChildView(bv) } catch {}
+        bv.setBounds(normalizeBounds(bounds)); try { mainWindow.contentView.addChildView(bv) } catch (err) { console.debug('[browser] Add child view error:', err) }
         setupListeners(bv, event.sender)
         const targetUrl = normalizeBrowserUrl(url)
         if (bv.webContents.getURL() !== targetUrl) await bv.webContents.loadURL(targetUrl)
@@ -61,7 +61,7 @@ export const browserCommands = {
     schema: z.object({}),
     execute: () => {
       const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
-      if (bv && win) { try { win.contentView.removeChildView(bv) } catch {} }
+      if (bv && win) { try { win.contentView.removeChildView(bv) } catch (err) { console.debug('[browser] Remove view error:', err) } }
     }
   },
   'browser:close': {
@@ -69,8 +69,8 @@ export const browserCommands = {
     execute: () => {
       const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
       if (bv) {
-        if (win) { try { win.contentView.removeChildView(bv) } catch {} }
-        try { bv.webContents.close() } catch {}
+        if (win) { try { win.contentView.removeChildView(bv) } catch (err) { console.debug('[browser] Remove view error:', err) } }
+        try { bv.webContents.close() } catch (err) { console.debug('[browser] WebContents close error:', err) }
         WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
     }

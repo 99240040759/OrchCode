@@ -17,7 +17,7 @@ export const OnboardingView: React.FC = () => {
   React.useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 6000); return () => clearTimeout(timer) }, [])
   React.useEffect(() => {
     if (!user || hasCalledRef.current) return
-    const timer = setTimeout(() => { if (hasCalledRef.current) return; hasCalledRef.current = true; window.api.invoke('auth:open-onboarding').catch(console.error) }, 1600)
+    const timer = setTimeout(() => { if (hasCalledRef.current) return; hasCalledRef.current = true; window.api.invoke('auth:complete-onboarding').catch(console.error) }, 1600)
     return () => clearTimeout(timer)
   }, [user])
 

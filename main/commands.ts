@@ -8,9 +8,16 @@ import { authCommands } from './authCommands'
 import { updaterCommands } from './updaterCommands'
 import { captureException } from '@sentry/electron'
 
+import type { z } from 'zod'
+
 export { cleanupAllPtys } from './terminalCommands'
 
-const commands: Record<string, any> = {
+interface CommandDef<T extends z.ZodTypeAny = z.ZodTypeAny> {
+  schema: T
+  execute: (payload: z.infer<T>, event: Electron.IpcMainInvokeEvent) => Promise<any> | any
+}
+
+const commands: Record<string, CommandDef<any>> = {
   ...threadCommands,
   ...workspaceCommands,
   ...terminalCommands,

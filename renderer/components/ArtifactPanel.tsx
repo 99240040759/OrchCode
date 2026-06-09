@@ -146,7 +146,7 @@ const ArtifactPanel: React.FC = () => {
   }, [isOpen])
 
   useEffect(() => {
-    const handleLayout = () => { try { editorRef.current?.layout(); diffEditorRef.current?.layout() } catch {} }
+    const handleLayout = () => { try { editorRef.current?.layout(); diffEditorRef.current?.layout() } catch (err) { console.debug('[ArtifactPanel] Layout error:', err) } }
     window.addEventListener('resize', handleLayout)
     const panelEl = document.querySelector('.artifact-pane-wrapper')
     let rafId: number

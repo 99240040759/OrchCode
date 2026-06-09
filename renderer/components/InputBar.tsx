@@ -10,7 +10,7 @@ import { workspaceService } from '../services/services'
 import { TokenIndicator } from './TokenIndicator'
 import { toast } from 'sonner'
 
-interface InputBarProps { onSubmit?: (val: string, mode?: string, attachments?: any[]) => void; onStop?: () => void }
+interface InputBarProps { onSubmit?: (val: string, attachments?: any[]) => void; onStop?: () => void }
 
 const MAX_TOKENS = 200_000
 const MAX_ATTACHMENTS = 8
@@ -20,6 +20,7 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
   const editorRef = useRef<HTMLDivElement>(null)
+  const chipRootsRef = useRef<ReturnType<typeof createRoot>[]>([])
   const runState = useAtomValue(agentRunStateAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const sessionTokens = useAtomValue(sessionTokensAtom)
@@ -109,6 +110,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     if (iconRoot) {
       const root = createRoot(iconRoot)
       root.render(<SymbolsFileIcon fileName={name} autoAssign={true} width={13} height={13} />)
+      chipRootsRef.current.push(root)
     }
     const spaceNode = document.createTextNode('\u00A0')
     chip.parentNode?.insertBefore(spaceNode, chip.nextSibling)
@@ -176,7 +178,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     Array.from(editorRef.current.childNodes).forEach(traverse)
     val = val.trim()
     if ((!val && attachments.length === 0) || isRunning) return
-    onSubmit?.(val, undefined, attachments)
+    onSubmit?.(val, attachments)
+    chipRootsRef.current.forEach((r) => { try { r.unmount() } catch (err) { console.debug('[InputBar] Unmount error:', err) } })
+    chipRootsRef.current = []
     editorRef.current.innerHTML = ''
     setInputValue('')
     setAttachments([])

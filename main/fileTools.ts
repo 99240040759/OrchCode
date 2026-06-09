@@ -42,8 +42,8 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
         const entries = await Promise.all(rawEntries.map(async (entry) => {
           const fullPath = join(safePath, entry.name), relativePath = relative(ctx.rootPath, fullPath), isDirectory = entry.isDirectory()
           let sizeBytes: number | undefined, numChildren: number | undefined
-          if (isDirectory) { try { numChildren = (await fs.readdir(fullPath)).length } catch {} }
-          else { try { sizeBytes = (await fs.stat(fullPath)).size } catch {} }
+          if (isDirectory) { try { numChildren = (await fs.readdir(fullPath)).length } catch (err) { log.debug('[fileTools] Error reading dir children:', err) } }
+          else { try { sizeBytes = (await fs.stat(fullPath)).size } catch (err) { log.debug('[fileTools] Error stat file size:', err) } }
           return { name: entry.name, relativePath, absolutePath: fullPath, isDirectory, extension: isDirectory ? undefined : extname(entry.name), sizeBytes, numChildren }
         }))
         entries.sort((a, b) => (a.isDirectory && !b.isDirectory) ? -1 : (!a.isDirectory && b.isDirectory) ? 1 : a.name.localeCompare(b.name))
@@ -95,7 +95,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
       try {
         const ctx = resolve(), safePath = safe(targetFile)
         let exists = false
-        try { await fs.stat(safePath); exists = true } catch {}
+        try { await fs.stat(safePath); exists = true } catch (err) { log.debug('[fileTools] File existence check failed:', err) }
         if (exists && !overwrite) throw new Error(`File already exists: "${safePath}". Set overwrite=true.`)
         await fs.mkdir(dirname(safePath), { recursive: true })
         await fs.writeFile(safePath, codeContent, 'utf-8')

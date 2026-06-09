@@ -15,10 +15,16 @@ export function callMainProcessTool(toolName: string, args: any, threadId?: stri
   })
 }
 (globalThis as any).callMainProcessTool = callMainProcessTool
-proc.parentPort.on('message', async (e: any) => {
-  const { type, threadId, modelType, attachments, promptText, token, isBrowserActive, requestId, result, error } = e.data
-  if (token) process.env.SUPABASE_SESSION_TOKEN = token
-  if (type === 'start-stream') {
+type StreamIpcMessage =
+  | { type: 'start-stream', threadId: string, modelType?: string, attachments?: any[], promptText?: string, token?: string, isBrowserActive?: boolean }
+  | { type: 'tool-response', requestId: string, result?: any, error?: any }
+  | { type: 'update-token', token: string }
+
+proc.parentPort.on('message', async (e: { data: StreamIpcMessage, ports: Electron.MessagePortMain[] }) => {
+  const msg = e.data
+  if ('token' in msg && msg.token) process.env.SUPABASE_SESSION_TOKEN = msg.token
+  if (msg.type === 'start-stream') {
+    const { threadId, modelType, attachments, promptText, isBrowserActive } = msg
     const [port] = e.ports
     if (!port) return
     log.info(`[agentWorker] Starting stream for thread: ${threadId}`)
@@ -30,8 +36,8 @@ proc.parentPort.on('message', async (e: any) => {
       if (err?.name !== 'AbortError') proc.parentPort.postMessage({ type: 'stream-finished', threadId, error: { message: err?.message || String(err), stack: err?.stack, name: err?.name } })
       else proc.parentPort.postMessage({ type: 'stream-finished', threadId })
     }
-  } else if (type === 'tool-response') {
-
+  } else if (msg.type === 'tool-response') {
+    const { requestId, result, error } = msg
     const pending = pendingRequests.get(requestId)
     if (pending) {
       pendingRequests.delete(requestId)

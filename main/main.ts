@@ -195,7 +195,7 @@ function createMainWindow(): BrowserWindow {
     if (browserView) {
       try {
         browserView.webContents.close()
-      } catch {}
+      } catch (err) { log.debug('[main] Failed to close browser view:', err) }
       WindowManager.setBrowserView(null)
     }
     cleanupAllPtys()
@@ -241,7 +241,7 @@ app.whenReady().then(async () => {
         if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
           shell.openExternal(parsed.toString()).catch(err => log.error('[main] Failed to open external URL:', err))
         }
-      } catch {}
+      } catch (err) { log.debug('[main] Failed to handle window.open URL:', err) }
       return { action: 'deny' }
     })
   })
@@ -308,8 +308,8 @@ app.on('before-quit', async (e) => {
     e.preventDefault()
     cleanupAuth()
     cleanupAllPtys()
-    try { await pool.shutdown() } catch {}
-    try { checkpointDB() } catch {}
+    try { await pool.shutdown() } catch (err) { log.debug('[main] Pool shutdown error:', err) }
+    try { checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
     isQuitting = true
     app.quit()
   }

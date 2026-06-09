@@ -6,6 +6,7 @@ import log from 'electron-log'
 class WorkerPool {
   private workers: UtilityProcess[] = []
   private activeJobs = new Map<UtilityProcess, string>()
+  private readonly minWorkers = 1
   constructor(private maxWorkers = 4) {}
 
   public getOrCreateWorker(token?: string): UtilityProcess {
@@ -34,11 +35,11 @@ class WorkerPool {
   public setJob(worker: UtilityProcess, jobName: string) { this.activeJobs.set(worker, jobName) }
   public clearJob(worker: UtilityProcess) {
     this.activeJobs.delete(worker)
-    if (this.workers.length > this.maxWorkers) {
+    if (this.workers.length > this.minWorkers) {
       const idx = this.workers.indexOf(worker)
       if (idx !== -1) {
-        log.info(`[workerPool] Terminating temporary worker pid ${worker.pid} to scale down pool.`)
-        try { worker.kill() } catch {}
+        log.info(`[workerPool] Scaling down — terminating worker pid ${worker.pid}`)
+        try { worker.kill() } catch (err) { log.debug('[workerPool] Failed to kill worker:', err) }
         this.workers.splice(idx, 1)
       }
     }
@@ -55,12 +56,12 @@ class WorkerPool {
     })
     for (const w of workersToKill) {
       const idx = this.workers.indexOf(w)
-      if (idx !== -1) { try { w.kill() } catch {} ; this.workers.splice(idx, 1) }
+      if (idx !== -1) { try { w.kill() } catch (err) { log.debug('[workerPool] Failed to kill idle worker:', err) } ; this.workers.splice(idx, 1) }
       this.activeJobs.delete(w)
     }
   }
   public async shutdown(): Promise<void> {
-    for (const w of this.workers) { try { w.kill() } catch {} }
+    for (const w of this.workers) { try { w.kill() } catch (err) { log.debug('[workerPool] Failed to kill worker on shutdown:', err) } }
     this.workers = []; this.activeJobs.clear()
   }
 }

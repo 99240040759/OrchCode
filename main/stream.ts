@@ -26,7 +26,7 @@ type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; cont
 interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
 const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
-const SUMMARISE_THRESHOLD = 180_000
+const SUMMARISE_THRESHOLD = 90_000
 
 const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
 const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/), modelType: z.string().max(255).optional(), attachments: z.array(AttachmentSchema).max(8).optional() })
@@ -86,6 +86,9 @@ export function registerStreamIpc() {
       worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
       return { ok: true }
     } catch (err) {
+      const win = WindowManager.getMainWindow()
+      if (win && !win.isDestroyed()) win.setProgressBar(-1)
+      if (rawPayload?.threadId) { try { pool.killJob(`stream:${rawPayload.threadId}`) } catch (err) { log.debug('[stream] Error killing job:', err) } }
       log.error('[stream IPC Error]:', err); captureException(err)
       const e = new Error(err instanceof Error ? err.message : String(err)); e.name = err instanceof Error ? err.name : 'Error'; e.stack = err instanceof Error ? err.stack : undefined; throw e
     }
@@ -125,13 +128,13 @@ async function setupStreamRequest(port: Electron.MessagePortMain, threadId: stri
     setTimeout(() => reject(new Error('Attachment handshake timeout')), 10000)
   }) : Promise.resolve([])
   port.on('message', (e) => {
-    if (e.data === 'abort') controller.abort()
+    if (e.data === 'abort') { controller.abort(); try { port.close() } catch (err) { log.debug('[stream] Port close error:', err) } }
     if (e.data?.type === 'bufs') resolveAttachments?.(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b)))
   })
   port.on('close', () => { if (!streamFinished) { log.info(`[stream] Port closed unexpectedly for ${threadId}. Aborting.`); controller.abort() } })
   ;(port as any).__markFinished = () => { streamFinished = true }
   port.start()
-  const bufs = await bufsPromise.catch(err => { log.error('[stream] Attachment handshake error:', err); return [] })
+  const bufs = await bufsPromise.catch(err => { log.error('[stream] Attachment handshake error:', err); throw err })
   if (attachments && bufs.length) {
     attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
     if (bufs.reduce((t, b) => t + b.length, 0) > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
@@ -149,7 +152,7 @@ export async function handleAgentStreamRequest(
 ) {
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
-  const send = (msg: Record<string, unknown>) => { try { port.postMessage(msg) } catch {} }
+  const send = (msg: Record<string, unknown>) => { try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) } }
   let bufferedText = '', bufferedReasoning = '', flushTimeout: NodeJS.Timeout | null = null
   const flushBuffers = () => {
     if (flushTimeout) { clearTimeout(flushTimeout); flushTimeout = null }
@@ -175,7 +178,7 @@ export async function handleAgentStreamRequest(
     await saveMessage(threadId, { id: userMsgId, role: 'user', content: text, data: attachments?.length ? JSON.stringify({ attachments }) : undefined })
     const ctx = getWorkspaceContext(threadId) || (await getOrCreateWorkspaceContext(threadId))
     if (ctx.isUserWorkspace && !getThreadWorkspace(threadId)) {
-      try { setThreadWorkspace(threadId, ctx.rootPath); addOpenedWorkspace(ctx.rootPath) } catch {}
+      try { setThreadWorkspace(threadId, ctx.rootPath); addOpenedWorkspace(ctx.rootPath) } catch (err) { log.error('[stream] Auto-bind error:', err) }
     }
     const models = await getAvailableModels(), availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
@@ -347,7 +350,7 @@ export async function handleAgentStreamRequest(
     if (error.name !== 'AbortError') {
       for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
       if (assistantContent || orderedBlocks.length > 0) {
-        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) }) } catch {}
+        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) }) } catch (err) { log.error('[stream] Final saveMessage error:', err) }
       }
       send({ type: 'error', payload: error.message, threadId })
     }
@@ -357,6 +360,6 @@ export async function handleAgentStreamRequest(
     ;(port as any).__markFinished?.()
     const entry = activeAbortControllers.get(threadId)
     if (entry && entry.sessionId === streamSessionId) activeAbortControllers.delete(threadId)
-    try { port.close() } catch {}
+    try { port.close() } catch (err) { log.debug('[stream] Final port close error:', err) }
   }
 }

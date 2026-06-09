@@ -133,8 +133,9 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         })
       }
 
+      const hasMermaid = content.includes('```mermaid') || content.includes('class="mermaid"')
       const resolveMermaid = async () => {
-        if (!isStreaming) {
+        if (!isStreaming && hasMermaid) {
           const nodes = el.querySelectorAll('.mermaid') as NodeListOf<HTMLElement>
           const unrendered = Array.from(nodes).filter(n => n.getAttribute('data-processed') !== 'true')
           if (unrendered.length > 0) {
@@ -142,6 +143,12 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
               await mermaid.run({ nodes: unrendered })
             } catch (err) {
               console.error('Mermaid render error:', err)
+              unrendered.forEach(node => {
+                const text = node.textContent || ''
+                node.innerHTML = `<pre><code class="hljs language-mermaid">${text}</code></pre>`
+                node.classList.remove('mermaid')
+                node.classList.add('language-mermaid', 'pre-wrapper')
+              })
             }
           }
         }
@@ -165,7 +172,7 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         active = false
         el.removeEventListener('click', handleGlobalClick)
         obs.disconnect()
-        roots.forEach(r => { try { r.unmount() } catch {} })
+        roots.forEach(r => { try { r.unmount() } catch (err) { console.debug('[MarkdownRenderer] Unmount error:', err) } })
       }
     }, [html, conversationId, isStreaming, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
 

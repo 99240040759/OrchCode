@@ -45,8 +45,7 @@ export const threadCommands = {
     execute: () => {
       const activeId = getActiveThreadId()
       if (activeId && getThread(activeId)) return activeId
-      const threads = getThreads()
-      return threads?.length ? threads[0].id : ''
+      return null
     }
   },
   'thread:new': { schema: z.object({}), execute: async () => { const newId = `session-${crypto.randomUUID()}`; await getOrCreateWorkspaceContext(newId); return { conversationId: newId } } },

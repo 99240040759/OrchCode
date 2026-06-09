@@ -37,7 +37,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
           if (termContainerRef.current && termContainerRef.current.clientWidth > 0) {
             fitAddonRef.current?.fit()
           }
-        } catch {}
+        } catch (err) { console.debug('[TerminalView] Parse error:', err) }
       }
     }))
 
@@ -87,11 +87,11 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
       term.loadAddon(webLinksAddon)
       term.open(termContainerRef.current)
 
-      try { fitAddon.fit() } catch {}
+      try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Fit error:', err) }
 
       fitTimeout = setTimeout(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
-          try { fitAddon.fit() } catch {}
+          try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Fit error:', err) }
           if (ptyIdRef.current) {
             window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
           }
@@ -139,7 +139,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       const debouncedResize = debounce(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
-          try { fitAddon.fit() } catch {}
+          try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Resize fit error:', err) }
           if (ptyIdRef.current) {
             window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
           }

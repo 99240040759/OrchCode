@@ -35,8 +35,8 @@ export const workspaceCommands = {
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
       const selectedPath = result.filePaths[0]
-      const ctx = await updateWorkspacePath(conversationId, selectedPath)
       try { bindWorkspaceTransaction(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      const ctx = await updateWorkspacePath(conversationId, selectedPath)
       return ctx
     }
   },
@@ -44,8 +44,8 @@ export const workspaceCommands = {
     schema: z.object({ conversationId: convIdSchema, workspacePath: z.string().min(1) }),
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
-      const ctx = await updateWorkspacePath(conversationId, workspacePath)
       try { bindWorkspaceTransaction(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      const ctx = await updateWorkspacePath(conversationId, workspacePath)
       return ctx
     }
   },
@@ -67,8 +67,7 @@ export const workspaceCommands = {
         for (const tid of affected) {
           pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)
           clearWorkspaceContext(tid)
-          await new Promise(resolve => setTimeout(resolve, 200))
-          await fs.rm(getConversationPath(tid), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+          await fs.rm(getConversationPath(tid), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
         }
         return true
       } catch (err) { log.error('[commands] close-and-delete error:', err); throw err }
@@ -86,9 +85,8 @@ export const workspaceCommands = {
     }
   },
   'file:read-original': {
-    schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema.optional() }),
+    schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema }),
     execute: async ({ filePath, conversationId }: any) => {
-      if (!conversationId) { try { return { content: await fs.readFile(filePath, 'utf-8') } } catch (fsErr) { log.error('[commands] disk read failed:', fsErr); throw fsErr } }
       try {
         const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
         const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)

@@ -10,7 +10,7 @@ import { isThreadLoadingAtom } from '../store/agentStore'
 
 interface ChatPaneProps {
   fullWidth: boolean
-  onSubmit: (prompt: string, mode?: string, attachments?: any[]) => void
+  onSubmit: (prompt: string, attachments?: any[]) => void
   onStop: () => void
   onOpenArtifacts: () => void
   onOpenWorkspace: () => void

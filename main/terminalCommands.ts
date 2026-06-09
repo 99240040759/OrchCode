@@ -10,7 +10,7 @@ const activePtyConversations = new Map<string, string>()
 const destroyListeners = new Map<string, () => void>()
 
 export function cleanupAllPtys() {
-  activePtys.forEach(p => { try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch {} } })
+  activePtys.forEach(p => { try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch (err) { log.debug('[terminal] PTY kill error:', err) } } })
   activePtys.clear(); activePtyOwners.clear(); activePtyConversations.clear(); destroyListeners.clear()
 }
 
@@ -19,7 +19,7 @@ export function cleanupPtysForThread(threadId: string) {
     if (convId === threadId) {
       const p = activePtys.get(id)
       if (p) {
-        try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch {} }
+        try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch (err) { log.debug('[terminal] Thread PTY kill error:', err) } }
         activePtys.delete(id); activePtyOwners.delete(id)
       }
       activePtyConversations.delete(id)
@@ -42,19 +42,19 @@ export const terminalCommands = {
       if (opts.conversationId) activePtyConversations.set(id, opts.conversationId)
       let dataListener: any
       const destroyListener = () => {
-        try { if (dataListener) dataListener.dispose(); if (process.platform !== 'win32') process.kill(-ptyProcess.pid, 'SIGINT'); else ptyProcess.kill() } catch { try { ptyProcess.kill() } catch {} }
+        try { if (dataListener) dataListener.dispose(); if (process.platform !== 'win32') process.kill(-ptyProcess.pid, 'SIGINT'); else ptyProcess.kill() } catch { try { ptyProcess.kill() } catch (err) { log.debug('[terminal] Spawn kill error:', err) } }
         activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id)
       }
       destroyListeners.set(id, destroyListener)
       event.sender.once('destroyed', destroyListener)
       dataListener = ptyProcess.onData((data: string) => {
         if (event.sender.isDestroyed()) { destroyListener(); event.sender.off('destroyed', destroyListener); return }
-        try { event.sender.send('terminal:data', { id, data }) } catch {}
+        try { event.sender.send('terminal:data', { id, data }) } catch (err) { log.debug('[terminal] Send data error:', err) }
       })
       ptyProcess.onExit(({ exitCode }: any) => {
         event.sender.off('destroyed', destroyListener)
         activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id)
-        try { event.sender.send('terminal:exit', { id, exitCode }) } catch {}
+        try { event.sender.send('terminal:exit', { id, exitCode }) } catch (err) { log.debug('[terminal] Send exit error:', err) }
       })
       return { id }
     }
@@ -75,7 +75,7 @@ export const terminalCommands = {
       if (listener) { event.sender.off('destroyed', listener); destroyListeners.delete(id) }
       const p = activePtys.get(id)
       if (p) {
-        try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch {} }
+        try { if (process.platform !== 'win32') process.kill(-p.pid, 'SIGINT'); else p.kill() } catch { try { p.kill() } catch (err) { log.debug('[terminal] Kill command error:', err) } }
         activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id)
       }
     }

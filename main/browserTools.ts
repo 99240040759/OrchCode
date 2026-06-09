@@ -224,9 +224,12 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     browserGetPageContent
   }
   if (process.type === 'utility') {
-    const callMainProcessTool = (globalThis as any).callMainProcessTool
     for (const [name, t] of Object.entries(tools)) {
-      t.execute = async (args: any) => callMainProcessTool?.(name, args, convId)
+      t.execute = async (args: any) => {
+        const callMain = (globalThis as any).callMainProcessTool
+        if (!callMain) throw new Error(`[browserTools] callMainProcessTool not available in utility process`)
+        return callMain(name, args, convId)
+      }
     }
   }
   return tools

@@ -34,8 +34,8 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     let cb: (() => void) | undefined
     if (globalPrompt) {
-      if (Object.keys(availableModels).length > 0) {
-        run(globalPrompt.prompt, globalPrompt.mode, undefined, globalPrompt.threadId)
+      if (globalPrompt?.prompt) {
+        run(globalPrompt.prompt, undefined, globalPrompt.threadId)
         setGlobalPrompt(null)
       } else {
         const timer = setTimeout(() => setGlobalPrompt(null), 5000)
@@ -91,7 +91,7 @@ function AppInner(): React.JSX.Element {
             <div className="app-glow-border" />
             <div className="split-view-container">
               <div className="chat-pane-wrapper">
-                <ChatPane fullWidth={!isArtifactPanelOpen} onSubmit={(p, m, a) => run(p, m, a)} onStop={stop} onOpenArtifacts={() => setArtifactPanelOpen(true)} onOpenWorkspace={openWorkspace} workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle} hasMessages={hasMessages} />
+                <ChatPane fullWidth={!isArtifactPanelOpen} onSubmit={(p, a) => run(p, a)} onStop={stop} onOpenArtifacts={() => setArtifactPanelOpen(true)} onOpenWorkspace={openWorkspace} workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle} hasMessages={hasMessages} />
               </div>
               <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}><ArtifactPanel /></div>
             </div>

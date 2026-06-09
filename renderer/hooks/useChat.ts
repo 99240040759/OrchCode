@@ -35,8 +35,9 @@ export function useChat() {
   const workerRef = useRef<Worker | null>(null)
   const workerVersionRef = useRef<Map<string, number>>(new Map())
   const isCompilingRef = useRef(false)
-  const pendingCompileRef = useRef<{ content: string; targetId: string } | null>(null)
+  const pendingCompileMap = useRef<Map<string, { content: string; version: number }>>(new Map())
   const isMountedRef = useRef(true)
+  const isRunningRef = useRef(false)
   const threadsRef = useRef(threads)
   const selectLockRef = useRef(false)
 
@@ -55,15 +56,15 @@ export function useChat() {
     workerRef.current.onmessage = (e) => {
       const { html, targetId, version } = e.data
       isCompilingRef.current = false
-      if (pendingCompileRef.current) {
-        const next = pendingCompileRef.current
-        pendingCompileRef.current = null
-        if (workerRef.current) {
-          isCompilingRef.current = true
-          const nextVer = (workerVersionRef.current.get(next.targetId) ?? 0) + 1
-          workerVersionRef.current.set(next.targetId, nextVer)
-          workerRef.current.postMessage({ type: 'compile', content: next.content, targetId: next.targetId, version: nextVer })
+      if (pendingCompileMap.current.size > 0) {
+        const entries = [...pendingCompileMap.current.entries()]
+        pendingCompileMap.current.clear()
+        isCompilingRef.current = true
+        const [firstTargetId, first] = entries[0]
+        for (const [tid, pending] of entries.slice(1)) {
+          pendingCompileMap.current.set(tid, pending)
         }
+        workerRef.current?.postMessage({ type: 'compile', content: first.content, targetId: firstTargetId, version: first.version })
       }
       const latest = workerVersionRef.current.get(targetId)
       // drop stale results
@@ -75,13 +76,13 @@ export function useChat() {
 
   const postToWorker = useCallback((content: string, targetId: string) => {
     if (!workerRef.current) return
+    const version = (workerVersionRef.current.get(targetId) ?? 0) + 1
+    workerVersionRef.current.set(targetId, version)
     if (isCompilingRef.current) {
-      pendingCompileRef.current = { content, targetId }
+      pendingCompileMap.current.set(targetId, { content, version })
       return
     }
     isCompilingRef.current = true
-    const version = (workerVersionRef.current.get(targetId) ?? 0) + 1
-    workerVersionRef.current.set(targetId, version)
     workerRef.current.postMessage({ type: 'compile', content, targetId, version })
   }, [])
 
@@ -129,7 +130,16 @@ export function useChat() {
   }, [setRunState, setMessages])
 
   const activeThreadIdRef = useRef(activeThreadId)
-  useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId
+    return () => {
+      setMessages(prev => prev.map(m =>
+        m.isStreaming
+          ? { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }
+          : m
+      ))
+    }
+  }, [activeThreadId, setMessages])
 
   const selectThread = useCallback(async (threadId: string) => {
     if (!threadId || selectLockRef.current) return
@@ -148,11 +158,11 @@ export function useChat() {
     try {
       await threadService.setActiveSession(threadId)
       if (checkStale()) return
-      const workspacePath = await threadService.getThreadWorkspace(threadId)
-      if (checkStale()) return
-      const rawMessages = await threadService.getThreadMessages(threadId)
-      if (checkStale()) return
-      const fresh = await threadService.getThread(threadId)
+      const [workspacePath, rawMessages, fresh] = await Promise.all([
+        threadService.getThreadWorkspace(threadId),
+        threadService.getThreadMessages(threadId),
+        threadService.getThread(threadId)
+      ])
       if (checkStale()) return
 
       clearTimer()
@@ -160,7 +170,7 @@ export function useChat() {
         setActiveWorkspace(workspacePath ? { name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace', path: workspacePath } : null)
         const loadedMsgs = (rawMessages || []).filter((m): m is ThreadMessage & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
           let blocks: StreamBlock[] | undefined
-          try { blocks = m.data ? JSON.parse(m.data) : undefined } catch {}
+          try { blocks = m.data ? JSON.parse(m.data) : undefined } catch (e) { console.error('Failed to parse message blocks:', e) }
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
         setMessages(loadedMsgs)
@@ -236,13 +246,15 @@ export function useChat() {
     } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
   }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels, messages, selectThread, setActiveThreadId])
 
-  const run = useCallback(async (promptText: string, _mode?: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
-    if (runState !== 'idle') return
+  const run = useCallback(async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
+    if (isRunningRef.current || runState !== 'idle') return
+    isRunningRef.current = true
+    try {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
     // clear version map for new stream
     workerVersionRef.current.clear()
     isCompilingRef.current = false
-    pendingCompileRef.current = null
+    pendingCompileMap.current.clear()
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
     const isNewThread = !existingThread || existingThread.title === 'New Chat'
@@ -377,7 +389,7 @@ export function useChat() {
         if (isMountedRef.current) setRunState('idle')
         if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
           threadService.generateTitle(promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200), resolvedThreadId)
-            .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch {} }).catch(console.error)
+            .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error('Failed to refresh threads:', e) } }).catch(console.error)
         }
       }
     }
@@ -387,29 +399,24 @@ export function useChat() {
       await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments }, processChunk)
     } catch (err: unknown) {
       if (!isMountedRef.current) return
-      if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+      const isCur = resolvedThreadId === activeStreamThreadIdRef.current
+      if (isCur && flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
       assistantIsStreaming = false
-      // Only show error if NOT already handled by the worker-crash useEffect
-      // The crash event fires independently; if stream() rejects due to crash,
-      // worker-crash useEffect already added the error block. So we skip duplicate.
       const errorMsg = err instanceof Error ? err.message : String(err)
-      const isCrashError = errorMsg.includes('Utility worker')
-      const isAbortError = err instanceof Error && err.name === 'AbortError'
+      const isCrashError = errorMsg.includes('Utility worker'), isAbortError = err instanceof Error && err.name === 'AbortError'
       if (!isCrashError && !isAbortError) {
         console.error('[useChat] Invocation Error:', err)
-        setMessages(prev => prev.map(m => {
-          if (m.id !== assistantMsgId) return m
-          return { ...m, isStreaming: false, orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(errorMsg) }] }
-        }))
-        setRunState('error')
-      } else if (isAbortError) {
-        // User-initiated stop — just mark as idle, no error shown
-        setMessages(prev => prev.map(m => !m.isStreaming ? m : {
-          ...m, isStreaming: false,
-          orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
-        }))
+        if (isCur) {
+          setMessages(prev => prev.map(m => m.id !== assistantMsgId ? m : { ...m, isStreaming: false, orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(errorMsg) }] }))
+          setRunState('error')
+        }
+      } else if (isAbortError && isCur) {
+        setMessages(prev => prev.map(m => !m.isStreaming ? m : { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }))
         setRunState('idle')
       }
+    }
+    } finally {
+      isRunningRef.current = false
     }
   }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker, runState])
 

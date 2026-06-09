@@ -70,7 +70,7 @@ contextBridge.exposeInMainWorld('api', {
   /** Send abort signal on MessagePort to halt the stream session. */
   stopStream: (threadId: string): void => {
     const st = activeStreams.get(threadId)
-    if (st) { st.port.postMessage('abort'); st.cleanup(); st.abort() }
+    if (st) { st.port.postMessage('abort'); activeStreams.delete(threadId); st.abort() }
   },
 
   /**

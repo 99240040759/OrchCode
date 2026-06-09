@@ -7,7 +7,7 @@ export const authCommands = {
   'auth:get-user': { schema: z.object({}), execute: () => getAuthUser() },
   'auth:login': { schema: z.object({}), execute: () => startGoogleAuth() },
   'auth:logout': { schema: z.object({}), execute: () => logoutUser() },
-  'auth:open-onboarding': { schema: z.object({}), execute: () => { app.emit('auth:open-main-and-close-onboarding') } },
+  'auth:complete-onboarding': { schema: z.object({}), execute: () => { app.emit('auth:open-main-and-close-onboarding') } },
   'dialog:confirm': {
     schema: z.object({ message: z.string().max(1000), detail: z.string().max(2000).optional(), buttons: z.array(z.string().max(100)).max(5).optional(), defaultId: z.number().int().optional(), cancelId: z.number().int().optional() }),
     execute: async (opts: any, event: any) => {
