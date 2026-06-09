@@ -78,9 +78,10 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     return { operation: op, target: targetName, suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
-    const path = getStreamingVal(args, argsDelta, 'absolutePath')
-    const start = getStreamingVal(args, argsDelta, 'startLine'), end = getStreamingVal(args, argsDelta, 'endLine')
-    const lineSuffix = start || end ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
+    const path = getStreamingVal(args, argsDelta, 'absolutePath'), res = result as { readStart?: number; readEnd?: number; isBinary?: boolean } | undefined
+    const start = getStreamingVal(args, argsDelta, 'startLine') || (res?.readStart !== undefined ? String(res.readStart) : '')
+    const end = getStreamingVal(args, argsDelta, 'endLine') || (res?.readEnd !== undefined ? String(res.readEnd) : '')
+    const lineSuffix = !res?.isBinary && (start || end) ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
     const suffix = lineSuffix ? <span className="tool-call-suffix">{lineSuffix}</span> : undefined
     const targetName = path.split(/[/\\]/).pop() ?? path
     return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: targetName, suffix, fullPath: path || null, isFile: true }
