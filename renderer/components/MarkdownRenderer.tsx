@@ -14,7 +14,7 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
-  securityLevel: 'loose',
+  securityLevel: 'strict',
   flowchart: { useMaxWidth: true, htmlLabels: true }
 })
 

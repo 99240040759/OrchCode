@@ -14,11 +14,18 @@ function getBrowserWebContents() {
   return bv ? bv.webContents : null
 }
 
-function checkBrowserViewActive() {
+function checkBrowserViewActive(convId?: string) {
   if (!WindowManager.getBrowserView()) {
     return {
       success: false,
       error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.'
+    }
+  }
+  const ownerConvId = WindowManager.getBrowserConversationId()
+  if (convId && ownerConvId && ownerConvId !== convId) {
+    return {
+      success: false,
+      error: 'Browser is currently owned by another conversation. The user must switch to this conversation and open the browser panel first.'
     }
   }
   return null
@@ -30,7 +37,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
     execute: async ({ url }) => {
       log.info(`[tool:browserNavigate] url="${url}"`)
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
@@ -51,7 +58,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     }),
     execute: async ({ selector, text, frameSelector }) => {
       log.info(`[tool:browserType] selector="${selector}"`)
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
@@ -84,7 +91,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     }),
     execute: async ({ direction, amount }) => {
       log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
@@ -106,7 +113,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     inputSchema: z.object({}),
     execute: async () => {
       log.info('[tool:browserScreenshot] executing...')
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
@@ -161,7 +168,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     }),
     execute: async ({ x, y, button }) => {
       log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
@@ -178,7 +185,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     inputSchema: z.object({}),
     execute: async () => {
       log.info('[tool:browserGetPageContent] executing...')
-      const check = checkBrowserViewActive()
+      const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {

@@ -88,6 +88,7 @@ export function sanitizeHtml(html: string): string {
         const ALLOWED = ['p', 'br', 'strong', 'em', 'code', 'pre', 'span', 'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'details', 'summary', 'svg', 'path', 'rect', 'polyline', 'button']
         if (!ALLOWED.includes(tag)) el.remove()
         else {
+          if (tag === 'button' && !el.classList.contains('code-block-copy-btn')) { el.remove(); child = next; continue }
           for (const attr of Array.from(el.attributes)) {
             const name = attr.name.toLowerCase(), val = attr.value
             if (name.startsWith('on')) el.removeAttribute(attr.name)

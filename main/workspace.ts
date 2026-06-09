@@ -12,12 +12,23 @@ import type { WorkspaceContext } from '../preload/types'
 
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
+const workspaceLastAccess = new Map<string, number>()
+const WORKSPACE_EVICTION_MS = 30 * 60 * 1000
+function evictStaleWorkspaces() {
+  const now = Date.now()
+  for (const [id, lastAccess] of workspaceLastAccess) {
+    if (now - lastAccess > WORKSPACE_EVICTION_MS && !initPromises.has(id)) {
+      workspaceRegistry.delete(id); workspaceLastAccess.delete(id)
+    }
+  }
+}
 
 const validateConversationId = (id: string) => { if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9-_]+$/.test(id)) throw new Error(`Invalid id: ${id}`) }
 
 export async function getOrCreateWorkspaceContext(conversationId: string, userSelectedPath?: string): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
-  if (workspaceRegistry.has(conversationId)) return workspaceRegistry.get(conversationId)!
+  evictStaleWorkspaces()
+  if (workspaceRegistry.has(conversationId)) { workspaceLastAccess.set(conversationId, Date.now()); return workspaceRegistry.get(conversationId)! }
   if (initPromises.has(conversationId)) return initPromises.get(conversationId)!
   const promise = (async () => {
     try {
@@ -26,20 +37,22 @@ export async function getOrCreateWorkspaceContext(conversationId: string, userSe
       await fs.mkdir(rootPath, { recursive: true })
       await fs.mkdir(artifactsPath, { recursive: true })
       const ctx = { conversationId, rootPath, artifactsPath, isUserWorkspace }
-      workspaceRegistry.set(conversationId, ctx); return ctx
+      workspaceRegistry.set(conversationId, ctx); workspaceLastAccess.set(conversationId, Date.now()); return ctx
     } finally { initPromises.delete(conversationId) }
   })()
   initPromises.set(conversationId, promise); return promise
 }
 
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
-  validateConversationId(conversationId); return workspaceRegistry.get(conversationId)
+  validateConversationId(conversationId)
+  if (workspaceRegistry.has(conversationId)) workspaceLastAccess.set(conversationId, Date.now())
+  return workspaceRegistry.get(conversationId)
 }
 
 export function clearWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
   validateConversationId(conversationId)
   const context = workspaceRegistry.get(conversationId)
-  workspaceRegistry.delete(conversationId); initPromises.delete(conversationId)
+  workspaceRegistry.delete(conversationId); initPromises.delete(conversationId); workspaceLastAccess.delete(conversationId)
   return context
 }
 

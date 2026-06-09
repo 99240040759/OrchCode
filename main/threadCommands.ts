@@ -77,7 +77,7 @@ export const threadCommands = {
       try {
         if (getActiveThreadId() === threadId) setActiveThreadId(null)
         pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
-        getThreadWorkspace(threadId); clearWorkspaceContext(threadId); const deleted = deleteThread(threadId)
+        clearWorkspaceContext(threadId); const deleted = deleteThread(threadId)
         await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
         return deleted
       } catch (err) { log.error('[commands] deleteThread:', err); throw err }

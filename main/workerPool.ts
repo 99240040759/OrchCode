@@ -14,6 +14,7 @@ class WorkerPool {
       if (token) idle.postMessage({ type: 'update-token', token })
       return idle
     }
+    if (this.workers.length >= this.maxWorkers) throw new Error(`Worker pool at capacity (${this.maxWorkers}). Try again shortly.`)
     let workerPath = join(__dirname, 'agentWorker.js')
     if (!existsSync(workerPath)) workerPath = join(__dirname, '..', 'agentWorker.js')
     log.info(`[workerPool] Spawning utilityProcess worker at: ${workerPath} (Pool size: ${this.workers.length + 1})`)

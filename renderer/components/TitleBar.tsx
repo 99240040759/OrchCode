@@ -1,59 +1,29 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect } from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { updateStatusAtom, sidebarExpandedAtom } from '../store/agentStore'
-
 import type { UpdateStatus } from '../../preload/index.d'
-
 interface TitleBarProps { title?: string; workspaceName?: string }
 import { isMac } from '../lib/sharedUtils'
-
-const isNewerVersion = (l: string, c: string): boolean => {
-  const parse = (v: string) => v.replace(/^v/, '').split('.').map(Number)
-  const [lM, lm, lP] = parse(l), [cM, cm, cP] = parse(c)
-  return isNaN(lM) || isNaN(cM) ? l !== c : lM > cM || (lM === cM && (lm > cm || (lm === cm && lP > cP)))
-}
 
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
   const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
   const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
 
-  const runMacWorkerCheck = useCallback(async () => {
-    if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
-    setUpdateStatus({ status: 'checking' })
-    try {
-      const currentVersion = await window.api.invoke('app:get-version') as string
-      const res = await fetch('https://api.github.com/repos/sameer786ss/OrchCode/releases/latest', {
-        headers: { Accept: 'application/vnd.github+json' }
-      })
-      if (!res.ok) {
-        if (res.status === 403 || res.status === 429) setUpdateStatus({ status: 'error', error: 'Rate limited by GitHub. Try again later.' })
-        else setUpdateStatus({ status: 'idle' })
-        return
-      }
-      const data = await res.json()
-      const latestVersion: string = data.tag_name?.replace(/^v/, '') ?? ''
-      const hasUpdate = !!latestVersion && isNewerVersion(latestVersion, currentVersion)
-      setUpdateStatus(hasUpdate ? { status: 'available', version: latestVersion } : { status: 'idle', version: latestVersion })
-    } catch (err: any) { setUpdateStatus({ status: 'error', error: err.message }) }
-  }, [setUpdateStatus])
-
   useEffect(() => {
     if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
     window.api.invoke('updater:get-status').then((status) => {
-      if (status) { if (isMac) runMacWorkerCheck(); else setUpdateStatus(status as UpdateStatus) }
+      if (status) setUpdateStatus(status as UpdateStatus)
     })
     const unsubscribe = window.api.on('updater:status-changed', (status) => {
-      if (!isMac) setUpdateStatus(status as UpdateStatus)
+      setUpdateStatus(status as UpdateStatus)
     })
-    let intervalId: ReturnType<typeof setInterval> | null = null
-    if (isMac) intervalId = setInterval(() => runMacWorkerCheck(), 3 * 60 * 60 * 1000)
-    return () => { unsubscribe(); if (intervalId) clearInterval(intervalId) }
-  }, [setUpdateStatus, runMacWorkerCheck])
+    return () => { unsubscribe() }
+  }, [setUpdateStatus])
 
   const handleUpdateClick = () => {
     if (updateStatus.status === 'downloaded') window.api.invoke('updater:install').catch(console.error)
     else if (updateStatus.status === 'available' && isMac) window.api.invoke('updater:open-mac-release').catch(console.error)
-    else if (updateStatus.status === 'error') { if (isMac) runMacWorkerCheck(); else window.api.invoke('updater:check').catch(console.error) }
+    else if (updateStatus.status === 'error') window.api.invoke('updater:check').catch(console.error)
   }
 
   const renderUpdateIndicator = () => {

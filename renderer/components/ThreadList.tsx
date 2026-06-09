@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
-import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2 } from 'lucide-react'
+import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2, Plus } from 'lucide-react'
 import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import { format, isToday, isYesterday } from 'date-fns'
@@ -18,7 +18,7 @@ const ThreadList: React.FC = () => {
   const activeThreadId = useAtomValue(activeThreadIdAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const agentRunState = useAtomValue(agentRunStateAtom)
-  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace } = useChat()
+  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useChat()
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
 
   const threads = useMemo(() => {
@@ -91,14 +91,18 @@ const ThreadList: React.FC = () => {
 
       <div className="thread-list-group">
         {allWorkspacePaths.length === 0 ? <div className="empty-state-desc thread-list-header">No projects opened yet.</div> : allWorkspacePaths.map((path) => {
-          const isActive = path === '' ? !activeWorkspace : activeWorkspace?.path === path, expanded = !!expandedPaths[path]
+          const isActive = path === '' ? !activeWorkspace : activeWorkspace?.path === path
+          const expanded = expandedPaths[path] !== undefined ? !!expandedPaths[path] : isActive
           return (
             <div key={path} className="thread-list-group">
               <div className="thread-group-header" onClick={() => toggleExpand(path)}>
                 <div className="thread-group-actions">{expanded ? <ChevronDown size={14} className="text-secondary" /> : <ChevronRight size={14} className="text-secondary" />}</div>
                 <Folder size={14} className="text-secondary" />
                 <span className={`thread-group-title${isActive ? ' thread-item-active-title' : ''}`} title={path}>{path ? (path.split(/[/\\]/).pop() ?? 'Workspace') : 'General Chats'}</span>
-                <div className="thread-group-actions">{path && <div className="sidebar-section-header-action" onClick={(e) => handleCloseWorkspace(e, path)} title="Close project"><X size={13} /></div>}</div>
+                <div className="thread-group-actions">
+                  <div className="sidebar-section-header-action" style={{ marginRight: path ? 4 : 0 }} onClick={(e) => { e.stopPropagation(); newConversation(path || null); if (!expanded) toggleExpand(path) }} title="New Chat"><Plus size={13} /></div>
+                  {path && <div className="sidebar-section-header-action" onClick={(e) => handleCloseWorkspace(e, path)} title="Close project"><X size={13} /></div>}
+                </div>
               </div>
               {expanded && (
                 <div className="thread-list-group">

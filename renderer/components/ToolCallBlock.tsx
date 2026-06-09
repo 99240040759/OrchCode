@@ -78,10 +78,28 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     return { operation: op, target: targetName, suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
-    const path = getStreamingVal(args, argsDelta, 'absolutePath'), res = result as { readStart?: number; readEnd?: number; isBinary?: boolean } | undefined
-    const start = getStreamingVal(args, argsDelta, 'startLine') || (res?.readStart !== undefined ? String(res.readStart) : '')
-    const end = getStreamingVal(args, argsDelta, 'endLine') || (res?.readEnd !== undefined ? String(res.readEnd) : '')
-    const lineSuffix = !res?.isBinary && (start || end) ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
+    const path = getStreamingVal(args, argsDelta, 'absolutePath')
+    const startArg = getStreamingVal(args, argsDelta, 'startLine')
+    const endArg = getStreamingVal(args, argsDelta, 'endLine')
+    
+    const res = result as any
+    const textOutput = typeof res?.content === 'string' ? res.content : (res?.value?.find((v: any) => v.type === 'text')?.text || '')
+    const isBinary = res?.isBinary || textOutput.startsWith('[Binary File') || textOutput.startsWith('Binary image') || textOutput.startsWith('Successfully analyzed binary image')
+    
+    let extractedStart = res?.readStart !== undefined ? String(res.readStart) : ''
+    let extractedEnd = res?.readEnd !== undefined ? String(res.readEnd) : ''
+    
+    if (!extractedStart && !extractedEnd && textOutput && !isBinary) {
+      const firstLineMatch = textOutput.match(/^(\d+):/)
+      if (firstLineMatch) extractedStart = firstLineMatch[1]
+      const lines = textOutput.trimEnd().split('\n')
+      const lastLineMatch = lines[lines.length - 1]?.match(/^(\d+):/)
+      if (lastLineMatch) extractedEnd = lastLineMatch[1]
+    }
+    
+    const start = startArg || extractedStart
+    const end = endArg || extractedEnd
+    const lineSuffix = !isBinary && (start || end) ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
     const suffix = lineSuffix ? <span className="tool-call-suffix">{lineSuffix}</span> : undefined
     const targetName = path.split(/[/\\]/).pop() ?? path
     return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: targetName, suffix, fullPath: path || null, isFile: true }
@@ -137,9 +155,10 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   const activeThreadId = useAtomValue(activeThreadIdAtom)
   const handleClick = async () => {
     if (!isFile || !fullPath) return
+    const clickThreadId = activeThreadId
     try {
-      const fileData = await window.api.invoke('file:read', { filePath: fullPath, conversationId: activeThreadId }) as FileReadResult
-      if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+      const fileData = await window.api.invoke('file:read', { filePath: fullPath, conversationId: clickThreadId }) as FileReadResult
+      if (fileData && clickThreadId === activeThreadId) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('[ToolCallBlock] Failed to open file:', err) }
   }
   const Component = (isFile ? 'button' : 'div') as React.ElementType

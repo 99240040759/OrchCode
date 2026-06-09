@@ -33,12 +33,12 @@ export function useChat() {
   const activeStreamThreadIdRef = useRef('')
   const flushRafRef = useRef<number | null>(null)
   const workerRef = useRef<Worker | null>(null)
-  // version map: targetId → latest version sent; worker drops stale results
   const workerVersionRef = useRef<Map<string, number>>(new Map())
   const isCompilingRef = useRef(false)
   const pendingCompileRef = useRef<{ content: string; targetId: string } | null>(null)
   const isMountedRef = useRef(true)
   const threadsRef = useRef(threads)
+  const selectLockRef = useRef(false)
 
   useEffect(() => { threadsRef.current = threads }, [threads])
   useEffect(() => {
@@ -131,10 +131,9 @@ export function useChat() {
   useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
 
   const selectThread = useCallback(async (threadId: string) => {
-    if (!threadId) return
+    if (!threadId || selectLockRef.current) return
+    selectLockRef.current = true
     setRunState('idle')
-    const curId = activeThreadIdRef.current
-    if (curId && curId !== threadId) window.api.stopStream(curId)
     activeStreamThreadIdRef.current = threadId
     let loadingTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
       if (activeStreamThreadIdRef.current === threadId && isMountedRef.current) setIsThreadLoading(true)
@@ -174,17 +173,17 @@ export function useChat() {
       clearTimer()
       if (isMountedRef.current) setIsThreadLoading(false)
       throw err
-    }
+    } finally { selectLockRef.current = false }
   }, [setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setIsThreadLoading, setActiveWorkspace, setRunState])
 
-  const newConversation = useCallback(async () => {
+  const newConversation = useCallback(async (workspacePath?: string | null) => {
     try {
       const { conversationId: newId } = await threadService.newConversation()
-      const curId = activeThreadIdRef.current
-      if (curId) window.api.stopStream(curId)
       setRunState('idle')
-      const curWs = activeWorkspace
-      if (curWs?.path) await workspaceService.setActiveWorkspace(newId, curWs.path)
+      const targetWsPath = workspacePath !== undefined ? workspacePath : activeWorkspace?.path
+      if (targetWsPath) {
+        await workspaceService.setActiveWorkspace(newId, targetWsPath)
+      }
       setActiveThreadId(newId); setMessages([]); setSessionTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
     } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
   }, [activeWorkspace, setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setRunState, loadThreads])
@@ -280,6 +279,8 @@ export function useChat() {
     const processChunk = (chunk: StreamChunk) => {
       if (!isMountedRef.current) return
       if (!chunk || chunk.threadId !== resolvedThreadId) return
+      // Guard: only update UI if this stream's thread is the active one
+      if (resolvedThreadId !== activeStreamThreadIdRef.current) return
       const chunkType = chunk.type
       const chunkData = chunk.payload && typeof chunk.payload === 'object' ? (chunk.payload as Record<string, unknown>) : undefined
       const chunkText = typeof chunk.payload === 'string' ? chunk.payload : ''
@@ -386,13 +387,21 @@ export function useChat() {
       // worker-crash useEffect already added the error block. So we skip duplicate.
       const errorMsg = err instanceof Error ? err.message : String(err)
       const isCrashError = errorMsg.includes('Utility worker')
-      console.error('[useChat] Invocation Error:', err)
-      if (!isCrashError) {
+      const isAbortError = err instanceof Error && err.name === 'AbortError'
+      if (!isCrashError && !isAbortError) {
+        console.error('[useChat] Invocation Error:', err)
         setMessages(prev => prev.map(m => {
           if (m.id !== assistantMsgId) return m
           return { ...m, isStreaming: false, orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(errorMsg) }] }
         }))
         setRunState('error')
+      } else if (isAbortError) {
+        // User-initiated stop — just mark as idle, no error shown
+        setMessages(prev => prev.map(m => !m.isStreaming ? m : {
+          ...m, isStreaming: false,
+          orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
+        }))
+        setRunState('idle')
       }
     }
   }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker, runState])

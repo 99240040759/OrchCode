@@ -115,7 +115,7 @@ export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'crea
     if (!db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
       db.prepare(`INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
     } else { db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId) }
-    saved = db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET role = excluded.role, threadId = excluded.threadId, content = excluded.content, data = excluded.data, createdAt = excluded.createdAt RETURNING id, role, content, data, createdAt`).get(msg) as ThreadMessage
+    saved = db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data RETURNING id, role, content, data, createdAt`).get(msg) as ThreadMessage
   })()
   if (!saved) throw new Error('[db] Failed to save message')
   return { id: saved.id, role: saved.role as 'user' | 'assistant' | 'system', content: saved.content, data: saved.data || undefined, createdAt: saved.createdAt }
@@ -172,6 +172,13 @@ export function addOpenedWorkspace(path: string): void {
     new Date().toISOString()
   )
 }
+export function bindWorkspaceTransaction(threadId: string, workspacePath: string): void {
+  const db = getDB()
+  db.transaction(() => {
+    addOpenedWorkspace(workspacePath)
+    setThreadWorkspace(threadId, workspacePath)
+  })()
+}
 
 export function deleteOpenedWorkspace(path: string): void {
   const db = getDB()
@@ -205,7 +212,7 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
       db.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...toDelete)
     }
     const keptDate = new Date(keptFirst.createdAt)
-    const summaryDate = new Date(keptDate.getTime() - 1000).toISOString()
+    const summaryDate = new Date(keptDate.getTime() - 1).toISOString()
     const summaryId = crypto.randomUUID()
     db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(summaryId, threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, summaryDate)
     db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)

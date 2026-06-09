@@ -8,7 +8,7 @@ import {
   getOrCreateWorkspaceContext, updateWorkspacePath, getWorkspaceContext,
   assertWithinWorkspace, listWorkspaceFiles, isFileBinary, getMimeType, clearWorkspaceContext
 } from './workspace'
-import { addOpenedWorkspace, setThreadWorkspace, deleteOpenedWorkspace, deleteWorkspaceThreads } from './db'
+import { deleteOpenedWorkspace, deleteWorkspaceThreads, bindWorkspaceTransaction } from './db'
 import { getConversationPath } from './paths'
 import WindowManager from './windowManager'
 import { convIdSchema } from './threadCommands'
@@ -35,9 +35,8 @@ export const workspaceCommands = {
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
       const selectedPath = result.filePaths[0]
-      addOpenedWorkspace(selectedPath); app.addRecentDocument(selectedPath)
       const ctx = await updateWorkspacePath(conversationId, selectedPath)
-      try { setThreadWorkspace(conversationId, selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { bindWorkspaceTransaction(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
     }
   },
@@ -46,8 +45,7 @@ export const workspaceCommands = {
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
       const ctx = await updateWorkspacePath(conversationId, workspacePath)
-      addOpenedWorkspace(workspacePath); app.addRecentDocument(workspacePath)
-      try { setThreadWorkspace(conversationId, workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { bindWorkspaceTransaction(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       return ctx
     }
   },

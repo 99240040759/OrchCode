@@ -164,7 +164,7 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
         term.dispose()
       }
-    }, [])
+    }, [conversationId])
 
     return <div ref={termContainerRef} className="terminal-container" />
   }

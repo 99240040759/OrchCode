@@ -25,8 +25,7 @@ type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; cont
 // Duality: AI SDK versions >= 3.x use 'toolCallId', while legacy or certain provider parts use 'id'
 interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
-const activeAbortControllers = new Map<string, AbortController>()
-const activePorts = new Map<string, Electron.MessagePortMain>()
+const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
 const SUMMARISE_THRESHOLD = 180_000
 
 const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
@@ -97,7 +96,7 @@ export function registerStreamIpc() {
 function buildBrowserInstruction(isBrowserActive: boolean, modelSupportsVision: boolean): string {
   const browserView = process.type === 'utility' ? null : WindowManager.getBrowserView()
   return (browserView || isBrowserActive)
-    ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract inner text and elements.`}`
+    ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract page text and interactive elements for non-vision models.`}`
     : ''
 }
 async function buildSkillsSection(): Promise<string> {
@@ -121,7 +120,6 @@ Use the sandboxed system inside 'artifacts/'. Manage with writeToFile, multiRepl
 Use native tools (viewFile, writeToFile, multiReplaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
 }
 async function setupStreamRequest(port: Electron.MessagePortMain, threadId: string, controller: AbortController, attachments?: any[]) {
-  activePorts.set(threadId, port)
   let streamFinished = false; let resolveAttachments: ((bufs: Buffer[]) => void) | null = null
   const bufsPromise = attachments && attachments.length ? new Promise<Buffer[]>((resolve, reject) => {
     resolveAttachments = resolve
@@ -161,10 +159,11 @@ export async function handleAgentStreamRequest(
   }
   const queueTextDelta = (text: string) => { bufferedText += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
   const queueReasoningDelta = (text: string) => { bufferedReasoning += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
-  const existingController = activeAbortControllers.get(threadId)
-  if (existingController) existingController.abort()
+  const existingEntry = activeAbortControllers.get(threadId)
+  if (existingEntry) existingEntry.controller.abort()
   const controller = new AbortController()
-  activeAbortControllers.set(threadId, controller)
+  const streamSessionId = crypto.randomUUID()
+  activeAbortControllers.set(threadId, { controller, sessionId: streamSessionId })
   try { await setupStreamRequest(port, threadId, controller, attachments) }
   catch (err) { log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
   let assistantMsgId = '', assistantContent = ''
@@ -199,7 +198,7 @@ export async function handleAgentStreamRequest(
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
     assistantMsgId = crypto.randomUUID()
     let currentReasoningStartMs = 0, lastSaveMs = 0, saveInFlight = false, saveQueued = false
-    const saveProgress = async (force = false) => {
+    const saveProgress = (force = false) => {
       const now = Date.now()
       if (!force && now - lastSaveMs < 1000) return
       if (saveInFlight) {
@@ -208,15 +207,16 @@ export async function handleAgentStreamRequest(
       }
       if (assistantContent || orderedBlocks.length > 0) {
         saveInFlight = true
-        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = Date.now() }
-        catch (err) { log.error('[stream] Progressive save failed:', err) }
-        finally { 
-          saveInFlight = false 
-          if (saveQueued) {
-            saveQueued = false
-            void saveProgress(true)
+        const doSave = () => {
+          try { saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = Date.now() }
+          catch (err) { log.error('[stream] Progressive save failed:', err) }
+          finally {
+            saveInFlight = false
+            if (saveQueued) { saveQueued = false; saveProgress(true) }
           }
         }
+        if (force) doSave()
+        else setImmediate(doSave)
       }
     }
     const result = streamText({
@@ -238,21 +238,26 @@ export async function handleAgentStreamRequest(
       prepareStep: async ({ messages: currentMessages }) => {
         if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD) return undefined
         log.info(`[stream] Context at ${sessionAccumulatedTokens} tokens — auto-summarising`)
+        const prevPersisted = persistedAccumulatedTokens, prevSession = sessionAccumulatedTokens
         const summary = await summariseContext(currentMessages as ModelMessage[])
         if (!summary) return undefined
         try {
           compactThreadHistory(threadId, summary)
           setThreadAccumulatedTokens(threadId, 0)
           persistedAccumulatedTokens = 0; sessionAccumulatedTokens = 0
-        } catch (err) { log.error('[stream] Compaction failed:', err) }
+        } catch (err) {
+          log.error('[stream] Compaction failed, reverting counters:', err)
+          persistedAccumulatedTokens = prevPersisted; sessionAccumulatedTokens = prevSession
+          return undefined
+        }
         send({ type: 'token-update', payload: { accumulatedTokens: 0 }, threadId })
         return {
           system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nSummary:\n\n${summary}\n\nContinue from this state.`,
           messages: sanitizeMessages((currentMessages as ModelMessage[]).slice(-10))
         }
       },
-      onAbort: () => { void saveProgress(true) },
-      onError: async ({ error }) => { log.error('[stream] AI SDK error:', error); await saveProgress(true) }
+      onAbort: () => { saveProgress(true) },
+      onError: ({ error }) => { log.error('[stream] AI SDK error:', error); saveProgress(true) }
     })
     for await (const part of result.fullStream) {
       if (controller.signal.aborted) break
@@ -336,7 +341,7 @@ export async function handleAgentStreamRequest(
         }
       }
     }
-    await saveProgress(true)
+    saveProgress(true)
   } catch (err: unknown) {
     const error = err as Error & { name?: string }
     log.error('[stream] error:', error)
@@ -350,10 +355,9 @@ export async function handleAgentStreamRequest(
     throw err
   } finally {
     flushBuffers()
-    // Mark finished so the port 'close' handler (from setupStreamRequest) doesn't abort
     ;(port as any).__markFinished?.()
-    if (activeAbortControllers.get(threadId) === controller) activeAbortControllers.delete(threadId)
-    activePorts.delete(threadId)
+    const entry = activeAbortControllers.get(threadId)
+    if (entry && entry.sessionId === streamSessionId) activeAbortControllers.delete(threadId)
     try { port.close() } catch {}
   }
 }

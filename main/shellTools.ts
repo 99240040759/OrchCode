@@ -4,7 +4,7 @@ import { execa } from 'execa'
 import { basename } from 'node:path'
 import { parse } from 'shell-quote'
 import log from 'electron-log'
-import { getWorkspaceContext, assertWithinWorkspace } from './workspace'
+import { getWorkspaceContext, assertWithinWorkspace, invalidateWorkspaceFilesCache } from './workspace'
 
 const BLOCKED_EXECUTABLES = new Set([
   'shutdown', 'reboot', 'init',
@@ -111,6 +111,8 @@ export function createShellTools(convId: string) {
       } catch (err: any) {
         log.error('[tool:runCommand] error:', err.message)
         return { success: false, error: err.message, stdout: '', stderr: err.message, exitCode: 1 }
+      } finally {
+        try { invalidateWorkspaceFilesCache(wctx().rootPath) } catch {}
       }
     },
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false && output.error ? `Error: ${output.error}` : `Command finished with exit code ${output.exitCode}.\nCwd: ${output.cwd}\nStdout:\n${output.stdout}\nStderr:\n${output.stderr}` }] })

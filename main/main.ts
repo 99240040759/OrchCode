@@ -5,7 +5,7 @@ import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
-import { initAuth, getCurrentSession, handleAuthCallback } from './auth'
+import { initAuth, getCurrentSession, handleAuthCallback, cleanupAuth } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../resources/icon.png?asset'
@@ -294,7 +294,7 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('window-all-closed', async () => {
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     cleanupAllPtys()
     log.info('[main] Cleaned up — quitting')
@@ -306,6 +306,7 @@ let isQuitting = false
 app.on('before-quit', async (e) => {
   if (!isQuitting) {
     e.preventDefault()
+    cleanupAuth()
     cleanupAllPtys()
     try { await pool.shutdown() } catch {}
     try { checkpointDB() } catch {}

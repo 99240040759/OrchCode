@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('api', {
       }
       const onPortReceived = (ev: Electron.IpcRendererEvent) => {
         const p = ev.ports[0]; if (!p) { cleanup(); return reject(new Error('No port')) }
-        activeStreams.set(payload.threadId, { port: p, cleanup, abort: () => reject(new Error('Stream aborted locally')) })
+    activeStreams.set(payload.threadId, { port: p, cleanup, abort: () => { const e = new Error('Stream aborted locally'); e.name = 'AbortError'; reject(e) } })
         p.onmessage = (e) => {
           try {
             onChunk(e.data)

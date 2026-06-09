@@ -204,3 +204,7 @@ export async function initAuth() {
   if (refreshInterval) clearInterval(refreshInterval)
   refreshInterval = setInterval(() => { void refreshSessionIfNeeded() }, 5 * 60 * 1000)
 }
+export function cleanupAuth() {
+  if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
+  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null }
+}

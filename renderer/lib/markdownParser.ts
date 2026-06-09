@@ -122,7 +122,7 @@ export function parseMarkdownIncremental(content: string, targetId: string): str
   processed = processed.replace(/(\\\([\s\S]*?\\\)|(?<!\\)\$[^\$\n]+?\$)/g, (match) => {
     let rawMath = match
     if (match.startsWith('$')) rawMath = match.slice(1, -1)
-    else { const s = match.indexOf('('), e = match.lastIndexOf(']'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
+    else { const s = match.indexOf('('), e = match.lastIndexOf(')'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
     try {
       const compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
       const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
