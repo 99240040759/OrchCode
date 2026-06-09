@@ -129,18 +129,58 @@ async function buildSkillsSection(): Promise<string> {
 }
 
 function buildSystemPrompt(threadId: string, rootPath: string, browserInstruction: string, skillsSection: string): string {
-  return `You are Orch Code, a highly capable AI developer assistant. Active thread: ${threadId}.
-── WORKSPACE ──
-Root: ${rootPath || 'No workspace selected'}
-Use searchWorkspace(query) to find files. Use listDir(path) to explore. Read before editing.
+  return `You are Orch Code, an advanced, highly specialized AI software engineering agent.
+Active Conversation Thread ID: ${threadId}
+
+=========================================
+1. IDENTITY & PROFESSIONAL BEHAVIOR
+=========================================
+- You are Orch Code, a world-class developer assistant designed to write clean, correct, and premium code.
+- Always communicate concisely and professionally. Focus on code accuracy, design elegance, and developer productivity.
+
+=========================================
+2. WORKSPACE & ENVIRONMENT ISOLATION
+=========================================
+- Active Workspace Folder: ${rootPath || 'No workspace directory currently selected.'}
+- Your operations are strictly bound to this workspace. Do not write or touch files outside this directory.
+- Always verify your understanding of the codebase first: search using \`searchWorkspace\` or browse directories using \`listDir\`.
+- Always read the contents of a target file using \`viewFile\` (paging/paginating using \`startLine\` and \`endLine\` if needed) before proposing any edits.
+
+=========================================
+3. SEARCH, SKILLS & WEB SEARCH PRIORITIES
+=========================================
+- **Priority 1 (Local Code & Structure):** Always use \`searchWorkspace\` and \`listDir\` first to locate code symbols, config files, and understand codebase layout. Local code is the ground truth.
+- **Priority 2 (Specialized Skills):** Check the \`── ADVANCED SKILLS ──\` section below. If any installed skill tools or workflows exist, prioritize using them to perform specialized repository tasks.
+- **Priority 3 (Web Search):** Use \`searchWeb\` ONLY when you need external library documentation, API specs, external dependency details, or debugging information for a general framework error that is not documented locally. Do not use web search for finding local workspace resources.
+
+=========================================
+4. SURGICAL CODE EDITING & FORMATTING CONSTRAINTS
+=========================================
+- **Surgical Edits:** When modifying code, only change the absolute minimum lines required to execute the fix or feature.
+- **Code Compression:** Avoid unnecessary empty lines or exploded whitespace. Collapse control flows, brackets, and simple blocks where syntactically clean.
+- **No Refactoring Unchanged Code:** Do not clean up, reformat, or alter surrounding lines of code that are unrelated to the task. Keep changes highly localized.
+- **AST Matching Resilience:** \`multiReplaceFileContent\` utilizes Abstract Syntax Tree (AST) matching where possible. For best results, make sure your target blocks are unique and contain sufficient context.
+
+=========================================
+5. STRUCTURED PLANNING & USER APPROVAL
+=========================================
+- **When to Plan:** If the request involves major architectural changes, multiple files, complex logic, or significant ambiguity, you MUST write an implementation plan at \`artifacts/implementation_plan.md\` first and wait for the user's approval.
+- **When NOT to Plan:** For simple one-off tasks (small fixes, additions of single functions, formatting adjustments, small scripts), proceed to direct execution immediately without blocking.
+- **Artifacts Directory:** Use the sandboxed directory \`artifacts/\` inside the conversation space for plans. Do not create walkthroughs or task files here; only use it for the implementation plan.
+
+=========================================
+6. TOOL UTILIZATION PROTOCOLS
+=========================================
+- **File System Tools:** Use only the native APIs (\`viewFile\`, \`writeToFile\`, \`multiReplaceFileContent\`, \`listDir\`, \`searchWorkspace\`) for all file actions.
+- **Shell Commands:** Do NOT run shell utilities (\`grep\`, \`find\`, \`sed\`, \`awk\`, \`cat\`, \`echo\`) inside \`runCommand\` to read, write, or search files. \`runCommand\` is strictly reserved for:
+  - Running compilation or build commands (e.g. \`npm run build\`).
+  - Running tests or lint suites (e.g. \`npm run test\`, \`jest\`).
+  - Package installations (e.g. \`npm install\`).
+  - Checking formatting or running code formatters.
+
 ${browserInstruction}
 ${skillsSection}
-── ARTIFACTS ──
-Use the sandboxed system inside 'artifacts/'. Manage with writeToFile, multiReplaceFileContent:
-1. PLANNING: For non-trivial changes, write implementation plan at 'artifacts/implementation_plan.md' and wait for user approval.
-2. ONLY PLANNING: Never create or edit other files in the artifacts directory. Do not write walkthroughs or task files.
-── TOOLS ──
-Use native tools (viewFile, writeToFile, multiReplaceFileContent, searchWorkspace, listDir) for files. Do NOT execute shell commands for file actions. runCommand is only for tests, compile, and format.`
+`
 }
 
 export async function handleAgentStreamRequest(
@@ -149,43 +189,12 @@ export async function handleAgentStreamRequest(
   modelType: string | undefined,
   attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }> | undefined,
   promptText: string | undefined,
-  isBrowserActive: boolean | undefined,
-  sharedBuffer: SharedArrayBuffer
+  isBrowserActive: boolean | undefined
 ) {
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
   const send = (msg: Record<string, unknown>) => {
     try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) }
-  }
-
-  const headerView = new Int32Array(sharedBuffer, 0, 16)
-  const reasoningView = new Uint8Array(sharedBuffer, 64, 256 * 1024)
-  const textView = new Uint8Array(sharedBuffer, 64 + 256 * 1024, 512 * 1024)
-  const toolView = new Uint8Array(sharedBuffer, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
-
-  headerView[0] = 0
-  headerView[1] = 0
-  headerView[2] = 0
-  headerView[3] = 1
-  headerView[4] = 0
-  headerView[5] = 0
-
-  send({ type: 'buffer-init', payload: sharedBuffer, threadId })
-
-  const encoder = new TextEncoder()
-  const writeToSharedBuffer = (view: Uint8Array, cursorIdx: number, textVal: string) => {
-    const bytes = encoder.encode(textVal)
-    let currentCursor = headerView[cursorIdx]
-    if (currentCursor + bytes.length <= view.byteLength) {
-      view.set(bytes, currentCursor)
-      headerView[cursorIdx] = currentCursor + bytes.length
-    } else {
-      const spaceLeft = view.byteLength - currentCursor
-      if (spaceLeft > 0) view.set(bytes.subarray(0, spaceLeft), currentCursor)
-      view.set(bytes.subarray(spaceLeft), 0)
-      headerView[cursorIdx] = bytes.length - spaceLeft
-      headerView[cursorIdx + 6] += 1
-    }
   }
 
   const existingEntry = activeAbortControllers.get(threadId)
@@ -329,17 +338,14 @@ export async function handleAgentStreamRequest(
       if (controller.signal.aborted) break
       switch (part.type) {
         case 'reasoning-start':
-          headerView[0] = 0
-          headerView[4] += 1
           currentReasoningStartMs = Date.now()
           orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
           send({ type: 'reasoning-start', threadId })
           break
         case 'reasoning-delta': {
-          const last = orderedBlocks[orderedBlocks.length - 1]
-          const delta = part.text || ''
+          const last = orderedBlocks[orderedBlocks.length - 1], delta = part.text || ''
           if (last?.type === 'reasoning') { last.content += delta; last.durationMs = Date.now() - currentReasoningStartMs }
-          writeToSharedBuffer(reasoningView, 0, delta)
+          send({ type: 'reasoning-delta', payload: delta, threadId })
           break
         }
         case 'reasoning-end':
@@ -351,20 +357,15 @@ export async function handleAgentStreamRequest(
           const last = orderedBlocks[orderedBlocks.length - 1]
           const isNewBlock = !last || last.type !== 'text'
           if (isNewBlock) {
-            headerView[1] = 0
-            headerView[5] += 1
             orderedBlocks.push({ type: 'text', content: delta })
           } else {
             last.content += delta
           }
-          // Always send text-delta for every delta — both new and continued blocks
           send({ type: 'text-delta', payload: delta, threadId })
-          writeToSharedBuffer(textView, 1, delta)
           void saveProgress(false)
           break
         }
         case 'tool-input-start': {
-          headerView[2] = 0
           const p = part as unknown as ToolStreamPart
           const tid = p.toolCallId || p.id || ''
           orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
@@ -377,7 +378,6 @@ export async function handleAgentStreamRequest(
           const delta = p.argsTextDelta || p.delta || ''
           const b = orderedBlocks.find(x => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
-          writeToSharedBuffer(toolView, 2, delta)
           break
         }
         case 'tool-call': {
@@ -402,7 +402,6 @@ export async function handleAgentStreamRequest(
           break
         }
         case 'error': {
-          headerView[3] = 2
           const errMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
           log.error(`[stream] error: "${errMsg}"`)
           for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
@@ -410,7 +409,6 @@ export async function handleAgentStreamRequest(
           break
         }
         case 'finish': {
-          headerView[3] = 2
           const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }
           const u = p.totalUsage || {}
           const pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0
@@ -459,7 +457,6 @@ export async function handleAgentStreamRequest(
       throw err
     }
   } finally {
-    headerView[3] = 2
     markPortFinished(port)
     markWorkspaceIdle(threadId)
     const entry = activeAbortControllers.get(threadId)

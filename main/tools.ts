@@ -147,8 +147,8 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 
   // -- FILE TOOLS --
   const listDir = tool({
-    description: 'List the contents of a directory within the active workspace.',
-    inputSchema: z.object({ directoryPath: z.string().describe('Absolute path to the directory to list.') }),
+    description: 'Lists all files, subdirectories, and their metadata directly inside a directory within the active workspace. Useful for understanding project layout, checking folder structures, and locating files. Returns file sizes and sub-item counts.',
+    inputSchema: z.object({ directoryPath: z.string().describe('The absolute, fully-qualified system path of the directory to list. Must reside within the workspace boundaries.') }),
     execute: async ({ directoryPath }) => {
       try {
         const ctx = resolve(), safePath = safe(directoryPath)
@@ -172,11 +172,11 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
 
   const viewFile = tool({
-    description: 'Read the content of a file within the workspace. Supports both text and binary files (including images, which are rendered as visual inputs if the model supports vision).',
+    description: 'Reads the text or binary content of a file within the workspace. For text files, returns a line-numbered block range. Reading is capped at 800 lines per call to optimize model context—use startLine/endLine pagination to read larger files. Automatically parses binary content (like images) and returns base64 content if vision is supported.',
     inputSchema: z.object({
-      absolutePath: z.string().describe('Absolute path to the file.'),
-      startLine: z.number().int().min(1).optional().describe('Optional 1-indexed start line number to read for text files. If omitted, defaults to 1.'),
-      endLine: z.number().int().min(1).optional().describe('Optional 1-indexed end line number to read for text files (maximum 800 lines from startLine). If omitted, defaults to reading up to 800 lines.')
+      absolutePath: z.string().describe('The absolute, fully-qualified system path of the target file to read.'),
+      startLine: z.number().int().min(1).optional().describe('The 1-indexed line number to start reading from (inclusive). Defaults to 1.'),
+      endLine: z.number().int().min(1).optional().describe('The 1-indexed line number to stop reading at (inclusive). Range cannot exceed 800 lines. Defaults to startLine + 799.')
     }),
     execute: async ({ absolutePath, startLine, endLine }) => {
       try {
@@ -208,8 +208,8 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
  
   const writeToFile = tool({
-    description: 'Create a new file within the workspace.',
-    inputSchema: z.object({ targetFile: z.string().describe('Absolute path for the file.'), codeContent: z.string().describe('Full content.'), overwrite: z.boolean().default(false) }),
+    description: 'Creates a new file in the workspace or overwrites an existing one if the overwrite flag is true. Automatically creates any parent directories if they do not exist.',
+    inputSchema: z.object({ targetFile: z.string().describe('The absolute, fully-qualified system path where the file should be created.'), codeContent: z.string().describe('The complete string content to write into the file.'), overwrite: z.boolean().default(false).describe('Set to true to explicitly overwrite the file if it already exists; otherwise, will error.') }),
     execute: async ({ targetFile, codeContent, overwrite }) => {
       try {
         const ctx = resolve(), safePath = safe(targetFile)
@@ -226,14 +226,14 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
  
   const multiReplaceFileContent = tool({
-    description: 'Edit MULTIPLE non-contiguous blocks in an existing file.',
+    description: 'Surgically edits one or more non-contiguous text blocks in an existing file. Uses Abstract Syntax Tree (AST) token matching for supported source code files (which is resilient to minor spacing, indentation, and quote changes), and falls back to exact string replacement for plain text or unsupported formats. Each chunk\'s targetContent must match exactly a unique section in the file.',
     inputSchema: z.object({
-      targetFile: z.string().describe('Absolute path to file.'),
-      instruction: z.string().describe('Description of changes.'),
+      targetFile: z.string().describe('The absolute, fully-qualified system path of the file to modify.'),
+      instruction: z.string().describe('A high-level explanation describing the purpose of these edits or what bug is being fixed.'),
       replacementChunks: z.array(z.object({
         targetContent: z.string().describe('The exact string block to be replaced. Must match exactly, including indentation and whitespace.'),
-        replacementContent: z.string().describe('The new content to replace the specified block with.')
-      })).min(1).describe('Blocks to replace.')
+        replacementContent: z.string().describe('The new content to insert in place of the targetContent.')
+      })).min(1).describe('The list of separate, non-adjacent edit chunks to apply.')
     }),
     execute: async ({ targetFile, instruction: _instruction, replacementChunks }) => {
       try {
@@ -247,8 +247,8 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
 
   const searchWorkspace = tool({
-    description: 'Searches the workspace for files containing a specific regex pattern.',
-    inputSchema: z.object({ query: z.string().describe('Regex query.'), includes: z.array(z.string()).optional() }),
+    description: 'Performs a fast, parallel regular expression search (using Ripgrep) across all files in the active workspace. Useful for finding code symbols, function definitions, classes, or references.',
+    inputSchema: z.object({ query: z.string().describe('The regular expression query or literal string to search for across files.'), includes: z.array(z.string()).optional().describe('Optional glob patterns to filter files to search (e.g. ["src/**/*.ts", "package.json"]).') }),
     execute: async ({ query, includes }) => {
       try {
         const ctx = resolve(), runDir = ctx.rootPath, args = ['-n', '-I', '--smart-case']
@@ -280,11 +280,11 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 
   // -- SHELL TOOLS --
   const runCommand = tool({
-    description: 'Execute a shell command in the workspace directory. Returns stdout, stderr, and exit code. Dangerous commands (sudo, shutdown, mkfs, etc.) are blocked. Timeout defaults to 60s.',
+    description: 'Executes a command-line script in the workspace directory. Returns stdout, stderr, and the integer exit code. Blocks destructive or dangerous commands (like sudo, shutdown, passwd, mkfs, and cmd/powershell/bash shells directly). Execution is run with PAGER=cat and FORCE_COLOR=1.',
     inputSchema: z.object({
-      commandLine: z.string().max(4096).describe('The shell command to execute.'),
-      cwd: z.string().optional().describe('Absolute path to run the command in. Must be within workspace root.'),
-      waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds (max 180000). Defaults to 60000.')
+      commandLine: z.string().max(4096).describe('The command string to execute in the terminal (e.g. "npm run test").'),
+      cwd: z.string().optional().describe('Optional absolute path to run the command in. Must be within the workspace root.'),
+      waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds before the process is killed or sent to background (max 180000, defaults to 60000).')
     }),
     execute: async ({ commandLine, cwd, waitMsBeforeAsync }) => {
       try {
@@ -311,11 +311,11 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 
   // -- WEB TOOLS --
   const searchWeb = tool({
-    description: 'Search the web using the Tavily API and return a summary of relevant results with URL citations.',
+    description: 'Searches the web using the Tavily API and returns a synthesized summary along with list of relevant results containing URL citations.',
     inputSchema: z.object({
-      query: z.string().describe('The search query.'),
-      domain: z.string().optional().describe('Optional domain to prioritize in results.'),
-      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Max number of results (1–10, default 5).')
+      query: z.string().describe('The web search query string.'),
+      domain: z.string().optional().describe('Optional domain to prioritize in the search results (e.g. "github.com").'),
+      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Maximum number of search results to return (1-10, default 5).')
     }),
     execute: async ({ query, domain, maxResults }) => {
       return tavilyLimiter.schedule(async () => {
@@ -344,9 +344,9 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
 
   const generateImage = tool({
-    description: 'Generate an image based on a prompt using the FLUX.2-klein-4b model and save it to the workspace.',
+    description: 'Generates a new image based on a detailed text prompt using the FLUX.2-klein-4b model and saves it as a PNG file directly to the workspace artifacts directory.',
     inputSchema: z.object({
-      prompt: z.string().describe('The detailed text prompt describing the image to generate.'),
+      prompt: z.string().describe('The detailed text prompt describing the image to generate (elements, style, colors, composition).'),
       width: z.number().int().min(256).max(1440).optional().default(1024).describe('Image width in pixels (default: 1024).'),
       height: z.number().int().min(256).max(1440).optional().default(1024).describe('Image height in pixels (default: 1024).'),
       seed: z.number().int().optional().default(0).describe('Seed for deterministic generation.'),
@@ -400,8 +400,28 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 }
 
 export function browserTools(convId: string, modelSupportsVision = true) {
+  const waitForPageLoad = (wc: any, timeoutMs = 8000) => {
+    return new Promise((resolve) => {
+      if (!wc.isLoading()) return resolve(true)
+      let resolved = false
+      const cleanUp = () => {
+        wc.off('did-stop-loading', onLoad)
+        wc.off('did-fail-load', onLoad)
+      }
+      const onLoad = () => {
+        if (resolved) return
+        resolved = true
+        cleanUp()
+        resolve(true)
+      }
+      wc.once('did-stop-loading', onLoad)
+      wc.once('did-fail-load', onLoad)
+      setTimeout(() => { if (!resolved) { resolved = true; cleanUp(); resolve(false) } }, timeoutMs)
+    })
+  }
+
   const browserNavigate = tool({
-    description: 'Navigates the active browser viewport to a specified URL.',
+    description: 'Navigates the active browser viewport to a specified URL and blocks until the page load completes.',
     inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
     execute: async ({ url }) => {
       log.info(`[tool:browserNavigate] url="${url}"`)
@@ -411,6 +431,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       try {
         const target = url.startsWith('http') ? url : `https://${url}`
         await wc.loadURL(target)
+        await waitForPageLoad(wc)
         return { success: true, url: wc.getURL() }
       } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
@@ -418,9 +439,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
   })
 
   const browserType = tool({
-    description: 'Types text into an input field on the active webpage. Supports piercing iframes via frameSelector.',
+    description: 'Types text into an input field on the active webpage. Supports CSS selectors, agentId values, and piercing iframes.',
     inputSchema: z.object({
-      selector: z.string().describe('CSS selector of the input field.'),
+      selector: z.string().describe('CSS selector of the input field or the integer agentId value (e.g. "1").'),
       text: z.string().describe('The text to type.'),
       frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
     }),
@@ -434,7 +455,10 @@ export function browserTools(convId: string, modelSupportsVision = true) {
           (() => {
             const doc = ${frameSelector ? `(() => { const f = document.querySelector(${JSON.stringify(frameSelector)}); return f ? f.contentDocument : document })()` : 'document'};
             if (!doc) throw new Error('Frame not found');
-            const el = doc.querySelector(${JSON.stringify(selector)});
+            let el = doc.querySelector(${JSON.stringify(selector)});
+            if (!el && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
+              el = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+            }
             if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
             el.focus();
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
@@ -453,6 +477,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
             el.dispatchEvent(new Event('change', { bubbles: true }));
           })()
         `)
+        await waitForPageLoad(wc, 1000)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browserType] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
@@ -514,25 +539,39 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     }
   })
 
-  const browserMouseClickCoordinate = tool({
-    description: 'Clicks at a specific pixel coordinate.',
-    inputSchema: z.object({ x: z.number().int().describe('X coordinate.'), y: z.number().int().describe('Y coordinate.'), button: z.enum(['left', 'right', 'middle']).default('left').describe('Mouse button.') }),
-    execute: async ({ x, y, button }) => {
-      log.info(`[tool:browserMouseClickCoordinate] x=${x} y=${y} button="${button}"`)
+  const browserClickSelector = tool({
+    description: 'Clicks an element on the active webpage using a CSS selector or the integer agentId value returned from browserGetPageContent.',
+    inputSchema: z.object({
+      selector: z.string().describe('CSS selector of the element to click, or the integer agentId value (e.g. "1").'),
+      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
+    }),
+    execute: async ({ selector, frameSelector }) => {
+      log.info(`[tool:browserClickSelector] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getBrowserWebContents()!
       try {
-        wc.sendInputEvent({ type: 'mouseDown', x, y, button: button || 'left', clickCount: 1 })
-        wc.sendInputEvent({ type: 'mouseUp', x, y, button: button || 'left', clickCount: 1 })
+        await wc.executeJavaScript(`
+          (() => {
+            const doc = ${frameSelector ? `(() => { const f = document.querySelector(${JSON.stringify(frameSelector)}); return f ? f.contentDocument : document })()` : 'document'};
+            if (!doc) throw new Error('Frame not found');
+            let target = doc.querySelector(${JSON.stringify(selector)});
+            if (!target && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
+              target = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+            }
+            if (!target) throw new Error('Element not found for selector: ' + ${JSON.stringify(selector)});
+            target.click();
+          })()
+        `)
+        await waitForPageLoad(wc)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserMouseClickCoordinate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browserClickSelector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked coordinates` }] })
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked element` }] })
   })
 
   const browserGetPageContent = tool({
-    description: 'Extracts the page URL, title, visible text content, and interactive element definitions from the active browser viewport.',
+    description: 'Extracts the page URL, title, visible text content, and interactive element definitions with agentId labels from the active browser viewport. Interactive elements will render numeric badges directly on screenshots matching these agentId labels.',
     inputSchema: z.object({}),
     execute: async () => {
       log.info('[tool:browserGetPageContent] executing...')
@@ -542,18 +581,49 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       try {
         const result = await wc.executeJavaScript(`
           (() => {
+            document.querySelectorAll('.agent-overlay-badge').forEach(el => el.remove());
             const text = document.body.innerText || '';
             const interactive = [];
-            const elements = document.querySelectorAll('button, input, select, textarea, a, [role="button"]');
+            const elements = document.querySelectorAll('button, input, select, textarea, a, [role="button"], [role="link"]');
+            let index = 1;
             for (const el of elements) {
               if (interactive.length >= 100) break;
               const rect = el.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                interactive.push({
-                  tagName: el.tagName.toLowerCase(), id: el.id || undefined, className: el.className || undefined,
-                  text: (el.textContent || '').trim().slice(0, 80) || undefined, placeholder: el.placeholder || undefined,
-                  name: el.name || undefined, type: el.type || undefined, value: el.value || undefined
+              if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0) {
+                el.setAttribute('data-agent-id', String(index));
+                
+                const badge = document.createElement('div');
+                badge.className = 'agent-overlay-badge';
+                badge.innerText = String(index);
+                Object.assign(badge.style, {
+                  position: 'absolute',
+                  left: (window.scrollX + rect.left) + 'px',
+                  top: (window.scrollY + rect.top) + 'px',
+                  background: '#df9a44',
+                  color: '#ffffff',
+                  border: '1px solid #ffffff',
+                  borderRadius: '3px',
+                  padding: '1px 3px',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  fontFamily: 'monospace',
+                  zIndex: '2147483647',
+                  pointerEvents: 'none',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
                 });
+                document.body.appendChild(badge);
+
+                interactive.push({
+                  agentId: index,
+                  tagName: el.tagName.toLowerCase(),
+                  id: el.id || undefined,
+                  className: el.className || undefined,
+                  text: (el.textContent || '').trim().slice(0, 80) || undefined,
+                  placeholder: el.placeholder || undefined,
+                  name: el.name || undefined,
+                  value: el.value || undefined
+                });
+                index++;
               }
             }
             return { url: window.location.href, title: document.title, text: text.slice(0, 15000), interactiveElements: interactive };
@@ -566,5 +636,5 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
   })
 
-  return { browserNavigate, browserType, browserScroll, browserScreenshot, browserMouseClickCoordinate, browserGetPageContent }
+  return { browserNavigate, browserType, browserScroll, browserScreenshot, browserClickSelector, browserGetPageContent }
 }

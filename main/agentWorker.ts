@@ -40,7 +40,7 @@ proc.parentPort.on('message', async (e: { data: StreamIpcMessage; ports: Electro
     if (!port) return
     log.info(`[agentWorker] Starting stream for thread: ${threadId}`)
     try {
-      await handleAgentStreamRequest(port, threadId, modelType, attachments, promptText, isBrowserActive, new SharedArrayBuffer(1024 * 1024 + 64))
+      await handleAgentStreamRequest(port, threadId, modelType, attachments, promptText, isBrowserActive)
       proc.parentPort.postMessage({ type: 'stream-finished', threadId })
     } catch (err: any) {
       log.error(`[agentWorker] Stream error for thread ${threadId}:`, err)

@@ -1,7 +1,7 @@
 import React from 'react'
 import {
   Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, BookOpen,
-  MousePointerClick, Keyboard, Camera, ChevronsUpDown, FileText
+  MousePointerClick, Keyboard, Camera, ChevronsUpDown, FileText, Loader
 } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom, useAtomValue } from 'jotai'
@@ -191,7 +191,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
           {target}
           {suffix}
         </span>
-        {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
+        {toolCall.status === 'pending' && <Loader className="animate-spin text-secondary" size={12} />}
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>
     </div>

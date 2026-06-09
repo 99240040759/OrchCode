@@ -157,7 +157,7 @@ function createMainWindow(): BrowserWindow {
     y: mainWindowState.y,
     width: mainWindowState.width,
     height: mainWindowState.height,
-    minWidth: 900,
+    minWidth: 520,
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,

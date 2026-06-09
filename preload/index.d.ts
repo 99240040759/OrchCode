@@ -60,7 +60,6 @@ export type { StreamChunk, StreamPayload } from './types'
 
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>
-  getSharedBuffer(): Promise<SharedArrayBuffer>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>
   stopStream(threadId: string): void
   injectToStream(threadId: string, text: string): void

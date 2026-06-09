@@ -7,6 +7,7 @@ import {
   type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
+import { clearMarkdownCache } from '../lib/markdownParser'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
 
@@ -33,10 +34,6 @@ export function useChat() {
 
   const activeStreamThreadIdRef = useRef('')
   const flushRafRef = useRef<number | null>(null)
-  const workerRef = useRef<Worker | null>(null)
-  const workerVersionRef = useRef<Map<string, number>>(new Map())
-  const isCompilingRef = useRef(false)
-  const pendingCompileMap = useRef<Map<string, { content: string; version: number }>>(new Map())
   const isMountedRef = useRef(true)
   const isRunningRef = useRef(false)
   const threadsRef = useRef(threads)
@@ -51,44 +48,7 @@ export function useChat() {
     }
   }, [])
 
-  // Init markdown worker once
-  useEffect(() => {
-    workerRef.current = new Worker(new URL('../workers/markdown.worker.ts', import.meta.url), { type: 'module' })
-    workerRef.current.onmessage = (e) => {
-      const { html, targetId, version } = e.data
-      isCompilingRef.current = false
-      if (pendingCompileMap.current.size > 0) {
-        const entries = [...pendingCompileMap.current.entries()]
-        pendingCompileMap.current.clear()
-        isCompilingRef.current = true
-        const [firstTargetId, first] = entries[0]
-        for (const [tid, pending] of entries.slice(1)) {
-          pendingCompileMap.current.set(tid, pending)
-        }
-        workerRef.current?.postMessage({ type: 'compile', content: first.content, targetId: firstTargetId, version: first.version })
-      }
-      const latest = workerVersionRef.current.get(targetId)
-      // drop stale results
-      if (latest !== undefined && version < latest) return
-      window.dispatchEvent(new CustomEvent('stream:html-update', { detail: { targetId, html } }))
-    }
-    return () => { workerRef.current?.terminate(); workerRef.current = null }
-  }, [])
 
-  const postToWorker = useCallback((content: string, targetId: string) => {
-    if (!workerRef.current) return
-    const version = (workerVersionRef.current.get(targetId) ?? 0) + 1
-    workerVersionRef.current.set(targetId, version)
-    if (isCompilingRef.current) {
-      pendingCompileMap.current.set(targetId, { content, version })
-      return
-    }
-    isCompilingRef.current = true
-    workerRef.current.postMessage({ type: 'compile', content, targetId, version })
-  }, [])
-  useEffect(() => {
-    ;(window as any).postToMarkdownWorker = postToWorker
-  }, [postToWorker])
 
   const resetThreadScopedPanels = useCallback(() => {
     setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
@@ -153,13 +113,9 @@ export function useChat() {
     selectLockRef.current = true
     setRunState('idle')
     activeStreamThreadIdRef.current = threadId
-    let loadingTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-      if (activeStreamThreadIdRef.current === threadId && isMountedRef.current) setIsThreadLoading(true)
-      loadingTimer = null
-    }, 200)
-    const clearTimer = () => { if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null } }
+    setIsThreadLoading(true)
     const checkStale = () => {
-      if (activeStreamThreadIdRef.current !== threadId) { clearTimer(); if (isMountedRef.current) setIsThreadLoading(false); return true }
+      if (activeStreamThreadIdRef.current !== threadId) { if (isMountedRef.current) setIsThreadLoading(false); return true }
       return false
     }
     try {
@@ -172,7 +128,6 @@ export function useChat() {
       ])
       if (checkStale()) return
 
-      clearTimer()
       if (isMountedRef.current) {
         setActiveWorkspace(workspacePath ? { name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace', path: workspacePath } : null)
         const loadedMsgs = (rawMessages || []).filter((m): m is ThreadMessage & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
@@ -189,7 +144,6 @@ export function useChat() {
       }
     } catch (err) {
       console.error('[useChat] Failed to load thread:', err)
-      clearTimer()
       if (isMountedRef.current) setIsThreadLoading(false)
       throw err
     } finally { selectLockRef.current = false }
@@ -199,13 +153,14 @@ export function useChat() {
     try {
       const { conversationId: newId } = await threadService.newConversation()
       setRunState('idle')
-      const targetWsPath = workspacePath !== undefined ? workspacePath : activeWorkspace?.path
+      const targetWsPath = workspacePath || null
       if (targetWsPath) {
         await workspaceService.setActiveWorkspace(newId, targetWsPath)
       }
+      setActiveWorkspace(targetWsPath ? { name: targetWsPath.split(/[/\\]/).pop() ?? 'Workspace', path: targetWsPath } : null)
       setActiveThreadId(newId); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
     } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
-  }, [activeWorkspace, setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, resetThreadScopedPanels, setRunState, loadThreads])
+  }, [setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, resetThreadScopedPanels, setRunState, loadThreads, setActiveWorkspace])
 
   const deleteThread = useCallback(async (threadId: string) => {
     try {
@@ -259,10 +214,6 @@ export function useChat() {
     isRunningRef.current = true
     try {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
-    // clear version map for new stream
-    workerVersionRef.current.clear()
-    isCompilingRef.current = false
-    pendingCompileMap.current.clear()
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
     const isNewThread = !existingThread || existingThread.title === 'New Chat'
@@ -271,7 +222,7 @@ export function useChat() {
     if (isMountedRef.current) setRunState('thinking')
     if (isMountedRef.current) setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: Date.now() }])
     const assistantMsgId = crypto.randomUUID()
-    workerRef.current?.postMessage({ type: 'clear-cache', targetId: assistantMsgId })
+    clearMarkdownCache(assistantMsgId)
     if (isMountedRef.current) setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: Date.now(), isStreaming: true }])
 
     let fullContent = ''
@@ -285,6 +236,11 @@ export function useChat() {
       const snapshot = [...orderedBlocks]
       setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m))
     }
+    const scheduleFlush = () => {
+      if (flushRafRef.current === null) {
+        flushRafRef.current = requestAnimationFrame(() => { flushRafRef.current = null; flushNow() })
+      }
+    }
 
     const processChunk = (chunk: StreamChunk) => {
       if (!isMountedRef.current) return
@@ -294,15 +250,6 @@ export function useChat() {
       const chunkData = chunk.payload && typeof chunk.payload === 'object' ? (chunk.payload as Record<string, unknown>) : undefined
       const chunkText = typeof chunk.payload === 'string' ? chunk.payload : ''
 
-      if (chunkType === 'buffer-init') {
-        const sab = chunk.payload as unknown as SharedArrayBuffer
-        ;(window as any).sharedBuffer = sab
-        ;(window as any).sharedBufferHeader = new Int32Array(sab, 0, 16)
-        ;(window as any).sharedBufferReasoning = new Uint8Array(sab, 64, 256 * 1024)
-        ;(window as any).sharedBufferText = new Uint8Array(sab, 64 + 256 * 1024, 512 * 1024)
-        ;(window as any).sharedBufferTool = new Uint8Array(sab, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
-        return
-      }
 
       if (chunkType === 'reasoning-start') {
         currentReasoningStartMs = Date.now()
@@ -313,13 +260,13 @@ export function useChat() {
         if (last?.type === 'reasoning') {
           last.content += chunkText
           last.durationMs = Date.now() - currentReasoningStartMs
+          scheduleFlush()
         }
       } else if (chunkType === 'reasoning-end') {
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') {
           last.durationMs = Date.now() - currentReasoningStartMs
           last.isStreaming = false
-          postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${orderedBlocks.length - 1}`)
         }
         flushNow()
       } else if (chunkType === 'text-delta') {
@@ -334,6 +281,7 @@ export function useChat() {
           flushNow()
         } else {
           last.content += chunkText
+          scheduleFlush()
         }
       } else if (chunkType === 'tool-call-streaming-start') {
         setRunState('tool-calling')
@@ -368,9 +316,6 @@ export function useChat() {
         const finalContent = chunkData?.content as string ?? fullContent
         const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
         for (let i = 0; i < finalBlocks.length; i++) { const b = finalBlocks[i]; if (b.type === 'tool' && b.status === 'pending') finalBlocks[i] = { ...b, status: 'error' } }
-        const last = finalBlocks[finalBlocks.length - 1]
-        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${finalBlocks.length - 1}`)
-        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${finalBlocks.length - 1}`)
         finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
         setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
         setRunState('error')
@@ -401,9 +346,6 @@ export function useChat() {
         }
         const finalContent = chunkData?.content as string ?? fullContent
         const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
-        const last = finalBlocks[finalBlocks.length - 1]
-        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${finalBlocks.length - 1}`)
-        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${finalBlocks.length - 1}`)
         setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
         if (isMountedRef.current) setRunState('idle')
         if (isNewThread && (finalContent || finalBlocks.length > 0)) {
@@ -437,7 +379,7 @@ export function useChat() {
     } finally {
       isRunningRef.current = false
     }
-  }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, postToWorker, runState])
+  }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, runState])
 
   return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, closeAndDeleteWorkspace }
 }

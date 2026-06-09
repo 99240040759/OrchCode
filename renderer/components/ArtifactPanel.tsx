@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useAtom, useAtomValue } from 'jotai'
-import { X, Globe, TerminalSquare, ListTodo } from 'lucide-react'
+import { X, Globe, TerminalSquare, ListTodo, Loader } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import {
   isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom,
@@ -62,6 +62,7 @@ const ArtifactPanel: React.FC = () => {
   const [hoveredTabPath, setHoveredTabPath] = useState<string | null>(null)
   const [themeLoaded, setThemeLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [fileLoading, setFileLoading] = useState(false)
   const [artifacts, setArtifacts] = useAtom(artifactsAtom)
   const convId = useAtomValue(activeThreadIdAtom)
   const [isDiffMode, setIsDiffMode] = useState(false)
@@ -119,9 +120,10 @@ const ArtifactPanel: React.FC = () => {
 
   const handleArtifactClick = useCallback(async (art: ArtifactEntry) => {
     try {
+      setFileLoading(true)
       const fileData = await window.api.invoke('file:read', { filePath: art.path, conversationId: convId }) as FileReadResult
       if (fileData) { setIsDiffMode(false); handleOpenFile(fileData) }
-    } catch (err) { console.error(err) }
+    } catch (err) { console.error(err) } finally { setFileLoading(false) }
   }, [convId, handleOpenFile])
 
   const handleCloseFile = useCallback((fileToClose: EditorFile, e: React.MouseEvent) => {
@@ -179,10 +181,15 @@ const ArtifactPanel: React.FC = () => {
           <BrowserView />
         </Tabs.Content>
         <Tabs.Content value={activeFile?.path ?? ''} className="artifact-panel-tab-content">
-          {!activeFile ? <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." /> :
+          {fileLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '100%', color: 'var(--text-secondary)' }}>
+              <Loader className="animate-spin" size={24} />
+              <span>Loading file...</span>
+            </div>
+          ) : !activeFile ? <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." /> :
             activeFile.isBinary ? <MediaPreview displayFile={activeFile} /> :
             activeFile.name.endsWith('.md') ? <MarkdownView displayFile={activeFile} activeWorkspace={activeWorkspace} /> :
-            <React.Suspense fallback={<div className="editor-loading">Loading editor...</div>}>
+            <React.Suspense fallback={<div className="editor-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}><Loader className="animate-spin mr-2" size={16} />Loading editor...</div>}>
               <CodeEditorView displayFile={activeFile} activeWorkspace={activeWorkspace} themeLoaded={themeLoaded} isDiffMode={isDiffMode} setIsDiffMode={setIsDiffMode} originalContent={originalContent} handleDiffEditorMount={handleDiffEditorMount} handleEditorMount={handleEditorMount} handleSearchClick={handleSearchClick} />
             </React.Suspense>}
         </Tabs.Content>

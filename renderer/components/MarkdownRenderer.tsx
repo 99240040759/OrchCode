@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import mermaid from 'mermaid'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import { stripFileProtocol } from '../lib/pathUtils'
-import { parseMarkdown } from '../lib/markdownParser'
+import { parseMarkdown, parseMarkdownIncremental } from '../lib/markdownParser'
 import { sanitizeHtml } from '../lib/uiUtils'
 import type { FileReadResult } from '../../preload/index.d'
 import debounce from 'lodash.debounce'
@@ -35,7 +35,10 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
     const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
     const conversationId = useAtomValue(activeThreadIdAtom)
 
-    const html = React.useMemo(() => isStreaming ? '' : sanitizeHtml(parseMarkdown(content)), [content, isStreaming])
+    const html = React.useMemo(() => {
+      if (isStreaming && id) return sanitizeHtml(parseMarkdownIncremental(content, id))
+      return sanitizeHtml(parseMarkdown(content))
+    }, [content, isStreaming, id])
     const containerRef = React.useRef<HTMLDivElement | null>(null)
 
     React.useEffect(() => {

@@ -156,6 +156,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   to { transform: rotate(360deg); }
 }
 
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes textShimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }

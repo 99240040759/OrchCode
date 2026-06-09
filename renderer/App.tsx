@@ -107,6 +107,17 @@ function AppInner(): React.JSX.Element {
     return () => { unsubNew(); unsubOpen(); unsubSidebar(); unsubArtifacts(); unsubFocus(); unsubTerminal() }
   }, [newConversation, openWorkspace, setSidebarExpanded, setArtifactPanelOpen, setArtifactPanelMode])
 
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const handleResize = () => {
+      document.body.classList.add('resize-active')
+      clearTimeout(timer)
+      timer = setTimeout(() => { document.body.classList.remove('resize-active') }, 100)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => { window.removeEventListener('resize', handleResize); clearTimeout(timer) }
+  }, [])
+
   return (
     <div className="app-root">
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
@@ -114,7 +125,6 @@ function AppInner(): React.JSX.Element {
       <div className="app-content-wrapper">
         <div className="app-container">
           <main className="workspace-main">
-            <div className="app-glow-border" />
             <div className="split-view-container">
               <div className="chat-pane-wrapper">
                 <ChatPane fullWidth={!isArtifactPanelOpen} onSubmit={(p, a) => run(p, a)} onStop={stop} onOpenArtifacts={() => setArtifactPanelOpen(true)} onOpenWorkspace={openWorkspace} workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle} hasMessages={hasMessages} />

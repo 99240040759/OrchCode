@@ -5,6 +5,7 @@ import Lottie from 'lottie-react'
 import onboardingAnimation from '../assets/onboarding.json'
 import onboardingEntryAnimation from '../assets/onboarding-entry.json'
 import onboardingCompleteAnimation from '../assets/onboarding-complete.json'
+import { Loader } from 'lucide-react'
 
 import type { UserProfile } from '../../preload/index.d'
 
@@ -17,8 +18,8 @@ export const OnboardingView: React.FC = () => {
   React.useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 6000); return () => clearTimeout(timer) }, [])
   React.useEffect(() => {
     if (!user || hasCalledRef.current) return
-    const timer = setTimeout(() => { if (hasCalledRef.current) return; hasCalledRef.current = true; window.api.invoke('auth:complete-onboarding').catch(console.error) }, 1600)
-    return () => clearTimeout(timer)
+    hasCalledRef.current = true
+    window.api.invoke('auth:complete-onboarding').catch(console.error)
   }, [user])
 
   const handleSignIn = async () => {
@@ -52,7 +53,7 @@ export const OnboardingView: React.FC = () => {
           </div>
           {loading ? (
             <div className="onboarding-loading">
-              <div className="onboarding-spinner" />
+              <Loader className="animate-spin" size={28} style={{ color: '#3b82f6' }} />
               <span className="onboarding-loading-text">Connecting to Google Auth...</span>
             </div>
           ) : (

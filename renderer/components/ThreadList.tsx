@@ -1,11 +1,10 @@
-import React, { useMemo, useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
-import { Trash2, ChevronDown, ChevronRight, X, Folder, FolderPlus, Loader2, Plus } from 'lucide-react'
-import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateAtom } from '../store/agentStore'
+import { Trash2, FolderPlus, Loader } from 'lucide-react'
+import { threadListAtom, activeThreadIdAtom, agentRunStateAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import { format, isToday, isYesterday } from 'date-fns'
 
-// Thin wrapper: ThreadList only needs these four actions from useChat
 function useThreadListActions() {
   const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useChat()
   return { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation }
@@ -20,46 +19,11 @@ const formatConversationDate = (dateStr: string): string => {
 }
 
 const ThreadList: React.FC = () => {
-  const rawThreads = useAtomValue(threadListAtom)
+  const threads = useAtomValue(threadListAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
-  const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const agentRunState = useAtomValue(agentRunStateAtom)
-  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useThreadListActions()
-  const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
-
-  const threads = rawThreads
-
-  const allWorkspacePaths = useMemo(() => {
-    const paths = ['', ...threads.map(t => t.workspacePath || '')]
-    if (activeWorkspace?.path) paths.push(activeWorkspace.path)
-    const seen = new Set<string>()
-    const uniquePaths: string[] = []
-    for (const p of paths) {
-      const normalized = p.toLowerCase().replace(/\\/g, '/')
-      if (!seen.has(normalized)) { seen.add(normalized); uniquePaths.push(p) }
-    }
-    return uniquePaths.sort((a, b) => a === '' ? 1 : b === '' ? -1 : a.localeCompare(b))
-  }, [threads, activeWorkspace?.path])
-
-  const threadsByWorkspace = useMemo(() => {
-    const map: Record<string, typeof threads> = {}
-    for (const path of allWorkspacePaths) map[path] = []
-    for (const t of threads) {
-      const p = t.workspacePath || ''
-      const pNorm = p.toLowerCase().replace(/\\/g, '/')
-      const matchedKey = allWorkspacePaths.find(k => k.toLowerCase().replace(/\\/g, '/') === pNorm) ?? p
-      if (!map[matchedKey]) map[matchedKey] = []
-      map[matchedKey].push(t)
-    }
-    return map
-  }, [threads, allWorkspacePaths])
-
-  React.useEffect(() => {
-    const p = activeWorkspace?.path || ''
-    setExpandedPaths(prev => ({ ...prev, [p]: prev[p] !== false }))
-  }, [activeWorkspace?.path])
-
-  const toggleExpand = useCallback((path: string) => setExpandedPaths(prev => ({ ...prev, [path]: !prev[path] })), [])
+  const { selectThread, deleteThread, openWorkspace } = useThreadListActions()
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
@@ -67,58 +31,36 @@ const ThreadList: React.FC = () => {
     if (confirmed === 1) await deleteThread(threadId)
   }, [deleteThread])
 
-  const handleCloseWorkspace = useCallback(async (e: React.MouseEvent, path: string) => {
-    e.stopPropagation()
-    const name = path.split(/[/\\]/).pop() ?? 'Workspace'
-    const confirmed = await window.api.invoke('dialog:confirm', { message: `Delete workspace data for "${name}"?`, detail: `This will permanently delete all related conversations, chat logs, and workspace artifacts. Actual code files inside the folder will NOT be touched.`, buttons: ['Cancel', 'Delete Data'], defaultId: 1, cancelId: 0 })
-    if (confirmed === 1) await closeAndDeleteWorkspace(path)
-  }, [closeAndDeleteWorkspace])
-
   return (
     <div className="sidebar-section thread-list-container">
       <div className="sidebar-section-header thread-list-header">
-        <span>Projects</span>
-        <span title="Add Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}><FolderPlus size={14} /></span>
+        <span>Conversations</span>
+        <span title="Open Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}><FolderPlus size={14} /></span>
       </div>
 
       <div className="thread-list-group">
-        {allWorkspacePaths.length === 0 ? <div className="sidebar-empty-state">No projects opened yet.</div> : allWorkspacePaths.map((path) => {
-          const isActive = path === '' ? !activeWorkspace : activeWorkspace?.path === path
-          const expanded = expandedPaths[path] !== undefined ? !!expandedPaths[path] : isActive
+        {threads.length === 0 ? <div className="sidebar-empty-state">No conversations yet.</div> : threads.map((thread) => {
+          const active = activeThreadId === thread.id
+          const wsName = thread.workspacePath ? (thread.workspacePath.split(/[/\\]/).pop() ?? 'Workspace') : null
+          const isHovered = hoveredId === thread.id
           return (
-            <div key={path} className="thread-list-group">
-              <div className="thread-group-header" onClick={() => toggleExpand(path)}>
-                <div className="thread-group-actions">{expanded ? <ChevronDown size={14} className="text-secondary" /> : <ChevronRight size={14} className="text-secondary" />}</div>
-                <Folder size={14} className="text-secondary" />
-                <span className={`thread-group-title${isActive ? ' thread-item-active-title' : ''}`} title={path}>{path ? (path.split(/[/\\]/).pop() ?? 'Workspace') : 'General Chats'}</span>
-                <div className="thread-group-actions">
-                  <div className="sidebar-section-header-action" style={{ marginRight: path ? 4 : 0 }} onClick={(e) => { e.stopPropagation(); newConversation(path || null); if (!expanded) toggleExpand(path) }} title="New Chat"><Plus size={13} /></div>
-                  {path && <div className="sidebar-section-header-action" onClick={(e) => handleCloseWorkspace(e, path)} title="Close project"><X size={13} /></div>}
-                </div>
+            <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)} onMouseEnter={() => setHoveredId(thread.id)} onMouseLeave={() => setHoveredId(null)} style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+              <div className="thread-item-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <span className={`thread-item-title-text thread-item-title ${active ? 'thread-item-active-title' : ''}`} style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.title ?? 'New conversation'}</span>
+                {active && agentRunState !== 'idle' && <Loader size={12} className="animate-spin running-indicator" style={{ marginLeft: '4px' }} />}
               </div>
-              {expanded && (
-                <div className="thread-list-group">
-                  {(() => {
-                    const workspaceThreads = threadsByWorkspace[path] || []
-                    return workspaceThreads.length === 0 ? <div className="sidebar-empty-state-nested">No chats yet</div> :
-                      workspaceThreads.map((thread) => {
-                        const active = activeThreadId === thread.id
-                        return (
-                           <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)}>
-                             <div className="thread-item-row">
-                               <span className={`thread-item-title-text thread-item-title ${active ? 'thread-item-active-title' : ''}`}>{thread.title ?? 'New conversation'}</span>
-                               {active && agentRunState !== 'idle' && <Loader2 size={12} className="running-indicator" />}
-                             </div>
-                             <div className="thread-item-meta">
-                               <span className="thread-item-meta-time">{formatConversationDate(thread.updatedAt ?? thread.createdAt)}</span>
-                               <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation"><Trash2 size={12} /></div>
-                             </div>
-                           </div>
-                        )
-                      })
-                  })()}
+              {wsName && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
+                  {wsName}
                 </div>
               )}
+              <div className="thread-item-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', marginTop: '4px', height: '14px' }}>
+                {isHovered ? (
+                  <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation" style={{ cursor: 'pointer', opacity: 0.8 }}><Trash2 size={12} /></div>
+                ) : (
+                  <span className="thread-item-meta-time" style={{ color: 'var(--text-muted)' }}>{formatConversationDate(thread.createdAt)}</span>
+                )}
+              </div>
             </div>
           )
         })}

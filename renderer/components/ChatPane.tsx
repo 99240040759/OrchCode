@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
-import { ChevronDown, Code } from 'lucide-react'
+import { ChevronDown, Code, Loader } from 'lucide-react'
 import TitleBar from './TitleBar'
 import Lottie from 'lottie-react'
 import emptyStateAnimation from '../assets/empty-state.json'
@@ -28,7 +28,7 @@ export const ChatPane = React.memo<ChatPaneProps>(
 
         {isLoading && (
           <div className="thread-loading-overlay">
-            <div className="thread-loading-spinner" />
+            <Loader className="animate-spin" size={24} style={{ color: 'var(--accent-blue)' }} />
           </div>
         )}
 

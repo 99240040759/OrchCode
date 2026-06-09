@@ -19,9 +19,6 @@ contextBridge.exposeInMainWorld('api', {
   invoke: (command: string, payload?: unknown): Promise<unknown> =>
     ipcRenderer.invoke('api:invoke', { command, payload }),
 
-  getSharedBuffer: (): Promise<SharedArrayBuffer> => {
-    return Promise.resolve(new SharedArrayBuffer(1024 * 1024 + 64))
-  },
 
   /**
    * Start an agent stream. Main will:

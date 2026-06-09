@@ -20,7 +20,11 @@ function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
     if (extra) { for (const [k, v] of Object.entries(extra)) headers.set(k, v) }
     
-    const fetchOptions: RequestInit = { ...options, headers }
+    const fetchOptions: RequestInit = {
+      signal: AbortSignal.timeout(30000),
+      ...options,
+      headers
+    }
     return fetch(url, fetchOptions)
   }
 }

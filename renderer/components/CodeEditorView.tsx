@@ -1,6 +1,6 @@
 import React from 'react'
 import { Editor, DiffEditor } from '@monaco-editor/react'
-import { FileDiff, Search, Copy } from 'lucide-react'
+import { FileDiff, Search, Copy, Loader } from 'lucide-react'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
@@ -39,7 +39,7 @@ const CodeEditorView: React.FC<CodeEditorViewProps> = ({ displayFile, activeWork
       {themeLoaded ? (
         isDiffMode ? (
           originalContent === null ? (
-            <div className="loading-container"><div className="loading-spinner" />Loading diff...</div>
+            <div className="loading-container"><Loader className="animate-spin" size={16} style={{ marginRight: '8px', color: 'var(--text-secondary)' }} />Loading diff...</div>
           ) : (
             <DiffEditor height="100%" language={displayFile.language} theme="orch-dark" original={originalContent ?? ''} modified={displayFile.content ?? ''} onMount={handleDiffEditorMount} keepCurrentOriginalModel={true} keepCurrentModifiedModel={true}
               options={{ readOnly: true, minimap: { enabled: false }, renderSideBySide: true, scrollbar: { vertical: 'visible', horizontal: 'visible', useShadows: false, verticalScrollbarSize: 8, horizontalScrollbarSize: 8 } }} />

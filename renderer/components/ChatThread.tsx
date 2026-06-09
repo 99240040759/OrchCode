@@ -1,11 +1,11 @@
 import React from 'react'
-import morphdom from 'morphdom'
+
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'
 import type { PrimitiveAtom } from 'jotai'
+import { Virtuoso } from 'react-virtuoso'
 import {
   chatMessageAtomsAtom,
   chatMessagesAtom,
-  agentRunStateAtom,
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
   artifactPanelModeAtom
@@ -15,7 +15,6 @@ import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStor
 import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import { sanitizeHtml } from '../lib/uiUtils'
 import { decodeBase64Utf8 } from '../lib/sharedUtils'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -30,79 +29,7 @@ import { decodeBase64Utf8 } from '../lib/sharedUtils'
  */
 const StreamingMarkdown = React.memo(
   ({ content, targetId, isStreaming }: { content: string; targetId: string; isStreaming: boolean }) => {
-    const containerRef = React.useRef<HTMLDivElement>(null)
-    const lastHtmlRef = React.useRef<string>('')
-
-    React.useEffect(() => {
-      if (!isStreaming) return
-      const isReasoning = targetId.startsWith('streaming-reasoning')
-      const blockCounterIdx = isReasoning ? 4 : 5
-      let localReadCursor = new TextEncoder().encode(content).length, accumulatedText = content, rafId: number | null = null
-      
-      const initialHeader = (window as any).sharedBufferHeader
-      const myBlockId = initialHeader ? initialHeader[blockCounterIdx] : 0
-      let localWrapCount = initialHeader ? initialHeader[(isReasoning ? 0 : 1) + 6] : 0
-
-      const checkBuffer = () => {
-        const header = (window as any).sharedBufferHeader
-        const buf = isReasoning ? (window as any).sharedBufferReasoning : (window as any).sharedBufferText
-        const cursorIdx = isReasoning ? 0 : 1
-        if (header && buf) {
-          if (header[blockCounterIdx] !== myBlockId) {
-            if (rafId) cancelAnimationFrame(rafId)
-            return
-          }
-          const writeCursor = header[cursorIdx]
-          const wrapCount = header[cursorIdx + 6]
-          
-          if (wrapCount > localWrapCount) {
-            const slice1 = buf.subarray(localReadCursor, buf.byteLength)
-            const slice2 = buf.subarray(0, writeCursor)
-            localReadCursor = writeCursor
-            localWrapCount = wrapCount
-            accumulatedText += new TextDecoder().decode(slice1) + new TextDecoder().decode(slice2)
-            ;(window as any).postToMarkdownWorker?.(accumulatedText, targetId)
-          } else if (writeCursor > localReadCursor) {
-            const slice = buf.subarray(localReadCursor, writeCursor)
-            localReadCursor = writeCursor
-            accumulatedText += new TextDecoder().decode(slice)
-            ;(window as any).postToMarkdownWorker?.(accumulatedText, targetId)
-          }
-        }
-        rafId = requestAnimationFrame(checkBuffer)
-      }
-      rafId = requestAnimationFrame(checkBuffer)
-      const handleUpdate = (e: Event) => {
-        const { targetId: tid, html } = (e as CustomEvent<{ targetId: string; html: string }>).detail
-        if (tid !== targetId || !containerRef.current) return
-        const sanitizedHtml = sanitizeHtml(html)
-        if (sanitizedHtml === lastHtmlRef.current) return
-        lastHtmlRef.current = sanitizedHtml
-        morphdom(containerRef.current, `<div id="${tid}" class="markdown-content">${sanitizedHtml}</div>`, {
-          onBeforeElUpdated: (from, to) => !from.isEqualNode(to)
-        })
-        requestAnimationFrame(() => {
-          const chatEl = document.querySelector('.chat-thread-container')
-          if (chatEl) {
-            const { scrollTop, scrollHeight, clientHeight } = chatEl
-            if (scrollHeight - scrollTop - clientHeight < 120) chatEl.scrollTop = chatEl.scrollHeight
-          }
-        })
-      }
-      window.addEventListener('stream:html-update', handleUpdate, { passive: true })
-      return () => {
-        if (rafId) cancelAnimationFrame(rafId)
-        window.removeEventListener('stream:html-update', handleUpdate)
-      }
-    }, [isStreaming, targetId])
-
-    const noHtmlYet = isStreaming && !lastHtmlRef.current
-    return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming && lastHtmlRef.current ? '' : content} isStreaming={isStreaming && !noHtmlYet} />
-  },
-  (prev, next) => {
-    if (prev.targetId !== next.targetId) return false
-    if (prev.isStreaming !== next.isStreaming) return false
-    return next.isStreaming || prev.content === next.content
+    return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
   }
 )
 StreamingMarkdown.displayName = 'StreamingMarkdown'
@@ -323,13 +250,12 @@ const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActio
 UserMessage.displayName = 'UserMessage'
 
 // Removed custom atom key generator since Jotai atoms have stable toString()
-// ─── ChatThread ───────────────────────────────────────────────────────────────
+const Scroller = React.forwardRef<HTMLDivElement, any>((props, ref) => <div {...props} ref={ref} className="chat-thread-container" />)
+Scroller.displayName = 'Scroller'
 
 const ChatThread: React.FC = () => {
   const messageAtoms = useAtomValue(chatMessageAtomsAtom)
-  // Only read messages for grouping — not for re-render triggers during streaming
   const messages = useAtomValue(chatMessagesAtom)
-  const runState = useAtomValue(agentRunStateAtom)
 
   const messageGroups = React.useMemo(() => {
     const groups: Array<{ key: string; userAtom: any; assistantAtoms: any[] }> = []
@@ -348,63 +274,27 @@ const ChatThread: React.FC = () => {
     return groups
   }, [messageAtoms, messages])
 
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const isAtBottomRef = React.useRef(true)
-  const prevLengthRef = React.useRef(messageAtoms.length)
-  const prevRunStateRef = React.useRef(runState)
-  const scrollRafRef = React.useRef<number | null>(null)
-
-  // RAF-throttled scroll tracking — avoids layout thrash on every scroll event
-  const handleScroll = React.useCallback(() => {
-    if (scrollRafRef.current !== null) return
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = null
-      if (!containerRef.current) return
-      const { scrollTop, scrollHeight, clientHeight } = containerRef.current
-      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 80
-    })
-  }, [])
-
-  React.useLayoutEffect(() => {
-    if ((runState === 'streaming' || runState === 'tool-calling') && isAtBottomRef.current && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
-    }
-  })
-
-  React.useEffect(() => {
-    if (!containerRef.current) return
-    const isStreaming = runState !== 'idle' && runState !== 'error'
-    const wasStreaming = prevRunStateRef.current !== 'idle' && prevRunStateRef.current !== 'error'
-    const hasNewMessage = messageAtoms.length > prevLengthRef.current
-    prevLengthRef.current = messageAtoms.length
-    prevRunStateRef.current = runState
-    if (hasNewMessage || (isStreaming && !wasStreaming)) {
-      const rafId = requestAnimationFrame(() => {
-        if (!containerRef.current) return
-        const { scrollHeight, clientHeight } = containerRef.current
-        if (isAtBottomRef.current) containerRef.current.scrollTo({ top: scrollHeight - clientHeight, behavior: isStreaming ? 'auto' : 'smooth' })
-      })
-      return () => cancelAnimationFrame(rafId)
-    }
-    return undefined
-  }, [messageAtoms, runState])
-
   if (messageAtoms.length === 0) return null
 
   return (
-    <div ref={containerRef} onScroll={handleScroll} className="chat-thread-container">
-      <div className="chat-thread-spacer-top" />
-      {messageGroups.map((group) => (
-        <div key={group.key} className="chat-section">
-          {group.userAtom && <MessageWrapper key={`${group.userAtom}`} messageAtom={group.userAtom} />}
+    <Virtuoso
+      style={{ height: '100%', width: '100%' }}
+      data={messageGroups}
+      followOutput="auto"
+      components={{
+        Scroller,
+        Header: () => <div className="chat-thread-spacer-top" />,
+        Footer: () => <div className="chat-thread-spacer-bottom" />
+      }}
+      itemContent={(_, group) => (
+        <div className="chat-section">
+          {group.userAtom && <MessageWrapper messageAtom={group.userAtom} />}
           {group.assistantAtoms.map((assistantAtom) => (
             <MessageWrapper key={`${assistantAtom}`} messageAtom={assistantAtom} />
           ))}
         </div>
-      ))}
-      <div className="chat-thread-spacer-bottom" />
-      <div className="chat-thread-anchor" />
-    </div>
+      )}
+    />
   )
 }
 
