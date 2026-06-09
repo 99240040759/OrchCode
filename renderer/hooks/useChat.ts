@@ -2,25 +2,13 @@ import { useRef, useCallback, useEffect } from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import {
   agentRunStateAtom, chatMessagesAtom, activeThreadIdAtom, threadListAtom,
-  sessionTokensAtom, selectedModelAtom, activeWorkspaceAtom, isThreadLoadingAtom,
+  sessionTokensAtom, lifetimeTokensAtom, selectedModelAtom, activeWorkspaceAtom, isThreadLoadingAtom,
   openFilesAtom, activeEditorFileAtom, artifactsAtom, artifactPanelModeAtom,
   type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
-
-async function initSharedBuffer() {
-  if ((window as any).sharedBufferHeader) return
-  try {
-    const sab = await window.api.getSharedBuffer()
-    ;(window as any).sharedBuffer = sab
-    ;(window as any).sharedBufferHeader = new Int32Array(sab, 0, 16)
-    ;(window as any).sharedBufferReasoning = new Uint8Array(sab, 64, 256 * 1024)
-    ;(window as any).sharedBufferText = new Uint8Array(sab, 64 + 256 * 1024, 512 * 1024)
-    ;(window as any).sharedBufferTool = new Uint8Array(sab, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
-  } catch (err) { console.error('Failed to init SharedArrayBuffer in renderer:', err) }
-}
 
 const isToolResultError = (r: unknown): boolean => {
   if (!r || typeof r !== 'object') return false
@@ -34,6 +22,7 @@ export function useChat() {
   const [messages, setMessages] = useAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
+  const setLifetimeTokens = useSetAtom(lifetimeTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const [activeWorkspace, setActiveWorkspace] = useAtom(activeWorkspaceAtom)
   const setIsThreadLoading = useSetAtom(isThreadLoadingAtom)
@@ -61,7 +50,6 @@ export function useChat() {
       if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current)
     }
   }, [])
-  useEffect(() => { void initSharedBuffer() }, [])
 
   // Init markdown worker once
   useEffect(() => {
@@ -146,8 +134,11 @@ export function useChat() {
   }, [setRunState, setMessages])
 
   const activeThreadIdRef = useRef(activeThreadId)
+  const messagesRef = useRef(messages)
+  useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
+  useEffect(() => { messagesRef.current = messages }, [messages])
+
   useEffect(() => {
-    activeThreadIdRef.current = activeThreadId
     return () => {
       setMessages(prev => prev.map(m =>
         m.isStreaming
@@ -191,6 +182,7 @@ export function useChat() {
         })
         setMessages(loadedMsgs)
         setSessionTokens(fresh?.accumulatedTokens ?? 0)
+        setLifetimeTokens(fresh?.lifetimeTokens ?? 0)
         resetThreadScopedPanels()
         setActiveThreadId(threadId)
         setIsThreadLoading(false)
@@ -211,9 +203,9 @@ export function useChat() {
       if (targetWsPath) {
         await workspaceService.setActiveWorkspace(newId, targetWsPath)
       }
-      setActiveThreadId(newId); setMessages([]); setSessionTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
+      setActiveThreadId(newId); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
     } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
-  }, [activeWorkspace, setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setRunState, loadThreads])
+  }, [activeWorkspace, setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, resetThreadScopedPanels, setRunState, loadThreads])
 
   const deleteThread = useCallback(async (threadId: string) => {
     try {
@@ -221,17 +213,17 @@ export function useChat() {
       await threadService.deleteThread(threadId); setThreads(prev => prev.filter(t => t.id !== threadId))
       const curId = activeThreadIdRef.current
       if (curId === threadId) {
-        setRunState('idle'); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setActiveWorkspace(null); resetThreadScopedPanels()
+        setRunState('idle'); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); setActiveWorkspace(null); resetThreadScopedPanels()
       }
     } catch (err) { console.error('[useChat] Delete thread error:', err); throw err }
-  }, [setThreads, setActiveThreadId, setMessages, setSessionTokens, setActiveWorkspace, resetThreadScopedPanels, setRunState])
+  }, [setThreads, setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, setActiveWorkspace, resetThreadScopedPanels, setRunState])
 
   const closeAndDeleteWorkspace = useCallback(async (path: string) => {
     try {
       if (activeWorkspace?.path === path) {
         const curId = activeThreadIdRef.current
         if (curId) window.api.stopStream(curId)
-        setRunState('idle'); setActiveWorkspace(null); setActiveThreadId(''); setMessages([]); setSessionTokens(0); resetThreadScopedPanels()
+        setRunState('idle'); setActiveWorkspace(null); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); resetThreadScopedPanels()
       }
       const success = await workspaceService.closeAndDeleteWorkspace(path)
       if (success) await loadThreads()
@@ -242,7 +234,7 @@ export function useChat() {
   const openWorkspace = useCallback(async () => {
     try {
       const prevId = activeThreadIdRef.current; let currentId = prevId; let createdNew = false
-      if (!currentId || messages.length > 0) { currentId = await newConversation(); createdNew = true }
+      if (!currentId || messagesRef.current.length > 0) { currentId = await newConversation(); createdNew = true }
       const ctx = await workspaceService.selectWorkspace(currentId)
       if (ctx) {
         resetThreadScopedPanels(); setActiveWorkspace({ name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath })
@@ -301,6 +293,16 @@ export function useChat() {
       const chunkType = chunk.type
       const chunkData = chunk.payload && typeof chunk.payload === 'object' ? (chunk.payload as Record<string, unknown>) : undefined
       const chunkText = typeof chunk.payload === 'string' ? chunk.payload : ''
+
+      if (chunkType === 'buffer-init') {
+        const sab = chunk.payload as unknown as SharedArrayBuffer
+        ;(window as any).sharedBuffer = sab
+        ;(window as any).sharedBufferHeader = new Int32Array(sab, 0, 16)
+        ;(window as any).sharedBufferReasoning = new Uint8Array(sab, 64, 256 * 1024)
+        ;(window as any).sharedBufferText = new Uint8Array(sab, 64 + 256 * 1024, 512 * 1024)
+        ;(window as any).sharedBufferTool = new Uint8Array(sab, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
+        return
+      }
 
       if (chunkType === 'reasoning-start') {
         currentReasoningStartMs = Date.now()
@@ -390,9 +392,13 @@ export function useChat() {
       } else if (chunkType === 'token-update') {
         const live = Number(chunkData?.accumulatedTokens ?? 0)
         if (live > 0 && isMountedRef.current) setSessionTokens(live)
+        if (chunkData?.lifetimeTokens !== undefined && isMountedRef.current) setLifetimeTokens(Number(chunkData.lifetimeTokens))
       } else if (chunkType === 'finish') {
         assistantIsStreaming = false
-        if (isMountedRef.current) setSessionTokens(Number(chunkData?.accumulatedTokens ?? 0))
+        if (isMountedRef.current) {
+          setSessionTokens(Number(chunkData?.accumulatedTokens ?? 0))
+          if (chunkData?.lifetimeTokens !== undefined) setLifetimeTokens(Number(chunkData.lifetimeTokens))
+        }
         const finalContent = chunkData?.content as string ?? fullContent
         const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
         const last = finalBlocks[finalBlocks.length - 1]

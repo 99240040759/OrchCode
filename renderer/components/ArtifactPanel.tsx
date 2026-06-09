@@ -16,9 +16,9 @@ import type { TerminalViewHandle } from './TerminalView'
 import OverviewPanel from './OverviewPanel'
 import TerminalView from './TerminalView'
 import BrowserView from './BrowserView'
-import MediaPreview from './MediaPreview'
-import MarkdownView from './MarkdownView'
-import { EmptyState } from './Primitives'
+import { MediaPreview } from './InputBar'
+import { MarkdownView } from './MarkdownRenderer'
+import { EmptyState } from '../lib/uiUtils'
 
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
 import { isMac } from '../lib/sharedUtils'

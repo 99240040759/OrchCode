@@ -36,7 +36,7 @@ interface ToolStreamPart {
 }
 
 const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
-const SUMMARISE_THRESHOLD = 90_000
+const SUMMARISE_THRESHOLD = 180_000
 
 const AttachmentSchema = z.object({
   type: z.enum(['image', 'document']),
@@ -168,14 +168,23 @@ export async function handleAgentStreamRequest(
   headerView[2] = 0
   headerView[3] = 1
   headerView[4] = 0
+  headerView[5] = 0
+
+  send({ type: 'buffer-init', payload: sharedBuffer, threadId })
 
   const encoder = new TextEncoder()
   const writeToSharedBuffer = (view: Uint8Array, cursorIdx: number, textVal: string) => {
     const bytes = encoder.encode(textVal)
-    const currentCursor = headerView[cursorIdx]
+    let currentCursor = headerView[cursorIdx]
     if (currentCursor + bytes.length <= view.byteLength) {
       view.set(bytes, currentCursor)
       headerView[cursorIdx] = currentCursor + bytes.length
+    } else {
+      const spaceLeft = view.byteLength - currentCursor
+      if (spaceLeft > 0) view.set(bytes.subarray(0, spaceLeft), currentCursor)
+      view.set(bytes.subarray(spaceLeft), 0)
+      headerView[cursorIdx] = bytes.length - spaceLeft
+      headerView[cursorIdx + 6] += 1
     }
   }
 
@@ -196,10 +205,14 @@ export async function handleAgentStreamRequest(
   let assistantMsgId = '', assistantContent = ''
   const orderedBlocks: StreamBlock[] = []
   let sessionAccumulatedTokens = 0
+  let persistedAccumulatedTokens = 0
+  let persistedLifetimeTokens = 0
 
   try {
     const history = await getThreadMessages(threadId)
-    let persistedAccumulatedTokens = (await getThread(threadId))?.accumulatedTokens ?? 0
+    const threadData = await getThread(threadId)
+    persistedAccumulatedTokens = threadData?.accumulatedTokens ?? 0
+    persistedLifetimeTokens = threadData?.lifetimeTokens ?? 0
     const userMsgId = crypto.randomUUID()
     await saveMessage(threadId, {
       id: userMsgId,
@@ -280,7 +293,7 @@ export async function handleAgentStreamRequest(
         if (usage) {
           const step = usage.totalTokens || (usage.inputTokens || 0) + (usage.outputTokens || 0)
           sessionAccumulatedTokens += step
-          send({ type: 'token-update', payload: { accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens }, threadId })
+          send({ type: 'token-update', payload: { accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens }, threadId })
         }
       },
       prepareStep: async ({ messages: currentMessages }) => {
@@ -291,7 +304,9 @@ export async function handleAgentStreamRequest(
         if (!summary) return undefined
         try {
           await compactThreadHistory(threadId, summary)
+          await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens)
           await setThreadAccumulatedTokens(threadId, 0)
+          persistedLifetimeTokens += sessionAccumulatedTokens
           persistedAccumulatedTokens = 0
           sessionAccumulatedTokens = 0
         } catch (err) {
@@ -300,7 +315,7 @@ export async function handleAgentStreamRequest(
           sessionAccumulatedTokens = prevSession
           return undefined
         }
-        send({ type: 'token-update', payload: { accumulatedTokens: 0 }, threadId })
+        send({ type: 'token-update', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens }, threadId })
         return {
           system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nSummary:\n\n${summary}\n\nContinue from this state.`,
           messages: sanitizeMessages((currentMessages as ModelMessage[]).slice(-10))
@@ -315,6 +330,7 @@ export async function handleAgentStreamRequest(
       switch (part.type) {
         case 'reasoning-start':
           headerView[0] = 0
+          headerView[4] += 1
           currentReasoningStartMs = Date.now()
           orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
           send({ type: 'reasoning-start', threadId })
@@ -336,6 +352,7 @@ export async function handleAgentStreamRequest(
           const isNewBlock = !last || last.type !== 'text'
           if (isNewBlock) {
             headerView[1] = 0
+            headerView[5] += 1
             orderedBlocks.push({ type: 'text', content: delta })
           } else {
             last.content += delta
@@ -398,7 +415,7 @@ export async function handleAgentStreamRequest(
           const u = p.totalUsage || {}
           const pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0
           try { await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens) } catch (err) { log.error('[stream] Token count save failed:', err) }
-          send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: pTokens + cTokens }, accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens, content: assistantContent, orderedBlocks }, threadId })
+          send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: pTokens + cTokens }, accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens, content: assistantContent, orderedBlocks }, threadId })
           if (p.finishReason === 'length') { log.warn(`[stream] Token limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
           break
         }
@@ -429,7 +446,7 @@ export async function handleAgentStreamRequest(
       }
       // inject-resume MUST be sent before finish — preload closes the port on finish
       send({ type: 'inject-resume', payload: injectedText, threadId })
-      send({ type: 'finish', payload: { accumulatedTokens: 0, content: assistantContent, orderedBlocks }, threadId })
+      send({ type: 'finish', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens, content: assistantContent, orderedBlocks }, threadId })
     } else if (error.name !== 'AbortError') {
       log.error('[stream] error:', error)
       for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }

@@ -1,4 +1,4 @@
-import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult } from '../../preload/index.d'
+import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile } from '../../preload/index.d'
 
 const invoke = <T>(command: string, payload?: unknown): Promise<T> =>
   window.api.invoke(command, payload) as Promise<T>
@@ -22,4 +22,25 @@ export const workspaceService = {
   listWorkspaceFiles: (conversationId: string) => invoke<string[]>('workspace:list-files', { conversationId }),
   readFile: (filePath: string, conversationId: string) => invoke<FileReadResult>('file:read', { filePath, conversationId }),
   readOriginalFile: (filePath: string, conversationId?: string) => invoke<{ content: string }>('file:read-original', { filePath, conversationId })
+}
+
+export const authService = {
+  startGoogleAuth: async (): Promise<UserProfile | null> => {
+    try { return await invoke<UserProfile | null>('auth:login') }
+    catch (err) { console.error('[authService] startGoogleAuth failed:', err); throw err }
+  },
+  logout: async (): Promise<boolean> => {
+    try { return await invoke<boolean>('auth:logout') }
+    catch (err) { console.error('[authService] logout failed:', err); throw err }
+  },
+  getAuthUser: async (): Promise<UserProfile | null> => {
+    try { return await invoke<UserProfile | null>('auth:get-user') }
+    catch (err) { console.error('[authService] getAuthUser failed:', err); throw err }
+  },
+  onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
+    return window.api.on('auth:status-changed', (user) => {
+      try { callback(user as UserProfile | null) }
+      catch (err) { console.error('[authService] Error in auth status callback:', err); throw err }
+    })
+  }
 }

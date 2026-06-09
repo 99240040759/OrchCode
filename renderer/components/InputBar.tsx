@@ -5,9 +5,9 @@ import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
-import AutocompleteSuggestions from './AutocompleteSuggestions'
+
 import { workspaceService } from '../services/services'
-import { TokenIndicator } from './TokenIndicator'
+import { TokenIndicator } from './OverviewPanel'
 import { toast } from 'sonner'
 
 interface InputBarProps { onSubmit?: (val: string, attachments?: any[]) => void; onStop?: () => void }
@@ -16,6 +16,42 @@ const MAX_TOKENS = 200_000
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+export const AutocompleteSuggestions: React.FC<{ showFileSuggestions: boolean, filteredFiles: string[], suggestionIndex: number, setSuggestionIndex: (idx: number) => void, selectFileSuggestion: (file: string) => void }> = ({ showFileSuggestions, filteredFiles, suggestionIndex, setSuggestionIndex, selectFileSuggestion }) => {
+  if (!showFileSuggestions || filteredFiles.length === 0) return null
+  return (
+    <div className="input-file-suggestions">
+      {filteredFiles.map((file, idx) => {
+        const isSelected = idx === suggestionIndex
+        const parts = file.split(/[/\\]/)
+        const name = parts[parts.length - 1]
+        const dir = parts.slice(0, -1).join('/')
+        return (
+          <div key={file} onClick={() => selectFileSuggestion(file)} onMouseEnter={() => setSuggestionIndex(idx)} className={`input-file-suggestion-item${isSelected ? ' input-file-suggestion-item-selected' : ''}`}>
+            <SymbolsFileIcon fileName={name} autoAssign={true} width={14} height={14} className="input-file-icon" />
+            <div className="input-file-details">
+              <span className="input-file-name">{name}</span>
+              {dir && <span className="input-file-dir">{dir}</span>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export const MediaPreview: React.FC<{ displayFile: { name: string; path: string; isBinary?: boolean; mimeType?: string; base64?: string } }> = ({ displayFile }) => {
+  const { mimeType, base64, name } = displayFile
+  const src = `data:${mimeType};base64,${base64}`
+  return (
+    <div className="media-preview-outer media-preview-container">
+      {mimeType?.startsWith('image/') && <div className="media-image-wrapper"><img src={src} alt={name} className="media-preview-image" /></div>}
+      {mimeType?.startsWith('video/') && <video controls autoPlay src={src} className="media-preview-video" />}
+      {mimeType?.startsWith('audio/') && <div className="media-audio-wrapper"><span className="media-audio-label">{name}</span><audio controls autoPlay src={src} className="media-preview-audio" /></div>}
+      {!mimeType?.startsWith('image/') && !mimeType?.startsWith('video/') && !mimeType?.startsWith('audio/') && <div className="media-unsupported">Unsupported preview format ({mimeType})</div>}
+    </div>
+  )
+}
 
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')

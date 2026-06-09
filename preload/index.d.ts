@@ -15,6 +15,7 @@ export interface ThreadEntry {
   updatedAt: string
   workspacePath?: string | null
   accumulatedTokens?: number
+  lifetimeTokens?: number
 }
 
 export interface ThreadMessage {

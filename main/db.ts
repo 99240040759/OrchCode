@@ -1,8 +1,8 @@
 import log from 'electron-log'
 import crypto from 'node:crypto'
-import { getDatabasePath } from './paths'
+import { getDatabasePath } from './utils'
 
-export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string }
+export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string; lifetimeTokens?: number }
 export interface ThreadMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; data?: string; createdAt: string }
 
 const pendingQueries = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
@@ -59,7 +59,9 @@ function spawnWorker() {
     if (respawnTimer) clearTimeout(respawnTimer)
     respawnTimer = setTimeout(() => { respawnTimer = null; spawnWorker() }, delay)
   })
-  respawnAttempts = 0
+  
+  // Reset respawn attempts if the worker survives for 10 seconds
+  setTimeout(() => { if (worker) respawnAttempts = 0 }, 10000)
 }
 
 function getWorker() {
@@ -86,8 +88,8 @@ export function runQuery(method: string, ...args: any[]): Promise<any> {
 }
 
 export function checkpointDB(): Promise<void> { return runQuery('checkpointDB') }
-export function getThreads(): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })[]> { return runQuery('getThreads') }
-export function getThread(threadId: string): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number }) | null> { return runQuery('getThread', threadId) }
+export function getThreads(): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number; lifetimeTokens?: number })[]> { return runQuery('getThreads') }
+export function getThread(threadId: string): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number; lifetimeTokens?: number }) | null> { return runQuery('getThread', threadId) }
 export function getThreadMessages(threadId: string): Promise<ThreadMessage[]> { return runQuery('getThreadMessages', threadId) }
 export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }): Promise<ThreadMessage> { return runQuery('saveMessage', threadId, message) }
 export function deleteThread(threadId: string): Promise<boolean> { return runQuery('deleteThread', threadId) }

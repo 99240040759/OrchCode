@@ -1,9 +1,28 @@
 import { shell, BrowserWindow, safeStorage } from 'electron'
-import { authEvents } from './authEvents'
+import { EventEmitter } from 'node:events'
+
+type AuthEventMap = {
+  'open-main-and-close-onboarding': []
+  'logged-out': []
+}
+
+class AuthEventEmitter extends EventEmitter {
+  emit<K extends keyof AuthEventMap>(event: K, ...args: AuthEventMap[K]): boolean {
+    return super.emit(event, ...args)
+  }
+  on<K extends keyof AuthEventMap>(event: K, listener: (...args: AuthEventMap[K]) => void): this {
+    return super.on(event, listener)
+  }
+  once<K extends keyof AuthEventMap>(event: K, listener: (...args: AuthEventMap[K]) => void): this {
+    return super.once(event, listener)
+  }
+}
+
+export const authEvents = new AuthEventEmitter()
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
-import { getSessionPath } from './paths'
+import { getSessionPath } from './utils'
 
 export interface UserProfile {
   uid: string

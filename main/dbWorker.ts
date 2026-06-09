@@ -13,7 +13,7 @@ function getDB(dbPath: string): Database.Database {
   dbInstance.pragma('temp_store = MEMORY')
   dbInstance.pragma('foreign_keys = ON')
   dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, resourceId TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, accumulatedTokens INTEGER NOT NULL DEFAULT 0) STRICT;
+    CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, resourceId TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, accumulatedTokens INTEGER NOT NULL DEFAULT 0, lifetimeTokens INTEGER NOT NULL DEFAULT 0) STRICT;
     CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, data TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
     CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(threadId, createdAt);
     CREATE TABLE IF NOT EXISTS thread_workspaces (threadId TEXT PRIMARY KEY, workspacePath TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
@@ -23,6 +23,9 @@ function getDB(dbPath: string): Database.Database {
   const cols = (table: string) => (dbInstance!.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name)
   if (!cols('threads').includes('accumulatedTokens')) {
     dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!cols('threads').includes('lifetimeTokens')) {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN lifetimeTokens INTEGER NOT NULL DEFAULT 0`)
   }
   return dbInstance
 }
@@ -38,10 +41,10 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     getDB(dbPath).pragma('wal_checkpoint(TRUNCATE)')
   },
   getThreads(dbPath) {
-    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
   },
   getThread(dbPath, threadId) {
-    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
   },
   getThreadMessages(dbPath, threadId) {
     return prepare(getDB(dbPath), 'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId)
@@ -51,7 +54,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const now = new Date().toISOString()
     db.transaction(() => {
       if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
       }
       if (workspacePath) {
         prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
@@ -65,7 +68,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     let saved: any
     db.transaction(() => {
       if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
       } else {
         prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
       }
@@ -82,7 +85,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
   updateThreadAccumulatedTokens(dbPath, threadId, tokens) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?').run(tokens, threadId)
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = accumulatedTokens + ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(tokens, tokens, threadId)
   },
   setThreadAccumulatedTokens(dbPath, threadId, tokens) {
     prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
@@ -91,7 +94,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const db = getDB(dbPath)
     if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
       const now = new Date().toISOString()
-      prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+      prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
     }
     prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
   },

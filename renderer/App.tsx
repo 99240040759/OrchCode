@@ -5,7 +5,7 @@ import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
 import { Toaster } from 'sonner'
-import { ErrorBoundary } from './components/ErrorBoundary'
+import { ErrorBoundary } from './lib/uiUtils'
 import {
   sidebarExpandedAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeThreadAtom,
   hasMessagesAtom, globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom,
@@ -13,7 +13,7 @@ import {
 } from './store/agentStore'
 import { useChat } from './hooks/useChat'
 import { ChatPane } from './components/ChatPane'
-import { authService } from './services/authService'
+import { authService } from './services/services'
 import { threadService } from './services/services'
 import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react'
 import { isMac } from './lib/sharedUtils'

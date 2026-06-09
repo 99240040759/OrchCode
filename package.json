@@ -51,6 +51,8 @@
     "morphdom": "^2.7.8",
     "node-pty": "^1.1.0",
     "shell-quote": "^1.8.4",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.26.9",
     "zod": "^4.4.3"
   },
   "devDependencies": {

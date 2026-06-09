@@ -2,7 +2,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import type { ProviderOptions } from '@ai-sdk/provider-utils'
 import type { streamText } from 'ai'
-import { globalApiLimiter } from './limiters'
+import { globalApiLimiter } from './utils'
 import { requireAuthToken } from './auth'
 
 export interface ModelCapabilities { vision: boolean; nativeFiles: boolean }
@@ -27,38 +27,38 @@ function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
 
 export async function getAvailableModels(force = false): Promise<AvailableModels> {
   if (!force && cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
-  const response = await createAuthFetch(true)(`${process.env.SUPABASE_URL}/functions/v1/models`)
+  const response = await createAuthFetch(true)(`${process.env.SUPABASE_URL}/functions/v1/api/models`)
   if (!response.ok) throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   cachedModels = await response.json(); cachedModelsAt = Date.now()
   return cachedModels!
 }
 
 const google = createGoogleGenerativeAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
 })
 
 const nvidia = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/nvidia/v1`,
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/nvidia/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
 })
 
 const opencode = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/opencode/v1`,
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/opencode/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
 })
 
 const zai = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/z-ai/v1`,
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/z-ai/v1`,
   apiKey: 'placeholder',
   fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
 })
 
 export const googleBypass = createGoogleGenerativeAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/gemini/v1beta`,
+  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta`,
   apiKey: 'placeholder',
   fetch: createAuthFetch()
 })

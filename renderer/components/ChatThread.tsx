@@ -36,14 +36,33 @@ const StreamingMarkdown = React.memo(
     React.useEffect(() => {
       if (!isStreaming) return
       const isReasoning = targetId.startsWith('streaming-reasoning')
+      const blockCounterIdx = isReasoning ? 4 : 5
       let localReadCursor = new TextEncoder().encode(content).length, accumulatedText = content, rafId: number | null = null
+      
+      const initialHeader = (window as any).sharedBufferHeader
+      const myBlockId = initialHeader ? initialHeader[blockCounterIdx] : 0
+      let localWrapCount = initialHeader ? initialHeader[(isReasoning ? 0 : 1) + 6] : 0
+
       const checkBuffer = () => {
         const header = (window as any).sharedBufferHeader
         const buf = isReasoning ? (window as any).sharedBufferReasoning : (window as any).sharedBufferText
         const cursorIdx = isReasoning ? 0 : 1
         if (header && buf) {
+          if (header[blockCounterIdx] !== myBlockId) {
+            if (rafId) cancelAnimationFrame(rafId)
+            return
+          }
           const writeCursor = header[cursorIdx]
-          if (writeCursor > localReadCursor) {
+          const wrapCount = header[cursorIdx + 6]
+          
+          if (wrapCount > localWrapCount) {
+            const slice1 = buf.subarray(localReadCursor, buf.byteLength)
+            const slice2 = buf.subarray(0, writeCursor)
+            localReadCursor = writeCursor
+            localWrapCount = wrapCount
+            accumulatedText += new TextDecoder().decode(slice1) + new TextDecoder().decode(slice2)
+            ;(window as any).postToMarkdownWorker?.(accumulatedText, targetId)
+          } else if (writeCursor > localReadCursor) {
             const slice = buf.subarray(localReadCursor, writeCursor)
             localReadCursor = writeCursor
             accumulatedText += new TextDecoder().decode(slice)

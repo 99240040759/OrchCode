@@ -1,11 +1,10 @@
 import log from 'electron-log'
 import { captureException } from '@sentry/electron'
 import { z } from 'zod'
-import WindowManager from './windowManager'
-import { pushArtifactsChanged } from './artifacts'
+import WindowManager, { pushArtifactsChanged } from './utils'
 import { pool } from './workerPool'
 import { getCurrentSession } from './auth'
-import { browserTools } from './browserTools'
+import { browserTools } from './tools'
 import * as db from './db'
 
 const StreamRequestSchema = z.object({

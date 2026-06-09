@@ -126,10 +126,9 @@ export function buildAttachmentParts(
 type RawMessage = { role: string; content: string; data?: string | null }
 
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
-  const clonedMessages = JSON.parse(JSON.stringify(messages)) as ModelMessage[]
   const result: ModelMessage[] = []
   const seenToolCallIds = new Set<string>()
-  for (const msg of clonedMessages) {
+  for (const msg of messages) {
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
       for (const part of msg.content as any[]) {
         if (part.type === 'tool-call') seenToolCallIds.add(part.toolCallId)
@@ -140,7 +139,7 @@ export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
         const validParts = (msg.content as any[]).filter(
           (part: any) => part.type === 'tool-result' && seenToolCallIds.has(part.toolCallId)
         )
-        if (validParts.length > 0) result.push({ role: 'tool', content: validParts as any })
+        if (validParts.length > 0) result.push({ ...msg, content: validParts as any })
       } else {
         const toolCallId = (msg as any).toolCallId
         if (!toolCallId || seenToolCallIds.has(toolCallId)) result.push(msg)

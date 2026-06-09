@@ -43,6 +43,7 @@ export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => mes
 
 export const artifactsAtom = atom<ArtifactEntry[]>([])
 export const sessionTokensAtom = atom<number>(0)
+export const lifetimeTokensAtom = atom<number>(0)
 
 export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)
 

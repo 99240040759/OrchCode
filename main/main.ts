@@ -5,8 +5,7 @@ import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
-import { initAuth, getCurrentSession, handleAuthCallback, cleanupAuth } from './auth'
-import { authEvents } from './authEvents'
+import { initAuth, getCurrentSession, handleAuthCallback, cleanupAuth, authEvents } from './auth'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../resources/icon.png?asset'
@@ -14,8 +13,7 @@ import { checkpointDB } from './db'
 import { registerAllIpc, cleanupAllPtys } from './commands'
 import { registerStreamIpc } from './stream'
 import { pool } from './workerPool'
-import WindowManager from './windowManager'
-import { APP_ID } from './paths'
+import WindowManager, { APP_ID } from './utils'
 import { initializeSkills } from './skills'
 import { clearAllWorkspaceFilesCache } from './workspace'
 
@@ -353,8 +351,9 @@ app.on('before-quit', async (e) => {
     e.preventDefault()
     cleanupAuth()
     cleanupAllPtys()
-    try { await pool.shutdown() } catch (err) { log.debug('[main] Pool shutdown error:', err) }
-    try { await checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
+    const timeoutPromise = new Promise(r => setTimeout(r, 3000))
+    try { await Promise.race([pool.shutdown(), timeoutPromise]) } catch (err) { log.debug('[main] Pool shutdown error:', err) }
+    try { await Promise.race([checkpointDB(), timeoutPromise]) } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
     isQuitting = true
     app.quit()
   }

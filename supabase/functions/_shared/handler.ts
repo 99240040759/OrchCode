@@ -31,7 +31,7 @@ export function createHandler(fn: HandlerFn) {
     }
 
     const url = new URL(req.url)
-    const isPublic = url.pathname === '/functions/v1/models' || url.pathname === '/models'
+    const isPublic = url.pathname === '/functions/v1/api/models' || url.pathname === '/api/models'
 
     if (isPublic) {
       if (!validateAnonKey(req, expectedAnonKey)) {

@@ -33,12 +33,15 @@ function getStreamingVal(args: Record<string, unknown> | undefined, argsDelta: s
 function getDiffStats(toolName: string, args: Record<string, unknown> | undefined, argsDelta: string | undefined): { added: number; removed: number } {
   let added = 0, removed = 0
   if (FILE_WRITE_TOOLS.includes(toolName) && toolName !== 'writeToFile') {
-    const chunks = args?.replacementChunks as Array<{ startLine?: number | string; endLine?: number | string; replacementContent?: string }> | undefined
+    const chunks = args?.replacementChunks as Array<{ targetContent?: string; replacementContent?: string; startLine?: number | string; endLine?: number | string }> | undefined
     if (chunks && Array.isArray(chunks)) {
       for (const c of chunks) {
         if (c.startLine !== undefined && c.endLine !== undefined) {
           const s = Number(c.startLine), e = Number(c.endLine)
           if (!isNaN(s) && !isNaN(e) && s > 0 && e >= s) removed += (e - s + 1)
+        } else if (c.targetContent !== undefined && c.targetContent !== null) {
+          const content = String(c.targetContent)
+          removed += content === '' ? 0 : content.split(/\r?\n/).length
         }
         if (c.replacementContent !== undefined && c.replacementContent !== null) {
           const content = String(c.replacementContent)
@@ -51,6 +54,10 @@ function getDiffStats(toolName: string, args: Record<string, unknown> | undefine
       for (let i = 0; i < Math.min(startMatches.length, endMatches.length); i++) {
         const s = Number(startMatches[i][1]), e = Number(endMatches[i][1])
         if (s > 0 && e >= s) removed += (e - s + 1)
+      }
+      const targetMatches = [...argsDelta.matchAll(/"targetContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+      for (const m of targetMatches) {
+        removed += (m[1].match(/\\r?\\n/g) ?? []).length + (m[1].match(/\r?\n/g) ?? []).length + 1
       }
       const repMatches = [...argsDelta.matchAll(/"replacementContent"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
       for (const m of repMatches) {
@@ -82,12 +89,24 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     const startArg = getStreamingVal(args, argsDelta, 'startLine')
     const endArg = getStreamingVal(args, argsDelta, 'endLine')
     
-    const res = result as any
-    const textOutput = typeof res?.content === 'string' ? res.content : (res?.value?.find((v: any) => v.type === 'text')?.text || '')
+    let res = result as any
+    if (typeof res === 'string') {
+      try { res = JSON.parse(res) } catch {}
+    }
+    let textOutput = typeof res?.content === 'string' ? res.content : (res?.value?.find((v: any) => v.type === 'text')?.text || (typeof res === 'string' ? res : ''))
     const isBinary = res?.isBinary || textOutput.startsWith('[Binary File') || textOutput.startsWith('Binary image') || textOutput.startsWith('Successfully analyzed binary image')
     
     let extractedStart = res?.readStart !== undefined ? String(res.readStart) : ''
     let extractedEnd = res?.readEnd !== undefined ? String(res.readEnd) : ''
+    
+    if (textOutput) {
+      const metaMatch = textOutput.match(/^\[METADATA: readStart=(\d+),\s*readEnd=(\d+)\]/)
+      if (metaMatch) {
+        if (!extractedStart) extractedStart = metaMatch[1]
+        if (!extractedEnd) extractedEnd = metaMatch[2]
+        textOutput = textOutput.slice(metaMatch[0].length).trimStart()
+      }
+    }
     
     if (!extractedStart && !extractedEnd && textOutput && !isBinary) {
       const trimmed = textOutput.trim()

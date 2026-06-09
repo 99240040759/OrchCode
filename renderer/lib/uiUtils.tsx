@@ -103,3 +103,80 @@ export function sanitizeHtml(html: string): string {
   }
   clean(doc.body); return doc.body.innerHTML
 }
+
+// ─── Primitives ───────────────────────────────────────────────────────────────
+
+interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
+  icon?: string | React.ReactNode
+  title: string
+  description?: string
+}
+
+export const EmptyState: React.FC<EmptyStateProps> = ({
+  icon,
+  title,
+  description,
+  className = '',
+  ...props
+}) => (
+  <div className={`empty-state-root ${className}`} {...props}>
+    {icon && <div className="empty-state-icon">{icon}</div>}
+    <h3 className="empty-state-title">{title}</h3>
+    {description && <p className="empty-state-desc-prim">{description}</p>}
+  </div>
+)
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+
+import { Component, type ErrorInfo, type ReactNode } from 'react'
+import Lottie from 'lottie-react'
+import errorAnimation from '../assets/error.json'
+
+interface ErrorBoundaryProps {
+  children: ReactNode
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean
+  error: Error | null
+}
+
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = {
+    hasError: false,
+    error: null
+  }
+
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error }
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Uncaught error caught by ErrorBoundary:', error, errorInfo)
+  }
+
+  private handleReload = () => {
+    window.location.reload()
+  }
+
+  public render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary-container">
+          <div className="error-boundary-lottie-wrapper">
+            <Lottie animationData={errorAnimation} loop={true} className="error-boundary-lottie" />
+          </div>
+          <h1 className="error-boundary-title">Something went wrong</h1>
+          <p className="error-boundary-subtitle">
+            {this.state.error?.message || 'An unexpected application crash has occurred.'}
+          </p>
+          <button onClick={this.handleReload} className="error-boundary-button">
+            Reload Application
+          </button>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}

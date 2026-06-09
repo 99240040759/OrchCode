@@ -4,7 +4,7 @@ import { useAtomValue } from 'jotai'
 import { Plus } from 'lucide-react'
 import { authUserAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
-import { authService } from '../services/authService'
+import { authService } from '../services/services'
 
 // LeftSidebar is a controlled component (App.tsx passes expanded prop).
 interface SidebarProps {

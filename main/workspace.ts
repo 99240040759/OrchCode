@@ -3,7 +3,7 @@ import { promises as fs, existsSync, readFileSync, realpathSync } from 'node:fs'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
 import fg from 'fast-glob'
-import { getConversationPath } from './paths'
+import { getConversationPath } from './utils'
 import { getUserSkillsPath } from './skills'
 
 Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
