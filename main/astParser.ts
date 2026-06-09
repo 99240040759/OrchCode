@@ -1,5 +1,6 @@
 import { Parser, Language, Node } from 'web-tree-sitter'
 import { join } from 'node:path'
+import { app } from 'electron'
 
 const EXT_TO_WASM: Record<string, string> = {
   '.ts': 'tree-sitter-typescript.wasm',
@@ -41,14 +42,10 @@ export async function getParserForExtension(ext: string): Promise<Parser | null>
   }
 
   const parser = new Parser()
-  let wasmPath = ''
-  try {
-    wasmPath = join(require.resolve('tree-sitter-wasms/package.json'), '..', 'out', wasmFile)
-  } catch {
-    wasmPath = join(__dirname, '..', 'node_modules', 'tree-sitter-wasms', 'out', wasmFile)
-  }
-  
-  const Lang = await Language.load(wasmPath)
+  const wasmsDir = app && app.isPackaged
+    ? join(process.resourcesPath, 'wasms')
+    : join(app ? app.getAppPath() : process.cwd(), 'resources', 'wasms')
+  const Lang = await Language.load(join(wasmsDir, wasmFile))
   parser.setLanguage(Lang)
   return parser
 }
