@@ -14,6 +14,8 @@ env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   EP_TARGET_COMMITISH: main
+  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 jobs:
   create-draft:
@@ -59,6 +61,16 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
+      - name: Cache Electron & Builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+            ~/.electron-gyp
+          key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-cache-
       - name: Install Dependencies
         run: npm ci
       - name: Compile Application
@@ -82,6 +94,19 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
+      - name: Disable Windows Defender
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        shell: powershell
+      - name: Cache Electron & Builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+            ~/.electron-gyp
+          key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-cache-
       - name: Install Dependencies
         run: npm ci
       - name: Download Compilation Output
@@ -107,6 +132,16 @@ jobs:
           node-version: 22
           architecture: x64
           cache: 'npm'
+      - name: Cache Electron & Builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+            ~/.electron-gyp
+          key: ${{ runner.os }}-intel-electron-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-intel-electron-cache-
       - name: Install Dependencies
         run: npm ci
       - name: Download Compilation Output
@@ -119,6 +154,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          NODE_OPTIONS: "--no-force-async-hooks-checks"
 
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
@@ -132,6 +168,16 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
+      - name: Cache Electron & Builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+            ~/.electron-gyp
+          key: ${{ runner.os }}-silicon-electron-cache-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-silicon-electron-cache-
       - name: Install Dependencies
         run: npm ci
       - name: Download Compilation Output

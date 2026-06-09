@@ -227,6 +227,8 @@
 .input-file-reference-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px }
 .input-attachments-container { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-color); align-items: center; max-height: 120px; overflow-y: auto }
 .input-attachment-chip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; background-color: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); font-size: var(--font-size-xs); color: var(--text-primary); font-family: var(--font-display) }
+.clickable-chip { cursor: pointer; transition: background-color 0.15s ease }
+.clickable-chip:hover { background-color: rgba(255, 255, 255, 0.1) }
 .input-attachment-chip-img { width: 16px; height: 16px; border-radius: 2px; object-fit: cover }
 .input-attachment-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .input-attachment-close { background: none; border: none; cursor: pointer; padding: 0; display: flex; align-items: center; color: var(--text-secondary); font-size: var(--font-size-xxs); transition: color 0.15s ease }
@@ -288,7 +290,9 @@
 .code-block-lang { position: absolute; top: 8px; left: 16px; font-size: var(--font-size-xxs); font-family: var(--font-mono); color: var(--text-secondary); opacity: 0.5; text-transform: lowercase }
 .code-block-copy-btn { position: absolute; top: 8px; right: 16px; background: transparent; border: none; color: var(--text-secondary); opacity: 0.5; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 4px; transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease }
 .code-block-copy-btn:hover { color: var(--text-primary); opacity: 1; background-color: rgba(255, 255, 255, 0.05) }
-.file-link { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font-size: 13px; user-select: none; cursor: pointer; margin: 0 2px; vertical-align: middle }
+.file-link { display: inline-flex; align-items: center; gap: 6px; background-color: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 2px 8px; color: var(--text-primary); font-size: 13px; font-weight: 500; user-select: none; cursor: pointer; margin: 0 4px; vertical-align: middle; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) }
+.file-link:hover { background-color: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.16); transform: translateY(-0.5px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) }
+.file-link:active { transform: translateY(0) }
 .file-name-wrapper { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px }
 .pre-wrapper { position: relative }
 .local-image-container { margin: 8px 0; max-width: 100%; display: flex; justify-content: flex-start }

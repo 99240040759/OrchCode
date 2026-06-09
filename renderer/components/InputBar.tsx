@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import TextareaAutosize from 'react-textarea-autosize'
 import { Plus, ChevronDown, ArrowRight, Square, Image, FileText } from 'lucide-react'
-import { useAtomValue, useAtom } from 'jotai'
+import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom } from '../store/agentStore'
+import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import AutocompleteSuggestions from './AutocompleteSuggestions'
 import { workspaceService } from '../services/services'
@@ -35,6 +35,16 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [triggerIndex, setTriggerIndex] = useState(-1)
   const [suggestionIndex, setSuggestionIndex] = useState(0)
   const [fileReferences, setFileReferences] = useState<Array<{ name: string; path: string }>>([])
+  const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
+  const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
+  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+
+  const handleOpenFile = useCallback(async (filePath: string) => {
+    try {
+      const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
+      if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+    } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
+  }, [conversationId, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
 
   const fetchWorkspaceFiles = useCallback(async () => {
     if (!conversationId) return
@@ -43,21 +53,24 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   }, [conversationId])
 
   useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId, fetchWorkspaceFiles])
+  useEffect(() => {
+    setFileReferences((prev) => prev.filter((ref) => inputValue.includes(`@${ref.name}`)))
+  }, [inputValue])
 
   const filteredFiles = workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15)
 
   const selectFileSuggestion = useCallback((selectedFile: string) => {
     if (!textareaRef.current) return
-    const currentEl = textareaRef.current
-    setInputValue((prev) => { const selStart = currentEl.selectionStart || 0; return prev.slice(0, triggerIndex) + prev.slice(selStart) })
+    const currentEl = textareaRef.current; const name = selectedFile.split(/[/\\]/).pop() || selectedFile
+    const insertedText = `@${name}`; const selStart = currentEl.selectionStart || 0
+    setInputValue((prev) => prev.slice(0, triggerIndex) + insertedText + prev.slice(selStart))
     setShowFileSuggestions(false)
-    const wsPath = activeWorkspace?.path ?? ''
-    const sep = wsPath.includes('\\') ? '\\' : '/'
+    const wsPath = activeWorkspace?.path ?? ''; const sep = wsPath.includes('\\') ? '\\' : '/'
     const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
     const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
-    const name = selectedFile.split(/[/\\]/).pop() || selectedFile
     setFileReferences((prev) => prev.some((p) => p.path === absolutePath) ? prev : [...prev, { name, path: absolutePath }])
-    setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(triggerIndex, triggerIndex) }, 0)
+    const newCursorPos = triggerIndex + insertedText.length
+    setTimeout(() => { currentEl.focus(); currentEl.setSelectionRange(newCursorPos, newCursorPos) }, 0)
   }, [triggerIndex, activeWorkspace])
 
 
@@ -110,8 +123,12 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const handleSend = useCallback(() => {
     let val = inputValue.trim()
-    if ((!val && attachments.length === 0 && fileReferences.length === 0) || isRunning) return
-    if (fileReferences.length > 0) { const refsText = fileReferences.map((ref) => `[${ref.name}](file://${ref.path})`).join(' '); val = `${val} ${refsText}`.trim() }
+    if ((!val && attachments.length === 0) || isRunning) return
+    if (fileReferences.length > 0) {
+      [...fileReferences].sort((a, b) => b.name.length - a.name.length).forEach((ref) => {
+        val = val.split(`@${ref.name}`).join(`[${ref.name}](file://${ref.path})`)
+      })
+    }
     onSubmit?.(val, undefined, attachments)
     setInputValue(''); setAttachments([]); setFileReferences([])
   }, [inputValue, attachments, fileReferences, isRunning, onSubmit])
@@ -126,16 +143,14 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); return selectFileSuggestion(filteredFiles[suggestionIndex]) }
       if (e.key === 'Escape') { e.preventDefault(); return setShowFileSuggestions(false) }
     }
-    if (e.key === 'Backspace' && fileReferences.length > 0 && textareaRef.current?.selectionStart === 0) {
-      e.preventDefault(); setFileReferences((prev) => prev.slice(0, -1))
-    } else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-  }, [showFileSuggestions, filteredFiles, suggestionIndex, selectFileSuggestion, fileReferences, handleSend])
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }, [showFileSuggestions, filteredFiles, suggestionIndex, selectFileSuggestion, handleSend])
 
   return (
     <div className="input-bar-container">
       <AutocompleteSuggestions showFileSuggestions={showFileSuggestions} filteredFiles={filteredFiles} suggestionIndex={suggestionIndex} setSuggestionIndex={setSuggestionIndex} selectFileSuggestion={selectFileSuggestion} />
       <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple className="hidden-input" />
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || fileReferences.length > 0) && (
         <div className="input-attachments-container">
           {attachments.map((att, idx) => (
             <div key={`att-${idx}`} className="input-attachment-chip" title={att.name}>
@@ -146,18 +161,17 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <button onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
             </div>
           ))}
+          {fileReferences.map((ref, idx) => (
+            <div key={`ref-${idx}`} title={ref.path} className="input-attachment-chip clickable-chip" onClick={() => handleOpenFile(ref.path)}>
+              <SymbolsFileIcon fileName={ref.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
+              <span className="input-attachment-name">{ref.name}</span>
+            </div>
+          ))}
         </div>
       )}
       <div className="input-bar-text-container-inner">
-        {fileReferences.map((ref, idx) => (
-          <div key={`ref-${idx}`} title={ref.path} className="input-file-reference">
-            <SymbolsFileIcon fileName={ref.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
-            <span className="input-file-reference-name">{ref.name}</span>
-            <button onClick={() => setFileReferences((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
-          </div>
-        ))}
         <TextareaAutosize ref={textareaRef} minRows={1} maxRows={8} className="input-bar-text-area input-bar-text-area-override"
-          placeholder={attachments.length > 0 || fileReferences.length > 0 ? '' : 'Ask anything, @ to mention'} value={inputValue}
+          placeholder={attachments.length > 0 ? '' : 'Ask anything, @ to mention'} value={inputValue}
           onChange={(e) => { setInputValue(e.target.value); checkSuggestions(e.target.value, e.target.selectionStart) }}
           onSelect={(e) => { const target = e.target as HTMLTextAreaElement; checkSuggestions(target.value, target.selectionStart) }}
           onKeyDown={handleKeyDown} />
@@ -202,7 +216,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           {isRunning ? (
             <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation"><Square size={11} strokeWidth={3} /></button>
           ) : (
-            <button className="toolbar-submit-btn" onClick={handleSend} title="Submit" disabled={!inputValue.trim() && attachments.length === 0 && fileReferences.length === 0}>
+            <button className="toolbar-submit-btn" onClick={handleSend} title="Submit" disabled={!inputValue.trim() && attachments.length === 0}>
               <ArrowRight size={14} strokeWidth={2.5} />
             </button>
           )}
