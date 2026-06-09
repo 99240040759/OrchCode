@@ -34,7 +34,7 @@ const StreamRequestSchema = z.object({ promptText: z.string().max(200_000), thre
 /** Shared file-write tool names — keep in sync with renderer/components/ToolCallBlock.tsx */
 const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
 
-export function registerStreamIpc() {
+export function registerStreamIpc(sharedBuffer: SharedArrayBuffer) {
   const { ipcMain, MessageChannelMain } = require('electron')
   ipcMain.handle('api:stream', async (event, rawPayload) => {
     try {
@@ -83,7 +83,7 @@ export function registerStreamIpc() {
       }
       worker.on('message', onMsg)
       const isBrowserActive = !!WindowManager.getBrowserView()
-      worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive }, [port1])
+      worker.postMessage({ type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive, sharedBuffer }, [port1])
       return { ok: true }
     } catch (err) {
       const win = WindowManager.getMainWindow()
@@ -139,28 +139,43 @@ async function setupStreamRequest(port: Electron.MessagePortMain, threadId: stri
     attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
     if (bufs.reduce((t, b) => t + b.length, 0) > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
   }
-  const wsPath = getThreadWorkspace(threadId)
+  const wsPath = await getThreadWorkspace(threadId)
   if (wsPath) await updateWorkspacePath(threadId, wsPath)
 }
 export async function handleAgentStreamRequest(
   port: Electron.MessagePortMain,
   threadId: string,
-  modelType?: string,
-  attachments?: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }>,
-  promptText?: string,
-  isBrowserActive?: boolean
+  modelType: string | undefined,
+  attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }> | undefined,
+  promptText: string | undefined,
+  isBrowserActive: boolean | undefined,
+  sharedBuffer: SharedArrayBuffer
 ) {
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
   const send = (msg: Record<string, unknown>) => { try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) } }
-  let bufferedText = '', bufferedReasoning = '', flushTimeout: NodeJS.Timeout | null = null
-  const flushBuffers = () => {
-    if (flushTimeout) { clearTimeout(flushTimeout); flushTimeout = null }
-    if (bufferedText) { send({ type: 'text-delta', payload: bufferedText, threadId }); bufferedText = '' }
-    if (bufferedReasoning) { send({ type: 'reasoning-delta', payload: bufferedReasoning, threadId }); bufferedReasoning = '' }
+
+  const headerView = new Int32Array(sharedBuffer, 0, 16)
+  const reasoningView = new Uint8Array(sharedBuffer, 64, 256 * 1024)
+  const textView = new Uint8Array(sharedBuffer, 64 + 256 * 1024, 512 * 1024)
+  const toolView = new Uint8Array(sharedBuffer, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
+
+  headerView[0] = 0 // reasoning offset
+  headerView[1] = 0 // text offset
+  headerView[2] = 0 // tool offset
+  headerView[3] = 1 // status: 1 = active
+  headerView[4] = 0 // tokens
+
+  const writeToSharedBuffer = (view: Uint8Array, cursorIdx: number, textVal: string) => {
+    const encoder = new TextEncoder()
+    const bytes = encoder.encode(textVal)
+    const currentCursor = headerView[cursorIdx]
+    if (currentCursor + bytes.length < view.byteLength) {
+      view.set(bytes, currentCursor)
+      headerView[cursorIdx] = currentCursor + bytes.length
+    }
   }
-  const queueTextDelta = (text: string) => { bufferedText += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
-  const queueReasoningDelta = (text: string) => { bufferedReasoning += text; if (!flushTimeout) flushTimeout = setTimeout(flushBuffers, 16) }
+
   const existingEntry = activeAbortControllers.get(threadId)
   if (existingEntry) existingEntry.controller.abort()
   const controller = new AbortController()
@@ -173,12 +188,12 @@ export async function handleAgentStreamRequest(
   let sessionAccumulatedTokens = 0
   try {
     const history = await getThreadMessages(threadId)
-    let persistedAccumulatedTokens = getThread(threadId)?.accumulatedTokens ?? 0
+    let persistedAccumulatedTokens = (await getThread(threadId))?.accumulatedTokens ?? 0
     const userMsgId = crypto.randomUUID()
     await saveMessage(threadId, { id: userMsgId, role: 'user', content: text, data: attachments?.length ? JSON.stringify({ attachments }) : undefined })
     const ctx = getWorkspaceContext(threadId) || (await getOrCreateWorkspaceContext(threadId))
-    if (ctx.isUserWorkspace && !getThreadWorkspace(threadId)) {
-      try { setThreadWorkspace(threadId, ctx.rootPath); addOpenedWorkspace(ctx.rootPath) } catch (err) { log.error('[stream] Auto-bind error:', err) }
+    if (ctx.isUserWorkspace && !(await getThreadWorkspace(threadId))) {
+      try { await setThreadWorkspace(threadId, ctx.rootPath); await addOpenedWorkspace(ctx.rootPath) } catch (err) { log.error('[stream] Auto-bind error:', err) }
     }
     const models = await getAvailableModels(), availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
@@ -203,19 +218,14 @@ export async function handleAgentStreamRequest(
     const saveProgress = (force = false) => {
       const now = Date.now()
       if (!force && now - lastSaveMs < 1000) return
-      if (saveInFlight) {
-        if (force) saveQueued = true
-        return
-      }
+      if (saveInFlight) { if (force) saveQueued = true; return }
       if (assistantContent || orderedBlocks.length > 0) {
         saveInFlight = true
         const doSave = () => {
-          try { saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }); lastSaveMs = Date.now() }
-          catch (err) { log.error('[stream] Progressive save failed:', err) }
-          finally {
-            saveInFlight = false
-            if (saveQueued) { saveQueued = false; saveProgress(true) }
-          }
+          saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) })
+            .then(() => { lastSaveMs = Date.now() })
+            .catch(err => log.error('[stream] Progressive save failed:', err))
+            .finally(() => { saveInFlight = false; if (saveQueued) { saveQueued = false; saveProgress(true) } })
         }
         if (force) doSave()
         else setImmediate(doSave)
@@ -244,8 +254,8 @@ export async function handleAgentStreamRequest(
         const summary = await summariseContext(currentMessages as ModelMessage[])
         if (!summary) return undefined
         try {
-          compactThreadHistory(threadId, summary)
-          setThreadAccumulatedTokens(threadId, 0)
+          await compactThreadHistory(threadId, summary)
+          await setThreadAccumulatedTokens(threadId, 0)
           persistedAccumulatedTokens = 0; sessionAccumulatedTokens = 0
         } catch (err) {
           log.error('[stream] Compaction failed, reverting counters:', err)
@@ -265,28 +275,34 @@ export async function handleAgentStreamRequest(
       if (controller.signal.aborted) break
       switch (part.type) {
         case 'reasoning-start':
-          flushBuffers()
+          headerView[0] = 0 // reset reasoning offset
           currentReasoningStartMs = Date.now(); orderedBlocks.push({ type: 'reasoning', content: '', durationMs: 0 })
           send({ type: 'reasoning-start', threadId }); break
         case 'reasoning-delta': {
           const last = orderedBlocks[orderedBlocks.length - 1]
           const delta = part.text || ''
           if (last?.type === 'reasoning') { last.content += delta; last.durationMs = Date.now() - currentReasoningStartMs }
-          queueReasoningDelta(delta); break
+          writeToSharedBuffer(reasoningView, 0, delta)
+          break
         }
         case 'reasoning-end':
-          flushBuffers()
           send({ type: 'reasoning-end', threadId }); break
         case 'text-delta': {
           const delta = part.text || ''; assistantContent += delta
           const last = orderedBlocks[orderedBlocks.length - 1]
-          if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: delta })
-          else last.content += delta
-          queueTextDelta(delta)
+          const isNewBlock = !last || last.type !== 'text'
+          if (isNewBlock) {
+            headerView[1] = 0 // reset text offset
+            orderedBlocks.push({ type: 'text', content: delta })
+            send({ type: 'text-delta', payload: delta, threadId })
+          } else {
+            last.content += delta
+          }
+          writeToSharedBuffer(textView, 1, delta)
           void saveProgress(false); break
         }
         case 'tool-input-start': {
-          flushBuffers()
+          headerView[2] = 0 // reset tool offset
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || ''
           orderedBlocks.push({ type: 'tool', toolCallId: tid, toolName: p.toolName || '', args: {}, argsDelta: '', status: 'pending' })
           send({ type: 'tool-call-streaming-start', payload: { toolCallId: tid, toolName: p.toolName || '' }, threadId }); break
@@ -295,10 +311,10 @@ export async function handleAgentStreamRequest(
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', delta = p.argsTextDelta || p.delta || ''
           const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') b.argsDelta = (b.argsDelta || '') + delta
-          send({ type: 'tool-call-delta', payload: { toolCallId: tid, delta }, threadId }); break
+          writeToSharedBuffer(toolView, 2, delta)
+          break
         }
         case 'tool-call': {
-          flushBuffers()
           const p = part as unknown as ToolStreamPart, tid = p.toolCallId || p.id || '', args = (p.args || p.input || {}) as Record<string, unknown>
           const b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === tid)
           if (b && b.type === 'tool') { b.args = args; b.argsDelta = undefined }
@@ -306,7 +322,6 @@ export async function handleAgentStreamRequest(
           send({ type: 'tool-call', payload: { toolCallId: tid, toolName: p.toolName || '', args }, threadId }); break
         }
         case 'tool-result': {
-          flushBuffers()
           const p = part as unknown as { toolCallId: string; toolName: string; result: unknown }, b = orderedBlocks.find((x) => x.type === 'tool' && x.toolCallId === p.toolCallId)
           if (b && b.type === 'tool') { b.result = p.result; b.status = 'complete' }
           send({ type: 'tool-result', payload: { toolCallId: p.toolCallId, result: p.result }, threadId })
@@ -317,16 +332,16 @@ export async function handleAgentStreamRequest(
           void saveProgress(false); break
         }
         case 'error': {
-          flushBuffers()
+          headerView[3] = 2 // finished
           const errMsg = part.error instanceof Error ? part.error.message : String(part.error || 'Unknown error')
           log.error(`[stream] error: "${errMsg}"`); for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
-          send({ type: 'error', payload: errMsg, threadId }); break
+          send({ type: 'error', payload: { message: errMsg, content: assistantContent, orderedBlocks }, threadId }); break
         }
         case 'finish': {
-          flushBuffers()
+          headerView[3] = 2 // finished
           const p = part as unknown as { totalUsage?: { inputTokens?: number; outputTokens?: number }; finishReason?: string }, u = p.totalUsage || {}, pTokens = u.inputTokens || 0, cTokens = u.outputTokens || 0, tot = pTokens + cTokens
-          try { updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
-          send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot) }, threadId })
+          try { await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens || tot) } catch (err) { log.error('[stream] Token count save failed:', err) }
+          send({ type: 'finish', payload: { usage: { promptTokens: pTokens, completionTokens: cTokens, totalTokens: tot }, accumulatedTokens: persistedAccumulatedTokens + (sessionAccumulatedTokens || tot), content: assistantContent, orderedBlocks }, threadId })
           if (p.finishReason === 'length') { log.warn(`[stream] Token limit for thread ${threadId}`); send({ type: 'step-limit', threadId }) }
           break
         }
@@ -356,7 +371,7 @@ export async function handleAgentStreamRequest(
     }
     throw err
   } finally {
-    flushBuffers()
+    headerView[3] = 2 // finished
     ;(port as any).__markFinished?.()
     const entry = activeAbortControllers.get(threadId)
     if (entry && entry.sessionId === streamSessionId) activeAbortControllers.delete(threadId)

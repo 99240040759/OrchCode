@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld('api', {
   invoke: (command: string, payload?: unknown): Promise<unknown> =>
     ipcRenderer.invoke('api:invoke', { command, payload }),
 
+  getSharedBuffer: (): Promise<SharedArrayBuffer> => {
+    return new Promise((resolve) => {
+      ipcRenderer.once('api:get-shared-buffer-response', (_ev, buf) => resolve(buf))
+      ipcRenderer.send('api:get-shared-buffer-request')
+    })
+  },
+
   /**
    * Start an agent stream. Main will:
    *   1. Create a MessageChannelMain
@@ -78,11 +85,18 @@ contextBridge.exposeInMainWorld('api', {
    * Returns an unsubscribe function.
    */
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
-    const ALLOWED = ['auth:status-changed', 'terminal:data', 'terminal:exit', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed', 'command:new-conversation', 'command:open-workspace']
+    const ALLOWED = ['auth:status-changed', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed', 'command:new-conversation', 'command:open-workspace']
     if (!ALLOWED.includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)
+  },
+
+  onTerminalPort: (id: string): void => {
+    ipcRenderer.once(`terminal:port:${id}`, (ev) => {
+      const p = ev.ports[0]
+      if (p) window.postMessage({ type: 'terminal-port-transfer', id }, '*', [p])
+    })
   },
 
   /** The platform string — exposed synchronously at bridge creation time. */

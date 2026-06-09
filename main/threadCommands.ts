@@ -42,9 +42,9 @@ export const threadCommands = {
   },
   'thread:active-id': {
     schema: z.object({}),
-    execute: () => {
-      const activeId = getActiveThreadId()
-      if (activeId && getThread(activeId)) return activeId
+    execute: async () => {
+      const activeId = await getActiveThreadId()
+      if (activeId && await getThread(activeId)) return activeId
       return null
     }
   },
@@ -52,18 +52,18 @@ export const threadCommands = {
   'thread:set-active': {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
-      try { setActiveThreadId(threadId); const wsPath = getThreadWorkspace(threadId); if (wsPath) await updateWorkspacePath(threadId, wsPath) }
+      try { await setActiveThreadId(threadId); const wsPath = await getThreadWorkspace(threadId); if (wsPath) await updateWorkspacePath(threadId, wsPath) }
       catch (err) { log.warn(`[commands] Auto-bind error for ${threadId}:`, err); throw err }
       return true
     }
   },
   'thread:list': { schema: z.object({}), execute: async () => { try { return await getThreads() } catch (err) { log.error('[commands] getThreads:', err); throw err } } },
-  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }: any) => { try { return getThread(threadId) } catch (err) { throw err } } },
+  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => { try { return await getThread(threadId) } catch (err) { throw err } } },
   'thread:messages': {
     schema: z.object({ threadId: threadIdSchema }),
-    execute: ({ threadId }: any) => {
+    execute: async ({ threadId }: any) => {
       try {
-        return getThreadMessages(threadId).map((message) => {
+        return (await getThreadMessages(threadId)).map((message) => {
           const parsed = message.role === 'assistant' ? parseAssistantMessageData(message.data) : message.role === 'user' ? parseUserMessageData(message.data) : undefined
           return { ...message, data: parsed ? serializeMessageData(parsed) : undefined }
         })
@@ -74,13 +74,13 @@ export const threadCommands = {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
       try {
-        if (getActiveThreadId() === threadId) setActiveThreadId(null)
+        if (await getActiveThreadId() === threadId) await setActiveThreadId(null)
         pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
-        clearWorkspaceContext(threadId); const deleted = deleteThread(threadId)
+        clearWorkspaceContext(threadId); const deleted = await deleteThread(threadId)
         await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
         return deleted
       } catch (err) { log.error('[commands] deleteThread:', err); throw err }
     }
   },
-  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }: any) => { try { return getThreadWorkspace(threadId) } catch (err) { throw err } } }
+  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => { try { return await getThreadWorkspace(threadId) } catch (err) { throw err } } }
 }

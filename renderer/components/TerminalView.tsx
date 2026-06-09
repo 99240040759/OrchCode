@@ -28,8 +28,6 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
     const termContainerRef = useRef<HTMLDivElement>(null)
     const fitAddonRef = useRef<FitAddon | null>(null)
     const ptyIdRef = useRef<string | null>(null)
-    const unsubDataRef = useRef<(() => void) | null>(null)
-    const unsubExitRef = useRef<(() => void) | null>(null)
 
     React.useImperativeHandle(ref, () => ({
       fit: () => {
@@ -43,11 +41,8 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
 
     useEffect(() => {
       if (!termContainerRef.current) return
-      let active = true
-      let fitTimeout: NodeJS.Timeout | null = null
-
+      let active = true, fitTimeout: NodeJS.Timeout | null = null
       const { bgApp, textPrimary, textMuted, accentBlue, accentGreen, accentOrange, accentPurple, accentRed } = getOrchThemeColors()
-
       const term = new XTerm({
         theme: {
           background: bgApp,
@@ -80,84 +75,73 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         allowTransparency: false,
         convertEol: true
       })
-
       const fitAddon = new FitAddon()
       const webLinksAddon = new WebLinksAddon()
       term.loadAddon(fitAddon)
       term.loadAddon(webLinksAddon)
       term.open(termContainerRef.current)
-
       try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Fit error:', err) }
+
+      const terminalId = `pty-${self.crypto.randomUUID()}`
+      ptyIdRef.current = terminalId
+      let activePort: MessagePort | null = null
+
+      const onMessage = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'terminal-port-transfer' && event.data.id === terminalId) {
+          window.removeEventListener('message', onMessage)
+          const p = event.ports[0]
+          if (p) {
+            if (!active) return p.close()
+            activePort = p
+            p.onmessage = (e) => {
+              if (!active) return
+              if (e.data.type === 'data') term.write(e.data.data)
+              else if (e.data.type === 'exit') { term.write('\r\n\x1b[2m[Process exited]\x1b[0m\r\n'); ptyIdRef.current = null }
+            }
+            p.start()
+          }
+        }
+      }
+      window.addEventListener('message', onMessage)
+      window.api.onTerminalPort(terminalId)
 
       fitTimeout = setTimeout(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
           try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Fit error:', err) }
-          if (ptyIdRef.current) {
-            window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
-          }
+          if (activePort) activePort.postMessage({ type: 'resize', cols: term.cols, rows: term.rows })
         }
       }, 50)
-
       fitAddonRef.current = fitAddon
-
       const { cols, rows } = term
 
       window.api.invoke('terminal:create', {
+        id: terminalId,
         cols,
         rows,
         cwd: workspacePathRef.current,
         conversationId: conversationIdRef.current
+      }).catch((err: any) => {
+        if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
       })
-        .then((result) => {
-          const { id } = result as { id: string }
-          if (!active) {
-            window.api.invoke('terminal:close', { id }).catch(console.error)
-            return
-          }
-          ptyIdRef.current = id
 
-          unsubDataRef.current = window.api.on('terminal:data', (payload) => {
-            const { id: dataId, data } = payload as { id: string; data: string }
-            if (dataId === id) term.write(data)
-          })
-
-          unsubExitRef.current = window.api.on('terminal:exit', (payload) => {
-            const { id: exitId } = payload as { id: string }
-            if (exitId === id) {
-              term.write('\r\n\x1b[2m[Process exited]\x1b[0m\r\n')
-              ptyIdRef.current = null
-            }
-          })
-
-          term.onData((data) => {
-            if (ptyIdRef.current) window.api.invoke('terminal:input', { id: ptyIdRef.current, data }).catch(() => {})
-          })
-        })
-        .catch((err: any) => {
-          if (active) term.write(`\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`)
-        })
+      term.onData((data) => { if (activePort) activePort.postMessage(data) })
 
       const debouncedResize = debounce(() => {
         if (active && termContainerRef.current && termContainerRef.current.clientWidth > 0) {
           try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Resize fit error:', err) }
-          if (ptyIdRef.current) {
-            window.api.invoke('terminal:resize', { id: ptyIdRef.current, cols: term.cols, rows: term.rows }).catch(() => {})
-          }
+          if (activePort) activePort.postMessage({ type: 'resize', cols: term.cols, rows: term.rows })
         }
       }, 100)
-
-      const resizeObs = new ResizeObserver(() => {
-        debouncedResize()
-      })
+      const resizeObs = new ResizeObserver(() => debouncedResize())
       resizeObs.observe(termContainerRef.current)
 
       return () => {
         active = false
+        window.removeEventListener('message', onMessage)
         if (fitTimeout) clearTimeout(fitTimeout)
         debouncedResize.cancel()
         resizeObs.disconnect()
-        if (unsubDataRef.current) unsubDataRef.current()
-        if (unsubExitRef.current) unsubExitRef.current()
+        if (activePort) try { activePort.close() } catch {}
         if (ptyIdRef.current) {
           window.api.invoke('terminal:close', { id: ptyIdRef.current }).catch(() => {})
           ptyIdRef.current = null

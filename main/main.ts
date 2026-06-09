@@ -1,7 +1,8 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
 initSentry({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN, tracesSampleRate: 1.0 })
-import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
+import { app, BrowserWindow, shell, nativeTheme, dialog, Menu, ipcMain } from 'electron'
+export const sharedBuffer = new SharedArrayBuffer(1024 * 1024)
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -118,7 +119,8 @@ function createOnboardingWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: true
+      webSecurity: true,
+      enableBlinkFeatures: 'SharedArrayBuffer'
     }
   })
 
@@ -174,7 +176,8 @@ function createMainWindow(): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: true
+      webSecurity: true,
+      enableBlinkFeatures: 'SharedArrayBuffer'
     }
   })
   WindowManager.setMainWindow(mainWindow)
@@ -250,7 +253,10 @@ app.whenReady().then(async () => {
 
   // Single unified IPC surface: one invoke router + one stream handler
   registerAllIpc()
-  registerStreamIpc()
+  registerStreamIpc(sharedBuffer)
+  ipcMain.on('api:get-shared-buffer-request', (event) => {
+    event.sender.postMessage('api:get-shared-buffer-response', sharedBuffer)
+  })
 
   void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
   initUpdater()
@@ -309,7 +315,7 @@ app.on('before-quit', async (e) => {
     cleanupAuth()
     cleanupAllPtys()
     try { await pool.shutdown() } catch (err) { log.debug('[main] Pool shutdown error:', err) }
-    try { checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
+    try { await checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
     isQuitting = true
     app.quit()
   }

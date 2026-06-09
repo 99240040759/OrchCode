@@ -35,11 +35,29 @@ const StreamingMarkdown = React.memo(
 
     React.useEffect(() => {
       if (!isStreaming) return
+      const isReasoning = targetId.startsWith('streaming-reasoning')
+      let localReadCursor = content.length, accumulatedText = content, rafId: number | null = null
+      const checkBuffer = () => {
+        const header = (window as any).sharedBufferHeader
+        const buf = isReasoning ? (window as any).sharedBufferReasoning : (window as any).sharedBufferText
+        const cursorIdx = isReasoning ? 0 : 1
+        if (header && buf) {
+          const writeCursor = header[cursorIdx]
+          if (writeCursor > localReadCursor) {
+            const slice = buf.subarray(localReadCursor, writeCursor)
+            localReadCursor = writeCursor
+            accumulatedText += new TextDecoder().decode(slice)
+            ;(window as any).postToMarkdownWorker?.(accumulatedText, targetId)
+          }
+        }
+        rafId = requestAnimationFrame(checkBuffer)
+      }
+      rafId = requestAnimationFrame(checkBuffer)
       const handleUpdate = (e: Event) => {
         const { targetId: tid, html } = (e as CustomEvent<{ targetId: string; html: string }>).detail
         if (tid !== targetId || !containerRef.current) return
         const sanitizedHtml = sanitizeHtml(html)
-        if (sanitizedHtml === lastHtmlRef.current) return // skip identical patches
+        if (sanitizedHtml === lastHtmlRef.current) return
         lastHtmlRef.current = sanitizedHtml
         morphdom(containerRef.current, `<div id="${tid}" class="markdown-content">${sanitizedHtml}</div>`, {
           onBeforeElUpdated: (from, to) => !from.isEqualNode(to)
@@ -53,10 +71,12 @@ const StreamingMarkdown = React.memo(
         })
       }
       window.addEventListener('stream:html-update', handleUpdate, { passive: true })
-      return () => window.removeEventListener('stream:html-update', handleUpdate)
-    }, [isStreaming, targetId])
+      return () => {
+        if (rafId) cancelAnimationFrame(rafId)
+        window.removeEventListener('stream:html-update', handleUpdate)
+      }
+    }, [isStreaming, targetId, content])
 
-    // After streaming ends, render final content via ReactMarkdown for full fidelity
     const noHtmlYet = isStreaming && !lastHtmlRef.current
     return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming && lastHtmlRef.current ? '' : content} isStreaming={isStreaming && !noHtmlYet} />
   },

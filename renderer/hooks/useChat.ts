@@ -10,6 +10,18 @@ import { cleanErrorMessage } from '../lib/cleanErrorMessage'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
 
+async function initSharedBuffer() {
+  if ((window as any).sharedBufferHeader) return
+  try {
+    const sab = await window.api.getSharedBuffer()
+    ;(window as any).sharedBuffer = sab
+    ;(window as any).sharedBufferHeader = new Int32Array(sab, 0, 16)
+    ;(window as any).sharedBufferReasoning = new Uint8Array(sab, 64, 256 * 1024)
+    ;(window as any).sharedBufferText = new Uint8Array(sab, 64 + 256 * 1024, 512 * 1024)
+    ;(window as any).sharedBufferTool = new Uint8Array(sab, 64 + 256 * 1024 + 512 * 1024, 256 * 1024)
+  } catch (err) { console.error('Failed to init SharedArrayBuffer in renderer:', err) }
+}
+
 const isToolResultError = (r: unknown): boolean => {
   if (!r || typeof r !== 'object') return false
   const obj = r as Record<string, unknown>
@@ -49,6 +61,7 @@ export function useChat() {
       if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current)
     }
   }, [])
+  useEffect(() => { void initSharedBuffer() }, [])
 
   // Init markdown worker once
   useEffect(() => {
@@ -85,6 +98,9 @@ export function useChat() {
     isCompilingRef.current = true
     workerRef.current.postMessage({ type: 'compile', content, targetId, version })
   }, [])
+  useEffect(() => {
+    ;(window as any).postToMarkdownWorker = postToWorker
+  }, [postToWorker])
 
   const resetThreadScopedPanels = useCallback(() => {
     setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
@@ -271,22 +287,8 @@ export function useChat() {
     let currentReasoningStartMs = 0
     let assistantIsStreaming = true
 
-    // Single RAF-based flush — batches all updates at display frame rate
-    const pendingFlush = { scheduled: false }
-    const scheduleFlush = () => {
-      if (pendingFlush.scheduled) return
-      pendingFlush.scheduled = true
-      flushRafRef.current = requestAnimationFrame(() => {
-        flushRafRef.current = null
-        pendingFlush.scheduled = false
-        if (!isMountedRef.current) return
-        const snapshot = [...orderedBlocks]
-        setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m))
-      })
-    }
     const flushNow = () => {
       if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
-      pendingFlush.scheduled = false
       if (!isMountedRef.current) return
       const snapshot = [...orderedBlocks]
       setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m))
@@ -295,7 +297,6 @@ export function useChat() {
     const processChunk = (chunk: StreamChunk) => {
       if (!isMountedRef.current) return
       if (!chunk || chunk.threadId !== resolvedThreadId) return
-      // Guard: only update UI if this stream's thread is the active one
       if (resolvedThreadId !== activeStreamThreadIdRef.current) return
       const chunkType = chunk.type
       const chunkData = chunk.payload && typeof chunk.payload === 'object' ? (chunk.payload as Record<string, unknown>) : undefined
@@ -308,15 +309,14 @@ export function useChat() {
       } else if (chunkType === 'reasoning-delta') {
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') {
-          const newContent = last.content + chunkText
-          orderedBlocks[orderedBlocks.length - 1] = { ...last, content: newContent, durationMs: Date.now() - currentReasoningStartMs }
-          postToWorker(newContent, `streaming-reasoning-${assistantMsgId}-${orderedBlocks.length - 1}`)
+          last.content += chunkText
+          last.durationMs = Date.now() - currentReasoningStartMs
         }
-        scheduleFlush()
       } else if (chunkType === 'reasoning-end') {
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') {
-          orderedBlocks[orderedBlocks.length - 1] = { ...last, durationMs: Date.now() - currentReasoningStartMs, isStreaming: false }
+          last.durationMs = Date.now() - currentReasoningStartMs
+          last.isStreaming = false
           postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${orderedBlocks.length - 1}`)
         }
         flushNow()
@@ -324,32 +324,31 @@ export function useChat() {
         fullContent += chunkText
         const last = orderedBlocks[orderedBlocks.length - 1]
         if (last?.type === 'reasoning') {
-          orderedBlocks[orderedBlocks.length - 1] = { ...last, isStreaming: false }
+          last.isStreaming = false
           orderedBlocks.push({ type: 'text', content: chunkText })
-          postToWorker(chunkText, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
           flushNow()
         } else if (!last || last.type !== 'text') {
           orderedBlocks.push({ type: 'text', content: chunkText })
-          postToWorker(chunkText, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
           flushNow()
         } else {
-          const newContent = last.content + chunkText
-          orderedBlocks[orderedBlocks.length - 1] = { ...last, content: newContent }
-          postToWorker(newContent, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
-          scheduleFlush()
+          last.content += chunkText
         }
       } else if (chunkType === 'tool-call-streaming-start') {
         setRunState('tool-calling')
         const last = orderedBlocks[orderedBlocks.length - 1]
-        if (last?.type === 'reasoning') orderedBlocks[orderedBlocks.length - 1] = { ...last, isStreaming: false }
+        if (last?.type === 'reasoning') last.isStreaming = false
         orderedBlocks.push({ type: 'tool', toolCallId: chunkData?.toolCallId as string ?? crypto.randomUUID(), toolName: chunkData?.toolName as string ?? 'unknown', args: {} as Record<string, unknown>, argsDelta: '', status: 'pending' })
         flushNow()
       } else if (chunkType === 'tool-call-delta') {
         const tcId = chunkData?.toolCallId as string
         const delta = chunkData?.delta as string ?? ''
         const idx = orderedBlocks.findIndex(b => b.type === 'tool' && b.toolCallId === tcId)
-        if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool') orderedBlocks[idx] = { ...old, argsDelta: (old.argsDelta || '') + delta } }
-        scheduleFlush()
+        if (idx !== -1) {
+          const old = orderedBlocks[idx]
+          if (old.type === 'tool') {
+            old.argsDelta = (old.argsDelta || '') + delta
+          }
+        }
       } else if (chunkType === 'tool-call') {
         setRunState('tool-calling')
         const tcId = chunkData?.toolCallId as string ?? crypto.randomUUID()
@@ -362,16 +361,17 @@ export function useChat() {
         const idx = orderedBlocks.findIndex(b => b.type === 'tool' && b.toolCallId === tcId)
         if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool') orderedBlocks[idx] = { ...old, result: chunkData?.result, status: isToolResultError(chunkData?.result) ? 'error' : 'complete', argsDelta: undefined } }
         flushNow()
-        // Only change to streaming if there's actually more text expected (not between tool calls)
-        // Keep tool-calling state until a text-delta or finish arrives
       } else if (chunkType === 'error') {
         assistantIsStreaming = false
-        for (let i = 0; i < orderedBlocks.length; i++) { const b = orderedBlocks[i]; if (b.type === 'tool' && b.status === 'pending') orderedBlocks[i] = { ...b, status: 'error' } }
-        const last = orderedBlocks[orderedBlocks.length - 1]
-        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
-        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${orderedBlocks.length - 1}`)
-        orderedBlocks.push({ type: 'error', message: cleanErrorMessage(chunk.payload) })
-        flushNow(); setRunState('error')
+        const finalContent = chunkData?.content as string ?? fullContent
+        const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
+        for (let i = 0; i < finalBlocks.length; i++) { const b = finalBlocks[i]; if (b.type === 'tool' && b.status === 'pending') finalBlocks[i] = { ...b, status: 'error' } }
+        const last = finalBlocks[finalBlocks.length - 1]
+        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${finalBlocks.length - 1}`)
+        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${finalBlocks.length - 1}`)
+        finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
+        setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
+        setRunState('error')
       } else if (chunkType === 'step-limit') {
         assistantIsStreaming = false
         orderedBlocks.push({ type: 'text', content: '\n\n> **⚠️ The model hit its context limit.** You can ask me to continue from where I left off.' })
@@ -382,13 +382,15 @@ export function useChat() {
       } else if (chunkType === 'finish') {
         assistantIsStreaming = false
         if (isMountedRef.current) setSessionTokens(Number(chunkData?.accumulatedTokens ?? 0))
-        const last = orderedBlocks[orderedBlocks.length - 1]
-        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${orderedBlocks.length - 1}`)
-        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${orderedBlocks.length - 1}`)
-        flushNow()
+        const finalContent = chunkData?.content as string ?? fullContent
+        const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
+        const last = finalBlocks[finalBlocks.length - 1]
+        if (last?.type === 'text') postToWorker(last.content, `streaming-text-${assistantMsgId}-${finalBlocks.length - 1}`)
+        else if (last?.type === 'reasoning') postToWorker(last.content, `streaming-reasoning-${assistantMsgId}-${finalBlocks.length - 1}`)
+        setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
         if (isMountedRef.current) setRunState('idle')
-        if (isNewThread && (fullContent || orderedBlocks.length > 0)) {
-          threadService.generateTitle(promptText.slice(0, 200) + ' ' + fullContent.slice(0, 200), resolvedThreadId)
+        if (isNewThread && (finalContent || finalBlocks.length > 0)) {
+          threadService.generateTitle(promptText.slice(0, 200) + ' ' + finalContent.slice(0, 200), resolvedThreadId)
             .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error('Failed to refresh threads:', e) } }).catch(console.error)
         }
       }

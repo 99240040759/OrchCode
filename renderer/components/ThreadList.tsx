@@ -91,7 +91,7 @@ const ThreadList: React.FC = () => {
       </div>
 
       <div className="thread-list-group">
-        {allWorkspacePaths.length === 0 ? <div className="empty-state-desc thread-list-header">No projects opened yet.</div> : allWorkspacePaths.map((path) => {
+        {allWorkspacePaths.length === 0 ? <div className="sidebar-empty-state">No projects opened yet.</div> : allWorkspacePaths.map((path) => {
           const isActive = path === '' ? !activeWorkspace : activeWorkspace?.path === path
           const expanded = expandedPaths[path] !== undefined ? !!expandedPaths[path] : isActive
           return (
@@ -109,7 +109,7 @@ const ThreadList: React.FC = () => {
                 <div className="thread-list-group">
                   {(() => {
                     const workspaceThreads = threadsByWorkspace[path] || []
-                    return workspaceThreads.length === 0 ? <span className="empty-state-desc thread-list-header">No chats yet</span> :
+                    return workspaceThreads.length === 0 ? <div className="sidebar-empty-state-nested">No chats yet</div> :
                       workspaceThreads.map((thread) => {
                         const active = activeThreadId === thread.id
                         return (

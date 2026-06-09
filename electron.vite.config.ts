@@ -14,7 +14,9 @@ export default defineConfig({
         external: ['node-pty', 'playwright-core'],
         input: {
           index: resolve(__dirname, 'main/main.ts'),
-          agentWorker: resolve(__dirname, 'main/agentWorker.ts')
+          agentWorker: resolve(__dirname, 'main/agentWorker.ts'),
+          ptyWorker: resolve(__dirname, 'main/ptyWorker.ts'),
+          dbWorker: resolve(__dirname, 'main/dbWorker.ts')
         }
       }
     },

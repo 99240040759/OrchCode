@@ -35,7 +35,7 @@ export const workspaceCommands = {
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
       const selectedPath = result.filePaths[0]
-      try { bindWorkspaceTransaction(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { await bindWorkspaceTransaction(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       const ctx = await updateWorkspacePath(conversationId, selectedPath)
       return ctx
     }
@@ -44,7 +44,7 @@ export const workspaceCommands = {
     schema: z.object({ conversationId: convIdSchema, workspacePath: z.string().min(1) }),
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
-      try { bindWorkspaceTransaction(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { await bindWorkspaceTransaction(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       const ctx = await updateWorkspacePath(conversationId, workspacePath)
       return ctx
     }
@@ -62,7 +62,7 @@ export const workspaceCommands = {
     schema: z.object({ workspacePath: z.string().min(1) }),
     execute: async ({ workspacePath }: any) => {
       try {
-        deleteOpenedWorkspace(workspacePath)
+        await deleteOpenedWorkspace(workspacePath)
         const affected = await deleteWorkspaceThreads(workspacePath)
         for (const tid of affected) {
           pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)

@@ -24,12 +24,12 @@ proc.parentPort.on('message', async (e: { data: StreamIpcMessage, ports: Electro
   const msg = e.data
   if ('token' in msg && msg.token) process.env.SUPABASE_SESSION_TOKEN = msg.token
   if (msg.type === 'start-stream') {
-    const { threadId, modelType, attachments, promptText, isBrowserActive } = msg
+    const { threadId, modelType, attachments, promptText, isBrowserActive, sharedBuffer } = msg as any
     const [port] = e.ports
     if (!port) return
     log.info(`[agentWorker] Starting stream for thread: ${threadId}`)
     try {
-      await handleAgentStreamRequest(port, threadId, modelType, attachments, promptText, isBrowserActive)
+      await handleAgentStreamRequest(port, threadId, modelType, attachments, promptText, isBrowserActive, sharedBuffer)
       proc.parentPort.postMessage({ type: 'stream-finished', threadId })
     } catch (err: any) {
       log.error(`[agentWorker] Stream error for thread ${threadId}:`, err)

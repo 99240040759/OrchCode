@@ -59,9 +59,11 @@ export type { StreamChunk, StreamPayload } from './types'
 
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>
+  getSharedBuffer(): Promise<SharedArrayBuffer>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>
   stopStream(threadId: string): void
   on(channel: string, cb: (data: unknown) => void): () => void
+  onTerminalPort(id: string): void
   platform: 'darwin' | 'win32' | 'linux'
 }
 

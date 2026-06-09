@@ -112,6 +112,8 @@
 .sidebar-section-header-action { color: var(--text-secondary); transition: color 0.15s ease; display: flex; align-items: center; cursor: pointer }
 .sidebar-section-header-action:hover { color: var(--text-primary) }
 .empty-state-desc { font-size: var(--font-size-xs-plus); color: var(--text-secondary) }
+.sidebar-empty-state { padding: 8px 16px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic }
+.sidebar-empty-state-nested { padding: 6px 16px 6px 38px; font-size: var(--font-size-xs); color: var(--text-muted); font-style: italic }
 .onboarding-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100vw; height: 100vh; background-color: #020202; font-family: 'Outfit', sans-serif; position: relative; overflow: hidden; user-select: none }
 .onboarding-orb { position: absolute; border-radius: 50%; pointer-events: none; z-index: 1 }
 .onboarding-orb-1 { width: 350px; height: 350px; background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, rgba(0, 0, 0, 0) 70%); top: 15%; left: 10% }
