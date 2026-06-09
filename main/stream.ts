@@ -1,5 +1,5 @@
 import log from 'electron-log'
-import { captureException } from '@sentry/electron'
+import { captureException } from '@sentry/electron/main'
 import { z } from 'zod'
 import WindowManager, { pushArtifactsChanged } from './utils'
 import { pool } from './workerPool'

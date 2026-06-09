@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { init as initSentry } from '@sentry/electron'
+import { init as initSentry } from '@sentry/electron/main'
 initSentry({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN, tracesSampleRate: 1.0 })
 import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
 import { join } from 'node:path'
