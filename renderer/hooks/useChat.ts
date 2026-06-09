@@ -3,7 +3,7 @@ import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import {
   agentRunStateAtom, chatMessagesAtom, activeThreadIdAtom, threadListAtom,
   sessionTokensAtom, lifetimeTokensAtom, selectedModelAtom, activeWorkspaceAtom, isThreadLoadingAtom,
-  openFilesAtom, activeEditorFileAtom, artifactsAtom, artifactPanelModeAtom,
+  openFilesAtom, activeEditorFileAtom, artifactsAtom, artifactPanelModeAtom, runningThreadsAtom,
   type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
@@ -22,6 +22,7 @@ export function useChat() {
   const [runState, setRunState] = useAtom(agentRunStateAtom)
   const [messages, setMessages] = useAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
+  const setRunningThreads = useSetAtom(runningThreadsAtom)
   const setSessionTokens = useSetAtom(sessionTokensAtom)
   const setLifetimeTokens = useSetAtom(lifetimeTokensAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
@@ -86,6 +87,7 @@ export function useChat() {
     const tid = activeStreamThreadIdRef.current
     window.api.stopStream(tid)
     setRunState('idle')
+    setRunningThreads(prev => { const n = new Set(prev); n.delete(tid); return n })
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
     setMessages(prev => prev.map(m => !m.isStreaming ? m : {
       ...m, isStreaming: false,
@@ -165,6 +167,7 @@ export function useChat() {
   const deleteThread = useCallback(async (threadId: string) => {
     try {
       window.api.stopStream(threadId)
+      setRunningThreads(prev => { const n = new Set(prev); n.delete(threadId); return n })
       await threadService.deleteThread(threadId); setThreads(prev => prev.filter(t => t.id !== threadId))
       const curId = activeThreadIdRef.current
       if (curId === threadId) {
@@ -194,7 +197,7 @@ export function useChat() {
       if (ctx) {
         resetThreadScopedPanels(); setActiveWorkspace({ name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath })
         const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? [])
-        const wThreads = (tList ?? []).filter(t => t.workspacePath && t.workspacePath.toLowerCase().replace(/\\/g, '/') === ctx.rootPath.toLowerCase().replace(/\\/g, '/'))
+        const wThreads = (tList ?? []).filter(t => t.id !== currentId && t.workspacePath && t.workspacePath.toLowerCase().replace(/\\/g, '/') === ctx.rootPath.toLowerCase().replace(/\\/g, '/'))
         if (wThreads.length > 0) {
           wThreads.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
           if (createdNew) await threadService.deleteThread(currentId)
@@ -212,18 +215,24 @@ export function useChat() {
   const run = useCallback(async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string, _fromInject?: boolean) => {
     if (isRunningRef.current || (!_fromInject && runState !== 'idle')) return
     isRunningRef.current = true
+    const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     try {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
-    const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
     const isNewThread = !existingThread || existingThread.title === 'New Chat'
     activeStreamThreadIdRef.current = resolvedThreadId
     if (resolvedThreadId !== activeThreadIdRef.current && isMountedRef.current) setActiveThreadId(resolvedThreadId)
     if (isMountedRef.current) setRunState('thinking')
+    if (isMountedRef.current) setRunningThreads(prev => new Set(prev).add(resolvedThreadId))
     if (isMountedRef.current) setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: Date.now() }])
     const assistantMsgId = crypto.randomUUID()
     clearMarkdownCache(assistantMsgId)
     if (isMountedRef.current) setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: Date.now(), isStreaming: true }])
+
+    if (isNewThread) {
+      threadService.generateTitle(promptText.slice(0, 400), resolvedThreadId)
+        .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error('Failed to refresh threads:', e) } }).catch(console.error)
+    }
 
     let fullContent = ''
     const orderedBlocks: StreamBlock[] = []
@@ -348,10 +357,6 @@ export function useChat() {
         const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
         setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
         if (isMountedRef.current) setRunState('idle')
-        if (isNewThread && (finalContent || finalBlocks.length > 0)) {
-          threadService.generateTitle(promptText.slice(0, 200) + ' ' + finalContent.slice(0, 200), resolvedThreadId)
-            .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error('Failed to refresh threads:', e) } }).catch(console.error)
-        }
       }
     }
 
@@ -378,6 +383,7 @@ export function useChat() {
     }
     } finally {
       isRunningRef.current = false
+      if (isMountedRef.current) setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
     }
   }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, runState])
 

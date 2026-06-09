@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react'
 import { useAtomValue } from 'jotai'
 import { Trash2, FolderPlus, Loader } from 'lucide-react'
-import { threadListAtom, activeThreadIdAtom, agentRunStateAtom } from '../store/agentStore'
+import { threadListAtom, activeThreadIdAtom, runningThreadsAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import { format, isToday, isYesterday } from 'date-fns'
 
@@ -21,7 +21,7 @@ const formatConversationDate = (dateStr: string): string => {
 const ThreadList: React.FC = () => {
   const threads = useAtomValue(threadListAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
-  const agentRunState = useAtomValue(agentRunStateAtom)
+  const runningThreads = useAtomValue(runningThreadsAtom)
   const { selectThread, deleteThread, openWorkspace } = useThreadListActions()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
 
@@ -47,19 +47,19 @@ const ThreadList: React.FC = () => {
             <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)} onMouseEnter={() => setHoveredId(thread.id)} onMouseLeave={() => setHoveredId(null)} style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
               <div className="thread-item-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                 <span className={`thread-item-title-text thread-item-title ${active ? 'thread-item-active-title' : ''}`} style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.title ?? 'New conversation'}</span>
-                {active && agentRunState !== 'idle' && <Loader size={12} className="animate-spin running-indicator" style={{ marginLeft: '4px' }} />}
+                {runningThreads.has(thread.id) && <Loader size={14} className="animate-spin running-indicator" style={{ marginLeft: '6px' }} />}
               </div>
-              {wsName && (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
-                  {wsName}
-                </div>
-              )}
-              <div className="thread-item-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', marginTop: '4px', height: '14px' }}>
-                {isHovered ? (
-                  <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation" style={{ cursor: 'pointer', opacity: 0.8 }}><Trash2 size={12} /></div>
-                ) : (
-                  <span className="thread-item-meta-time" style={{ color: 'var(--text-muted)' }}>{formatConversationDate(thread.createdAt)}</span>
-                )}
+              <div className="thread-item-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', marginTop: '4px', height: '14px', width: '100%' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: '8px' }}>
+                  {wsName || ''}
+                </span>
+                <span style={{ flexShrink: 0, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  {isHovered ? (
+                    <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation" style={{ cursor: 'pointer', opacity: 0.8, display: 'inline-flex' }}><Trash2 size={12} /></div>
+                  ) : (
+                    <span className="thread-item-meta-time" style={{ color: 'var(--text-muted)' }}>{formatConversationDate(thread.createdAt)}</span>
+                  )}
+                </span>
               </div>
             </div>
           )

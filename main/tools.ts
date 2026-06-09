@@ -190,6 +190,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         }
         const content = rawBuffer.toString('utf-8'), allLines = content.split('\n'), totalLines = allLines.length
         const start = startLine !== undefined ? Math.max(1, startLine) : 1
+        if (start > totalLines) throw new Error(`Invalid startLine: file only has ${totalLines} lines.`)
         const end = endLine !== undefined ? Math.min(totalLines, endLine) : Math.min(totalLines, start + 799)
         if (end < start) throw new Error('Invalid line range: endLine cannot be less than startLine.')
         if (end - start + 1 > 800) throw new Error('Line range limit exceeded: cannot read more than 800 lines at a time.')

@@ -27,8 +27,8 @@ const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]
 
 // We wrap createOpenAICompatProxy because it returns a HandlerFn that takes (req, env)
 const handleNvidia = createOpenAICompatProxy({ functionName: 'api/nvidia', envKey: 'NVIDIA_API_KEY', baseUrl: 'https://integrate.api.nvidia.com' })
-const handleOpencode = createOpenAICompatProxy({ functionName: 'api/opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://api.opencode.com' })
-const handleZAi = createOpenAICompatProxy({ functionName: 'api/z-ai', envKey: 'Z_AI_API_KEY', baseUrl: 'https://api.z-ai.com' })
+const handleOpencode = createOpenAICompatProxy({ functionName: 'api/opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' })
+const handleZAi = createOpenAICompatProxy({ functionName: 'api/z-ai', envKey: 'Z_AI_API_KEY', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', pathReplace: { search: /^\/v1/, replace: '' } })
 
 async function handleGemini(req: Request, env: EnvMap, url: URL): Promise<Response> {
   const apiKey = env['GOOGLE_GENERATIVE_AI_API_KEY']
@@ -41,13 +41,21 @@ async function handleGemini(req: Request, env: EnvMap, url: URL): Promise<Respon
 async function handleModels(req: Request, env: EnvMap): Promise<Response> {
   const models: Record<string, { id: string; name: string; capabilities: { vision: boolean; nativeFiles: boolean } }> = {}
   for (const [prefix, defaultId, defaultName] of MODEL_DEFINITIONS) {
-    const responseKey = prefix.toLowerCase()
     const id = env[`${prefix}_MODEL_ID`] || defaultId
-    const name = env[`${prefix}_MODEL_NAME`] || defaultName
-    const lid = id.toLowerCase()
-    const vision = lid.includes('gemini') || lid.includes('gemma') || lid.includes('kimi') || lid.includes('mimo') || lid.includes('glm-4.6v')
-    const nativeFiles = lid.includes('gemini')
-    models[responseKey] = { id, name, capabilities: { vision, nativeFiles } }
+    let isAvailable = true
+    if (id.startsWith('zai/') && !env['Z_AI_API_KEY']) isAvailable = false
+    if (id.startsWith('opencode/') && !env['OPENCODE_API_KEY']) isAvailable = false
+    if (id.startsWith('nvidia/') && !env['NVIDIA_API_KEY']) isAvailable = false
+    if (!id.includes('/') && !env['GOOGLE_GENERATIVE_AI_API_KEY']) isAvailable = false // gemini/gemma
+
+    if (isAvailable) {
+      const responseKey = prefix.toLowerCase()
+      const name = env[`${prefix}_MODEL_NAME`] || defaultName
+      const lid = id.toLowerCase()
+      const vision = lid.includes('gemini') || lid.includes('gemma') || lid.includes('kimi') || lid.includes('mimo') || lid.includes('glm-4.6v')
+      const nativeFiles = lid.includes('gemini')
+      models[responseKey] = { id, name, capabilities: { vision, nativeFiles } }
+    }
   }
   return jsonResponse(models)
 }

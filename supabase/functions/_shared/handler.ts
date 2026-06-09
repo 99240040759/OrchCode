@@ -100,6 +100,12 @@ function buildForwardHeaders(req: Request, authHeader: Record<string, string>): 
   if (ct) h.set('Content-Type', ct)
   const acc = req.headers.get('accept')
   if (acc) h.set('Accept', acc)
+  const ua = req.headers.get('user-agent')
+  if (ua) h.set('User-Agent', ua)
+  const origin = req.headers.get('origin')
+  if (origin) h.set('Origin', origin)
+  const referer = req.headers.get('referer') || req.headers.get('http-referer')
+  if (referer) h.set('Referer', referer)
   return h
 }
 
@@ -121,12 +127,16 @@ export async function proxyRequest(
   body?: string
 ): Promise<Response> {
   const headers = buildForwardHeaders(req, authHeader)
-  const res = await fetch(targetUrl, {
-    method: req.method,
-    headers,
-    body: body !== undefined ? (body || undefined) : req.body
-  })
-  return upstreamResponse(res)
+  try {
+    const res = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: body !== undefined ? (body || undefined) : req.body
+    })
+    return upstreamResponse(res)
+  } catch (err: any) {
+    return errorResponse(`Upstream Proxy Error (${targetUrl}): ${err.message || 'fetch failed'}`, 502)
+  }
 }
 
 /**

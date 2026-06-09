@@ -2,7 +2,6 @@ import React from 'react'
 
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'
 import type { PrimitiveAtom } from 'jotai'
-import { Virtuoso } from 'react-virtuoso'
 import {
   chatMessageAtomsAtom,
   chatMessagesAtom,
@@ -12,21 +11,15 @@ import {
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStore'
-import { ChevronDown, AlertTriangle, Copy, Check } from 'lucide-react'
+import { ChevronDown, AlertTriangle, Copy, Check, Loader } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { decodeBase64Utf8 } from '../lib/sharedUtils'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── StreamingMarkdown — worker-patched, no ReactMarkdown during streaming ────
+// ─── StreamingMarkdown ────────────────────────────────────────────────────────
 
-/**
- * During streaming: the worker posts compiled HTML via stream:html-update.
- * We morph the DOM directly — no React re-render needed per token.
- * After streaming (isStreaming=false): fall through to MarkdownRenderer for
- * final static render. This eliminates the dual-pipeline fight.
- */
 const StreamingMarkdown = React.memo(
   ({ content, targetId, isStreaming }: { content: string; targetId: string; isStreaming: boolean }) => {
     return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
@@ -199,7 +192,8 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
         <div className="assistant-content chat-message-assistant"><MarkdownRenderer content={message.content} /></div>
       )}
       {message.isStreaming && (
-        <div className="chat-message-generating-container">
+        <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Loader size={14} className="animate-spin" style={{ color: 'var(--accent-blue)' }} />
           <span className="shimmer-text chat-message-generating-text">{statusText}</span>
         </div>
       )}
@@ -256,6 +250,24 @@ Scroller.displayName = 'Scroller'
 const ChatThread: React.FC = () => {
   const messageAtoms = useAtomValue(chatMessageAtomsAtom)
   const messages = useAtomValue(chatMessagesAtom)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const isAtBottomRef = React.useRef(true)
+
+  const handleScroll = React.useCallback(() => {
+    if (!scrollRef.current) return
+    const { scrollTop } = scrollRef.current
+    // In column-reverse, scrollTop is usually 0 or negative at the bottom.
+    // In Webkit/Blink, it's 0 at the bottom and negative as you scroll up.
+    // In Firefox, it might be positive. But typically Math.abs(scrollTop) < 15 indicates we are at the bottom.
+    isAtBottomRef.current = Math.abs(scrollTop) < 15
+  }, [])
+
+  // If we receive a completely new message and we were at the bottom, we ensure scrollTop is 0
+  React.useLayoutEffect(() => {
+    if (scrollRef.current && isAtBottomRef.current) {
+      scrollRef.current.scrollTop = 0
+    }
+  }, [messageAtoms.length])
 
   const messageGroups = React.useMemo(() => {
     const groups: Array<{ key: string; userAtom: any; assistantAtoms: any[] }> = []
@@ -277,24 +289,19 @@ const ChatThread: React.FC = () => {
   if (messageAtoms.length === 0) return null
 
   return (
-    <Virtuoso
-      style={{ height: '100%', width: '100%' }}
-      data={messageGroups}
-      followOutput="auto"
-      components={{
-        Scroller,
-        Header: () => <div className="chat-thread-spacer-top" />,
-        Footer: () => <div className="chat-thread-spacer-bottom" />
-      }}
-      itemContent={(_, group) => (
-        <div className="chat-section">
+    <div className="chat-thread-container" ref={scrollRef} onScroll={handleScroll} style={{ flexDirection: 'column-reverse' }}>
+      <div className="chat-thread-spacer-bottom" style={{ flexShrink: 0 }} />
+      <div className="chat-thread-anchor" style={{ flexShrink: 0 }} />
+      {messageGroups.slice().reverse().map((group) => (
+        <div key={group.key} className="chat-section" style={{ display: 'flex', flexDirection: 'column' }}>
           {group.userAtom && <MessageWrapper messageAtom={group.userAtom} />}
           {group.assistantAtoms.map((assistantAtom) => (
             <MessageWrapper key={`${assistantAtom}`} messageAtom={assistantAtom} />
           ))}
         </div>
-      )}
-    />
+      ))}
+      <div className="chat-thread-spacer-top" style={{ flexShrink: 0 }} />
+    </div>
   )
 }
 

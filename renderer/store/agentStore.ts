@@ -37,6 +37,8 @@ export const isThreadLoadingAtom = atom<boolean>(false)
 
 export const agentRunStateAtom = atom<AgentRunState>('idle')
 
+export const runningThreadsAtom = atom<Set<string>>(new Set<string>())
+
 export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
 
 export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => message.id)

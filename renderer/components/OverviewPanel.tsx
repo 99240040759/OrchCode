@@ -9,6 +9,7 @@ import type { ArtifactEntry } from '../../preload/index.d'
 const MAX_TOKENS = 200_000
 
 function formatTokens(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
 }
@@ -29,7 +30,7 @@ export const TokenIndicator: React.FC<TokenIndicatorProps> = ({ current, max }) 
   const fraction = Math.min(current / max, 1)
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction)
   const color = ringColor(fraction)
-  const formattedTokens = current >= 1000 ? `${(current / 1000).toFixed(1)}k` : String(current)
+  const formattedTokens = formatTokens(current)
   return (
     <div className="token-ring-wrapper" title={`${current.toLocaleString()} / ${max.toLocaleString()} tokens\n${(fraction * 100).toFixed(1)}% context filled`}>
       <svg width={RING_RADIUS * 2 + 4} height={RING_RADIUS * 2 + 4} viewBox={`0 0 ${RING_RADIUS * 2 + 4} ${RING_RADIUS * 2 + 4}`} className="token-ring-svg">

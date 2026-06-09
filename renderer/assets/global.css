@@ -139,8 +139,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(226, 168, 86, 0.12);
-  border-radius: 9999px;
+  background-color: var(--border-focus);
+  border-radius: 4px;
   border: 1px solid transparent;
   background-clip: padding-box;
   transition: background 0.15s ease;

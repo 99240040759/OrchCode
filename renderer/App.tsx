@@ -121,7 +121,7 @@ function AppInner(): React.JSX.Element {
   return (
     <div className="app-root">
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
-      <LeftSidebar expanded={sidebarExpanded} onStartConversation={newConversation} threadListContent={<ThreadList />} />
+      <LeftSidebar expanded={sidebarExpanded} onStartConversation={() => newConversation()} threadListContent={<ThreadList />} />
       <div className="app-content-wrapper">
         <div className="app-container">
           <main className="workspace-main">

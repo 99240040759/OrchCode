@@ -2,6 +2,7 @@ import { Marked } from 'marked'
 import hljs from 'highlight.js'
 import katex from 'katex'
 import { normalizeMarkdownLinks, stripFileProtocol } from './pathUtils'
+import { sanitizeHtml } from './uiUtils'
 
 function getFileIconSvg(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() || ''
@@ -56,6 +57,8 @@ interface MathExtracted {
   mathSessionId: string
 }
 
+const mathCache = new Map<string, string>()
+
 function extractMathBlocks(content: string): MathExtracted {
   const mathBlocks: string[] = []
   const mathSessionId = Math.random().toString(36).substring(2, 10)
@@ -66,8 +69,15 @@ function extractMathBlocks(content: string): MathExtracted {
       let rawMath = match
       if (match.startsWith('$$')) rawMath = match.slice(2, -2)
       else { const s = match.indexOf('['), e = match.lastIndexOf(']'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
+      
+      const key = 'd_' + rawMath.trim()
       try {
-        const compiled = katex.renderToString(rawMath.trim(), { displayMode: true, throwOnError: false })
+        let compiled = mathCache.get(key)
+        if (!compiled) {
+          compiled = katex.renderToString(rawMath.trim(), { displayMode: true, throwOnError: false })
+          if (mathCache.size > 1000) mathCache.clear()
+          mathCache.set(key, compiled)
+        }
         const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
         mathBlocks.push(compiled)
         return placeholder
@@ -81,8 +91,15 @@ function extractMathBlocks(content: string): MathExtracted {
       let rawMath = match
       if (match.startsWith('$')) rawMath = match.slice(1, -1)
       else { const s = match.indexOf('('), e = match.lastIndexOf(')'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
+      
+      const key = 'i_' + rawMath.trim()
       try {
-        const compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
+        let compiled = mathCache.get(key)
+        if (!compiled) {
+          compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
+          if (mathCache.size > 1000) mathCache.clear()
+          mathCache.set(key, compiled)
+        }
         const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
         mathBlocks.push(compiled)
         return placeholder
@@ -104,7 +121,7 @@ export function parseMarkdown(content: string): string {
   if (!content) return ''
   const { processed, mathBlocks, mathSessionId } = extractMathBlocks(content)
   const html = marked.parse(normalizeMarkdownLinks(processed)) as string
-  return restoreMathBlocks(html, mathBlocks, mathSessionId)
+  return restoreMathBlocks(sanitizeHtml(html), mathBlocks, mathSessionId)
 }
 
 interface CachedBlock { text: string; html: string }
@@ -131,8 +148,8 @@ export function parseMarkdownIncremental(content: string, targetId: string): str
     const token = tokens[i]
     if (i < tokens.length - 1) {
       if (cache[i] && cache[i].text === token.raw) htmlSegments.push(cache[i].html)
-      else { const compiled = marked.parser([token]); cache[i] = { text: token.raw, html: compiled }; htmlSegments.push(compiled) }
-    } else htmlSegments.push(marked.parser([token]))
+      else { const compiled = sanitizeHtml(marked.parser([token])); cache[i] = { text: token.raw, html: compiled }; htmlSegments.push(compiled) }
+    } else htmlSegments.push(sanitizeHtml(marked.parser([token])))
   }
   return restoreMathBlocks(htmlSegments.join('\n'), mathBlocks, mathSessionId)
 }

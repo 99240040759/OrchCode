@@ -400,7 +400,7 @@
 .token-ring-wrapper { position: relative; display: flex; align-items: center; justify-content: center; cursor: default; flex-shrink: 0 }
 .token-ring-svg { transform: rotate(-90deg) }
 .token-ring-circle { transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease }
-.token-ring-label { position: absolute; font-size: var(--font-size-micro); font-weight: 700; font-family: var(--font-mono); top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; line-height: 1; letter-spacing: -0.03em; opacity: 0; transition: opacity 0.15s ease }
+.token-ring-label, .token-counter, .lifetime-tokens { position: absolute; font-size: var(--font-size-micro); font-weight: 700; font-family: var(--font-mono); top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; line-height: 1; letter-spacing: -0.03em; opacity: 0; transition: opacity 0.15s ease; font-variant-numeric: tabular-nums }
 .token-ring-wrapper:hover .token-ring-label { opacity: 1 }
 .message-bubble-wrapper { position: relative; width: 100% }
 .message-meta-actions { position: absolute; bottom: -18px; display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity var(--transition-speed-normal) var(--transition-curve-default); z-index: 10 }

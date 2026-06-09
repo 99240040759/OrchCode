@@ -8,10 +8,10 @@ import mermaid from 'mermaid'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
 import { stripFileProtocol } from '../lib/pathUtils'
 import { parseMarkdown, parseMarkdownIncremental } from '../lib/markdownParser'
-import { sanitizeHtml } from '../lib/uiUtils'
 import type { FileReadResult } from '../../preload/index.d'
 import debounce from 'lodash.debounce'
 import { createRoot } from 'react-dom/client'
+import morphdom from 'morphdom'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 mermaid.initialize({
@@ -36,10 +36,24 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
     const conversationId = useAtomValue(activeThreadIdAtom)
 
     const html = React.useMemo(() => {
-      if (isStreaming && id) return sanitizeHtml(parseMarkdownIncremental(content, id))
-      return sanitizeHtml(parseMarkdown(content))
+      if (isStreaming && id) return parseMarkdownIncremental(content, id)
+      return parseMarkdown(content)
     }, [content, isStreaming, id])
     const containerRef = React.useRef<HTMLDivElement | null>(null)
+
+    React.useLayoutEffect(() => {
+      if (!containerRef.current) return
+      if (isStreaming && containerRef.current.hasChildNodes()) {
+        try {
+          morphdom(containerRef.current, `<div>${html}</div>`, { childrenOnly: true })
+        } catch (err) {
+          console.error('[MarkdownRenderer] morphdom error:', err)
+          containerRef.current.innerHTML = html
+        }
+      } else {
+        containerRef.current.innerHTML = html
+      }
+    }, [html, isStreaming])
 
     React.useEffect(() => {
       const el = containerRef.current
@@ -191,7 +205,6 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         }}
         id={id}
         className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}
-        dangerouslySetInnerHTML={isStreaming ? undefined : { __html: html }}
       />
     )
   }

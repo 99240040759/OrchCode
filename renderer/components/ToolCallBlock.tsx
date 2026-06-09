@@ -1,7 +1,7 @@
 import React from 'react'
 import {
   Terminal, FolderOpen, Globe, AlertCircle, ClipboardList, BookOpen,
-  MousePointerClick, Keyboard, Camera, ChevronsUpDown, FileText, Loader
+  MousePointerClick, Keyboard, Camera, ChevronsUpDown, Loader, Search
 } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom, useAtomValue } from 'jotai'
@@ -159,7 +159,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
     case 'browserMouseClickCoordinate': return <MousePointerClick size={15} className="icon-pink" />
     case 'runCommand': return <Terminal size={15} className="icon-lime" />
     case 'listDir': return <FolderOpen size={15} className="icon-secondary" />
-    case 'searchWorkspace': return <FileText size={15} className="icon-secondary" />
+    case 'searchWorkspace': return <Search size={15} className="icon-secondary" />
     case 'searchWeb': return <Globe size={15} className="icon-purple" />
     case 'generateImage': return <Camera size={15} className="icon-blue" />
     default: return <Terminal size={15} className="icon-secondary" />
