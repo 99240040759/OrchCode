@@ -253,6 +253,7 @@
 .icon-wrapper { display: flex; align-items: center; flex-shrink: 0; opacity: 0.8 }
 .target-text { color: var(--text-secondary); font-weight: 500; font-family: var(--font-mono); font-size: 11.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none }
 .line-range-text { color: var(--text-muted); font-family: var(--font-mono); font-size: 10.5px; opacity: 0.7; margin-left: -2px; white-space: nowrap }
+.tool-call-suffix { color: var(--text-muted); font-family: var(--font-mono); font-size: 10.5px; opacity: 0.7; margin-left: 4px; white-space: nowrap }
 .diff-stats { display: flex; gap: 3px; font-size: 10px; font-family: var(--font-mono); font-weight: 600; margin-left: 2px; flex-shrink: 0 }
 .diff-add { color: var(--accent-green) }
 .diff-sub { color: var(--accent-red) }
@@ -437,3 +438,5 @@
 .mermaid:not([data-processed="true"]) { display: block; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); white-space: pre; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto; color: #e5e5e5 }
 .mermaid[data-processed="true"] { display: flex; justify-content: center; align-items: center; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin: 16px 0; overflow-x: auto }
 .mermaid[data-processed="true"] svg { max-width: 100%; height: auto }
+.file-mention-chip { display: inline-flex; align-items: center; gap: 4px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 6px; color: var(--text-primary); font-size: 13px; font-weight: 500; user-select: none; margin: 0 4px; vertical-align: middle }
+.file-mention-chip-icon { display: inline-flex; align-items: center; flex-shrink: 0 }

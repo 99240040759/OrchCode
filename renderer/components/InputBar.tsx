@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import TextareaAutosize from 'react-textarea-autosize'
+import { createRoot } from 'react-dom/client'
 import { Plus, ChevronDown, ArrowRight, Square, Image, FileText } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -19,7 +19,7 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<HTMLDivElement>(null)
   const runState = useAtomValue(agentRunStateAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const sessionTokens = useAtomValue(sessionTokensAtom)
@@ -32,9 +32,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([])
   const [showFileSuggestions, setShowFileSuggestions] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [triggerIndex, setTriggerIndex] = useState(-1)
   const [suggestionIndex, setSuggestionIndex] = useState(0)
-  const [fileReferences, setFileReferences] = useState<Array<{ name: string; path: string }>>([])
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -46,6 +44,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
   }, [conversationId, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
 
+  const handleEditorClick = useCallback((e: React.MouseEvent) => {
+    const chip = (e.target as HTMLElement).closest('.file-mention-chip')
+    if (chip) { e.preventDefault(); e.stopPropagation(); const path = chip.getAttribute('data-path'); if (path) handleOpenFile(path) }
+  }, [handleOpenFile])
+
   const fetchWorkspaceFiles = useCallback(async () => {
     if (!conversationId) return
     try { const files = await workspaceService.listWorkspaceFiles(conversationId); setWorkspaceFiles(files) }
@@ -53,40 +56,70 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   }, [conversationId])
 
   useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId, fetchWorkspaceFiles])
-  useEffect(() => {
-    setFileReferences((prev) => prev.filter((ref) => inputValue.includes(`@${ref.name}`)))
-  }, [inputValue])
 
   const filteredFiles = workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15)
 
-  const selectFileSuggestion = useCallback((selectedFile: string) => {
-    if (!textareaRef.current) return
-    const currentEl = textareaRef.current; const name = selectedFile.split(/[/\\]/).pop() || selectedFile
-    const insertedText = `@${name}`; const selStart = currentEl.selectionStart || 0
-    setInputValue((prev) => prev.slice(0, triggerIndex) + insertedText + prev.slice(selStart))
-    setShowFileSuggestions(false)
-    const wsPath = activeWorkspace?.path ?? ''; const sep = wsPath.includes('\\') ? '\\' : '/'
-    const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
-    const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
-    setFileReferences((prev) => prev.some((p) => p.path === absolutePath) ? prev : [...prev, { name, path: absolutePath }])
-    const newCursorPos = triggerIndex + insertedText.length
-    setTimeout(() => { currentEl.focus(); currentEl.setSelectionRange(newCursorPos, newCursorPos) }, 0)
-  }, [triggerIndex, activeWorkspace])
-
-
-  const checkSuggestions = useCallback((val: string, selectionStart: number | null) => {
-    if (selectionStart === null) return setShowFileSuggestions(false)
-    const textBeforeCursor = val.slice(0, selectionStart)
+  const checkSuggestions = useCallback(() => {
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return setShowFileSuggestions(false)
+    const range = selection.getRangeAt(0)
+    if (!editorRef.current || !editorRef.current.contains(range.startContainer)) return setShowFileSuggestions(false)
+    const container = range.startContainer
+    if (container.nodeType !== Node.TEXT_NODE) return setShowFileSuggestions(false)
+    const text = container.textContent || ''
+    const offset = range.startOffset
+    const textBeforeCursor = text.slice(0, offset)
     const lastAtIdx = textBeforeCursor.lastIndexOf('@')
     if (lastAtIdx !== -1) {
       const textAfterAt = textBeforeCursor.slice(lastAtIdx + 1)
       if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        setTriggerIndex(lastAtIdx); setSearchQuery(textAfterAt); setShowFileSuggestions(true); setSuggestionIndex(0)
+        setSearchQuery(textAfterAt); setShowFileSuggestions(true); setSuggestionIndex(0)
         return
       }
     }
     setShowFileSuggestions(false)
-  }, [fetchWorkspaceFiles])
+  }, [])
+
+  const selectFileSuggestion = useCallback((selectedFile: string) => {
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+    const range = selection.getRangeAt(0)
+    if (!editorRef.current || !editorRef.current.contains(range.startContainer)) return
+    const container = range.startContainer
+    if (container.nodeType !== Node.TEXT_NODE) return
+    const name = selectedFile.split(/[/\\]/).pop() || selectedFile
+    const text = container.textContent || ''
+    const offset = range.startOffset
+    const atIdx = text.slice(0, offset).lastIndexOf('@')
+    if (atIdx === -1) return
+    range.setStart(container, atIdx)
+    range.setEnd(container, offset)
+    range.deleteContents()
+    const wsPath = activeWorkspace?.path ?? ''; const sep = wsPath.includes('\\') ? '\\' : '/'
+    const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
+    const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
+    const chip = document.createElement('span')
+    chip.className = 'file-mention-chip'
+    chip.setAttribute('contenteditable', 'false')
+    chip.setAttribute('data-path', absolutePath)
+    chip.setAttribute('data-name', name)
+    chip.innerHTML = `<span class="react-icon-root" style="display: inline-flex; align-items: center; vertical-align: middle; margin-right: 3px;"></span><span style="font-size: 13px;">${name}</span>`
+    range.insertNode(chip)
+    const iconRoot = chip.querySelector('.react-icon-root')
+    if (iconRoot) {
+      const root = createRoot(iconRoot)
+      root.render(<SymbolsFileIcon fileName={name} autoAssign={true} width={13} height={13} />)
+    }
+    const spaceNode = document.createTextNode('\u00A0')
+    chip.parentNode?.insertBefore(spaceNode, chip.nextSibling)
+    const newRange = document.createRange()
+    newRange.setStartAfter(spaceNode)
+    newRange.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(newRange)
+    setShowFileSuggestions(false)
+    if (editorRef.current) setInputValue(editorRef.current.innerText || '')
+  }, [activeWorkspace])
 
   const triggerFileSelect = useCallback((type: 'image' | 'document') => {
     if (fileInputRef.current) {
@@ -122,20 +155,50 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   }, [attachments])
 
   const handleSend = useCallback(() => {
-    let val = inputValue.trim()
-    if ((!val && attachments.length === 0) || isRunning) return
-    if (fileReferences.length > 0) {
-      [...fileReferences].sort((a, b) => b.name.length - a.name.length).forEach((ref) => {
-        val = val.split(`@${ref.name}`).join(`[${ref.name}](file://${ref.path})`)
-      })
+    if (!editorRef.current) return
+    let val = ''
+    const traverse = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) { val += node.textContent }
+      else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement
+        if (el.classList.contains('file-mention-chip')) {
+          const path = el.getAttribute('data-path') || ''
+          const name = el.getAttribute('data-name') || el.textContent || ''
+          val += `[${name}](file://${path})`
+        } else if (el.tagName === 'BR') { val += '\n' }
+        else if (el.tagName === 'DIV' || el.tagName === 'P') {
+          if (val && !val.endsWith('\n')) val += '\n'
+          Array.from(el.childNodes).forEach(traverse)
+          if (!val.endsWith('\n')) val += '\n'
+        } else { Array.from(el.childNodes).forEach(traverse) }
+      }
     }
+    Array.from(editorRef.current.childNodes).forEach(traverse)
+    val = val.trim()
+    if ((!val && attachments.length === 0) || isRunning) return
     onSubmit?.(val, undefined, attachments)
-    setInputValue(''); setAttachments([]); setFileReferences([])
-  }, [inputValue, attachments, fileReferences, isRunning, onSubmit])
+    editorRef.current.innerHTML = ''
+    setInputValue('')
+    setAttachments([])
+  }, [attachments, isRunning, onSubmit])
 
   const handleStop = useCallback(() => onStop?.(), [onStop])
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(document.createTextNode(text))
+    range.collapse(false)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    if (editorRef.current) setInputValue(editorRef.current.innerText || '')
+  }, [])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (showFileSuggestions && filteredFiles.length > 0) {
       const len = filteredFiles.length
       if (e.key === 'ArrowDown') { e.preventDefault(); return setSuggestionIndex((prev) => (prev + 1) % len) }
@@ -150,7 +213,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     <div className="input-bar-container">
       <AutocompleteSuggestions showFileSuggestions={showFileSuggestions} filteredFiles={filteredFiles} suggestionIndex={suggestionIndex} setSuggestionIndex={setSuggestionIndex} selectFileSuggestion={selectFileSuggestion} />
       <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple className="hidden-input" />
-      {(attachments.length > 0 || fileReferences.length > 0) && (
+      {attachments.length > 0 && (
         <div className="input-attachments-container">
           {attachments.map((att, idx) => (
             <div key={`att-${idx}`} className="input-attachment-chip" title={att.name}>
@@ -161,20 +224,26 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <button onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
             </div>
           ))}
-          {fileReferences.map((ref, idx) => (
-            <div key={`ref-${idx}`} title={ref.path} className="input-attachment-chip clickable-chip" onClick={() => handleOpenFile(ref.path)}>
-              <SymbolsFileIcon fileName={ref.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
-              <span className="input-attachment-name">{ref.name}</span>
-            </div>
-          ))}
         </div>
       )}
-      <div className="input-bar-text-container-inner">
-        <TextareaAutosize ref={textareaRef} minRows={1} maxRows={8} className="input-bar-text-area input-bar-text-area-override"
-          placeholder={attachments.length > 0 ? '' : 'Ask anything, @ to mention'} value={inputValue}
-          onChange={(e) => { setInputValue(e.target.value); checkSuggestions(e.target.value, e.target.selectionStart) }}
-          onSelect={(e) => { const target = e.target as HTMLTextAreaElement; checkSuggestions(target.value, target.selectionStart) }}
-          onKeyDown={handleKeyDown} />
+      <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()} style={{ position: 'relative', flex: 1, display: 'flex', minWidth: 0, cursor: 'text' }}>
+        {inputValue.trim().length === 0 && (
+          <div style={{ position: 'absolute', left: 0, top: '2px', color: 'var(--text-secondary)', opacity: 0.4, pointerEvents: 'none', userSelect: 'none', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-md-plus)' }}>
+            Ask anything, @ to mention
+          </div>
+        )}
+        <div
+          ref={editorRef}
+          contentEditable
+          className="input-bar-text-area input-bar-text-area-override"
+          style={{ outline: 'none', minHeight: '24px', maxHeight: '180px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1 }}
+          onInput={() => { if (editorRef.current) { setInputValue(editorRef.current.innerText || ''); checkSuggestions() } }}
+          onKeyDown={handleKeyDown}
+          onKeyUp={checkSuggestions}
+          onMouseUp={checkSuggestions}
+          onPaste={handlePaste}
+          onClick={handleEditorClick}
+        />
       </div>
       <div className="input-bar-toolbar">
         <div className="input-bar-toolbar-left">
@@ -225,5 +294,4 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     </div>
   )
 }
-
 export default InputBar

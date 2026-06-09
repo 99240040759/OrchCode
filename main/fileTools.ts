@@ -55,7 +55,11 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
 
   const viewFile = tool({
     description: 'Read the content of a file within the workspace. Supports both text and binary files (including images, which are rendered as visual inputs if the model supports vision).',
-    inputSchema: z.object({ absolutePath: z.string().describe('Absolute path to the file.'), startLine: z.number().int().min(1).optional(), endLine: z.number().int().min(1).optional() }),
+    inputSchema: z.object({
+      absolutePath: z.string().describe('Absolute path to the file.'),
+      startLine: z.number().int().min(1).optional().describe('Optional 1-indexed start line number to read for text files. If omitted, defaults to 1.'),
+      endLine: z.number().int().min(1).optional().describe('Optional 1-indexed end line number to read for text files (maximum 800 lines from startLine). If omitted, defaults to reading up to 800 lines.')
+    }),
     execute: async ({ absolutePath, startLine, endLine }) => {
       try {
         const safePath = safe(absolutePath), stat = await fs.stat(safePath)
@@ -66,13 +70,13 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
           const mimeType = getMimeType(safePath)
           return { content: `[Binary File: ${mimeType}] Base64 data included.`, base64Content: rawBuffer.toString('base64'), mimeType, absolutePath: safePath, isBinary: true, sizeBytes: stat.size }
         }
-        if (startLine === undefined || endLine === undefined) throw new Error('Line ranges (startLine and endLine) are required for text files.')
-        if (endLine < startLine) throw new Error('Invalid line range: endLine cannot be less than startLine.')
-        if (endLine - startLine + 1 > 800) throw new Error('Line range limit exceeded: cannot read more than 800 lines at a time.')
         const content = rawBuffer.toString('utf-8'), allLines = content.split('\n'), totalLines = allLines.length
-        const start = Math.max(1, startLine), end = Math.min(totalLines, endLine), wasTruncated = endLine > totalLines
+        const start = startLine !== undefined ? Math.max(1, startLine) : 1
+        const end = endLine !== undefined ? Math.min(totalLines, endLine) : Math.min(totalLines, start + 799)
+        if (end < start) throw new Error('Invalid line range: endLine cannot be less than startLine.')
+        if (end - start + 1 > 800) throw new Error('Line range limit exceeded: cannot read more than 800 lines at a time.')
         const targetLines = allLines.slice(start - 1, end), numberedContent = targetLines.map((line, i) => `${start + i}: ${line}`).join('\n')
-        return { content: numberedContent, absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: wasTruncated }
+        return { content: numberedContent, absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: end < totalLines }
       } catch (err: any) { log.error('[tool:viewFile] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {
@@ -83,7 +87,7 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
       return { type: 'content', value: [{ type: 'text', text: output.content || output.error || 'No content' }] }
     }
   })
-
+ 
   const writeToFile = tool({
     description: 'Create a new file within the workspace.',
     inputSchema: z.object({ targetFile: z.string().describe('Absolute path for the file.'), codeContent: z.string().describe('Full content.'), overwrite: z.boolean().default(false) }),
@@ -101,10 +105,18 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     },
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully wrote to file ${output.absolutePath}` }] })
   })
-
+ 
   const multiReplaceFileContent = tool({
     description: 'Edit MULTIPLE non-contiguous blocks in an existing file.',
-    inputSchema: z.object({ targetFile: z.string().describe('Absolute path to file.'), instruction: z.string().describe('Description of changes.'), replacementChunks: z.array(z.object({ startLine: z.number().int().min(1), endLine: z.number().int().min(1), replacementContent: z.string() })).min(1) }),
+    inputSchema: z.object({
+      targetFile: z.string().describe('Absolute path to file.'),
+      instruction: z.string().describe('Description of changes.'),
+      replacementChunks: z.array(z.object({
+        startLine: z.number().int().min(1).describe('The 1-indexed start line number of the block to replace.'),
+        endLine: z.number().int().min(1).describe('The 1-indexed end line number (inclusive) of the block to replace.'),
+        replacementContent: z.string().describe('The new content to replace the specified line range with.')
+      })).min(1).describe('Non-overlapping chunks of the file to replace, sorted in ascending order of startLine.')
+    }),
     execute: async ({ targetFile, instruction: _instruction, replacementChunks }) => {
       try {
         const safePath = safe(targetFile), ctx = resolve()

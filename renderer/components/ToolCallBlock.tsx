@@ -30,7 +30,7 @@ function getStreamingVal(args: Record<string, unknown> | undefined, argsDelta: s
   try { return JSON.parse(`"${m[1]}"`) } catch { return m[1] }
 }
 
-function getDiffStats(toolName: string, args: Record<string, unknown> | undefined, argsDelta: string | undefined): string {
+function getDiffStats(toolName: string, args: Record<string, unknown> | undefined, argsDelta: string | undefined): { added: number; removed: number } {
   let added = 0, removed = 0
   if (FILE_WRITE_TOOLS.includes(toolName) && toolName !== 'writeToFile') {
     const chunks = args?.replacementChunks as Array<{ startLine?: number | string; endLine?: number | string; replacementContent?: string }> | undefined
@@ -58,27 +58,32 @@ function getDiffStats(toolName: string, args: Record<string, unknown> | undefine
       }
     }
   }
-  return (added || removed) ? ` +${added}-${removed}` : ''
+  return { added, removed }
 }
-
 function getToolDisplay(toolName: string, args: Record<string, unknown> | undefined, status?: 'pending' | 'complete' | 'error', argsDelta?: string, result?: unknown): {
-  operation: string; target: string; fullPath: string | null; isFile: boolean
+  operation: string; target: string; suffix?: React.ReactNode; fullPath: string | null; isFile: boolean
 } {
   const isErr = status === 'error', isComp = status === 'complete'
   if (FILE_WRITE_TOOLS.includes(toolName)) {
     const path = getStreamingVal(args, argsDelta, 'targetFile')
-    const suffix = toolName !== 'writeToFile' ? getDiffStats(toolName, args, argsDelta) : ''
-    const targetName = (path.split(/[/\\]/).pop() ?? path) + suffix
-    const op = toolName === 'writeToFile'
-      ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing')
-      : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
-    return { operation: op, target: targetName, fullPath: path || null, isFile: true }
+    const { added, removed } = toolName !== 'writeToFile' ? getDiffStats(toolName, args, argsDelta) : { added: 0, removed: 0 }
+    const targetName = path.split(/[/\\]/).pop() ?? path
+    const op = toolName === 'writeToFile' ? (isComp ? 'Wrote' : isErr ? 'Failed to write' : 'Writing') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
+    const suffix = (added || removed) ? (
+      <span className="diff-stats" style={{ display: 'inline-flex', gap: '3px', marginLeft: '6px', fontSize: '10.5px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+        {added > 0 && <span className="diff-add" style={{ color: 'var(--accent-green)' }}>+{added}</span>}
+        {removed > 0 && <span className="diff-sub" style={{ color: 'var(--accent-red)' }}>-{removed}</span>}
+      </span>
+    ) : undefined
+    return { operation: op, target: targetName, suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'viewFile') {
     const path = getStreamingVal(args, argsDelta, 'absolutePath')
     const start = getStreamingVal(args, argsDelta, 'startLine'), end = getStreamingVal(args, argsDelta, 'endLine')
-    const suffix = start || end ? ` #L${start || '1'}${end ? `-${end}` : ''}` : ''
-    return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: (path.split(/[/\\]/).pop() ?? path) + suffix, fullPath: path || null, isFile: true }
+    const lineSuffix = start || end ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
+    const suffix = lineSuffix ? <span className="tool-call-suffix">{lineSuffix}</span> : undefined
+    const targetName = path.split(/[/\\]/).pop() ?? path
+    return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: targetName, suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'listDir') {
     const path = getStreamingVal(args, argsDelta, 'directoryPath')
@@ -100,7 +105,6 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
   }
   return { operation: toolName, target: '', fullPath: null, isFile: false }
 }
-
 function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   if (toolName === 'browserScreenshot') return <Camera size={15} className="icon-blue" />
   if (isFile) {
@@ -122,14 +126,12 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
     default: return <Terminal size={15} className="icon-secondary" />
   }
 }
-
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
-  const { operation, target, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta, toolCall.result)
+  const { operation, target, suffix, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta, toolCall.result)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
-
   const handleClick = async () => {
     if (!isFile || !fullPath) return
     try {
@@ -137,14 +139,16 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
       if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('[ToolCallBlock] Failed to open file:', err) }
   }
-
   const Component = (isFile ? 'button' : 'div') as React.ElementType
   return (
     <div className="tool-call-block-container">
       <Component onClick={isFile ? handleClick : undefined} className={`tool-call-wrapper ${isFile ? 'tool-call-interactive' : 'tool-call-non-interactive'}`} title={isFile ? `Open ${fullPath}` : undefined}>
         <span className="muted-text">{operation}</span>
         <span className="icon-wrapper">{renderToolIcon(toolCall.toolName, isFile, target)}</span>
-        <span className="target-text">{target}</span>
+        <span className="target-text">
+          {target}
+          {suffix}
+        </span>
         {toolCall.status === 'pending' && <div className="tool-call-spinner" />}
         {toolCall.status === 'error' && <AlertCircle size={14} className="icon-red" />}
       </Component>

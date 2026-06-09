@@ -150,8 +150,10 @@ export function setThreadAccumulatedTokens(threadId: string, tokens: number): vo
 
 export function setThreadWorkspace(threadId: string, workspacePath: string): void {
   const db = getDB()
-  const threadExists = db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)
-  if (!threadExists) return // Do not create zombie records
+  if (!db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
+    const now = new Date().toISOString()
+    db.prepare(`INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+  }
   db.prepare(`INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
 }
 

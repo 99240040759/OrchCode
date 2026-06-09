@@ -22,7 +22,7 @@ function getFileIconSvg(fileName: string): string {
 }
 
 const renderer = {
-  hr(): string { return '<hr>\n' },
+  hr(): string { return '' },
   code(token: { text: string; lang?: string }): string {
     const code = token.text, lang = token.lang || ''
     if (lang === 'mermaid') return `<div class="mermaid">${code}</div>`

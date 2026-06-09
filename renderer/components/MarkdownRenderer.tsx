@@ -8,6 +8,8 @@ import { parseMarkdown } from '../lib/markdownParser'
 import { sanitizeHtml } from '../lib/uiUtils'
 import type { FileReadResult } from '../../preload/index.d'
 import debounce from 'lodash.debounce'
+import { createRoot } from 'react-dom/client'
+import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -37,6 +39,7 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
       const el = containerRef.current
       if (!el) return
       let active = true
+      const roots: any[] = []
 
       const handleGlobalClick = async (e: MouseEvent) => {
         const fileLink = (e.target as HTMLElement).closest('.file-link')
@@ -111,6 +114,25 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
         }
       }
 
+      const resolveFileIcons = () => {
+        const fileLinks = el.querySelectorAll('.file-link')
+        fileLinks.forEach((linkEl) => {
+          if (linkEl.getAttribute('data-mounted') === 'true') return
+          linkEl.setAttribute('data-mounted', 'true')
+          const text = linkEl.querySelector('.file-name-wrapper')?.textContent || linkEl.textContent || ''
+          const fileName = text.split(/[/\\]/).pop() ?? ''
+          linkEl.innerHTML = '<span class="react-icon-root"></span><span class="file-name-wrapper"></span>'
+          const iconRoot = linkEl.querySelector('.react-icon-root')
+          const nameWrapper = linkEl.querySelector('.file-name-wrapper')
+          if (nameWrapper) nameWrapper.textContent = text
+          if (iconRoot) {
+            const root = createRoot(iconRoot)
+            root.render(<SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />)
+            roots.push(root)
+          }
+        })
+      }
+
       const resolveMermaid = async () => {
         if (!isStreaming) {
           const nodes = el.querySelectorAll('.mermaid') as NodeListOf<HTMLElement>
@@ -127,16 +149,23 @@ const MarkdownRenderer = React.forwardRef<HTMLDivElement, MarkdownRendererProps>
 
       el.addEventListener('click', handleGlobalClick)
       resolveImages()
+      resolveFileIcons()
       resolveMermaid()
 
-      const debouncedResolveImages = debounce(() => { if (active) resolveImages() }, 500)
-      const obs = new MutationObserver(() => { debouncedResolveImages() })
+      const debouncedResolve = debounce(() => {
+        if (active) {
+          resolveImages()
+          resolveFileIcons()
+        }
+      }, 500)
+      const obs = new MutationObserver(() => { debouncedResolve() })
       obs.observe(el, { childList: true, subtree: true })
 
       return () => {
         active = false
         el.removeEventListener('click', handleGlobalClick)
         obs.disconnect()
+        roots.forEach(r => { try { r.unmount() } catch {} })
       }
     }, [html, conversationId, isStreaming, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
 
