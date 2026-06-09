@@ -365,7 +365,7 @@ export function registerAllIpc() {
       throw new Error(`Unknown command: ${command}`)
     }
     try {
-      return await cmd.execute(payload, event)
+      return await cmd.execute(payload ?? {}, event)
     } catch (err: any) {
       log.error(`[ipc] Error in ${command}:`, err)
       throw err

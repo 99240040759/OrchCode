@@ -50,6 +50,15 @@
   --transition-speed-panel: 0.2s;
   --transition-speed-panel-opacity: 0.15s;
   --transition-panel: width var(--transition-speed-panel) var(--transition-curve-default), opacity var(--transition-speed-panel-opacity) var(--transition-curve-default);
+
+  /* Spacing Tokens */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
 }
 
 /* Base Reset */
