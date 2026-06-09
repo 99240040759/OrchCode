@@ -44,12 +44,13 @@ const StreamingMarkdown = React.memo(
         morphdom(containerRef.current, `<div id="${tid}" class="markdown-content">${sanitizedHtml}</div>`, {
           onBeforeElUpdated: (from, to) => !from.isEqualNode(to)
         })
-        // auto-scroll if near bottom
-        const chatEl = document.querySelector('.chat-thread-container')
-        if (chatEl) {
-          const { scrollTop, scrollHeight, clientHeight } = chatEl
-          if (scrollHeight - scrollTop - clientHeight < 120) chatEl.scrollTop = chatEl.scrollHeight
-        }
+        requestAnimationFrame(() => {
+          const chatEl = document.querySelector('.chat-thread-container')
+          if (chatEl) {
+            const { scrollTop, scrollHeight, clientHeight } = chatEl
+            if (scrollHeight - scrollTop - clientHeight < 120) chatEl.scrollTop = chatEl.scrollHeight
+          }
+        })
       }
       window.addEventListener('stream:html-update', handleUpdate, { passive: true })
       return () => window.removeEventListener('stream:html-update', handleUpdate)

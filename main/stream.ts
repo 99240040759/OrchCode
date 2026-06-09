@@ -25,10 +25,8 @@ type StreamBlock = { type: 'text'; content: string } | { type: 'reasoning'; cont
 // Duality: AI SDK versions >= 3.x use 'toolCallId', while legacy or certain provider parts use 'id'
 interface ToolStreamPart { type: string; toolCallId?: string; id?: string; toolName?: string; args?: Record<string, unknown>; input?: Record<string, unknown>; argsDelta?: string; argsTextDelta?: string; delta?: string; result?: unknown; error?: unknown }
 
-export const activeAbortControllers = new Map<string, AbortController>()
+const activeAbortControllers = new Map<string, AbortController>()
 const activePorts = new Map<string, Electron.MessagePortMain>()
-const pendingAttachments = new Map<string, Promise<Buffer[]>>()
-const attachmentResolvers = new Map<string, (bufs: Buffer[]) => void>()
 const SUMMARISE_THRESHOLD = 180_000
 
 const AttachmentSchema = z.object({ type: z.enum(['image', 'document']), name: z.string().min(1).max(255), mimeType: z.string().max(255).optional(), base64: z.string().max(14_000_000).optional() })
@@ -44,15 +42,7 @@ export function registerStreamIpc() {
       const session = getCurrentSession()
       if (!session) throw new Error('Unauthorized: Please sign in to use agents.')
       const request = StreamRequestSchema.parse(rawPayload ?? {})
-      if (request.attachments?.length) {
-        pendingAttachments.set(request.threadId, new Promise<Buffer[]>((resolve, reject) => {
-          const timeoutId = setTimeout(() => { attachmentResolvers.delete(request.threadId); reject(new Error('Attachment handshake timeout')) }, 10000)
-          attachmentResolvers.set(request.threadId, (bufs) => { clearTimeout(timeoutId); resolve(bufs) })
-        }).catch(err => {
-          log.error('[stream] Attachment handshake error:', err)
-          return []
-        }))
-      }
+
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
       const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
@@ -75,8 +65,7 @@ export function registerStreamIpc() {
           const t = browserTools(request.threadId, true)[toolName]
           if (t) {
             t.execute(args).then((res: any) => {
-              const transfers = res && res.buffer instanceof ArrayBuffer ? [res.buffer] : []
-              worker.postMessage({ type: 'tool-response', requestId, result: res }, transfers)
+              worker.postMessage({ type: 'tool-response', requestId, result: res })
             }).catch((err: any) => worker.postMessage({ type: 'tool-response', requestId, error: err.message }))
           } else worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
         }
@@ -133,26 +122,19 @@ Use native tools (viewFile, writeToFile, multiReplaceFileContent, searchWorkspac
 }
 async function setupStreamRequest(port: Electron.MessagePortMain, threadId: string, controller: AbortController, attachments?: any[]) {
   activePorts.set(threadId, port)
-  let streamFinished = false
+  let streamFinished = false; let resolveAttachments: ((bufs: Buffer[]) => void) | null = null
+  const bufsPromise = attachments && attachments.length ? new Promise<Buffer[]>((resolve, reject) => {
+    resolveAttachments = resolve
+    setTimeout(() => reject(new Error('Attachment handshake timeout')), 10000)
+  }) : Promise.resolve([])
   port.on('message', (e) => {
     if (e.data === 'abort') controller.abort()
-    if (e.data?.type === 'bufs') {
-      const resolver = attachmentResolvers.get(threadId)
-      if (resolver) { resolver(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b))); attachmentResolvers.delete(threadId) }
-    }
+    if (e.data?.type === 'bufs') resolveAttachments?.(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b)))
   })
-  // FIXED: only abort on unexpected port close, not on normal finish-triggered close
-  port.on('close', () => {
-    if (!streamFinished) {
-      log.info(`[stream] Port closed unexpectedly for ${threadId}. Aborting.`)
-      controller.abort()
-    }
-  })
-  // Expose a way for handleAgentStreamRequest to mark stream as done before closing port
+  port.on('close', () => { if (!streamFinished) { log.info(`[stream] Port closed unexpectedly for ${threadId}. Aborting.`); controller.abort() } })
   ;(port as any).__markFinished = () => { streamFinished = true }
   port.start()
-  const attachmentPromise = pendingAttachments.get(threadId), bufs = attachmentPromise ? await attachmentPromise : []
-  pendingAttachments.delete(threadId)
+  const bufs = await bufsPromise.catch(err => { log.error('[stream] Attachment handshake error:', err); return [] })
   if (attachments && bufs.length) {
     attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
     if (bufs.reduce((t, b) => t + b.length, 0) > 25 * 1024 * 1024) throw new Error('Attachments exceed 25 MB limit.')
@@ -184,7 +166,7 @@ export async function handleAgentStreamRequest(
   const controller = new AbortController()
   activeAbortControllers.set(threadId, controller)
   try { await setupStreamRequest(port, threadId, controller, attachments) }
-  catch (err) { pendingAttachments.delete(threadId); attachmentResolvers.delete(threadId); log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
+  catch (err) { log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err); throw err }
   let assistantMsgId = '', assistantContent = ''
   const orderedBlocks: StreamBlock[] = []
   let sessionAccumulatedTokens = 0

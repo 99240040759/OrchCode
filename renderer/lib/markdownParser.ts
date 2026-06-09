@@ -100,3 +100,48 @@ export function parseMarkdown(content: string): string {
   }
   return html
 }
+
+interface CachedBlock { text: string; html: string }
+const compileCache = new Map<string, CachedBlock[]>()
+export function clearMarkdownCache(targetId: string) { for (const k of compileCache.keys()) { if (k.includes(targetId)) compileCache.delete(k) } }
+
+export function parseMarkdownIncremental(content: string, targetId: string): string {
+  if (!content) return ''
+  const mathBlocks: string[] = []
+  const mathSessionId = Math.random().toString(36).substring(2, 10)
+  let processed = content.replace(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\\\[[\s\S]*?\\\\\])/g, (match) => {
+    let rawMath = match
+    if (match.startsWith('$$')) rawMath = match.slice(2, -2)
+    else { const s = match.indexOf('['), e = match.lastIndexOf(']'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
+    try {
+      const compiled = katex.renderToString(rawMath.trim(), { displayMode: true, throwOnError: false })
+      const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
+      mathBlocks.push(compiled); return placeholder
+    } catch { return match }
+  })
+  processed = processed.replace(/(\\\([\s\S]*?\\\)|(?<!\\)\$[^\$\n]+?\$)/g, (match) => {
+    let rawMath = match
+    if (match.startsWith('$')) rawMath = match.slice(1, -1)
+    else { const s = match.indexOf('('), e = match.lastIndexOf(']'); if (s !== -1 && e !== -1) rawMath = match.slice(s + 1, e) }
+    try {
+      const compiled = katex.renderToString(rawMath.trim(), { displayMode: false, throwOnError: false })
+      const placeholder = `__MATH_BLOCK_${mathSessionId}_${mathBlocks.length}__`
+      mathBlocks.push(compiled); return placeholder
+    } catch { return match }
+  })
+  const tokens = marked.lexer(normalizeMarkdownLinks(processed))
+  let cache = compileCache.get(targetId)
+  if (!cache) { cache = []; compileCache.set(targetId, cache) }
+  const htmlSegments: string[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (i < tokens.length - 1) {
+      if (cache[i] && cache[i].text === token.raw) htmlSegments.push(cache[i].html)
+      else { const compiled = marked.parser([token]); cache[i] = { text: token.raw, html: compiled }; htmlSegments.push(compiled) }
+    } else htmlSegments.push(marked.parser([token]))
+  }
+  let html = htmlSegments.join('\n')
+  for (let i = 0; i < mathBlocks.length; i++) html = html.replace(new RegExp(`__MATH_BLOCK_${mathSessionId}_${i}__`, 'g'), () => mathBlocks[i])
+  return html
+}
+

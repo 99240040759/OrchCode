@@ -127,6 +127,8 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   }
 }
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
+  const isFileTool = FILE_WRITE_TOOLS.includes(toolCall.toolName) || toolCall.toolName === 'viewFile'
+  if (isFileTool && toolCall.status !== 'complete' && toolCall.status !== 'error') return null
   const { operation, target, suffix, fullPath, isFile } = getToolDisplay(toolCall.toolName, toolCall.args, toolCall.status, toolCall.argsDelta, toolCall.result)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)

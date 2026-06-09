@@ -227,23 +227,25 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         </div>
       )}
       <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()} style={{ position: 'relative', flex: 1, display: 'flex', minWidth: 0, cursor: 'text' }}>
-        {inputValue.trim().length === 0 && (
-          <div style={{ position: 'absolute', left: 0, top: '2px', color: 'var(--text-secondary)', opacity: 0.4, pointerEvents: 'none', userSelect: 'none', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-md-plus)' }}>
-            Ask anything, @ to mention
-          </div>
-        )}
-        <div
-          ref={editorRef}
-          contentEditable
-          className="input-bar-text-area input-bar-text-area-override"
-          style={{ outline: 'none', minHeight: '24px', maxHeight: '180px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1 }}
-          onInput={() => { if (editorRef.current) { setInputValue(editorRef.current.innerText || ''); checkSuggestions() } }}
-          onKeyDown={handleKeyDown}
-          onKeyUp={checkSuggestions}
-          onMouseUp={checkSuggestions}
-          onPaste={handlePaste}
-          onClick={handleEditorClick}
-        />
+        <div style={{ position: 'relative', flex: 1, display: 'flex', minWidth: 0 }}>
+          {inputValue.trim().length === 0 && (
+            <div style={{ position: 'absolute', left: 0, top: '2px', color: 'var(--text-secondary)', opacity: 0.4, pointerEvents: 'none', userSelect: 'none', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-md-plus)' }}>
+              Ask anything, @ to mention
+            </div>
+          )}
+          <div
+            ref={editorRef}
+            contentEditable
+            className="input-bar-text-area input-bar-text-area-override"
+            style={{ outline: 'none', minHeight: '24px', maxHeight: '180px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1 }}
+            onInput={() => { if (editorRef.current) { setInputValue(editorRef.current.innerText || ''); checkSuggestions() } }}
+            onKeyDown={handleKeyDown}
+            onKeyUp={checkSuggestions}
+            onMouseUp={checkSuggestions}
+            onPaste={handlePaste}
+            onClick={handleEditorClick}
+          />
+        </div>
       </div>
       <div className="input-bar-toolbar">
         <div className="input-bar-toolbar-left">

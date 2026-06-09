@@ -12,7 +12,6 @@ import { addOpenedWorkspace, setThreadWorkspace, deleteOpenedWorkspace, deleteWo
 import { getConversationPath } from './paths'
 import WindowManager from './windowManager'
 import { convIdSchema } from './threadCommands'
-import { activeAbortControllers } from './stream'
 import { pool } from './workerPool'
 import { cleanupPtysForThread } from './terminalCommands'
 import { MAX_FILE_READ_BYTES } from './fileTools'
@@ -68,8 +67,6 @@ export const workspaceCommands = {
         deleteOpenedWorkspace(workspacePath)
         const affected = await deleteWorkspaceThreads(workspacePath)
         for (const tid of affected) {
-          const ctrl = activeAbortControllers.get(tid)
-          if (ctrl) { ctrl.abort(); activeAbortControllers.delete(tid) }
           pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)
           clearWorkspaceContext(tid)
           await new Promise(resolve => setTimeout(resolve, 200))

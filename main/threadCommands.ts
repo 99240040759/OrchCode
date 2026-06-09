@@ -9,7 +9,6 @@ import {
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { getAvailableModels } from './models'
-import { activeAbortControllers } from './stream'
 import { listArtifacts } from './artifacts'
 import { getConversationPath } from './paths'
 import { requireAuthToken } from './auth'
@@ -20,15 +19,6 @@ const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Inv
 export const convIdSchema = z.string().min(1).max(256)
 
 export const threadCommands = {
-  'agent:stop': {
-    schema: z.object({ threadId: threadIdSchema.optional() }),
-    execute: ({ threadId }: any) => {
-      if (threadId) {
-        const ctrl = activeAbortControllers.get(threadId)
-        if (ctrl) { ctrl.abort(); activeAbortControllers.delete(threadId) }
-      } else { activeAbortControllers.forEach(c => c.abort()); activeAbortControllers.clear() }
-    }
-  },
   'models:list': { schema: z.object({}), execute: () => getAvailableModels() },
   'artifacts:list': { schema: z.object({ conversationId: convIdSchema }), execute: ({ conversationId }: any) => listArtifacts(conversationId) },
   'thread:generate-title': {
@@ -86,8 +76,6 @@ export const threadCommands = {
     execute: async ({ threadId }: any) => {
       try {
         if (getActiveThreadId() === threadId) setActiveThreadId(null)
-        const ctrl = activeAbortControllers.get(threadId)
-        if (ctrl) { ctrl.abort(); activeAbortControllers.delete(threadId) }
         pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
         getThreadWorkspace(threadId); clearWorkspaceContext(threadId); const deleted = deleteThread(threadId)
         await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

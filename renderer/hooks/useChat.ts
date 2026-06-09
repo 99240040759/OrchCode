@@ -35,6 +35,8 @@ export function useChat() {
   const workerRef = useRef<Worker | null>(null)
   // version map: targetId → latest version sent; worker drops stale results
   const workerVersionRef = useRef<Map<string, number>>(new Map())
+  const isCompilingRef = useRef(false)
+  const pendingCompileRef = useRef<{ content: string; targetId: string } | null>(null)
   const isMountedRef = useRef(true)
   const threadsRef = useRef(threads)
 
@@ -52,6 +54,17 @@ export function useChat() {
     workerRef.current = new Worker(new URL('../workers/markdown.worker.ts', import.meta.url), { type: 'module' })
     workerRef.current.onmessage = (e) => {
       const { html, targetId, version } = e.data
+      isCompilingRef.current = false
+      if (pendingCompileRef.current) {
+        const next = pendingCompileRef.current
+        pendingCompileRef.current = null
+        if (workerRef.current) {
+          isCompilingRef.current = true
+          const nextVer = (workerVersionRef.current.get(next.targetId) ?? 0) + 1
+          workerVersionRef.current.set(next.targetId, nextVer)
+          workerRef.current.postMessage({ type: 'compile', content: next.content, targetId: next.targetId, version: nextVer })
+        }
+      }
       const latest = workerVersionRef.current.get(targetId)
       // drop stale results
       if (latest !== undefined && version < latest) return
@@ -62,6 +75,11 @@ export function useChat() {
 
   const postToWorker = useCallback((content: string, targetId: string) => {
     if (!workerRef.current) return
+    if (isCompilingRef.current) {
+      pendingCompileRef.current = { content, targetId }
+      return
+    }
+    isCompilingRef.current = true
     const version = (workerVersionRef.current.get(targetId) ?? 0) + 1
     workerVersionRef.current.set(targetId, version)
     workerRef.current.postMessage({ type: 'compile', content, targetId, version })
@@ -220,6 +238,8 @@ export function useChat() {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
     // clear version map for new stream
     workerVersionRef.current.clear()
+    isCompilingRef.current = false
+    pendingCompileRef.current = null
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
     const isNewThread = !existingThread || existingThread.title === 'New Chat'
@@ -228,6 +248,7 @@ export function useChat() {
     if (isMountedRef.current) setRunState('thinking')
     if (isMountedRef.current) setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: Date.now() }])
     const assistantMsgId = crypto.randomUUID()
+    workerRef.current?.postMessage({ type: 'clear-cache', targetId: assistantMsgId })
     if (isMountedRef.current) setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: Date.now(), isStreaming: true }])
 
     let fullContent = ''
