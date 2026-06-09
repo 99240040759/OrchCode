@@ -118,6 +118,7 @@ jobs:
         run: npx electron-builder --win --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          NODE_OPTIONS: "--max_old_space_size=8192"
 
   release-mac-intel:
     name: Build & Publish macOS Intel (x64)
@@ -154,7 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          NODE_OPTIONS: "--no-force-async-hooks-checks"
+          NODE_OPTIONS: "--max_old_space_size=8192 --no-force-async-hooks-checks"
 
   release-mac-silicon:
     name: Build & Publish macOS Apple Silicon (arm64)
@@ -190,6 +191,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          NODE_OPTIONS: "--max_old_space_size=8192"
 
   publish-release:
     name: Publish GitHub Release
