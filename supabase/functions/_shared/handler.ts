@@ -144,6 +144,7 @@ export interface OpenAICompatConfig {
   functionName: string    // used for path-stripping: /functions/v1/<functionName>
   envKey: string          // env var holding the API key
   baseUrl: string         // upstream base URL (no trailing slash)
+  pathReplace?: { search: string | RegExp; replace: string }
 }
 
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/]
@@ -152,19 +153,14 @@ export function createOpenAICompatProxy(config: OpenAICompatConfig): HandlerFn {
   return async (req: Request, env: EnvMap): Promise<Response> => {
     const apiKey = env[config.envKey]
     if (!apiKey) return errorResponse(`Server Configuration Error: ${config.envKey} is missing.`, 500)
-
     const url = new URL(req.url)
     const subpath = url.pathname.replace(new RegExp(`^/(functions/v1/)?${config.functionName}`), '')
-
-    if (!OPENAI_COMPAT_PATHS.some((p) => p.test(subpath))) {
-      return errorResponse(`Path not allowed: ${subpath}`, 403)
-    }
-
+    if (!OPENAI_COMPAT_PATHS.some((p) => p.test(subpath))) return errorResponse(`Path not allowed: ${subpath}`, 403)
     let body = ''
     if (req.method === 'POST' && subpath === '/v1/chat/completions') {
       try { body = await req.text() } catch { /* fallback to empty */ }
     }
-
-    return proxyRequest(req, `${config.baseUrl}${subpath}${url.search}`, { Authorization: `Bearer ${apiKey}` }, body)
+    const targetPath = config.pathReplace ? subpath.replace(config.pathReplace.search, config.pathReplace.replace) : subpath
+    return proxyRequest(req, `${config.baseUrl}${targetPath}${url.search}`, { Authorization: `Bearer ${apiKey}` }, body)
   }
 }

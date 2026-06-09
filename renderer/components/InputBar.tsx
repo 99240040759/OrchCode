@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { createRoot } from 'react-dom/client'
-import { Plus, ChevronDown, ArrowRight, Square, Image, FileText } from 'lucide-react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
@@ -20,7 +20,6 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
   const editorRef = useRef<HTMLDivElement>(null)
-  const chipRootsRef = useRef<ReturnType<typeof createRoot>[]>([])
   const runState = useAtomValue(agentRunStateAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const sessionTokens = useAtomValue(sessionTokensAtom)
@@ -58,7 +57,10 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId, fetchWorkspaceFiles])
 
-  const filteredFiles = workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15)
+  const filteredFiles = useMemo(
+    () => workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15),
+    [workspaceFiles, searchQuery]
+  )
 
   const checkSuggestions = useCallback(() => {
     const selection = window.getSelection()
@@ -99,19 +101,14 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     const wsPath = activeWorkspace?.path ?? ''; const sep = wsPath.includes('\\') ? '\\' : '/'
     const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
     const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
+    const iconHtml = renderToStaticMarkup(<SymbolsFileIcon fileName={name} autoAssign={true} width={13} height={13} />)
     const chip = document.createElement('span')
     chip.className = 'file-mention-chip'
     chip.setAttribute('contenteditable', 'false')
     chip.setAttribute('data-path', absolutePath)
     chip.setAttribute('data-name', name)
-    chip.innerHTML = `<span class="react-icon-root" style="display: inline-flex; align-items: center; vertical-align: middle; margin-right: 3px;"></span><span style="font-size: 13px;">${name}</span>`
+    chip.innerHTML = `<span style="display: inline-flex; align-items: center; vertical-align: middle; margin-right: 3px;">${iconHtml}</span><span style="font-size: 13px;">${name}</span>`
     range.insertNode(chip)
-    const iconRoot = chip.querySelector('.react-icon-root')
-    if (iconRoot) {
-      const root = createRoot(iconRoot)
-      root.render(<SymbolsFileIcon fileName={name} autoAssign={true} width={13} height={13} />)
-      chipRootsRef.current.push(root)
-    }
     const spaceNode = document.createTextNode('\u00A0')
     chip.parentNode?.insertBefore(spaceNode, chip.nextSibling)
     const newRange = document.createRange()
@@ -179,14 +176,34 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     val = val.trim()
     if ((!val && attachments.length === 0) || isRunning) return
     onSubmit?.(val, attachments)
-    chipRootsRef.current.forEach((r) => { try { r.unmount() } catch (err) { console.debug('[InputBar] Unmount error:', err) } })
-    chipRootsRef.current = []
     editorRef.current.innerHTML = ''
     setInputValue('')
     setAttachments([])
   }, [attachments, isRunning, onSubmit])
 
   const handleStop = useCallback(() => onStop?.(), [onStop])
+
+  const handleInject = useCallback(() => {
+    if (!editorRef.current || !conversationId) return
+    let val = ''
+    const traverse = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) { val += node.textContent }
+      else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement
+        if (el.classList.contains('file-mention-chip')) {
+          val += `[${el.getAttribute('data-name') || el.textContent || ''}](file://${el.getAttribute('data-path') || ''})`
+        } else if (el.tagName === 'BR') { val += '\n' }
+        else { Array.from(el.childNodes).forEach(traverse) }
+      }
+    }
+    Array.from(editorRef.current.childNodes).forEach(traverse)
+    val = val.trim()
+    if (!val) return
+    window.api.injectToStream(conversationId, val)
+    editorRef.current.innerHTML = ''
+    setInputValue('')
+    setAttachments([])
+  }, [conversationId])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     e.preventDefault()
@@ -289,7 +306,14 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         <div className="input-bar-toolbar-right">
           <TokenIndicator current={sessionTokens} max={MAX_TOKENS} />
           {isRunning ? (
-            <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation"><Square size={11} strokeWidth={3} /></button>
+            <>
+              {inputValue.trim() && (
+                <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" style={{ marginRight: 4 }}>
+                  <MessageSquarePlus size={13} strokeWidth={2} />
+                </button>
+              )}
+              <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation"><Square size={11} strokeWidth={3} /></button>
+            </>
           ) : (
             <button className="toolbar-submit-btn" onClick={handleSend} title="Submit" disabled={!inputValue.trim() && attachments.length === 0}>
               <ArrowRight size={14} strokeWidth={2.5} />

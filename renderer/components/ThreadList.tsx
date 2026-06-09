@@ -5,6 +5,12 @@ import { threadListAtom, activeThreadIdAtom, activeWorkspaceAtom, agentRunStateA
 import { useChat } from '../hooks/useChat'
 import { format, isToday, isYesterday } from 'date-fns'
 
+// Thin wrapper: ThreadList only needs these four actions from useChat
+function useThreadListActions() {
+  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useChat()
+  return { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation }
+}
+
 const formatConversationDate = (dateStr: string): string => {
   try {
     const d = new Date(dateStr)
@@ -18,25 +24,10 @@ const ThreadList: React.FC = () => {
   const activeThreadId = useAtomValue(activeThreadIdAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const agentRunState = useAtomValue(agentRunStateAtom)
-  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useChat()
+  const { selectThread, deleteThread, openWorkspace, closeAndDeleteWorkspace, newConversation } = useThreadListActions()
   const [expandedPaths, setExpandedPaths] = useState<Record<string, boolean>>({})
 
-  const threads = useMemo(() => {
-    if (activeThreadId && !rawThreads.some(t => t.id === activeThreadId)) {
-      return [
-        {
-          id: activeThreadId,
-          title: 'New conversation',
-          resourceId: 'local-user',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          workspacePath: activeWorkspace?.path || null
-        },
-        ...rawThreads
-      ]
-    }
-    return rawThreads
-  }, [rawThreads, activeThreadId, activeWorkspace?.path])
+  const threads = rawThreads
 
   const allWorkspacePaths = useMemo(() => {
     const paths = ['', ...threads.map(t => t.workspacePath || '')]

@@ -36,7 +36,7 @@ const StreamingMarkdown = React.memo(
     React.useEffect(() => {
       if (!isStreaming) return
       const isReasoning = targetId.startsWith('streaming-reasoning')
-      let localReadCursor = content.length, accumulatedText = content, rafId: number | null = null
+      let localReadCursor = new TextEncoder().encode(content).length, accumulatedText = content, rafId: number | null = null
       const checkBuffer = () => {
         const header = (window as any).sharedBufferHeader
         const buf = isReasoning ? (window as any).sharedBufferReasoning : (window as any).sharedBufferText
@@ -75,7 +75,7 @@ const StreamingMarkdown = React.memo(
         if (rafId) cancelAnimationFrame(rafId)
         window.removeEventListener('stream:html-update', handleUpdate)
       }
-    }, [isStreaming, targetId, content])
+    }, [isStreaming, targetId])
 
     const noHtmlYet = isStreaming && !lastHtmlRef.current
     return <MarkdownRenderer ref={containerRef} id={targetId} content={isStreaming && lastHtmlRef.current ? '' : content} isStreaming={isStreaming && !noHtmlYet} />

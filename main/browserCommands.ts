@@ -1,6 +1,10 @@
-import { WebContentsView } from 'electron'
+import { WebContentsView, BrowserWindow } from 'electron'
 import { z } from 'zod'
 import WindowManager from './windowManager'
+
+function removeBrowserView(win: BrowserWindow, bv: WebContentsView) {
+  try { win.contentView.removeChildView(bv) } catch (err) { console.debug('[browser] Remove view error:', err) }
+}
 
 function normalizeBrowserUrl(val: string): string {
   const c = val.trim()
@@ -27,7 +31,8 @@ export const browserCommands = {
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       let bv = WindowManager.getBrowserView()
       if (bv && WindowManager.getBrowserConversationId() !== conversationId) {
-        try { mainWindow.contentView.removeChildView(bv); bv.webContents.close() } catch (err) { console.debug('[browser] Cleanup error:', err) }
+        if (mainWindow) removeBrowserView(mainWindow, bv)
+        try { bv.webContents.close() } catch (err) { console.debug('[browser] Cleanup error:', err) }
         bv = null; WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
       const setupListeners = (view: any, sender: any) => {
@@ -61,7 +66,7 @@ export const browserCommands = {
     schema: z.object({}),
     execute: () => {
       const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
-      if (bv && win) { try { win.contentView.removeChildView(bv) } catch (err) { console.debug('[browser] Remove view error:', err) } }
+      if (bv && win) removeBrowserView(win, bv)
     }
   },
   'browser:close': {
@@ -69,7 +74,7 @@ export const browserCommands = {
     execute: () => {
       const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
       if (bv) {
-        if (win) { try { win.contentView.removeChildView(bv) } catch (err) { console.debug('[browser] Remove view error:', err) } }
+        if (win) removeBrowserView(win, bv)
         try { bv.webContents.close() } catch (err) { console.debug('[browser] WebContents close error:', err) }
         WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }

@@ -12,7 +12,7 @@ export const getOrchThemeColors = () => {
   return {
     bgApp: rootStyle.getPropertyValue('--bg-app').trim() || '#121212',
     textPrimary: rootStyle.getPropertyValue('--text-primary').trim() || '#f3f3f3',
-    textSecondary: (rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa').replace('#', ''),
+    textSecondary: rootStyle.getPropertyValue('--text-secondary').trim() || '#a1a1aa',
     textMuted: rootStyle.getPropertyValue('--text-muted').trim() || '#71717a',
     accentBlue: rootStyle.getPropertyValue('--accent-blue').trim() || '#3b82f6',
     accentGreen: rootStyle.getPropertyValue('--accent-green').trim() || '#10b981',

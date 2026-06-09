@@ -1,7 +1,10 @@
-import Database from 'better-sqlite3'
+import Database, { type Statement } from 'better-sqlite3'
 import crypto from 'node:crypto'
+
 const proc = process as any
 let dbInstance: Database.Database | null = null
+const stmtCache = new Map<string, Statement>()
+
 function getDB(dbPath: string): Database.Database {
   if (dbInstance) return dbInstance
   dbInstance = new Database(dbPath, { timeout: 5000 })
@@ -23,55 +26,81 @@ function getDB(dbPath: string): Database.Database {
   }
   return dbInstance
 }
+
+function prepare(db: Database.Database, sql: string): Statement {
+  let stmt = stmtCache.get(sql)
+  if (!stmt) { stmt = db.prepare(sql); stmtCache.set(sql, stmt) }
+  return stmt
+}
+
 const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
-  checkpointDB(dbPath) { getDB(dbPath).pragma('wal_checkpoint(TRUNCATE)') },
+  checkpointDB(dbPath) {
+    getDB(dbPath).pragma('wal_checkpoint(TRUNCATE)')
+  },
   getThreads(dbPath) {
-    return getDB(dbPath).prepare(`SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
   },
   getThread(dbPath, threadId) {
-    return getDB(dbPath).prepare(`SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
   },
   getThreadMessages(dbPath, threadId) {
-    return getDB(dbPath).prepare('SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId)
+    return prepare(getDB(dbPath), 'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId)
+  },
+  createThread(dbPath, threadId, workspacePath) {
+    const db = getDB(dbPath)
+    const now = new Date().toISOString()
+    db.transaction(() => {
+      if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
+        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+      }
+      if (workspacePath) {
+        prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
+        prepare(db, `INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)`).run(workspacePath, now)
+      }
+    })()
   },
   saveMessage(dbPath, threadId, message) {
     const db = getDB(dbPath), now = new Date().toISOString()
     const msg = { id: message.id, threadId, role: message.role, content: message.content, data: message.data || null, createdAt: message.createdAt || now }
     let saved: any
     db.transaction(() => {
-      if (!db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-        db.prepare(`INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
-      } else { db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId) }
-      saved = db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data RETURNING id, role, content, data, createdAt`).get(msg)
+      if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
+        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+      } else {
+        prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
+      }
+      saved = prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data RETURNING id, role, content, data, createdAt`).get(msg)
     })()
     if (!saved) throw new Error('[db] Failed to save message')
     return { id: saved.id, role: saved.role, content: saved.content, data: saved.data || undefined, createdAt: saved.createdAt }
   },
-  deleteThread(dbPath, threadId) { return getDB(dbPath).prepare('DELETE FROM threads WHERE id = ?').run(threadId).changes > 0 },
+  deleteThread(dbPath, threadId) {
+    return prepare(getDB(dbPath), 'DELETE FROM threads WHERE id = ?').run(threadId).changes > 0
+  },
   updateThreadTitle(dbPath, threadId, title) {
     const db = getDB(dbPath), now = new Date().toISOString()
-    return db.prepare('UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
+    return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
   updateThreadAccumulatedTokens(dbPath, threadId, tokens) {
-    getDB(dbPath).prepare('UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?').run(tokens, threadId)
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = accumulatedTokens + ? WHERE id = ?').run(tokens, threadId)
   },
   setThreadAccumulatedTokens(dbPath, threadId, tokens) {
-    getDB(dbPath).prepare('UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
   },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
     const db = getDB(dbPath)
-    if (!db.prepare('SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
+    if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
       const now = new Date().toISOString()
-      db.prepare(`INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
+      prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0)`).run(threadId, now, now)
     }
-    db.prepare(`INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
+    prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
   },
   getThreadWorkspace(dbPath, threadId) {
-    const row = getDB(dbPath).prepare('SELECT workspacePath FROM thread_workspaces WHERE threadId = ?').get(threadId) as any
+    const row = prepare(getDB(dbPath), 'SELECT workspacePath FROM thread_workspaces WHERE threadId = ?').get(threadId) as any
     return row?.workspacePath ?? null
   },
   addOpenedWorkspace(dbPath, path) {
-    getDB(dbPath).prepare('INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, new Date().toISOString())
+    prepare(getDB(dbPath), 'INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, new Date().toISOString())
   },
   bindWorkspaceTransaction(dbPath, threadId, workspacePath) {
     getDB(dbPath).transaction(() => {
@@ -79,12 +108,14 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
       methods.setThreadWorkspace(dbPath, threadId, workspacePath)
     })()
   },
-  deleteOpenedWorkspace(dbPath, path) { getDB(dbPath).prepare('DELETE FROM opened_workspaces WHERE path = ?').run(path) },
+  deleteOpenedWorkspace(dbPath, path) {
+    prepare(getDB(dbPath), 'DELETE FROM opened_workspaces WHERE path = ?').run(path)
+  },
   deleteWorkspaceThreads(dbPath, workspacePath) {
     const db = getDB(dbPath)
     let threadIds: string[] = []
     db.transaction(() => {
-      const rows = db.prepare('SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as any[]
+      const rows = prepare(db, 'SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as any[]
       threadIds = rows.map(r => r.threadId)
       if (threadIds.length > 0) {
         const placeholders = threadIds.map(() => '?').join(',')
@@ -96,10 +127,10 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   compactThreadHistory(dbPath, threadId, summary, keepCount = 10) {
     const db = getDB(dbPath)
     db.transaction(() => {
-      const msgs = db.prepare('SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as any[]
+      const msgs = prepare(db, 'SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as any[]
       if (msgs.length <= keepCount) return
       const deleteCount = msgs.length - keepCount
-      const toDelete = msgs.slice(0, deleteCount).map(m => m.id)
+      const toDelete = msgs.slice(0, deleteCount).map((m: any) => m.id)
       const keptFirst = msgs[deleteCount]
       if (toDelete.length > 0) {
         const placeholders = toDelete.map(() => '?').join(',')
@@ -108,28 +139,33 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
       const keptDate = new Date(keptFirst.createdAt)
       const summaryDate = new Date(keptDate.getTime() - 1).toISOString()
       const summaryId = crypto.randomUUID()
-      db.prepare(`INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(summaryId, threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, summaryDate)
-      db.prepare('UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
+      prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(summaryId, threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, summaryDate)
+      prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
     })()
   },
   getActiveThreadId(dbPath) {
-    const row = getDB(dbPath).prepare("SELECT value FROM app_settings WHERE key = 'activeThreadId'").get() as any
+    const row = prepare(getDB(dbPath), "SELECT value FROM app_settings WHERE key = 'activeThreadId'").get() as any
     return row?.value ?? null
   },
   setActiveThreadId(dbPath, threadId) {
     const db = getDB(dbPath)
-    if (threadId) db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('activeThreadId', ?)").run(threadId)
-    else db.prepare("DELETE FROM app_settings WHERE key = 'activeThreadId'").run()
+    if (threadId) prepare(db, "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('activeThreadId', ?)").run(threadId)
+    else prepare(db, "DELETE FROM app_settings WHERE key = 'activeThreadId'").run()
   }
 }
-proc.parentPort.on('message', (e: { data: any }) => {
-  const { id, method, args, dbPath } = e.data
-  const fn = methods[method]
-  if (!fn) return proc.parentPort.postMessage({ id, error: `Method ${method} not found` })
-  try {
-    const result = fn(dbPath, ...args)
-    proc.parentPort.postMessage({ id, result })
-  } catch (err: any) {
-    proc.parentPort.postMessage({ id, error: err.message })
-  }
+
+function handleQuery(port: any, data: any) {
+  const { id, method, args, dbPath } = data, fn = methods[method]
+  if (!fn) return port.postMessage({ id, error: `Method ${method} not found` })
+  try { port.postMessage({ id, result: fn(dbPath, ...args) }) }
+  catch (err: any) { port.postMessage({ id, error: err.message }) }
+}
+proc.parentPort.on('message', (e: any) => {
+  if (e.data?.type === 'new-client') {
+    const [port] = e.ports
+    if (port) {
+      port.on('message', (pe: any) => handleQuery(port, pe.data))
+      port.start()
+    }
+  } else { handleQuery(proc.parentPort, e.data) }
 })

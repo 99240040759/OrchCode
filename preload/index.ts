@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { PUSH_CHANNELS } from '../shared/ipcChannels'
 
 const activeStreams = new Map<string, { port: MessagePort; cleanup: () => void; abort: () => void }>()
 
@@ -19,10 +20,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('api:invoke', { command, payload }),
 
   getSharedBuffer: (): Promise<SharedArrayBuffer> => {
-    return new Promise((resolve) => {
-      ipcRenderer.once('api:get-shared-buffer-response', (_ev, buf) => resolve(buf))
-      ipcRenderer.send('api:get-shared-buffer-request')
-    })
+    return Promise.resolve(new SharedArrayBuffer(1024 * 1024 + 64))
   },
 
   /**
@@ -80,13 +78,18 @@ contextBridge.exposeInMainWorld('api', {
     if (st) { st.port.postMessage('abort'); activeStreams.delete(threadId); st.abort() }
   },
 
+  /** Inject a mid-turn message into the active stream — pauses current generation and resumes with the injected text appended. */
+  injectToStream: (threadId: string, text: string): void => {
+    const st = activeStreams.get(threadId)
+    if (st) st.port.postMessage({ type: 'inject', text })
+  },
+
   /**
    * Subscribe to push events emitted from main (e.g. terminal:data, browser:title-updated).
    * Returns an unsubscribe function.
    */
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
-    const ALLOWED = ['auth:status-changed', 'browser:title-updated', 'browser:url-changed', 'artifacts:changed', 'updater:status-changed', 'stream:worker-crashed', 'command:new-conversation', 'command:open-workspace']
-    if (!ALLOWED.includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
+    if (!(PUSH_CHANNELS as readonly string[]).includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)
@@ -95,7 +98,7 @@ contextBridge.exposeInMainWorld('api', {
   onTerminalPort: (id: string): void => {
     ipcRenderer.once(`terminal:port:${id}`, (ev) => {
       const p = ev.ports[0]
-      if (p) window.postMessage({ type: 'terminal-port-transfer', id }, '*', [p])
+      if (p) window.postMessage({ type: 'terminal-port-transfer', id }, window.location.origin || '*', [p])
     })
   },
 

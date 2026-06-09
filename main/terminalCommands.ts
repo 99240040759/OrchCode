@@ -70,14 +70,6 @@ export const terminalCommands = {
       return { id }
     }
   },
-  'terminal:input': {
-    schema: z.object({ id: z.string().min(1), data: z.string().max(65536) }),
-    execute: () => { /* Bypassed: input routed directly via MessagePort */ }
-  },
-  'terminal:resize': {
-    schema: z.object({ id: z.string().min(1), cols: z.number().int().min(10).max(500), rows: z.number().int().min(3).max(200) }),
-    execute: () => { /* Bypassed: resizes routed directly via MessagePort */ }
-  },
   'terminal:close': {
     schema: z.object({ id: z.string().min(1) }),
     execute: ({ id }: any, event: any) => {

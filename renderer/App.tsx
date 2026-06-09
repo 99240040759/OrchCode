@@ -5,9 +5,11 @@ import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
 import { Toaster } from 'sonner'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import {
   sidebarExpandedAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeThreadAtom,
-  hasMessagesAtom, globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom
+  hasMessagesAtom, globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom,
+  artifactPanelModeAtom
 } from './store/agentStore'
 import { useChat } from './hooks/useChat'
 import { ChatPane } from './components/ChatPane'
@@ -24,12 +26,34 @@ function AppInner(): React.JSX.Element {
   const hasMessages = useAtomValue(hasMessagesAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
+  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
   const setSelectedModel = useSetAtom(selectedModelAtom)
   const activeThreadTitle = activeThread?.title || 'New Chat'
-  const { run, stop, openWorkspace, newConversation, loadThreads, selectThread } = useChat()
+  const chatActions = useChat()
+  const { run, stop, openWorkspace, newConversation, loadThreads, selectThread } = chatActions
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
   const availableModels = useAtomValue(availableModelsAtom)
   const sessionInitialized = useRef(false)
+
+  // Renderer-side keyboard shortcuts not covered by Electron menu accelerators
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (e.key === 'Escape') {
+        const inputEl = document.querySelector<HTMLElement>('.input-bar-text-area')
+        if (document.activeElement === inputEl) return
+        stop()
+        return
+      }
+      if (mod && e.key === 'k') {
+        e.preventDefault()
+        const el = document.querySelector<HTMLElement>('.input-bar-text-area')
+        if (el) { el.focus(); const range = document.createRange(); range.selectNodeContents(el); range.collapse(false); const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range) }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [stop])
 
   useEffect(() => {
     let cb: (() => void) | undefined
@@ -69,17 +93,19 @@ function AppInner(): React.JSX.Element {
   }, [setAvailableModels, setSelectedModel])
 
   useEffect(() => {
-    const unsubNew = window.api.on('command:new-conversation', () => {
-      newConversation().catch(console.error)
+    const unsubNew = window.api.on('command:new-conversation', () => { newConversation().catch(console.error) })
+    const unsubOpen = window.api.on('command:open-workspace', () => { openWorkspace().catch(console.error) })
+    const unsubSidebar = window.api.on('shortcut:toggle-sidebar', () => { setSidebarExpanded(p => !p) })
+    const unsubArtifacts = window.api.on('shortcut:toggle-artifacts', () => { setArtifactPanelOpen(p => !p) })
+    const unsubFocus = window.api.on('shortcut:focus-input', () => {
+      const el = document.querySelector<HTMLElement>('.input-bar-text-area')
+      if (el) { el.focus(); const range = document.createRange(); range.selectNodeContents(el); range.collapse(false); const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range) }
     })
-    const unsubOpen = window.api.on('command:open-workspace', () => {
-      openWorkspace().catch(console.error)
+    const unsubTerminal = window.api.on('shortcut:toggle-terminal', () => {
+      setArtifactPanelOpen(true); setArtifactPanelMode('terminal')
     })
-    return () => {
-      unsubNew()
-      unsubOpen()
-    }
-  }, [newConversation, openWorkspace])
+    return () => { unsubNew(); unsubOpen(); unsubSidebar(); unsubArtifacts(); unsubFocus(); unsubTerminal() }
+  }, [newConversation, openWorkspace, setSidebarExpanded, setArtifactPanelOpen, setArtifactPanelMode])
 
   return (
     <div className="app-root">
@@ -107,7 +133,6 @@ function AppInner(): React.JSX.Element {
     </div>
   )
 }
-
 function App(): React.JSX.Element {
   const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))
   return view === 'onboarding' ? (
@@ -115,7 +140,7 @@ function App(): React.JSX.Element {
       <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: '#161616', border: '1px solid var(--border-color)', color: '#f3f3f3', fontSize: 13 } }} />
       <OnboardingView />
     </>
-  ) : <Provider><AppInner /></Provider>
+  ) : <Provider><ErrorBoundary><AppInner /></ErrorBoundary></Provider>
 }
 
 export default App

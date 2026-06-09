@@ -62,6 +62,7 @@ export interface Api {
   getSharedBuffer(): Promise<SharedArrayBuffer>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>
   stopStream(threadId: string): void
+  injectToStream(threadId: string, text: string): void
   on(channel: string, cb: (data: unknown) => void): () => void
   onTerminalPort(id: string): void
   platform: 'darwin' | 'win32' | 'linux'

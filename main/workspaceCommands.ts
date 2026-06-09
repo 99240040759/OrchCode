@@ -6,14 +6,11 @@ import log from 'electron-log'
 import { z } from 'zod'
 import {
   getOrCreateWorkspaceContext, updateWorkspacePath, getWorkspaceContext,
-  assertWithinWorkspace, listWorkspaceFiles, isFileBinary, getMimeType, clearWorkspaceContext
+  assertWithinWorkspace, listWorkspaceFiles, isFileBinary, getMimeType
 } from './workspace'
 import { deleteOpenedWorkspace, deleteWorkspaceThreads, bindWorkspaceTransaction } from './db'
-import { getConversationPath } from './paths'
 import WindowManager from './windowManager'
-import { convIdSchema } from './threadCommands'
-import { pool } from './workerPool'
-import { cleanupPtysForThread } from './terminalCommands'
+import { convIdSchema, deleteThreadData } from './threadCommands'
 import { MAX_FILE_READ_BYTES } from './fileTools'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
@@ -64,11 +61,7 @@ export const workspaceCommands = {
       try {
         await deleteOpenedWorkspace(workspacePath)
         const affected = await deleteWorkspaceThreads(workspacePath)
-        for (const tid of affected) {
-          pool.killJob(`stream:${tid}`); cleanupPtysForThread(tid)
-          clearWorkspaceContext(tid)
-          await fs.rm(getConversationPath(tid), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-        }
+        for (const tid of affected) await deleteThreadData(tid)
         return true
       } catch (err) { log.error('[commands] close-and-delete error:', err); throw err }
     }
@@ -92,13 +85,15 @@ export const workspaceCommands = {
         const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
         const relativePath = relative(ctx.rootPath, safePath)
         const gitPath = relativePath.replace(/\\/g, '/')
-        try {
-          const { stdout } = await execa('git', ['show', `HEAD:${gitPath}`], { cwd: ctx.rootPath, timeout: 5000, reject: true, shell: false })
-          return { content: stdout }
-        } catch {
-          try { return { content: await fs.readFile(safePath, 'utf-8') } } catch (fsErr) { log.error('[commands] git show and disk read failed:', fsErr); throw fsErr }
+        const { stdout } = await execa('git', ['show', `HEAD:${gitPath}`], { cwd: ctx.rootPath, timeout: 5000, reject: true, shell: false })
+        return { content: stdout }
+      } catch (err: any) {
+        if (err?.exitCode !== undefined) {
+          throw new Error('No git history available for this file. Ensure the workspace is a git repository with at least one commit.')
         }
-      } catch (err: any) { log.error('[commands] file:read-original error:', err); throw err }
+        log.error('[commands] file:read-original error:', err)
+        throw err
+      }
     }
   }
 }

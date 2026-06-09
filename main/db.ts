@@ -1,12 +1,31 @@
 import log from 'electron-log'
 import crypto from 'node:crypto'
 import { getDatabasePath } from './paths'
+
 export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string }
 export interface ThreadMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; data?: string; createdAt: string }
+
 const pendingQueries = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
+let dbPort: any = null
+export function setDBPort(port: any) {
+  dbPort = port
+  dbPort.on('message', (e: any) => {
+    const { id, result, error } = e.data, pending = pendingQueries.get(id)
+    if (pending) {
+      pendingQueries.delete(id)
+      if (error) pending.reject(new Error(error))
+      else pending.resolve(result)
+    }
+  })
+  dbPort.start()
+}
 let worker: any = null
-function getWorker() {
-  if (worker) return worker
+let respawnAttempts = 0
+let respawnTimer: NodeJS.Timeout | null = null
+const MAX_RESPAWN_ATTEMPTS = 5
+const RESPAWN_BACKOFF_BASE_MS = 500
+
+function spawnWorker() {
   const { utilityProcess, app } = require('electron')
   const { join } = require('node:path')
   const { existsSync } = require('node:fs')
@@ -30,17 +49,42 @@ function getWorker() {
     worker = null
     pendingQueries.forEach(p => p.reject(new Error('DB worker crashed')))
     pendingQueries.clear()
+    if (respawnAttempts >= MAX_RESPAWN_ATTEMPTS) {
+      log.error('[db] Worker crashed too many times — giving up respawn.')
+      return
+    }
+    const delay = RESPAWN_BACKOFF_BASE_MS * Math.pow(2, respawnAttempts)
+    respawnAttempts++
+    log.warn(`[db] Scheduling worker respawn #${respawnAttempts} in ${delay}ms`)
+    if (respawnTimer) clearTimeout(respawnTimer)
+    respawnTimer = setTimeout(() => { respawnTimer = null; spawnWorker() }, delay)
   })
+  respawnAttempts = 0
+}
+
+function getWorker() {
+  if (worker) return worker
+  spawnWorker()
   return worker
 }
+export function shareDBPort(clientPort: any) {
+  getWorker().postMessage({ type: 'new-client' }, [clientPort])
+}
+
 export function runQuery(method: string, ...args: any[]): Promise<any> {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID()
     pendingQueries.set(id, { resolve, reject })
-    try { getWorker().postMessage({ id, method, args, dbPath: getDatabasePath() }) }
-    catch (err) { pendingQueries.delete(id); reject(err) }
+    if (dbPort) {
+      try { dbPort.postMessage({ id, method, args, dbPath: getDatabasePath() }) }
+      catch (err) { pendingQueries.delete(id); reject(err) }
+    } else {
+      try { getWorker().postMessage({ id, method, args, dbPath: getDatabasePath() }) }
+      catch (err) { pendingQueries.delete(id); reject(err) }
+    }
   })
 }
+
 export function checkpointDB(): Promise<void> { return runQuery('checkpointDB') }
 export function getThreads(): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number })[]> { return runQuery('getThreads') }
 export function getThread(threadId: string): Promise<(ThreadEntry & { workspacePath?: string | null; accumulatedTokens?: number }) | null> { return runQuery('getThread', threadId) }
@@ -59,3 +103,4 @@ export function deleteWorkspaceThreads(workspacePath: string): Promise<string[]>
 export function compactThreadHistory(threadId: string, summary: string, keepCount = 10): Promise<void> { return runQuery('compactThreadHistory', threadId, summary, keepCount) }
 export function getActiveThreadId(): Promise<string | null> { return runQuery('getActiveThreadId') }
 export function setActiveThreadId(threadId: string | null): Promise<void> { return runQuery('setActiveThreadId', threadId) }
+export function createThread(threadId: string, workspacePath?: string | null): Promise<void> { return runQuery('createThread', threadId, workspacePath) }

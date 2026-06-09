@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { tavilyLimiter } from './limiters'
 
 import { requireAuthToken } from './auth'
-import { getConversationPath } from './paths'
+import { getWorkspaceContext, getOrCreateWorkspaceContext } from './workspace'
+import { pushArtifactsChanged } from './artifacts'
 
 export function createWebTools(convId?: string) {
   const searchWeb = tool({
@@ -99,6 +100,8 @@ export function createWebTools(convId?: string) {
           throw new Error('No active conversation ID provided. Image generation cannot resolve workspace.')
         }
 
+        const ctx = getWorkspaceContext(convId) || (await getOrCreateWorkspaceContext(convId))
+
         const token = requireAuthToken()
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
@@ -152,12 +155,12 @@ export function createWebTools(convId?: string) {
           throw new Error(`No image data returned in API response: ${JSON.stringify(data)}`)
         }
 
-        const folderPath = join(getConversationPath(convId), 'generated')
         const fileName = `img-${Date.now()}.png`
-        const targetPath = join(folderPath, fileName)
-        await fs.mkdir(folderPath, { recursive: true })
+        const targetPath = join(ctx.artifactsPath, fileName)
+        await fs.mkdir(ctx.artifactsPath, { recursive: true })
         await fs.writeFile(targetPath, Buffer.from(base64Data, 'base64'))
         log.info(`[tool:generateImage] saved image to ${targetPath}`)
+        await pushArtifactsChanged(convId)
         return { success: true, filePath: targetPath, message: `Image generated successfully and saved to ${targetPath}` }
       } catch (err: any) {
         log.error('[tool:generateImage] Error:', err.message)

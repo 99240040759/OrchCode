@@ -1,4 +1,5 @@
-import { app, shell, BrowserWindow, safeStorage } from 'electron'
+import { shell, BrowserWindow, safeStorage } from 'electron'
+import { authEvents } from './authEvents'
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
@@ -98,7 +99,7 @@ export async function logoutUser(): Promise<boolean> {
   currentSession = null
   await saveSession(null)
   broadcastUserStatus(null)
-  app.emit('auth:logged-out')
+  authEvents.emit('logged-out')
   return true
 }
 

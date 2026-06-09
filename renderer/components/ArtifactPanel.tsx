@@ -87,7 +87,7 @@ const ArtifactPanel: React.FC = () => {
       setOriginalContent(null)
       window.api.invoke('file:read-original', { filePath: activeFile.path, conversationId: convId })
         .then((res) => setOriginalContent((res as { content?: string })?.content ?? ''))
-        .catch(() => setOriginalContent(''))
+        .catch(() => { setOriginalContent(null); setIsDiffMode(false) })
     } else setOriginalContent(null)
   }, [activeFile?.path, activeFile?.content, isDiffMode, convId])
 
@@ -163,8 +163,10 @@ const ArtifactPanel: React.FC = () => {
     else { const file = openFiles.find(f => f.path === val); if (file) { setIsDiffMode(false); setActiveFile(file); setPanelMode('editor') } }
   }, [openFiles, setPanelMode, setActiveFile])
 
+  const tabsValue = panelMode === 'editor' ? (activeFile?.path ?? 'overview') : panelMode
+
   return (
-    <Tabs.Root value={panelMode === 'editor' ? (activeFile?.path ?? '') : panelMode} onValueChange={handleTabChange} className="artifact-pane">
+    <Tabs.Root value={tabsValue} onValueChange={handleTabChange} className="artifact-pane">
       <PanelHeader panelMode={panelMode} openFiles={openFiles} hoveredTabPath={hoveredTabPath} setHoveredTabPath={setHoveredTabPath} handleCloseFile={handleCloseFile} />
       <div className="artifact-panel-content">
         <Tabs.Content value="overview" className="artifact-panel-tab-content">

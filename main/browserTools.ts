@@ -64,17 +64,25 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       try {
         await wc.executeJavaScript(`
           (() => {
-            const doc = ${frameSelector ? `document.querySelector(${JSON.stringify(frameSelector)}).contentDocument` : 'document'};
+            const doc = ${frameSelector ? `(() => { const f = document.querySelector(${JSON.stringify(frameSelector)}); return f ? f.contentDocument : document })()` : 'document'};
+            if (!doc) throw new Error('Frame not found');
             const el = doc.querySelector(${JSON.stringify(selector)});
-            if (!el) throw new Error('Element not found');
+            if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
             el.focus();
-            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+              || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+            if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && nativeInputValueSetter) {
+              nativeInputValueSetter.call(el, ${JSON.stringify(text)});
+            } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
               el.value = ${JSON.stringify(text)};
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
             } else {
               el.textContent = ${JSON.stringify(text)};
             }
+            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+            el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true }));
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
           })()
         `)
         return { success: true }
@@ -128,7 +136,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         } catch {}
         const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
         await fs.writeFile(screenshotPath, png)
-        return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) }
+        return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
       } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     },
     toModelOutput: async ({ output }: { output: ScreenshotOutput & { buffer?: ArrayBuffer } }) => {
@@ -215,7 +223,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
   })
 
-  const tools = {
+  return {
     browserNavigate,
     browserType,
     browserScroll,
@@ -223,14 +231,4 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     browserMouseClickCoordinate,
     browserGetPageContent
   }
-  if (process.type === 'utility') {
-    for (const [name, t] of Object.entries(tools)) {
-      t.execute = async (args: any) => {
-        const callMain = (globalThis as any).callMainProcessTool
-        if (!callMain) throw new Error(`[browserTools] callMainProcessTool not available in utility process`)
-        return callMain(name, args, convId)
-      }
-    }
-  }
-  return tools
 }

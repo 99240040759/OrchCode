@@ -16,17 +16,15 @@ const MODEL_DEFINITIONS = [
 ] as const
 
 serve(createHandler(async (_req, env) => {
-  const models: Record<string, { id: string; name: string }> = {}
-
+  const models: Record<string, { id: string; name: string; capabilities: { vision: boolean; nativeFiles: boolean } }> = {}
   for (const [prefix, defaultId, defaultName] of MODEL_DEFINITIONS) {
-    // L-5 FIX: Removed the unused `key` variable that was computed but never referenced.
-    // The response key is simply the lowercased prefix (e.g. GLM_4_5_FLASH → glm_4_5_flash).
     const responseKey = prefix.toLowerCase()
-    models[responseKey] = {
-      id: env[`${prefix}_MODEL_ID`] || defaultId,
-      name: env[`${prefix}_MODEL_NAME`] || defaultName
-    }
+    const id = env[`${prefix}_MODEL_ID`] || defaultId
+    const name = env[`${prefix}_MODEL_NAME`] || defaultName
+    const lid = id.toLowerCase()
+    const vision = lid.includes('gemini') || lid.includes('gemma') || lid.includes('kimi') || lid.includes('mimo') || lid.includes('glm-4.6v')
+    const nativeFiles = lid.includes('gemini')
+    models[responseKey] = { id, name, capabilities: { vision, nativeFiles } }
   }
-
   return jsonResponse(models)
 }))

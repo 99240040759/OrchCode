@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { readFileSync } from 'node:fs'
+import { promises as fs } from 'node:fs'
 import log from 'electron-log'
 import type { ModelMessage } from 'ai'
 
@@ -149,47 +149,17 @@ export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
       result.push(msg)
     }
   }
-  const merged: ModelMessage[] = []
-  for (const msg of result) {
-    if (merged.length === 0) { merged.push(msg); continue }
-    const prev = merged[merged.length - 1]
-    if (prev.role === msg.role) {
-      if (prev.role === 'user') {
-        const prevContent = prev.content, currContent = msg.content
-        if (typeof prevContent === 'string' && typeof currContent === 'string') prev.content = prevContent + '\n\n' + currContent
-        else {
-          const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
-          const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
-          prev.content = [...prevParts, ...currParts] as any
-        }
-      } else if (prev.role === 'assistant') {
-        const prevContent = prev.content, currContent = msg.content
-        if (typeof prevContent === 'string' && typeof currContent === 'string') prev.content = prevContent + '\n\n' + currContent
-        else {
-          const prevParts = Array.isArray(prevContent) ? prevContent : [{ type: 'text', text: prevContent }]
-          const currParts = Array.isArray(currContent) ? currContent : [{ type: 'text', text: currContent }]
-          prev.content = [...prevParts, ...currParts] as any
-        }
-      } else if (prev.role === 'tool') {
-        const prevParts = Array.isArray(prev.content) ? prev.content : [prev.content]
-        const currParts = Array.isArray(msg.content) ? msg.content : [msg.content]
-        prev.content = [...prevParts, ...currParts] as any
-      }
-    } else {
-      merged.push(msg)
-    }
-  }
-  return merged
+  return result
 }
 
-export function buildMessagesFromHistory(
+export async function buildMessagesFromHistory(
   history: RawMessage[],
   modelSupportsVision: boolean,
   modelSupportsNativeFiles: boolean
-): {
+): Promise<{
   messages: ModelMessage[]
   systemInstructionSuffix: string
-} {
+}> {
   const rawMessages: ModelMessage[] = []
   let systemInstructionSuffix = ''
 
@@ -241,7 +211,7 @@ export function buildMessagesFromHistory(
               } else if (block.toolName === 'browserScreenshot' && (outputVal as any)?.success && (outputVal as any)?.filePath) {
                 try {
                   const cleanPath = (outputVal as { filePath: string }).filePath.replace('file://', '')
-                  const base64Image = readFileSync(cleanPath).toString('base64')
+                  const base64Image = (await fs.readFile(cleanPath)).toString('base64')
                   formattedOutput = { type: 'content', value: [
                     { type: 'image-data', data: base64Image, mediaType: 'image/png' },
                     { type: 'text', text: `Screenshot: ${(outputVal as any).filePath}` }

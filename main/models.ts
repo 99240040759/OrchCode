@@ -5,7 +5,8 @@ import type { streamText } from 'ai'
 import { globalApiLimiter } from './limiters'
 import { requireAuthToken } from './auth'
 
-export interface ModelInfo { id: string; name: string }
+export interface ModelCapabilities { vision: boolean; nativeFiles: boolean }
+export interface ModelInfo { id: string; name: string; capabilities: ModelCapabilities }
 export type AvailableModels = Record<string, ModelInfo>
 
 let cachedModels: AvailableModels | null = null
@@ -62,6 +63,10 @@ export const googleBypass = createGoogleGenerativeAI({
   fetch: createAuthFetch()
 })
 
+const GEMMA4_THINKING_MODEL_IDS = new Set([
+  'gemma-4-26b-a4b-it',
+])
+
 export function resolveModel(modelId: string): {
   model: Parameters<typeof streamText>[0]['model']
   providerOptions: ProviderOptions
@@ -69,7 +74,7 @@ export function resolveModel(modelId: string): {
   if (modelId.startsWith('zai/')) return { model: zai.chat(modelId.replace('zai/', '')), providerOptions: {} }
   if (modelId.startsWith('opencode/')) return { model: opencode.chat(modelId.replace('opencode/', '')), providerOptions: {} }
   if (modelId.startsWith('nvidia/')) return { model: nvidia.chat(modelId.replace('nvidia/', '')), providerOptions: {} }
-  if (modelId.includes('gemma-4')) return { model: google(modelId), providerOptions: { google: { chatTemplateKwargs: { enable_thinking: true } } } as ProviderOptions }
-  if (modelId.includes('thinking') || modelId.includes('pro')) return { model: google(modelId), providerOptions: { google: { thinkingConfig: { thinkingLevel: 'auto', includeThoughts: true } } } as ProviderOptions }
+  if (GEMMA4_THINKING_MODEL_IDS.has(modelId)) return { model: google(modelId), providerOptions: { google: { chatTemplateKwargs: { enable_thinking: true } } } as ProviderOptions }
+  if (modelId.includes('thinking') || modelId.includes('-pro')) return { model: google(modelId), providerOptions: { google: { thinkingConfig: { thinkingLevel: 'auto', includeThoughts: true } } } as ProviderOptions }
   return { model: google(modelId), providerOptions: {} }
 }

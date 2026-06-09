@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { getOrCreateWorkspaceContext, clearWorkspaceContext, updateWorkspacePath } from './workspace'
 import {
   updateThreadTitle, getActiveThreadId, getThread, getThreads, setActiveThreadId,
-  getThreadMessages, deleteThread, getThreadWorkspace
+  getThreadMessages, deleteThread, getThreadWorkspace, createThread
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { getAvailableModels } from './models'
@@ -18,6 +18,13 @@ import { cleanupPtysForThread } from './terminalCommands'
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 export const convIdSchema = z.string().min(1).max(256)
 
+export async function deleteThreadData(threadId: string): Promise<boolean> {
+  if (await getActiveThreadId() === threadId) await setActiveThreadId(null)
+  pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
+  clearWorkspaceContext(threadId); const deleted = await deleteThread(threadId)
+  await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  return deleted
+}
 export const threadCommands = {
   'models:list': { schema: z.object({}), execute: () => getAvailableModels() },
   'artifacts:list': { schema: z.object({ conversationId: convIdSchema }), execute: ({ conversationId }: any) => listArtifacts(conversationId) },
@@ -48,7 +55,15 @@ export const threadCommands = {
       return null
     }
   },
-  'thread:new': { schema: z.object({}), execute: async () => { const newId = `session-${crypto.randomUUID()}`; await getOrCreateWorkspaceContext(newId); return { conversationId: newId } } },
+  'thread:new': {
+    schema: z.object({ workspacePath: z.string().optional() }),
+    execute: async ({ workspacePath }: any) => {
+      const newId = `session-${crypto.randomUUID()}`
+      await createThread(newId, workspacePath ?? null)
+      await getOrCreateWorkspaceContext(newId)
+      return { conversationId: newId }
+    }
+  },
   'thread:set-active': {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
@@ -73,13 +88,8 @@ export const threadCommands = {
   'thread:delete': {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
-      try {
-        if (await getActiveThreadId() === threadId) await setActiveThreadId(null)
-        pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
-        clearWorkspaceContext(threadId); const deleted = await deleteThread(threadId)
-        await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-        return deleted
-      } catch (err) { log.error('[commands] deleteThread:', err); throw err }
+      try { return await deleteThreadData(threadId) }
+      catch (err) { log.error('[commands] deleteThread:', err); throw err }
     }
   },
   'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => { try { return await getThreadWorkspace(threadId) } catch (err) { throw err } } }

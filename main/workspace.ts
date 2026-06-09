@@ -13,11 +13,16 @@ import type { WorkspaceContext } from '../preload/types'
 const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 const workspaceLastAccess = new Map<string, number>()
+const activeStreams = new Set<string>()
 const WORKSPACE_EVICTION_MS = 30 * 60 * 1000
+
+export function markWorkspaceActive(conversationId: string): void { activeStreams.add(conversationId) }
+export function markWorkspaceIdle(conversationId: string): void { activeStreams.delete(conversationId) }
+
 function evictStaleWorkspaces() {
   const now = Date.now()
   for (const [id, lastAccess] of workspaceLastAccess) {
-    if (now - lastAccess > WORKSPACE_EVICTION_MS && !initPromises.has(id)) {
+    if (now - lastAccess > WORKSPACE_EVICTION_MS && !initPromises.has(id) && !activeStreams.has(id)) {
       workspaceRegistry.delete(id); workspaceLastAccess.delete(id)
     }
   }
@@ -125,9 +130,9 @@ function buildIgnore(rootPath: string): Ignore {
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const resolved = resolve(rootPath), key = getCacheKey(rootPath), cached = workspaceFilesCache.get(key)
-  if (cached && Date.now() - cached.timestamp < 10000) return cached.files
+  if (cached && Date.now() - cached.timestamp < 60000) return cached.files
   const ig = buildIgnore(rootPath)
-  const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
+  const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, followSymbolicLinks: false, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
   const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
   workspaceFilesCache.set(key, { files, timestamp: Date.now() }); return files

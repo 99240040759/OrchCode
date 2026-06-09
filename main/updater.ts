@@ -49,7 +49,7 @@ const isNewerVersion = (l: string, c: string): boolean => {
   return isNaN(lM) || isNaN(cM) ? l !== c : lM > cM || (lM === cM && (lm > cm || (lm === cm && lP > cP)))
 }
 
-export async function checkMacUpdate() {
+async function checkMacUpdate() {
   if (process.platform !== 'darwin') return
   sendStatus({ status: 'checking' })
   try {

@@ -162,5 +162,64 @@ export function createFileTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.results }] })
   })
 
-  return { listDir, viewFile, writeToFile, multiReplaceFileContent, searchWorkspace }
+  const deleteFile = tool({
+    description: 'Delete a file within the workspace.',
+    inputSchema: z.object({ absolutePath: z.string().describe('Absolute path to the file to delete.') }),
+    execute: async ({ absolutePath }) => {
+      try {
+        const ctx = resolve(), safePath = safe(absolutePath), stat = await fs.stat(safePath)
+        if (!stat.isFile()) throw new Error(`Not a file: "${safePath}"`)
+        await fs.rm(safePath, { force: false })
+        invalidateWorkspaceFilesCache(ctx.rootPath)
+        return { success: true, absolutePath: safePath }
+      } catch (err: any) { log.error('[tool:deleteFile] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully deleted ${output.absolutePath}` }] })
+  })
+
+  const moveFile = tool({
+    description: 'Move a file to a new location within the workspace. Fails if the destination already exists.',
+    inputSchema: z.object({
+      sourcePath: z.string().describe('Absolute path to the source file.'),
+      destinationPath: z.string().describe('Absolute path to the destination.')
+    }),
+    execute: async ({ sourcePath, destinationPath }) => {
+      try {
+        const ctx = resolve(), safeSrc = safe(sourcePath), safeDest = safe(destinationPath)
+        let destExists = false
+        try { await fs.stat(safeDest); destExists = true } catch {}
+        if (destExists) throw new Error(`Destination already exists: "${safeDest}"`)
+        await fs.mkdir(dirname(safeDest), { recursive: true })
+        await fs.rename(safeSrc, safeDest)
+        invalidateWorkspaceFilesCache(ctx.rootPath)
+        return { success: true, source: safeSrc, destination: safeDest }
+      } catch (err: any) { log.error('[tool:moveFile] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully moved ${output.source} → ${output.destination}` }] })
+  })
+
+  const renameFile = tool({
+    description: 'Rename a file within the same directory in the workspace.',
+    inputSchema: z.object({
+      absolutePath: z.string().describe('Absolute path to the file to rename.'),
+      newName: z.string().describe('The new file name (not a path — just the filename).')
+    }),
+    execute: async ({ absolutePath, newName }) => {
+      try {
+        if (newName.includes('/') || newName.includes('\\')) throw new Error('newName must be a filename only, not a path.')
+        const ctx = resolve(), safeSrc = safe(absolutePath)
+        const destPath = join(dirname(safeSrc), newName)
+        const safeDest = safe(destPath)
+        let destExists = false
+        try { await fs.stat(safeDest); destExists = true } catch {}
+        if (destExists) throw new Error(`A file named "${newName}" already exists in that directory.`)
+        await fs.rename(safeSrc, safeDest)
+        invalidateWorkspaceFilesCache(ctx.rootPath)
+        return { success: true, oldPath: safeSrc, newPath: safeDest }
+      } catch (err: any) { log.error('[tool:renameFile] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully renamed to ${output.newPath}` }] })
+  })
+
+  return { listDir, viewFile, writeToFile, multiReplaceFileContent, searchWorkspace, deleteFile, moveFile, renameFile }
 }

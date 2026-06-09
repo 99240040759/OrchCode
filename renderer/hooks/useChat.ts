@@ -262,8 +262,8 @@ export function useChat() {
     } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
   }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels, messages, selectThread, setActiveThreadId])
 
-  const run = useCallback(async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
-    if (isRunningRef.current || runState !== 'idle') return
+  const run = useCallback(async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string, _fromInject?: boolean) => {
+    if (isRunningRef.current || (!_fromInject && runState !== 'idle')) return
     isRunningRef.current = true
     try {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
@@ -372,6 +372,17 @@ export function useChat() {
         finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
         setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m))
         setRunState('error')
+      } else if (chunkType === 'inject-resume') {
+        const injectedText = chunkText || (chunkData?.injectedText as string) || ''
+        if (injectedText && isMountedRef.current) {
+          // Reset the running guard immediately so the re-run isn't blocked.
+          // finish arrives right after this and will set runState to idle, but
+          // React batches that state update — isRunningRef is the reliable gate.
+          isRunningRef.current = false
+          setTimeout(() => {
+            if (isMountedRef.current) run(injectedText, undefined, resolvedThreadId, true)
+          }, 0)
+        }
       } else if (chunkType === 'step-limit') {
         assistantIsStreaming = false
         orderedBlocks.push({ type: 'text', content: '\n\n> **⚠️ The model hit its context limit.** You can ask me to continue from where I left off.' })

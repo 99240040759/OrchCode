@@ -1,12 +1,12 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron'
 initSentry({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN, tracesSampleRate: 1.0 })
-import { app, BrowserWindow, shell, nativeTheme, dialog, Menu, ipcMain } from 'electron'
-export const sharedBuffer = new SharedArrayBuffer(1024 * 1024)
+import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
 import { initAuth, getCurrentSession, handleAuthCallback, cleanupAuth } from './auth'
+import { authEvents } from './authEvents'
 import windowStateKeeper from 'electron-window-state'
 import log from 'electron-log'
 import icon from '../resources/icon.png?asset'
@@ -36,18 +36,22 @@ if (!gotTheLock) {
   process.exit(0)
 }
 
+function handleCommandLineArgs(argv: string[], win: BrowserWindow) {
+  if (argv.includes('--new-conversation')) win.webContents.send('command:new-conversation')
+  if (argv.includes('--open-workspace')) win.webContents.send('command:open-workspace')
+  if (argv.includes('--clear-cache')) {
+    clearAllWorkspaceFilesCache()
+    dialog.showMessageBox(win, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
+  }
+}
+
 app.on('second-instance', (_event, commandLine) => {
   log.info('[main] second-instance event received with commandLine:', commandLine)
   const mainWin = WindowManager.getMainWindow()
   if (mainWin) {
     if (mainWin.isMinimized()) mainWin.restore()
     mainWin.focus()
-    if (commandLine.includes('--new-conversation')) mainWin.webContents.send('command:new-conversation')
-    if (commandLine.includes('--open-workspace')) mainWin.webContents.send('command:open-workspace')
-    if (commandLine.includes('--clear-cache')) {
-      clearAllWorkspaceFilesCache()
-      dialog.showMessageBox(mainWin, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
-    }
+    handleCommandLineArgs(commandLine, mainWin)
   }
   const onboardingWin = onboardingWindow
   if (onboardingWin) {
@@ -186,12 +190,7 @@ function createMainWindow(): BrowserWindow {
   mainWindow.on('ready-to-show', () => {
     mainWindow!.show()
     log.info('[main] Window ready')
-    if (process.argv.includes('--new-conversation')) mainWindow!.webContents.send('command:new-conversation')
-    if (process.argv.includes('--open-workspace')) mainWindow!.webContents.send('command:open-workspace')
-    if (process.argv.includes('--clear-cache')) {
-      clearAllWorkspaceFilesCache()
-      dialog.showMessageBox(mainWindow!, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
-    }
+    handleCommandLineArgs(process.argv, mainWindow!)
   })
   mainWindow.on('closed', () => {
     const browserView = WindowManager.getBrowserView()
@@ -251,12 +250,52 @@ app.whenReady().then(async () => {
 
   log.info('[main] App ready — initializing modules')
 
+  // Application menu with global keyboard shortcuts
+  const sendToMain = (channel: string) => {
+    const win = WindowManager.getMainWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(channel)
+  }
+  const appMenu = Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Conversation', accelerator: 'CmdOrCtrl+N', click: () => sendToMain('command:new-conversation') },
+        { label: 'Open Project Folder...', accelerator: 'CmdOrCtrl+O', click: () => sendToMain('command:open-workspace') },
+        { type: 'separator' as const },
+        process.platform === 'darwin' ? { role: 'close' as const } : { role: 'quit' as const }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+Shift+B', click: () => sendToMain('shortcut:toggle-sidebar') },
+        { label: 'Toggle Artifact Panel', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendToMain('shortcut:toggle-artifacts') },
+        { label: 'Focus Input', accelerator: 'CmdOrCtrl+L', click: () => sendToMain('shortcut:focus-input') },
+        { label: 'Toggle Terminal', accelerator: 'CmdOrCtrl+`', click: () => sendToMain('shortcut:toggle-terminal') },
+        { type: 'separator' as const },
+        { role: 'reload' as const },
+        { role: 'toggleDevTools' as const }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' as const },
+        { role: 'redo' as const },
+        { type: 'separator' as const },
+        { role: 'cut' as const },
+        { role: 'copy' as const },
+        { role: 'paste' as const },
+        { role: 'selectAll' as const }
+      ]
+    }
+  ])
+  Menu.setApplicationMenu(appMenu)
+
   // Single unified IPC surface: one invoke router + one stream handler
   registerAllIpc()
-  registerStreamIpc(sharedBuffer)
-  ipcMain.on('api:get-shared-buffer-request', (event) => {
-    event.sender.postMessage('api:get-shared-buffer-response', sharedBuffer)
-  })
+  registerStreamIpc()
 
   void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
   initUpdater()
@@ -272,7 +311,7 @@ app.whenReady().then(async () => {
     createOnboardingWindow()
   }
 
-  ;(app as Electron.App).on('auth:open-main-and-close-onboarding' as never, () => {
+  authEvents.on('open-main-and-close-onboarding', () => {
     log.info('[main] Onboarding completed, transitioning to main window...')
     const main = createMainWindow()
     main.once('ready-to-show', () => {
@@ -283,7 +322,7 @@ app.whenReady().then(async () => {
       }
     })
   })
-  ;(app as Electron.App).on('auth:logged-out' as never, () => {
+  authEvents.on('logged-out', () => {
     log.info('[main] User logged out, showing onboarding window...')
     createOnboardingWindow()
     if (mainWindow) {
