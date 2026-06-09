@@ -14,6 +14,7 @@ export function callMainProcessTool(toolName: string, args: any, threadId?: stri
     proc.parentPort.postMessage({ type: 'tool-request', requestId, toolName, args, threadId })
   })
 }
+(globalThis as any).callMainProcessTool = callMainProcessTool
 proc.parentPort.on('message', async (e: any) => {
   const { type, threadId, modelType, attachments, promptText, token, isBrowserActive, requestId, result, error } = e.data
   if (token) process.env.SUPABASE_SESSION_TOKEN = token

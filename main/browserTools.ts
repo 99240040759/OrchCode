@@ -217,9 +217,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     browserGetPageContent
   }
   if (process.type === 'utility') {
-    const { callMainProcessTool } = require('./agentWorker')
+    const callMainProcessTool = (globalThis as any).callMainProcessTool
     for (const [name, t] of Object.entries(tools)) {
-      t.execute = async (args: any) => callMainProcessTool(name, args, convId)
+      t.execute = async (args: any) => callMainProcessTool?.(name, args, convId)
     }
   }
   return tools
