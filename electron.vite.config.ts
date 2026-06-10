@@ -16,7 +16,8 @@ export default defineConfig({
           index: resolve(__dirname, 'main/main.ts'),
           agentWorker: resolve(__dirname, 'main/agentWorker.ts'),
           ptyWorker: resolve(__dirname, 'main/ptyWorker.ts'),
-          dbWorker: resolve(__dirname, 'main/dbWorker.ts')
+          dbWorker: resolve(__dirname, 'main/dbWorker.ts'),
+          db: resolve(__dirname, 'main/db.ts')
         }
       }
     },

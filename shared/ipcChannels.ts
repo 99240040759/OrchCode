@@ -11,6 +11,7 @@ export const PUSH_CHANNELS = [
   'shortcut:toggle-artifacts',
   'shortcut:focus-input',
   'shortcut:toggle-terminal',
+  'theme-changed',
 ] as const
 
 export type PushChannel = typeof PUSH_CHANNELS[number]

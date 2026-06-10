@@ -44,23 +44,19 @@ contextBridge.exposeInMainWorld('api', {
         const p = ev.ports[0]; if (!p) { cleanup(); return reject(new Error('No port')) }
     activeStreams.set(payload.threadId, { port: p, cleanup, abort: () => { const e = new Error('Stream aborted locally'); e.name = 'AbortError'; reject(e) } })
         p.onmessage = (e) => {
-          try {
-            onChunk(e.data)
-            if (['finish', 'error'].includes(e.data.type)) { cleanup(); resolve() }
-          } catch (err) { cleanup(); reject(err instanceof Error ? err : new Error(String(err))) }
+          onChunk(e.data)
+          if (['finish', 'error'].includes(e.data.type)) { cleanup(); resolve() }
         }
         p.onmessageerror = () => { cleanup(); reject(new Error('Message serialization error')) }
         p.start()
         if (payload.attachments?.length) {
-          try {
-            const bufs = payload.attachments.map(a => {
-              const bin = atob(a.base64 || '')
-              const arr = new Uint8Array(bin.length)
-              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
-              return arr.buffer
-            })
-            p.postMessage({ type: 'bufs', bufs }, bufs)
-          } catch (err: any) { cleanup(); reject(new Error(`Failed to decode attachments: ${err.message}`)) }
+          const bufs = payload.attachments.map(a => {
+            const bin = atob(a.base64!)
+            const arr = new Uint8Array(bin.length)
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+            return arr.buffer
+          })
+          p.postMessage({ type: 'bufs', bufs }, bufs)
         }
       }
       ipcRenderer.once(ch, onPortReceived); ipcRenderer.on(chCrashed, onCrash)

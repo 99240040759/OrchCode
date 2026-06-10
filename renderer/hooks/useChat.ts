@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import {
   agentRunStateAtom, chatMessagesAtom, activeThreadIdAtom, threadListAtom,
@@ -7,7 +7,6 @@ import {
   type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
-import { clearMarkdownCache } from '../lib/markdownParser'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
 
@@ -34,6 +33,7 @@ export function useChat() {
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
 
   const activeStreamThreadIdRef = useRef('')
+  const activeRunIdRef = useRef<string | null>(null)
   const flushRafRef = useRef<number | null>(null)
   const isMountedRef = useRef(true)
   const isRunningRef = useRef(false)
@@ -51,9 +51,9 @@ export function useChat() {
 
 
 
-  const resetThreadScopedPanels = useCallback(() => {
+  const resetThreadScopedPanels = () => {
     setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
-  }, [setOpenFiles, setActiveEditorFile, setArtifacts, setArtifactPanelMode])
+  }
 
   useEffect(() => { activeStreamThreadIdRef.current = activeThreadId }, [activeThreadId])
 
@@ -78,12 +78,12 @@ export function useChat() {
     return () => unsub()
   }, [setRunState, setMessages])
 
-  const loadThreads = useCallback(async () => {
+  const loadThreads = async () => {
     try { setThreads((await threadService.getThreads()) ?? []) }
     catch (err) { console.error('[useChat] Failed to load threads:', err); throw err }
-  }, [setThreads])
+  }
 
-  const stop = useCallback(() => {
+  const stop = () => {
     const tid = activeStreamThreadIdRef.current
     window.api.stopStream(tid)
     setRunState('idle')
@@ -93,7 +93,7 @@ export function useChat() {
       ...m, isStreaming: false,
       orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
     }))
-  }, [setRunState, setMessages])
+  }
 
   const activeThreadIdRef = useRef(activeThreadId)
   const messagesRef = useRef(messages)
@@ -110,61 +110,50 @@ export function useChat() {
     }
   }, [activeThreadId, setMessages])
 
-  const selectThread = useCallback(async (threadId: string) => {
+  const selectThread = async (threadId: string) => {
     if (!threadId || selectLockRef.current) return
     selectLockRef.current = true
     setRunState('idle')
+    const requestId = Math.random().toString(36).substring(2)
+    const requestIdRef = { current: requestId }
     activeStreamThreadIdRef.current = threadId
     setIsThreadLoading(true)
     const checkStale = () => {
-      if (activeStreamThreadIdRef.current !== threadId) { if (isMountedRef.current) setIsThreadLoading(false); return true }
+      if (activeStreamThreadIdRef.current !== threadId || requestIdRef.current !== requestId) { if (isMountedRef.current) setIsThreadLoading(false); return true }
       return false
     }
     try {
       await threadService.setActiveSession(threadId)
       if (checkStale()) return
-      const [workspacePath, rawMessages, fresh] = await Promise.all([
-        threadService.getThreadWorkspace(threadId),
-        threadService.getThreadMessages(threadId),
-        threadService.getThread(threadId)
-      ])
+      const [workspacePath, rawMessages, fresh] = await Promise.all([threadService.getThreadWorkspace(threadId), threadService.getThreadMessages(threadId), threadService.getThread(threadId)])
       if (checkStale()) return
-
-      if (isMountedRef.current) {
+      if (isMountedRef.current && requestIdRef.current === requestId) {
         setActiveWorkspace(workspacePath ? { name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace', path: workspacePath } : null)
         const loadedMsgs = (rawMessages || []).filter((m): m is ThreadMessage & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
           let blocks: StreamBlock[] | undefined
           try { blocks = m.data ? JSON.parse(m.data) : undefined } catch (e) { console.error('Failed to parse message blocks:', e) }
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
-        setMessages(loadedMsgs)
-        setSessionTokens(fresh?.accumulatedTokens ?? 0)
-        setLifetimeTokens(fresh?.lifetimeTokens ?? 0)
-        resetThreadScopedPanels()
-        setActiveThreadId(threadId)
-        setIsThreadLoading(false)
+        setMessages(loadedMsgs); setSessionTokens(fresh?.accumulatedTokens ?? 0); setLifetimeTokens(fresh?.lifetimeTokens ?? 0); resetThreadScopedPanels(); setActiveThreadId(threadId); setIsThreadLoading(false)
       }
-    } catch (err) {
-      console.error('[useChat] Failed to load thread:', err)
-      if (isMountedRef.current) setIsThreadLoading(false)
-      throw err
-    } finally { selectLockRef.current = false }
-  }, [setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setIsThreadLoading, setActiveWorkspace, setRunState])
+    } catch (err) { console.error('[useChat] Failed to load thread:', err); if (isMountedRef.current && requestIdRef.current === requestId) setIsThreadLoading(false); throw err }
+    finally { selectLockRef.current = false }
+  }
 
-  const newConversation = useCallback(async (workspacePath?: string | null) => {
+  const newConversation = async (workspacePath?: string | null) => {
     try {
-      const { conversationId: newId } = await threadService.newConversation()
+      const targetWsPath = workspacePath !== undefined ? workspacePath : (activeWorkspace?.path || null)
+      const { conversationId: newId } = await threadService.newConversation(targetWsPath)
       setRunState('idle')
-      const targetWsPath = workspacePath || null
       if (targetWsPath) {
         await workspaceService.setActiveWorkspace(newId, targetWsPath)
       }
       setActiveWorkspace(targetWsPath ? { name: targetWsPath.split(/[/\\]/).pop() ?? 'Workspace', path: targetWsPath } : null)
       setActiveThreadId(newId); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); resetThreadScopedPanels(); await loadThreads(); return newId
     } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
-  }, [setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, resetThreadScopedPanels, setRunState, loadThreads, setActiveWorkspace])
+  }
 
-  const deleteThread = useCallback(async (threadId: string) => {
+  const deleteThread = async (threadId: string) => {
     try {
       window.api.stopStream(threadId)
       setRunningThreads(prev => { const n = new Set(prev); n.delete(threadId); return n })
@@ -174,9 +163,9 @@ export function useChat() {
         setRunState('idle'); setActiveThreadId(''); setMessages([]); setSessionTokens(0); setLifetimeTokens(0); setActiveWorkspace(null); resetThreadScopedPanels()
       }
     } catch (err) { console.error('[useChat] Delete thread error:', err); throw err }
-  }, [setThreads, setActiveThreadId, setMessages, setSessionTokens, setLifetimeTokens, setActiveWorkspace, resetThreadScopedPanels, setRunState])
+  }
 
-  const closeAndDeleteWorkspace = useCallback(async (path: string) => {
+  const closeAndDeleteWorkspace = async (path: string) => {
     try {
       if (activeWorkspace?.path === path) {
         const curId = activeThreadIdRef.current
@@ -187,9 +176,9 @@ export function useChat() {
       if (success) await loadThreads()
       return success
     } catch (err) { console.error('[useChat] Close & delete workspace error:', err); throw err }
-  }, [activeWorkspace, setActiveWorkspace, loadThreads, setActiveThreadId, setMessages, setSessionTokens, resetThreadScopedPanels, setRunState])
+  }
 
-  const openWorkspace = useCallback(async () => {
+  const openWorkspace = async () => {
     try {
       const prevId = activeThreadIdRef.current; let currentId = prevId; let createdNew = false
       if (!currentId || messagesRef.current.length > 0) { currentId = await newConversation(); createdNew = true }
@@ -210,11 +199,13 @@ export function useChat() {
       }
       return null
     } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
-  }, [newConversation, setActiveWorkspace, loadThreads, resetThreadScopedPanels, messages, selectThread, setActiveThreadId])
+  }
 
-  const run = useCallback(async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string, _fromInject?: boolean) => {
+  const run = async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string, _fromInject?: boolean) => {
     if (isRunningRef.current || (!_fromInject && runState !== 'idle')) return
     isRunningRef.current = true
+    const runId = Math.random().toString(36).substring(2)
+    activeRunIdRef.current = runId
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     try {
     if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
@@ -226,9 +217,7 @@ export function useChat() {
     if (isMountedRef.current) setRunningThreads(prev => new Set(prev).add(resolvedThreadId))
     if (isMountedRef.current) setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: Date.now() }])
     const assistantMsgId = crypto.randomUUID()
-    clearMarkdownCache(assistantMsgId)
     if (isMountedRef.current) setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: Date.now(), isStreaming: true }])
-
     if (isNewThread) {
       threadService.generateTitle(promptText.slice(0, 400), resolvedThreadId)
         .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error('Failed to refresh threads:', e) } }).catch(console.error)
@@ -306,6 +295,7 @@ export function useChat() {
           const old = orderedBlocks[idx]
           if (old.type === 'tool') {
             old.argsDelta = (old.argsDelta || '') + delta
+            scheduleFlush()
           }
         }
       } else if (chunkType === 'tool-call') {
@@ -331,13 +321,8 @@ export function useChat() {
       } else if (chunkType === 'inject-resume') {
         const injectedText = chunkText || (chunkData?.injectedText as string) || ''
         if (injectedText && isMountedRef.current) {
-          // Reset the running guard immediately so the re-run isn't blocked.
-          // finish arrives right after this and will set runState to idle, but
-          // React batches that state update — isRunningRef is the reliable gate.
           isRunningRef.current = false
-          setTimeout(() => {
-            if (isMountedRef.current) run(injectedText, undefined, resolvedThreadId, true)
-          }, 0)
+          run(injectedText, undefined, resolvedThreadId, true)
         }
       } else if (chunkType === 'step-limit') {
         assistantIsStreaming = false
@@ -361,6 +346,7 @@ export function useChat() {
     }
 
     if (isMountedRef.current) setRunState('streaming')
+    if (isMountedRef.current) setRunState('thinking')
     try {
       await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments }, processChunk)
     } catch (err: unknown) {
@@ -382,10 +368,12 @@ export function useChat() {
       }
     }
     } finally {
-      isRunningRef.current = false
-      if (isMountedRef.current) setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
+      if (activeRunIdRef.current === runId) {
+        isRunningRef.current = false
+        if (isMountedRef.current) setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
+      }
     }
-  }, [selectedModel, setActiveThreadId, setMessages, setRunState, setThreads, setSessionTokens, runState])
+  }
 
   return { run, stop, loadThreads, selectThread, newConversation, deleteThread, openWorkspace, closeAndDeleteWorkspace }
 }

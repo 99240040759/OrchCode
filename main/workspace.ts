@@ -1,4 +1,4 @@
-import { join, extname, relative, resolve, normalize, sep, isAbsolute, dirname } from 'node:path'
+import { join, extname, relative, resolve, normalize, sep, isAbsolute, dirname, basename } from 'node:path'
 import { promises as fs, existsSync, readFileSync, realpathSync } from 'node:fs'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
@@ -14,38 +14,31 @@ const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 const workspaceLastAccess = new Map<string, number>()
 const activeStreams = new Set<string>()
-const WORKSPACE_EVICTION_MS = 30 * 60 * 1000
 
 export function markWorkspaceActive(conversationId: string): void { activeStreams.add(conversationId) }
 export function markWorkspaceIdle(conversationId: string): void { activeStreams.delete(conversationId) }
 
-function evictStaleWorkspaces() {
-  const now = Date.now()
-  for (const [id, lastAccess] of workspaceLastAccess) {
-    if (now - lastAccess > WORKSPACE_EVICTION_MS && !initPromises.has(id) && !activeStreams.has(id)) {
-      workspaceRegistry.delete(id); workspaceLastAccess.delete(id)
-    }
-  }
-}
-
 const validateConversationId = (id: string) => { if (!id || typeof id !== 'string' || !/^[a-zA-Z0-9-_]+$/.test(id)) throw new Error(`Invalid id: ${id}`) }
+
+
 
 export async function getOrCreateWorkspaceContext(conversationId: string, userSelectedPath?: string): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
-  evictStaleWorkspaces()
   if (workspaceRegistry.has(conversationId)) { workspaceLastAccess.set(conversationId, Date.now()); return workspaceRegistry.get(conversationId)! }
   if (initPromises.has(conversationId)) return initPromises.get(conversationId)!
   const promise = (async () => {
-    try {
-      const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId)
-      const artifactsPath = join(getConversationPath(conversationId), 'artifacts')
-      await fs.mkdir(rootPath, { recursive: true })
-      await fs.mkdir(artifactsPath, { recursive: true })
-      const ctx = { conversationId, rootPath, artifactsPath, isUserWorkspace }
-      workspaceRegistry.set(conversationId, ctx); workspaceLastAccess.set(conversationId, Date.now()); return ctx
-    } finally { initPromises.delete(conversationId) }
+    const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId)
+    const artifactsPath = join(getConversationPath(conversationId), 'artifacts')
+    await fs.mkdir(rootPath, { recursive: true })
+    await fs.mkdir(artifactsPath, { recursive: true })
+    const ctx = { conversationId, rootPath, artifactsPath, isUserWorkspace }
+    workspaceRegistry.set(conversationId, ctx)
+    workspaceLastAccess.set(conversationId, Date.now())
+    initPromises.delete(conversationId)
+    return ctx
   })()
-  initPromises.set(conversationId, promise); return promise
+  initPromises.set(conversationId, promise)
+  return promise
 }
 
 export function getWorkspaceContext(conversationId: string): WorkspaceContext | undefined {
@@ -79,18 +72,42 @@ const isWithin = (base: string, target: string) => {
 }
 
 export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
-  let resolvedTarget = normalize(isAbsolute(targetPath) ? resolve(targetPath) : resolve(rootPath, targetPath))
-  if (conversationId) {
-    const segs = resolvedTarget.split(/[/\\]/), artIdx = segs.indexOf('artifacts')
-    if (artIdx !== -1) resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', segs.slice(artIdx + 1).join(sep)))
+  const normalizedTarget = normalize(isAbsolute(targetPath) ? targetPath : join(rootPath, targetPath))
+  let resolvedTarget: string
+  try { resolvedTarget = realpathSync(normalizedTarget) }
+  catch (err) {
+    let testPath = normalizedTarget, unresolvedSuffix = ''
+    while (!existsSync(testPath)) {
+      const parent = dirname(testPath)
+      if (parent === testPath) { resolvedTarget = normalizedTarget; break }
+      unresolvedSuffix = join(basename(testPath), unresolvedSuffix)
+      testPath = parent
+    }
+    resolvedTarget = existsSync(testPath) ? normalize(join(realpathSync(testPath), unresolvedSuffix)) : normalizedTarget
   }
-  const isAllowed = isWithin(rootPath, resolvedTarget) || isWithin(getUserSkillsPath(), resolvedTarget) || (conversationId ? isWithin(getConversationPath(conversationId), resolvedTarget) : false)
-  if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves outside workspace root "${rootPath}".`)
-  let existingPath = resolvedTarget
-  while (!existsSync(existingPath)) { const parent = dirname(existingPath); if (parent === existingPath) break; existingPath = parent }
-  const realExisting = realpathSync(existingPath)
-  const isRealAllowed = isWithin(realpathSync(resolve(rootPath)), realExisting) || isWithin(realpathSync(resolve(getUserSkillsPath())), realExisting) || (conversationId ? isWithin(realpathSync(resolve(getConversationPath(conversationId))), realExisting) : false)
-  if (!isRealAllowed) throw new Error(`Symlink traversal blocked: "${targetPath}" resolves outside the workspace.`)
+  if (conversationId) {
+    const isRelativeArtifacts = !isAbsolute(targetPath) && (targetPath.replace(/\\/g, '/').startsWith('artifacts/') || targetPath.replace(/\\/g, '/').startsWith('./artifacts/'))
+    if (isRelativeArtifacts) {
+      const relativeSuffix = targetPath.replace(/\\/g, '/').replace(/^\.?\/??artifacts\//, '')
+      resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', relativeSuffix))
+    }
+  }
+  const resolvedRoot = realpathSync(resolve(rootPath))
+  let resolvedSkills = '', resolvedConv = ''
+  try {
+    const sPath = getUserSkillsPath()
+    if (!existsSync(sPath)) require('node:fs').mkdirSync(sPath, { recursive: true })
+    resolvedSkills = realpathSync(resolve(sPath))
+  } catch {}
+  if (conversationId) {
+    try {
+      const cPath = getConversationPath(conversationId)
+      if (!existsSync(cPath)) require('node:fs').mkdirSync(cPath, { recursive: true })
+      resolvedConv = realpathSync(resolve(cPath))
+    } catch {}
+  }
+  const isAllowed = isWithin(resolvedRoot, resolvedTarget) || (resolvedSkills && isWithin(resolvedSkills, resolvedTarget)) || (resolvedConv && isWithin(resolvedConv, resolvedTarget))
+  if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves to "${resolvedTarget}" which is outside workspace root "${rootPath}".`)
   return resolvedTarget
 }
 
@@ -109,7 +126,7 @@ export function isFileBinary(filePath: string, buf: Buffer): boolean {
 const DEFAULT_IGNORED_DIRS = ['.git', '.gemini', 'node_modules', 'dist', 'out', 'build', 'target', 'coverage', '.cache', '.idea', '.vscode', '.next', '.nuxt', '.venv', 'venv', 'env', '__pycache__']
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
-const workspaceFilesCache = new Map<string, { files: string[]; timestamp: number }>()
+const workspaceFilesCache = new Map<string, string[]>()
 
 function getCacheKey(p: string) {
   const res = resolve(p)
@@ -121,19 +138,18 @@ export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear(
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore()
-  try {
-    const gitignorePath = join(rootPath, '.gitignore')
-    if (existsSync(gitignorePath)) ig.add(readFileSync(gitignorePath, 'utf8'))
-  } catch {}
+  const gitignorePath = join(rootPath, '.gitignore')
+  if (existsSync(gitignorePath)) ig.add(readFileSync(gitignorePath, 'utf8'))
   return ig
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const resolved = resolve(rootPath), key = getCacheKey(rootPath), cached = workspaceFilesCache.get(key)
-  if (cached && Date.now() - cached.timestamp < 60000) return cached.files
+  if (cached) return cached
   const ig = buildIgnore(rootPath)
   const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, followSymbolicLinks: false, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
   const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
-  workspaceFilesCache.set(key, { files, timestamp: Date.now() }); return files
+  workspaceFilesCache.set(key, files)
+  return files
 }

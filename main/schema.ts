@@ -198,14 +198,11 @@ export async function buildMessagesFromHistory(
             if (toolResults.length) flush()
             assistantParts.push({ type: 'text', text: block.content })
           } else if (block.type === 'tool') {
-            if (toolResults.length) flush()
             assistantParts.push({ type: 'tool-call', toolCallId: block.toolCallId, toolName: block.toolName, input: block.args || {} })
             if (block.status === 'complete' || block.status === 'error' || 'result' in block) {
               const outputVal = block.result
               let formattedOutput: unknown
-              const KNOWN_TYPES = ['text', 'json', 'execution-denied', 'error-text', 'error-json', 'content']
-              if (outputVal && typeof outputVal === 'object' && 'type' in outputVal &&
-                KNOWN_TYPES.includes((outputVal as { type?: string }).type || '')) {
+              if (outputVal && typeof outputVal === 'object' && 'type' in outputVal) {
                 formattedOutput = outputVal
               } else if (block.toolName === 'browserScreenshot' && (outputVal as any)?.success && (outputVal as any)?.filePath) {
                 try {

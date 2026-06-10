@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom } from '../store/agentStore'
@@ -17,28 +17,17 @@ const BrowserView: React.FC = () => {
   const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
   const activeThreadId = useAtomValue(activeThreadIdAtom)
 
-  // M-7 FIX: Replace 3 ref-sync useEffects with direct render-time assignments.
-  // This is equivalent and avoids 3 scheduled microtasks per render.
-  const panelModeRef = useRef(panelMode)
-  const isOpenRef = useRef(isOpen)
-  const urlInputRef = useRef(urlInput)
-  const activeThreadIdRef = useRef(activeThreadId)
-  panelModeRef.current = panelMode
-  isOpenRef.current = isOpen
-  urlInputRef.current = urlInput
-  activeThreadIdRef.current = activeThreadId
-
-  const getBounds = useCallback((): { x: number; y: number; width: number; height: number } => {
-    if (!containerRef.current || panelModeRef.current !== 'browser' || !isOpenRef.current) return { x: 0, y: 0, width: 0, height: 0 }
+  const getBounds = (): { x: number; y: number; width: number; height: number } => {
+    if (!containerRef.current || panelMode !== 'browser' || !isOpen) return { x: 0, y: 0, width: 0, height: 0 }
     const rect = containerRef.current.getBoundingClientRect()
     return { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) }
-  }, [])
+  }
 
-  const navigate = useCallback((url: string) => {
+  const navigate = (url: string) => {
     window.api.invoke('browser:navigate', { url }).catch(() => {})
-  }, [])
+  }
 
-  const openBrowserWithBounds = useCallback(async () => {
+  const openBrowserWithBounds = async () => {
     setLoadError(null)
     try {
       const bounds = getBounds()
@@ -46,11 +35,11 @@ const BrowserView: React.FC = () => {
         requestAnimationFrame(openBrowserWithBounds)
         return
       }
-      await window.api.invoke('browser:open', { url: urlInputRef.current, bounds, conversationId: activeThreadIdRef.current })
+      await window.api.invoke('browser:open', { url: urlInput, bounds, conversationId: activeThreadId })
       setIsLoaded(true); isLoadedRef.current = true
       window.api.invoke('browser:resize', bounds).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
-  }, [getBounds])
+  }
 
   useEffect(() => {
     if (panelMode !== 'browser' || !isOpen) return
@@ -78,15 +67,15 @@ const BrowserView: React.FC = () => {
       resizeObs.disconnect()
       unsubTitle()
       unsubUrl()
-      if (!isOpenRef.current) window.api.invoke('browser:close').catch(() => {})
+      if (!isOpen) window.api.invoke('browser:close').catch(() => {})
       else window.api.invoke('browser:hide').catch(() => {})
       setIsLoaded(false); isLoadedRef.current = false
     }
-  }, [panelMode, isOpen, getBounds, openBrowserWithBounds])
+  }, [panelMode, isOpen, activeThreadId])
 
   useEffect(() => {
     if (isLoaded) window.api.invoke('browser:resize', getBounds()).catch(() => {})
-  }, [sidebarExpanded, getBounds, isLoaded])
+  }, [sidebarExpanded, isLoaded])
 
   return (
     <div className="browser-container">

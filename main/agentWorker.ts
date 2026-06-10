@@ -9,14 +9,7 @@ const pendingRequests = new Map<string, { resolve: (val: any) => void; reject: (
 export function callMainProcessTool(toolName: string, args: any, threadId?: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const requestId = randomUUID()
-    const timeout = setTimeout(() => {
-      pendingRequests.delete(requestId)
-      reject(new Error(`Tool ${toolName} timed out after 5 minutes.`))
-    }, 5 * 60 * 1000)
-    pendingRequests.set(requestId, {
-      resolve: (val) => { clearTimeout(timeout); resolve(val) },
-      reject: (err) => { clearTimeout(timeout); reject(err) }
-    })
+    pendingRequests.set(requestId, { resolve, reject })
     proc.parentPort.postMessage({ type: 'tool-request', requestId, toolName, args, threadId })
   })
 }

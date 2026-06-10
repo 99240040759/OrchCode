@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useActionState } from 'react'
+import { useFormStatus } from 'react-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
@@ -53,9 +54,32 @@ export const MediaPreview: React.FC<{ displayFile: { name: string; path: string;
   )
 }
 
+const SubmitButton: React.FC<{ isRunning: boolean; hasInput: boolean; handleStop: () => void; handleInject: () => void }> = ({ isRunning, hasInput, handleStop, handleInject }) => {
+  const { pending } = useFormStatus()
+  if (isRunning) {
+    return (
+      <>
+        {hasInput && (
+          <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" style={{ marginRight: 4 }} type="button">
+            <MessageSquarePlus size={13} strokeWidth={2} />
+          </button>
+        )}
+        <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation" type="button"><Square size={11} strokeWidth={3} /></button>
+      </>
+    )
+  }
+  return (
+    <button className="toolbar-submit-btn" type="submit" title="Submit" disabled={pending || !hasInput}>
+      <ArrowRight size={14} strokeWidth={2.5} />
+    </button>
+  )
+}
+
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
   const editorRef = useRef<HTMLDivElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  const [_, submitAction] = useActionState(async () => { handleSend() }, null)
   const runState = useAtomValue(agentRunStateAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const sessionTokens = useAtomValue(sessionTokensAtom)
@@ -73,32 +97,29 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
 
-  const handleOpenFile = useCallback(async (filePath: string) => {
+  const handleOpenFile = async (filePath: string) => {
     try {
       const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
       if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
-  }, [conversationId, setActiveEditorFile, setArtifactPanelMode, setArtifactPanelOpen])
+  }
 
-  const handleEditorClick = useCallback((e: React.MouseEvent) => {
+  const handleEditorClick = (e: React.MouseEvent) => {
     const chip = (e.target as HTMLElement).closest('.file-mention-chip')
     if (chip) { e.preventDefault(); e.stopPropagation(); const path = chip.getAttribute('data-path'); if (path) handleOpenFile(path) }
-  }, [handleOpenFile])
+  }
 
-  const fetchWorkspaceFiles = useCallback(async () => {
+  const fetchWorkspaceFiles = async () => {
     if (!conversationId) return
     try { const files = await workspaceService.listWorkspaceFiles(conversationId); setWorkspaceFiles(files) }
     catch (err) { console.error('Failed to load workspace files:', err) }
-  }, [conversationId])
+  }
 
-  useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId, fetchWorkspaceFiles])
+  useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId])
 
-  const filteredFiles = useMemo(
-    () => workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15),
-    [workspaceFiles, searchQuery]
-  )
+  const filteredFiles = workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15)
 
-  const checkSuggestions = useCallback(() => {
+  const checkSuggestions = () => {
     const selection = window.getSelection()
     if (!selection || selection.rangeCount === 0) return setShowFileSuggestions(false)
     const range = selection.getRangeAt(0)
@@ -117,9 +138,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       }
     }
     setShowFileSuggestions(false)
-  }, [])
+  }
 
-  const selectFileSuggestion = useCallback((selectedFile: string) => {
+  const selectFileSuggestion = (selectedFile: string) => {
     const selection = window.getSelection()
     if (!selection || selection.rangeCount === 0) return
     const range = selection.getRangeAt(0)
@@ -154,17 +175,17 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     selection.addRange(newRange)
     setShowFileSuggestions(false)
     if (editorRef.current) setInputValue(editorRef.current.innerText || '')
-  }, [activeWorkspace])
+  }
 
-  const triggerFileSelect = useCallback((type: 'image' | 'document') => {
+  const triggerFileSelect = (type: 'image' | 'document') => {
     if (fileInputRef.current) {
       fileInputRef.current.accept = type === 'image' ? 'image/*' : '.txt,.pdf,.json,.ts,.js,.tsx,.jsx,.html,.css,.md,.py,.rs,.go'
       fileInputRef.current.setAttribute('data-upload-type', type)
       fileInputRef.current.click()
     }
-  }, [])
+  }
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
     const type = (fileInputRef.current?.getAttribute('data-upload-type') as 'image' | 'document') || 'document'
@@ -187,9 +208,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       reader.readAsDataURL(file)
     })
     e.target.value = ''
-  }, [attachments])
+  }
 
-  const handleSend = useCallback(() => {
+  const handleSend = () => {
     if (!editorRef.current) return
     let val = ''
     const traverse = (node: Node) => {
@@ -215,11 +236,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     editorRef.current.innerHTML = ''
     setInputValue('')
     setAttachments([])
-  }, [attachments, isRunning, onSubmit])
+  }
 
-  const handleStop = useCallback(() => onStop?.(), [onStop])
+  const handleStop = () => onStop?.()
 
-  const handleInject = useCallback(() => {
+  const handleInject = () => {
     if (!editorRef.current || !conversationId) return
     let val = ''
     const traverse = (node: Node) => {
@@ -239,9 +260,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     editorRef.current.innerHTML = ''
     setInputValue('')
     setAttachments([])
-  }, [conversationId])
+  }
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+  const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault()
     const text = e.clipboardData.getData('text/plain')
     const selection = window.getSelection()
@@ -253,9 +274,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     selection.removeAllRanges()
     selection.addRange(range)
     if (editorRef.current) setInputValue(editorRef.current.innerText || '')
-  }, [])
+  }
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (showFileSuggestions && filteredFiles.length > 0) {
       const len = filteredFiles.length
       if (e.key === 'ArrowDown') { e.preventDefault(); return setSuggestionIndex((prev) => (prev + 1) % len) }
@@ -263,11 +284,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); return selectFileSuggestion(filteredFiles[suggestionIndex]) }
       if (e.key === 'Escape') { e.preventDefault(); return setShowFileSuggestions(false) }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-  }, [showFileSuggestions, filteredFiles, suggestionIndex, selectFileSuggestion, handleSend])
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); formRef.current?.requestSubmit() }
+  }
 
   return (
-    <div className="input-bar-container">
+    <form ref={formRef} action={submitAction} className="input-bar-container">
       <AutocompleteSuggestions showFileSuggestions={showFileSuggestions} filteredFiles={filteredFiles} suggestionIndex={suggestionIndex} setSuggestionIndex={setSuggestionIndex} selectFileSuggestion={selectFileSuggestion} />
       <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple className="hidden-input" />
       {attachments.length > 0 && (
@@ -341,23 +362,10 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         </div>
         <div className="input-bar-toolbar-right">
           <TokenIndicator current={sessionTokens} max={MAX_TOKENS} />
-          {isRunning ? (
-            <>
-              {inputValue.trim() && (
-                <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" style={{ marginRight: 4 }}>
-                  <MessageSquarePlus size={13} strokeWidth={2} />
-                </button>
-              )}
-              <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation"><Square size={11} strokeWidth={3} /></button>
-            </>
-          ) : (
-            <button className="toolbar-submit-btn" onClick={handleSend} title="Submit" disabled={!inputValue.trim() && attachments.length === 0}>
-              <ArrowRight size={14} strokeWidth={2.5} />
-            </button>
-          )}
+          <SubmitButton isRunning={isRunning} hasInput={!!(inputValue.trim() || attachments.length > 0)} handleStop={handleStop} handleInject={handleInject} />
         </div>
       </div>
-    </div>
+    </form>
   )
 }
 export default InputBar

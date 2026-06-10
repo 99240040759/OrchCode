@@ -198,10 +198,4 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   )
 }
 
-export default React.memo(ToolCallBlock, (prev, next) =>
-  prev.toolCall.id === next.toolCall.id &&
-  prev.toolCall.status === next.toolCall.status &&
-  prev.toolCall.result === next.toolCall.result &&
-  prev.toolCall.args === next.toolCall.args &&
-  prev.toolCall.argsDelta === next.toolCall.argsDelta  // FIXED: was missing, blocked live updates
-)
+export default ToolCallBlock

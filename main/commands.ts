@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { extname, relative, join } from 'node:path'
-import { app, BrowserWindow, dialog, WebContentsView, utilityProcess, MessageChannelMain, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, WebContentsView, utilityProcess, MessageChannelMain, ipcMain, nativeTheme } from 'electron'
 import { execa } from 'execa'
 import log from 'electron-log'
 import { z } from 'zod'
@@ -35,8 +35,17 @@ const activePtyConversations = new Map<string, string>()
 const destroyListeners = new Map<string, () => void>()
 
 export function cleanupAllPtys() {
-  activePtys.forEach(child => { try { child.kill() } catch (err) { log.debug('[terminal] PTY kill error:', err) } })
-  activePtys.clear(); activePtyOwners.clear(); activePtyConversations.clear(); destroyListeners.clear()
+  activePtys.forEach((child) => {
+    try {
+      child.kill('SIGKILL')
+    } catch (err) {
+      log.debug('[terminal] PTY kill error:', err)
+    }
+  })
+  activePtys.clear()
+  activePtyOwners.clear()
+  activePtyConversations.clear()
+  destroyListeners.clear()
 }
 
 export function cleanupPtysForThread(threadId: string) {
@@ -92,6 +101,8 @@ export async function deleteThreadData(threadId: string): Promise<boolean> {
 }
 
 export const ipcCommands = {
+  // Theme Commands
+  'theme:get': { schema: z.object({}), execute: () => ({ dark: nativeTheme.shouldUseDarkColors, systemUI: nativeTheme.shouldUseDarkColorsForSystemIntegratedUI }) },
   // Auth Commands
   'auth:get-user': { schema: z.object({}), execute: () => getAuthUser() },
   'auth:login': { schema: z.object({}), execute: () => startGoogleAuth() },
@@ -154,7 +165,7 @@ export const ipcCommands = {
     }
   },
   'thread:new': {
-    schema: z.object({ workspacePath: z.string().optional() }),
+    schema: z.object({ workspacePath: z.string().nullable().optional() }),
     execute: async ({ workspacePath }: any) => {
       const newId = `session-${crypto.randomUUID()}`
       await createThread(newId, workspacePath ?? null)
@@ -350,7 +361,11 @@ export const ipcCommands = {
       const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
       if (bv) {
         if (win) removeBrowserView(win, bv)
-        try { bv.webContents.close() } catch (err) { console.debug('[browser] WebContents close error:', err) }
+        try {
+          bv.webContents.removeAllListeners()
+          bv.webContents.close()
+          setTimeout(() => { try { if (!bv.webContents.isDestroyed()) (bv.webContents as any).destroy() } catch (err) { log.debug('[browser] Delayed destroy error:', err) } }, 100)
+        } catch (err) { log.debug('[browser] WebContents cleanup error:', err) }
         WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
       }
     }
@@ -365,7 +380,8 @@ export function registerAllIpc() {
       throw new Error(`Unknown command: ${command}`)
     }
     try {
-      return await cmd.execute(payload ?? {}, event)
+      const validatedPayload = cmd.schema ? cmd.schema.parse(payload ?? {}) : (payload ?? {})
+      return await cmd.execute(validatedPayload, event)
     } catch (err: any) {
       log.error(`[ipc] Error in ${command}:`, err)
       throw err

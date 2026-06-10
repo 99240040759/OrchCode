@@ -20,69 +20,58 @@ import { decodeBase64Utf8 } from '../lib/sharedUtils'
 
 // ─── StreamingMarkdown ────────────────────────────────────────────────────────
 
-const StreamingMarkdown = React.memo(
-  ({ content, targetId, isStreaming }: { content: string; targetId: string; isStreaming: boolean }) => {
-    return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
-  }
-)
-StreamingMarkdown.displayName = 'StreamingMarkdown'
+const StreamingMarkdown = ({ content, targetId, isStreaming }: { content: string; targetId: string; isStreaming: boolean }) => {
+  return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
+}
 
 // ─── ReasoningBlock ──────────────────────────────────────────────────────────
 
-const ReasoningBlock = React.memo(
-  ({ content, durationMs, isStreaming, targetId }: { content: string; durationMs?: number; isStreaming?: boolean; targetId: string }) => {
-    const [isOpen, setIsOpen] = React.useState(!!isStreaming)
-    const [userToggled, setUserToggled] = React.useState(false)
-    const scrollRef = React.useRef<HTMLDivElement>(null)
+const ReasoningBlock = ({ content, durationMs, isStreaming, targetId }: { content: string; durationMs?: number; isStreaming?: boolean; targetId: string }) => {
+  const [isOpen, setIsOpen] = React.useState(!!isStreaming)
+  const [userToggled, setUserToggled] = React.useState(false)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
 
-    React.useEffect(() => {
-      if (!userToggled) setIsOpen(!!isStreaming)
-    }, [isStreaming, userToggled])
+  React.useEffect(() => {
+    if (!userToggled) setIsOpen(!!isStreaming)
+  }, [isStreaming, userToggled])
 
-    React.useEffect(() => {
-      let cb: (() => void) | undefined
-      if (isStreaming) {
-        const raf = requestAnimationFrame(() => {
-          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-        })
-        cb = () => cancelAnimationFrame(raf)
-      }
-      return cb
-    }, [content, isStreaming])
+  React.useEffect(() => {
+    let cb: (() => void) | undefined
+    if (isStreaming) {
+      const raf = requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      })
+      cb = () => cancelAnimationFrame(raf)
+    }
+    return cb
+  }, [content, isStreaming])
 
-    const seconds = durationMs ? Math.round(durationMs / 1000).toString() : ''
-    const title = isStreaming ? `Thinking${seconds ? ` for ${seconds}s` : ''}` : `Thought for ${seconds}s`
+  const seconds = durationMs ? Math.round(durationMs / 1000).toString() : ''
+  const title = isStreaming ? `Thinking${seconds ? ` for ${seconds}s` : ''}` : `Thought for ${seconds}s`
 
-    return (
-      <details
-        open={isOpen}
-        onToggle={(e) => {
-          const open = (e.target as HTMLDetailsElement).open
-          if (open !== isOpen) { setUserToggled(true); setIsOpen(open) }
-        }}
-        className="chat-reasoning-details"
-      >
-        <summary className="chat-reasoning-summary">
-          <span>{title}</span>
-          <ChevronDown size={14} className="chat-reasoning-chevron" />
-        </summary>
-        <div ref={scrollRef} className="assistant-content chat-reasoning-body">
-          <StreamingMarkdown content={content || 'Thinking...'} targetId={targetId} isStreaming={!!isStreaming} />
-        </div>
-      </details>
-    )
-  },
-  (prev, next) =>
-    prev.content === next.content &&
-    prev.durationMs === next.durationMs &&
-    prev.isStreaming === next.isStreaming &&
-    prev.targetId === next.targetId
-)
-ReasoningBlock.displayName = 'ReasoningBlock'
+  return (
+    <details
+      open={isOpen}
+      onToggle={(e) => {
+        const open = (e.target as HTMLDetailsElement).open
+        if (open !== isOpen) { setUserToggled(true); setIsOpen(open) }
+      }}
+      className="chat-reasoning-details"
+    >
+      <summary className="chat-reasoning-summary">
+        <span>{title}</span>
+        <ChevronDown size={14} className="chat-reasoning-chevron" />
+      </summary>
+      <div ref={scrollRef} className="assistant-content chat-reasoning-body">
+        <StreamingMarkdown content={content || 'Thinking...'} targetId={targetId} isStreaming={!!isStreaming} />
+      </div>
+    </details>
+  )
+}
 
 // ─── ToolGroupBlock ──────────────────────────────────────────────────────────
 
-const ToolGroupBlock = React.memo(({ tools, isStreaming, isLast }: { tools: ToolCallEntry[]; isStreaming?: boolean; isLast: boolean }) => {
+const ToolGroupBlock = ({ tools, isStreaming, isLast }: { tools: ToolCallEntry[]; isStreaming?: boolean; isLast: boolean }) => {
   const isPending = tools.some(t => t.status === 'pending')
   const [isOpen, setIsOpen] = React.useState(isPending || (isLast && !!isStreaming))
   const [userToggled, setUserToggled] = React.useState(false)
@@ -111,22 +100,20 @@ const ToolGroupBlock = React.memo(({ tools, isStreaming, isLast }: { tools: Tool
       </div>
     </details>
   )
-})
-ToolGroupBlock.displayName = 'ToolGroupBlock'
+}
 
 // ─── AssistantMessage ─────────────────────────────────────────────────────────
 
-const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
-  const statusText = React.useMemo(() => {
+const AssistantMessage = ({ message }: { message: ChatMessage }) => {
+  const statusText = (() => {
     if (!message.orderedBlocks?.length) return 'Thinking'
     const last = message.orderedBlocks[message.orderedBlocks.length - 1]
     if (last.type === 'tool' && last.status === 'pending') return 'Working'
     if (last.type === 'text') return 'Generating'
+    if (last.type === 'reasoning') return 'Thinking'
     return 'Thinking'
-  }, [message.orderedBlocks])
-
-  // Build segments with stable tool-group keys
-  const segments = React.useMemo(() => {
+  })()
+  const segments = (() => {
     type Seg =
       | { type: 'reasoning'; block: StreamBlock & { type: 'reasoning' }; blockIndex: number }
       | { type: 'text'; block: StreamBlock & { type: 'text' }; blockIndex: number }
@@ -154,7 +141,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
     })
     flush()
     return result
-  }, [message.orderedBlocks])
+  })()
 
   return (
     <div className="chat-message-assistant-container">
@@ -166,7 +153,6 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
             content={seg.block.content}
             durationMs={seg.block.durationMs}
             isStreaming={seg.block.isStreaming}
-            // Use stable blockIndex so targetId is consistent regardless of other blocks
             targetId={`streaming-reasoning-${message.id}-${seg.blockIndex}`}
           />
         )
@@ -199,12 +185,7 @@ const AssistantMessage = React.memo(({ message }: { message: ChatMessage }) => {
       )}
     </div>
   )
-}, (prev, next) =>
-  prev.message.isStreaming === next.message.isStreaming &&
-  prev.message.orderedBlocks === next.message.orderedBlocks &&
-  prev.message.content === next.message.content
-)
-AssistantMessage.displayName = 'AssistantMessage'
+}
 
 // ─── UserMessage ─────────────────────────────────────────────────────────────
 
@@ -243,9 +224,7 @@ const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActio
 }
 UserMessage.displayName = 'UserMessage'
 
-// Removed custom atom key generator since Jotai atoms have stable toString()
-const Scroller = React.forwardRef<HTMLDivElement, any>((props, ref) => <div {...props} ref={ref} className="chat-thread-container" />)
-Scroller.displayName = 'Scroller'
+
 
 const ChatThread: React.FC = () => {
   const messageAtoms = useAtomValue(chatMessageAtomsAtom)
@@ -253,25 +232,20 @@ const ChatThread: React.FC = () => {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
 
-  const handleScroll = React.useCallback(() => {
+  const handleScroll = () => {
     if (!scrollRef.current) return
     const { scrollTop } = scrollRef.current
-    // In column-reverse, scrollTop is usually 0 or negative at the bottom.
-    // In Webkit/Blink, it's 0 at the bottom and negative as you scroll up.
-    // In Firefox, it might be positive. But typically Math.abs(scrollTop) < 15 indicates we are at the bottom.
     isAtBottomRef.current = Math.abs(scrollTop) < 15
-  }, [])
-
-  // If we receive a completely new message and we were at the bottom, we ensure scrollTop is 0
+  }
   React.useLayoutEffect(() => {
     if (scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = 0
     }
   }, [messageAtoms.length])
 
-  const messageGroups = React.useMemo(() => {
-    const groups: Array<{ key: string; userAtom: any; assistantAtoms: any[] }> = []
-    let currentGroup: { key: string; userAtom: any; assistantAtoms: any[] } | null = null
+  const messageGroups = (() => {
+    const groups: Array<{ key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> }> = []
+    let currentGroup: { key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> } | null = null
     messageAtoms.forEach((atom, idx) => {
       const msg = messages[idx]
       if (!msg) return
@@ -279,12 +253,13 @@ const ChatThread: React.FC = () => {
         currentGroup = { key: `group-${msg.id}`, userAtom: atom, assistantAtoms: [] }
         groups.push(currentGroup)
       } else {
-        if (currentGroup) currentGroup.assistantAtoms.push(atom)
-        else groups.push({ key: `group-init-${msg.id}`, userAtom: null, assistantAtoms: [atom] })
+        const item = { atom, id: msg.id }
+        if (currentGroup) currentGroup.assistantAtoms.push(item)
+        else groups.push({ key: `group-init-${msg.id}`, userAtom: null, assistantAtoms: [item] })
       }
     })
     return groups
-  }, [messageAtoms, messages])
+  })()
 
   if (messageAtoms.length === 0) return null
 
@@ -295,8 +270,8 @@ const ChatThread: React.FC = () => {
       {messageGroups.slice().reverse().map((group) => (
         <div key={group.key} className="chat-section" style={{ display: 'flex', flexDirection: 'column' }}>
           {group.userAtom && <MessageWrapper messageAtom={group.userAtom} />}
-          {group.assistantAtoms.map((assistantAtom) => (
-            <MessageWrapper key={`${assistantAtom}`} messageAtom={assistantAtom} />
+          {group.assistantAtoms.map(({ atom, id }) => (
+            <MessageWrapper key={id} messageAtom={atom} />
           ))}
         </div>
       ))}
@@ -307,26 +282,20 @@ const ChatThread: React.FC = () => {
 
 // ─── MessageWrapper ───────────────────────────────────────────────────────────
 
-const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
+const MessageWrapper = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)
   const [copied, setCopied] = React.useState(false)
 
-  const textToCopy = React.useMemo(() => {
-    if (message.content) return message.content
-    return message.orderedBlocks?.filter((b): b is StreamBlock & { type: 'text' } => b.type === 'text').map(b => b.content).join('') ?? ''
-  }, [message.content, message.orderedBlocks])
+  const textToCopy = message.content || (message.orderedBlocks?.filter((b): b is StreamBlock & { type: 'text' } => b.type === 'text').map(b => b.content).join('') ?? '')
 
-  const handleCopy = React.useCallback(() => {
+  const handleCopy = () => {
     if (!textToCopy) return
     navigator.clipboard.writeText(textToCopy)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }, [textToCopy])
+  }
 
-  const timeStr = React.useMemo(() => {
-    if (!message.timestamp) return ''
-    return new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }, [message.timestamp])
+  const timeStr = message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 
   return (
     <div className={`chat-thread-message-wrapper message-${message.role}`}>
@@ -365,7 +334,6 @@ const MessageWrapper = React.memo(({ messageAtom }: { messageAtom: PrimitiveAtom
       </div>
     </div>
   )
-})
-MessageWrapper.displayName = 'MessageWrapper'
+}
 
 export default ChatThread

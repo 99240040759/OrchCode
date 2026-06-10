@@ -14,10 +14,10 @@ export interface TerminalViewHandle {
 
 interface TerminalViewProps {
   workspacePath?: string
+  ref?: React.Ref<TerminalViewHandle>
 }
 
-const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
-  ({ workspacePath }, ref) => {
+const TerminalView = ({ workspacePath, ref }: TerminalViewProps) => {
     const conversationId = useAtomValue(activeThreadIdAtom)
 
     const conversationIdRef = useRef(conversationId)
@@ -148,11 +148,10 @@ const TerminalView = React.forwardRef<TerminalViewHandle, TerminalViewProps>(
         }
         term.dispose()
       }
-    }, [conversationId])
+    }, [conversationId, workspacePath])
 
     return <div ref={termContainerRef} className="terminal-container" />
   }
-)
 TerminalView.displayName = 'TerminalView'
 
 export default TerminalView

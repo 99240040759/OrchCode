@@ -2,6 +2,7 @@ import { utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import log from 'electron-log'
+import { dbEvents } from './db'
 
 const IDLE_KILL_MS = 60_000
 
@@ -10,7 +11,22 @@ class WorkerPool {
   private activeJobs = new Map<UtilityProcess, string>()
   private idleTimers = new Map<UtilityProcess, NodeJS.Timeout>()
   private readonly minWorkers = 1
-  constructor(private maxWorkers = 4) {}
+  constructor(private maxWorkers = 4) {
+    dbEvents.on('restarted', () => this.reShareDBPorts())
+  }
+
+  public reShareDBPorts() {
+    const { MessageChannelMain } = require('electron')
+    const { shareDBPort } = require('./db')
+    log.info(`[workerPool] DB worker restarted. Re-sharing DB ports with ${this.workers.length} workers.`)
+    for (const w of this.workers) {
+      try {
+        const { port1, port2 } = new MessageChannelMain()
+        shareDBPort(port1)
+        w.postMessage({ type: 'db-port' }, [port2])
+      } catch (err) { log.debug('[workerPool] Port sharing error:', err) }
+    }
+  }
 
   private resolveWorkerPath(): string {
     let workerPath = join(__dirname, 'agentWorker.js')

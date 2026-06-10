@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useAtom, useAtomValue } from 'jotai'
 import { X, Globe, TerminalSquare, ListTodo, Loader } from 'lucide-react'
@@ -74,12 +74,12 @@ const ArtifactPanel: React.FC = () => {
   const convIdRef = useRef(convId)
   convIdRef.current = convId
 
-  const handleEditorMount = useCallback((editor: editor.IStandaloneCodeEditor) => { editorRef.current = editor }, [])
-  const handleDiffEditorMount = useCallback((editor: editor.IStandaloneDiffEditor) => { diffEditorRef.current = editor }, [])
-  const handleSearchClick = useCallback(() => {
+  const handleEditorMount = (editor: editor.IStandaloneCodeEditor) => { editorRef.current = editor }
+  const handleDiffEditorMount = (editor: editor.IStandaloneDiffEditor) => { diffEditorRef.current = editor }
+  const handleSearchClick = () => {
     const ed = isDiffMode ? diffEditorRef.current?.getModifiedEditor() : editorRef.current
     if (ed) { ed.focus(); ed.trigger('actions', 'actions.find', null) }
-  }, [isDiffMode])
+  }
 
   useEffect(() => { setupMonaco().then(() => setThemeLoaded(true)) }, [])
 
@@ -114,19 +114,19 @@ const ArtifactPanel: React.FC = () => {
     })
   }, [setArtifacts])
 
-  const handleOpenFile = useCallback((fileData: EditorFile) => {
+  const handleOpenFile = (fileData: EditorFile) => {
     setActiveFile(fileData); setPanelMode('editor')
-  }, [setActiveFile, setPanelMode])
+  }
 
-  const handleArtifactClick = useCallback(async (art: ArtifactEntry) => {
+  const handleArtifactClick = async (art: ArtifactEntry) => {
     try {
       setFileLoading(true)
       const fileData = await window.api.invoke('file:read', { filePath: art.path, conversationId: convId }) as FileReadResult
       if (fileData) { setIsDiffMode(false); handleOpenFile(fileData) }
     } catch (err) { console.error(err) } finally { setFileLoading(false) }
-  }, [convId, handleOpenFile])
+  }
 
-  const handleCloseFile = useCallback((fileToClose: EditorFile, e: React.MouseEvent) => {
+  const handleCloseFile = (fileToClose: EditorFile, e: React.MouseEvent) => {
     e.stopPropagation()
     const next = openFiles.filter(f => f.path !== fileToClose.path)
     setOpenFiles(next)
@@ -134,7 +134,7 @@ const ArtifactPanel: React.FC = () => {
       if (next.length > 0) { setActiveFile(next[next.length - 1]); setPanelMode('editor') }
       else { setActiveFile(null); setPanelMode('overview') }
     }
-  }, [openFiles, activeFile, setOpenFiles, setActiveFile, setPanelMode])
+  }
 
   useEffect(() => {
     if (panelMode === 'browser') browserWasOpenedRef.current = true
@@ -160,10 +160,10 @@ const ArtifactPanel: React.FC = () => {
     return () => { window.removeEventListener('resize', handleLayout); cancelAnimationFrame(rafId); obs.disconnect() }
   }, [])
 
-  const handleTabChange = useCallback((val: string) => {
+  const handleTabChange = (val: string) => {
     if (['overview', 'terminal', 'browser'].includes(val)) { setPanelMode(val as ArtifactPanelMode); setActiveFile(null) }
     else { const file = openFiles.find(f => f.path === val); if (file) { setIsDiffMode(false); setActiveFile(file); setPanelMode('editor') } }
-  }, [openFiles, setPanelMode, setActiveFile])
+  }
 
   const tabsValue = panelMode === 'editor' ? (activeFile?.path ?? 'overview') : panelMode
 

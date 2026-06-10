@@ -120,6 +120,8 @@ function AppInner(): React.JSX.Element {
 
   return (
     <div className="app-root">
+      <title>{activeThreadTitle} — Orch Code</title>
+      <meta name="description" content="AI pair programming assistant" />
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
       <LeftSidebar expanded={sidebarExpanded} onStartConversation={() => newConversation()} threadListContent={<ThreadList />} />
       <div className="app-content-wrapper">
@@ -129,7 +131,7 @@ function AppInner(): React.JSX.Element {
               <div className="chat-pane-wrapper">
                 <ChatPane fullWidth={!isArtifactPanelOpen} onSubmit={(p, a) => run(p, a)} onStop={stop} onOpenArtifacts={() => setArtifactPanelOpen(true)} onOpenWorkspace={openWorkspace} workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle} hasMessages={hasMessages} />
               </div>
-              <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}><ArtifactPanel /></div>
+              <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}><React.Suspense fallback={<div className="editor-loading">Loading Artifacts...</div>}><ArtifactPanel /></React.Suspense></div>
             </div>
           </main>
         </div>
@@ -147,10 +149,12 @@ function App(): React.JSX.Element {
   const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))
   return view === 'onboarding' ? (
     <>
+      <title>Welcome to Orch Code</title>
+      <meta name="description" content="AI onboarding setup" />
       <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: '#161616', border: '1px solid var(--border-color)', color: '#f3f3f3', fontSize: 13 } }} />
       <OnboardingView />
     </>
-  ) : <Provider><ErrorBoundary><AppInner /></ErrorBoundary></Provider>
+  ) : <Provider><ErrorBoundary><React.Suspense fallback={<div className="editor-loading">Loading Orch Code...</div>}><AppInner /></React.Suspense></ErrorBoundary></Provider>
 }
 
 export default App

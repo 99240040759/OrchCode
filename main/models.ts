@@ -79,6 +79,5 @@ export function resolveModel(modelId: string): {
   if (modelId.startsWith('opencode/')) return { model: opencode.chat(modelId.replace('opencode/', '')), providerOptions: {} }
   if (modelId.startsWith('nvidia/')) return { model: nvidia.chat(modelId.replace('nvidia/', '')), providerOptions: {} }
   if (GEMMA4_THINKING_MODEL_IDS.has(modelId)) return { model: google(modelId), providerOptions: { google: { chatTemplateKwargs: { enable_thinking: true } } } as ProviderOptions }
-  if (modelId.includes('thinking') || modelId.includes('-pro')) return { model: google(modelId), providerOptions: { google: { thinkingConfig: { thinkingLevel: 'auto', includeThoughts: true } } } as ProviderOptions }
-  return { model: google(modelId), providerOptions: {} }
+  return { model: google(modelId), providerOptions: { google: { thinkingConfig: { thinkingLevel: 'auto', includeThoughts: true } } } as ProviderOptions }
 }

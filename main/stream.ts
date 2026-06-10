@@ -6,6 +6,7 @@ import { pool } from './workerPool'
 import { getCurrentSession } from './auth'
 import { browserTools } from './tools'
 import * as db from './db'
+import { getWorkspaceContext, invalidateWorkspaceFilesCache } from './workspace'
 
 const StreamRequestSchema = z.object({
   promptText: z.string().max(200_000),
@@ -49,7 +50,10 @@ export function registerStreamIpc() {
       worker.once('exit', onExit)
 
       const onMsg = (msg: any) => {
-        if (msg?.type === 'artifacts-changed') pushArtifactsChanged(msg.threadId)
+        if (msg?.type === 'artifacts-changed') {
+          try { const ctx = getWorkspaceContext(request.threadId); if (ctx?.rootPath) invalidateWorkspaceFilesCache(ctx.rootPath) } catch (e) { log.debug('[stream] Cache invalidation error:', e) }
+          pushArtifactsChanged(msg.threadId)
+        }
         if (msg?.type === 'tool-request' && msg.threadId === request.threadId) {
           const { requestId, toolName, args } = msg
           const t = browserTools(request.threadId, true)[toolName]

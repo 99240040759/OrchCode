@@ -1,6 +1,8 @@
 import log from 'electron-log'
 import crypto from 'node:crypto'
 import { getDatabasePath } from './utils'
+import { EventEmitter } from 'node:events'
+export const dbEvents = new EventEmitter()
 
 export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string; lifetimeTokens?: number }
 export interface ThreadMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; data?: string; createdAt: string }
@@ -8,6 +10,7 @@ export interface ThreadMessage { id: string; role: 'user' | 'assistant' | 'syste
 const pendingQueries = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
 let dbPort: any = null
 export function setDBPort(port: any) {
+  if (dbPort) { try { dbPort.close() } catch {} }
   dbPort = port
   dbPort.on('message', (e: any) => {
     const { id, result, error } = e.data, pending = pendingQueries.get(id)
@@ -21,47 +24,46 @@ export function setDBPort(port: any) {
 }
 let worker: any = null
 let respawnAttempts = 0
+let lifetimeRespawnAttempts = 0
 let respawnTimer: NodeJS.Timeout | null = null
 const MAX_RESPAWN_ATTEMPTS = 5
+const MAX_LIFETIME_RESPAWN_ATTEMPTS = 10
 const RESPAWN_BACKOFF_BASE_MS = 500
 
 function spawnWorker() {
+  if (lifetimeRespawnAttempts >= MAX_LIFETIME_RESPAWN_ATTEMPTS) {
+    log.error('[db] Worker exceeded lifetime respawn limit. Database may be corrupt.')
+    const { dialog, app } = require('electron')
+    dialog.showErrorBox('Database Error', 'The database has crashed too many times. Please restart the application. If the problem persists, the database file may be corrupted.')
+    app.quit()
+    return
+  }
   const { utilityProcess, app } = require('electron')
   const { join } = require('node:path')
   const { existsSync } = require('node:fs')
   let workerPath = join(__dirname, 'dbWorker.js')
   if (!existsSync(workerPath)) workerPath = join(__dirname, '..', 'dbWorker.js')
-  worker = utilityProcess.fork(workerPath, [], {
-    stdio: 'inherit',
-    env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath }
-  })
+  worker = utilityProcess.fork(workerPath, [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
+  lifetimeRespawnAttempts++
+  dbEvents.emit('restarted')
   worker.on('message', (e: any) => {
     const { id, result, error } = e
     const pending = pendingQueries.get(id)
-    if (pending) {
-      pendingQueries.delete(id)
-      if (error) pending.reject(new Error(error))
-      else pending.resolve(result)
-    }
+    if (pending) { pendingQueries.delete(id); if (error) pending.reject(new Error(error)); else pending.resolve(result) }
   })
   worker.once('exit', (code: number) => {
     log.error(`[db] Worker process exited with code ${code}`)
     worker = null
     pendingQueries.forEach(p => p.reject(new Error('DB worker crashed')))
     pendingQueries.clear()
-    if (respawnAttempts >= MAX_RESPAWN_ATTEMPTS) {
-      log.error('[db] Worker crashed too many times — giving up respawn.')
-      return
-    }
+    if (respawnAttempts >= MAX_RESPAWN_ATTEMPTS) { log.error('[db] Worker crashed too many times — giving up respawn.'); return }
     const delay = RESPAWN_BACKOFF_BASE_MS * Math.pow(2, respawnAttempts)
     respawnAttempts++
-    log.warn(`[db] Scheduling worker respawn #${respawnAttempts} in ${delay}ms`)
+    log.warn(`[db] Respawn #${respawnAttempts} (lifetime: ${lifetimeRespawnAttempts}) in ${delay}ms`)
     if (respawnTimer) clearTimeout(respawnTimer)
     respawnTimer = setTimeout(() => { respawnTimer = null; spawnWorker() }, delay)
   })
-  
-  // Reset respawn attempts if the worker survives for 10 seconds
-  setTimeout(() => { if (worker) respawnAttempts = 0 }, 10000)
+  setTimeout(() => { if (worker) { respawnAttempts = 0; log.info('[db] Worker stable, resetting counter') } }, 10000)
 }
 
 function getWorker() {

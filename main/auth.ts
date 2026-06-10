@@ -40,8 +40,6 @@ export interface AuthSession {
 const sessionFilePath = getSessionPath()
 let currentSession: AuthSession | null = null
 let loginInProgress = false
-let loginTimeout: NodeJS.Timeout | null = null
-let refreshInterval: NodeJS.Timeout | null = null
 let activeVerifier = ''
 let pendingLoginResolve: ((user: UserProfile | null) => void) | null = null
 let pendingLoginReject: ((reason: Error) => void) | null = null
@@ -75,10 +73,6 @@ export function requireAuthToken(): string {
 }
 
 async function loadSession(): Promise<AuthSession | null> {
-  if (!safeStorage.isEncryptionAvailable()) {
-    log.error('[auth] safeStorage unavailable — cannot restore session. Re-authentication required.')
-    return null
-  }
   try {
     const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
     if (!exists) return null
@@ -86,21 +80,16 @@ async function loadSession(): Promise<AuthSession | null> {
     return currentSession
   } catch (err) {
     log.error('[auth] Load session failed:', err)
-    return null
+    throw err
   }
 }
 
 async function saveSession(session: AuthSession | null) {
   if (!session) {
-    await fs.rm(sessionFilePath, { force: true }).catch(() => {})
+    await fs.rm(sessionFilePath, { force: true })
     return
   }
-  if (!safeStorage.isEncryptionAvailable()) return
-  try {
-    await fs.writeFile(sessionFilePath, safeStorage.encryptString(JSON.stringify(session)))
-  } catch (err) {
-    log.error('[auth] Save session failed:', err)
-  }
+  await fs.writeFile(sessionFilePath, safeStorage.encryptString(JSON.stringify(session)))
 }
 
 function broadcastUserStatus(user: UserProfile | null) {
@@ -130,12 +119,9 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
     if (pendingLoginReject) { pendingLoginReject(new Error('Login cancelled')); pendingLoginReject = null; pendingLoginResolve = null }
     const { verifier, challenge } = generatePKCE()
     activeVerifier = verifier
-    const supabaseUrl = process.env.SUPABASE_URL
-    if (!supabaseUrl) { reject(new Error('SUPABASE_URL config is missing.')); return }
+    const supabaseUrl = process.env.SUPABASE_URL!
     pendingLoginResolve = resolve; pendingLoginReject = reject
     const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({ provider: 'google', redirect_to: 'orch-code://auth-callback', code_challenge: challenge, code_challenge_method: 's256' }).toString()
-    if (loginTimeout) clearTimeout(loginTimeout)
-    loginTimeout = setTimeout(() => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(new Error('Sign-in timed out.')) }, 5 * 60 * 1000)
     void shell.openExternal(redirectUrl).catch((err) => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(err instanceof Error ? err : new Error(String(err))) })
   })
   return promise.finally(() => { loginInProgress = false })
@@ -143,22 +129,18 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
 
 export async function handleAuthCallback(code: string, _state: string, errorMsg?: string | null): Promise<void> {
   if (!pendingLoginResolve || !pendingLoginReject) return
-  if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
   const resolve = pendingLoginResolve
   const reject = pendingLoginReject
   pendingLoginResolve = null
   pendingLoginReject = null
-
   if (errorMsg) {
     reject(new Error(errorMsg))
     return
   }
-
   try {
     log.info('[auth] Exchanging Supabase auth code for tokens...')
-    const supabaseUrl = process.env.SUPABASE_URL
-    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
-
+    const supabaseUrl = process.env.SUPABASE_URL!
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY!
     const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
       method: 'POST',
       headers: {
@@ -193,38 +175,35 @@ function getJwtExpiry(token: string): number {
   try { const parts = token.split('.'); if (parts.length !== 3) return 0; return (JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8')).exp || 0) * 1000 }
   catch { return 0 }
 }
-async function refreshSessionIfNeeded(): Promise<boolean> {
-  if (!currentSession?.refreshToken) return false
+async function refreshSessionIfNeeded(): Promise<void> {
+  if (!currentSession?.refreshToken) return
   const exp = getJwtExpiry(currentSession.idToken)
-  if (exp && exp - Date.now() > 5 * 60 * 1000) return true
-  try {
-    log.info('[auth] Refreshing Supabase session token...')
-    const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_ANON_KEY! },
-      body: JSON.stringify({ refresh_token: currentSession.refreshToken })
-    })
-    if (!res.ok) {
-      if (res.status === 400 || res.status === 401) {
-        log.warn('[auth] Refresh failed with 400/401. Logging out.')
-        await logoutUser()
-      }
-      return false
+  if (exp && exp - Date.now() > 5 * 60 * 1000) return
+  log.info('[auth] Refreshing Supabase session token...')
+  const res = await fetch(`${process.env.SUPABASE_URL!}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_ANON_KEY! },
+    body: JSON.stringify({ refresh_token: currentSession.refreshToken })
+  })
+  if (!res.ok) {
+    if (res.status === 400 || res.status === 401) {
+      log.warn('[auth] Refresh failed with 400/401. Logging out.')
+      await logoutUser()
     }
-    const data = await res.json()
-    if (!data.access_token || !data.refresh_token) return false
-    currentSession = { ...currentSession, idToken: data.access_token, refreshToken: data.refresh_token }
-    await saveSession(currentSession); broadcastUserStatus(currentSession.user)
-    return true
-  } catch (err) { log.error('[auth] Token refresh failed:', err); return false }
+    throw new Error(`Refresh failed: ${res.status}`)
+  }
+  const data = await res.json()
+  currentSession = { ...currentSession, idToken: data.access_token, refreshToken: data.refresh_token }
+  await saveSession(currentSession)
+  broadcastUserStatus(currentSession.user)
 }
 export async function initAuth() {
   currentSession = await loadSession()
-  if (currentSession) { log.info('[auth] Recovered session for:', currentSession.user.email); broadcastUserStatus(currentSession.user); void refreshSessionIfNeeded() }
-  if (refreshInterval) clearInterval(refreshInterval)
-  refreshInterval = setInterval(() => { void refreshSessionIfNeeded() }, 5 * 60 * 1000)
+  if (currentSession) {
+    log.info('[auth] Recovered session for:', currentSession.user.email)
+    broadcastUserStatus(currentSession.user)
+    await refreshSessionIfNeeded()
+  }
+  setInterval(() => { if (currentSession) refreshSessionIfNeeded() }, 5 * 60 * 1000)
 }
-export function cleanupAuth() {
-  if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null }
-  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null }
-}
+export function cleanupAuth() {}

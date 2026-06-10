@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { Trash2, FolderPlus, Loader } from 'lucide-react'
 import { threadListAtom, activeThreadIdAtom, runningThreadsAtom } from '../store/agentStore'
@@ -25,11 +25,11 @@ const ThreadList: React.FC = () => {
   const { selectThread, deleteThread, openWorkspace } = useThreadListActions()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
 
-  const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
+  const handleDeleteThread = async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
     const confirmed = await window.api.invoke('dialog:confirm', { message: 'Delete this conversation?', detail: 'This will permanently remove the conversation and all its messages.', buttons: ['Cancel', 'Delete'], defaultId: 1, cancelId: 0 })
     if (confirmed === 1) await deleteThread(threadId)
-  }, [deleteThread])
+  }
 
   return (
     <div className="sidebar-section thread-list-container">

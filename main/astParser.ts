@@ -42,9 +42,10 @@ export async function getParserForExtension(ext: string): Promise<Parser | null>
   }
 
   const parser = new Parser()
-  const wasmsDir = app && app.isPackaged
-    ? join(process.resourcesPath, 'wasms')
-    : join(app ? app.getAppPath() : process.cwd(), 'resources', 'wasms')
+  const isPackaged = process.env.IS_PACKAGED === 'true' || (app && app.isPackaged)
+  const resourcesPath = process.env.RESOURCES_PATH || process.resourcesPath
+  const appPath = process.env.APP_PATH || (app && app.getAppPath()) || process.cwd()
+  const wasmsDir = isPackaged ? join(resourcesPath, 'wasms') : join(appPath, 'resources', 'wasms')
   const Lang = await Language.load(join(wasmsDir, wasmFile))
   parser.setLanguage(Lang)
   return parser

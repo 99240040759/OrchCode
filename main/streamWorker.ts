@@ -37,6 +37,7 @@ interface ToolStreamPart {
 
 const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
 const SUMMARISE_THRESHOLD = 180_000
+let refreshLock = false
 
 const AttachmentSchema = z.object({
   type: z.enum(['image', 'document']),
@@ -53,17 +54,9 @@ const StreamRequestSchema = z.object({
 
 export { StreamRequestSchema }
 
-const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent']
+const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent', 'generateImage']
 
-const finishedPorts = new WeakSet<Electron.MessagePortMain>()
 
-function markPortFinished(port: Electron.MessagePortMain) {
-  finishedPorts.add(port)
-}
-
-function isPortFinished(port: Electron.MessagePortMain): boolean {
-  return finishedPorts.has(port)
-}
 
 async function setupStreamRequest(
   port: Electron.MessagePortMain,
@@ -73,10 +66,7 @@ async function setupStreamRequest(
 ) {
   let resolveAttachments: ((bufs: Buffer[]) => void) | null = null
   const bufsPromise = attachments && attachments.length
-    ? new Promise<Buffer[]>((resolve, reject) => {
-        resolveAttachments = resolve
-        setTimeout(() => reject(new Error('Attachment handshake timeout')), 30000)
-      })
+    ? new Promise<Buffer[]>((resolve) => { resolveAttachments = resolve })
     : Promise.resolve([])
 
   port.on('message', (e) => {
@@ -91,23 +81,12 @@ async function setupStreamRequest(
       controller.abort(new Error('__inject__:' + (e.data.text ?? '')))
     }
   })
-  port.on('close', () => {
-    if (!isPortFinished(port)) {
-      log.info(`[stream] Port closed unexpectedly for ${threadId}. Aborting.`)
-      controller.abort()
-    }
-  })
+  port.on('close', () => controller.abort())
   port.start()
 
-  const bufs = await bufsPromise.catch(err => {
-    log.error('[stream] Attachment handshake error:', err)
-    throw err
-  })
+  const bufs = await bufsPromise
   if (attachments && bufs.length) {
     attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
-    if (bufs.reduce((t, b) => t + b.length, 0) > 25 * 1024 * 1024) {
-      throw new Error('Attachments exceed 25 MB limit.')
-    }
   }
 
   const wsPath = await getThreadWorkspace(threadId)
@@ -128,8 +107,9 @@ async function buildSkillsSection(): Promise<string> {
     : ''
 }
 
-function buildSystemPrompt(threadId: string, rootPath: string, browserInstruction: string, skillsSection: string): string {
-  return `You are Orch Code, an advanced, highly specialized AI software engineering agent.
+function buildSystemPrompt(threadId: string, rootPath: string, browserInstruction: string, skillsSection: string, estimatedContextTokens: number): string {
+  const tokenWarning = estimatedContextTokens > 150000 ? `\n\n⚠️ CONTEXT WARNING: Session using ~${Math.round(estimatedContextTokens / 1000)}k tokens. Approaching 200k limit. Be concise.` : ''
+  return `You are Orch Code, an advanced, highly specialized AI software engineering agent.${tokenWarning}
 Active Conversation Thread ID: ${threadId}
 
 =========================================
@@ -255,13 +235,13 @@ export async function handleAgentStreamRequest(
 
     const browserInstruction = buildBrowserInstruction(!!isBrowserActive, modelSupportsVision)
     const skillsSection = await buildSkillsSection()
-    const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection)
-
     const coreTools = createCoreTools(threadId, modelSupportsVision)
     const activeTools = {
       ...coreTools,
       ...(isBrowserActive ? browserTools(threadId, modelSupportsVision) : {})
     }
+    const estimatedContextTokens = persistedAccumulatedTokens + sessionAccumulatedTokens + 2000 + (Object.keys(activeTools).length * 500)
+    const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, estimatedContextTokens)
 
     const { model: resolvedModel, providerOptions: modelProviderOptions } = resolveModel(rawModel.id)
     log.info(`[stream] model: ${rawModel.id}, messages: ${messages.length}`)
@@ -306,24 +286,18 @@ export async function handleAgentStreamRequest(
         }
       },
       prepareStep: async ({ messages: currentMessages }) => {
-        if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD) return undefined
+        if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD || refreshLock) return undefined
+        refreshLock = true
         log.info(`[stream] Context at ${sessionAccumulatedTokens} tokens — auto-summarising`)
-        const prevPersisted = persistedAccumulatedTokens, prevSession = sessionAccumulatedTokens
         const summary = await summariseContext(currentMessages as ModelMessage[])
-        if (!summary) return undefined
-        try {
-          await compactThreadHistory(threadId, summary)
-          await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens)
-          await setThreadAccumulatedTokens(threadId, 0)
-          persistedLifetimeTokens += sessionAccumulatedTokens
-          persistedAccumulatedTokens = 0
-          sessionAccumulatedTokens = 0
-        } catch (err) {
-          log.error('[stream] Compaction failed, reverting counters:', err)
-          persistedAccumulatedTokens = prevPersisted
-          sessionAccumulatedTokens = prevSession
-          return undefined
-        }
+        if (!summary) { refreshLock = false; return undefined }
+        await compactThreadHistory(threadId, summary)
+        await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens)
+        await setThreadAccumulatedTokens(threadId, 0)
+        persistedLifetimeTokens += sessionAccumulatedTokens
+        persistedAccumulatedTokens = 0
+        sessionAccumulatedTokens = 0
+        refreshLock = false
         send({ type: 'token-update', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens }, threadId })
         return {
           system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nSummary:\n\n${summary}\n\nContinue from this state.`,
@@ -432,19 +406,15 @@ export async function handleAgentStreamRequest(
     saveProgress(true)
   } catch (err: unknown) {
     const error = err as Error & { name?: string }
-    const isInject = error?.message?.startsWith('__inject__:')
+    const injectReason = controller.signal.reason as Error | undefined
+    const isInject = injectReason?.message?.startsWith('__inject__:') || error?.message?.startsWith('__inject__:')
     if (isInject) {
-      const injectedText = error.message.slice('__inject__:'.length)
+      const injectedText = (injectReason?.message || error.message).slice('__inject__:'.length)
       log.info(`[stream] Inject received for ${threadId}: "${injectedText.slice(0, 60)}"`)
-      for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
-      if (assistantContent || orderedBlocks.length > 0) {
-        try {
-          await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) })
-        } catch (saveErr) { log.error('[stream] Inject save error:', saveErr) }
-      }
-      // inject-resume MUST be sent before finish — preload closes the port on finish
+      for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') { x.status = 'complete'; x.result = { type: 'text', value: '[Tool execution interrupted by user injection]' } } }
+      if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Inject save error:', saveErr) } }
       send({ type: 'inject-resume', payload: injectedText, threadId })
-      send({ type: 'finish', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens, content: assistantContent, orderedBlocks }, threadId })
+      send({ type: 'finish', payload: { accumulatedTokens: persistedAccumulatedTokens + sessionAccumulatedTokens, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens, content: assistantContent, orderedBlocks }, threadId })
     } else if (error.name !== 'AbortError') {
       log.error('[stream] error:', error)
       for (const x of orderedBlocks) { if (x.type === 'tool' && x.status === 'pending') x.status = 'error' }
@@ -457,7 +427,6 @@ export async function handleAgentStreamRequest(
       throw err
     }
   } finally {
-    markPortFinished(port)
     markWorkspaceIdle(threadId)
     const entry = activeAbortControllers.get(threadId)
     if (entry && entry.sessionId === streamSessionId) activeAbortControllers.delete(threadId)

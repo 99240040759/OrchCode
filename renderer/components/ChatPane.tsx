@@ -18,8 +18,7 @@ interface ChatPaneProps {
   hasMessages: boolean
 }
 
-export const ChatPane = React.memo<ChatPaneProps>(
-  ({ fullWidth, onSubmit, onStop, onOpenArtifacts, onOpenWorkspace, workspaceName, hasMessages }) => {
+export const ChatPane: React.FC<ChatPaneProps> = ({ fullWidth, onSubmit, onStop, onOpenArtifacts, onOpenWorkspace, workspaceName, hasMessages }) => {
     const isLoading = useAtomValue(isThreadLoadingAtom)
 
     return (
@@ -76,6 +75,4 @@ export const ChatPane = React.memo<ChatPaneProps>(
         </div>
       </div>
     )
-  }
-)
-ChatPane.displayName = 'ChatPane'
+}

@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 const proc = process as any
 let dbInstance: Database.Database | null = null
 const stmtCache = new Map<string, Statement>()
+const MAX_CACHED_STATEMENTS = 100
 
 function getDB(dbPath: string): Database.Database {
   if (dbInstance) return dbInstance
@@ -32,7 +33,16 @@ function getDB(dbPath: string): Database.Database {
 
 function prepare(db: Database.Database, sql: string): Statement {
   let stmt = stmtCache.get(sql)
-  if (!stmt) { stmt = db.prepare(sql); stmtCache.set(sql, stmt) }
+  if (!stmt) {
+    if (stmtCache.size >= MAX_CACHED_STATEMENTS) {
+      const firstKey = stmtCache.keys().next().value
+      if (firstKey !== undefined) {
+        stmtCache.delete(firstKey)
+      }
+    }
+    stmt = db.prepare(sql)
+    stmtCache.set(sql, stmt)
+  }
   return stmt
 }
 

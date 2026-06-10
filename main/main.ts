@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { init as initSentry } from '@sentry/electron/main'
 initSentry({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN, tracesSampleRate: 1.0 })
-import { app, BrowserWindow, shell, nativeTheme, dialog, Menu } from 'electron'
+import { app, BrowserWindow, shell, nativeTheme, Menu } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initUpdater } from './updater'
@@ -15,7 +15,6 @@ import { registerStreamIpc } from './stream'
 import { pool } from './workerPool'
 import WindowManager, { APP_ID } from './utils'
 import { initializeSkills } from './skills'
-import { clearAllWorkspaceFilesCache } from './workspace'
 
 app.setName('Orch Code')
 
@@ -37,10 +36,6 @@ if (!gotTheLock) {
 function handleCommandLineArgs(argv: string[], win: BrowserWindow) {
   if (argv.includes('--new-conversation')) win.webContents.send('command:new-conversation')
   if (argv.includes('--open-workspace')) win.webContents.send('command:open-workspace')
-  if (argv.includes('--clear-cache')) {
-    clearAllWorkspaceFilesCache()
-    dialog.showMessageBox(win, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' })
-  }
 }
 
 app.on('second-instance', (_event, commandLine) => {
@@ -218,15 +213,13 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) {
     const dockMenu = Menu.buildFromTemplate([
       { label: 'New Conversation', click() { const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('command:new-conversation') } } },
-      { label: 'Open Project Folder...', click() { const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('command:open-workspace') } } },
-      { label: 'Clear Workspace Cache', click() { clearAllWorkspaceFilesCache(); const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) dialog.showMessageBox(win, { type: 'info', message: 'Workspace Cache Cleared', detail: 'The cached lists of project files have been successfully reset.' }) } }
+      { label: 'Open Project Folder...', click() { const win = WindowManager.getMainWindow(); if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('command:open-workspace') } } }
     ])
     app.dock.setMenu(dockMenu)
   } else if (process.platform === 'win32') {
     app.setUserTasks([
       { program: process.execPath, arguments: '--new-conversation', iconPath: process.execPath, iconIndex: 0, title: 'New Conversation', description: 'Start a new chat thread' },
-      { program: process.execPath, arguments: '--open-workspace', iconPath: process.execPath, iconIndex: 0, title: 'Open Project Folder...', description: 'Select and open a project folder' },
-      { program: process.execPath, arguments: '--clear-cache', iconPath: process.execPath, iconIndex: 0, title: 'Clear Workspace Cache', description: 'Reset cached project files list' }
+      { program: process.execPath, arguments: '--open-workspace', iconPath: process.execPath, iconIndex: 0, title: 'Open Project Folder...', description: 'Select and open a project folder' }
     ])
   }
 
@@ -351,9 +344,8 @@ app.on('before-quit', async (e) => {
     e.preventDefault()
     cleanupAuth()
     cleanupAllPtys()
-    const timeoutPromise = new Promise(r => setTimeout(r, 3000))
-    try { await Promise.race([pool.shutdown(), timeoutPromise]) } catch (err) { log.debug('[main] Pool shutdown error:', err) }
-    try { await Promise.race([checkpointDB(), timeoutPromise]) } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
+    try { await pool.shutdown() } catch (err) { log.debug('[main] Pool shutdown error:', err) }
+    try { await checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
     isQuitting = true
     app.quit()
   }

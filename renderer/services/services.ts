@@ -5,7 +5,7 @@ const invoke = <T>(command: string, payload?: unknown): Promise<T> =>
 
 export const threadService = {
   getConversationId: () => invoke<string>('thread:active-id'),
-  newConversation: () => invoke<{ conversationId: string }>('thread:new'),
+  newConversation: (workspacePath?: string | null) => invoke<{ conversationId: string }>('thread:new', { workspacePath }),
   getThreads: () => invoke<ThreadEntry[]>('thread:list'),
   getThread: (threadId: string) => invoke<(ThreadEntry & { workspacePath?: string | null }) | null>('thread:get', { threadId }),
   getThreadMessages: (threadId: string) => invoke<ThreadMessage[]>('thread:messages', { threadId }),

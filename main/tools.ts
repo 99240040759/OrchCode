@@ -9,7 +9,7 @@ import log from 'electron-log'
 import {
   getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType, invalidateWorkspaceFilesCache, getOrCreateWorkspaceContext
 } from './workspace'
-import WindowManager, { getConversationScreenshotsPath, tavilyLimiter, pushArtifactsChanged } from './utils'
+import WindowManager, { getConversationScreenshotsPath, tavilyLimiter } from './utils'
 import { requireAuthToken } from './auth'
 import { getParserForExtension, getTokens } from './astParser'
 
@@ -26,45 +26,40 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
   let raw = await fs.readFile(filePath, 'utf-8')
   const isCrlf = raw.includes('\r\n')
   if (isCrlf) raw = raw.replace(/\r\n/g, '\n')
-  
-  const ext = extname(filePath)
-  const parser = await getParserForExtension(ext)
-  
+  const ext = extname(filePath), parser = await getParserForExtension(ext)
   for (const edit of edits) {
     let replaced = false
     if (parser) {
       try {
-        const fileTree = parser.parse(raw)
-        const targetTree = parser.parse(edit.targetContent)
-        
+        const fileTree = parser.parse(raw), targetTree = parser.parse(edit.targetContent)
         if (fileTree && targetTree) {
           const fileTokens = getTokens(fileTree.rootNode).filter(t => t.text.trim().length > 0)
           const targetTokens = getTokens(targetTree.rootNode).filter(t => t.text.trim().length > 0)
-          
           if (targetTokens.length > 0 && fileTokens.length >= targetTokens.length) {
-            const matches: { startIndex: number; endIndex: number }[] = []
+            const matches: { startIndex: number; endIndex: number; score: number }[] = []
+            const fuzzyThreshold = 0.85
             for (let i = 0; i <= fileTokens.length - targetTokens.length; i++) {
-              let match = true
+              let exactMatches = 0, tolerantMatches = 0
               for (let j = 0; j < targetTokens.length; j++) {
-                if (fileTokens[i + j].text !== targetTokens[j].text) {
-                  match = false
-                  break
-                }
+                const fToken = fileTokens[i + j].text, tToken = targetTokens[j].text
+                if (fToken === tToken) { exactMatches++; tolerantMatches++ }
+                else if (fToken.replace(/\s+/g, '') === tToken.replace(/\s+/g, '')) tolerantMatches++
+                else if (fToken.replace(/['"]/g, '') === tToken.replace(/['"]/g, '')) tolerantMatches++
               }
-              if (match) {
-                matches.push({
-                  startIndex: fileTokens[i].startIndex,
-                  endIndex: fileTokens[i + targetTokens.length - 1].endIndex
-                })
+              const score = tolerantMatches / targetTokens.length
+              if (exactMatches === targetTokens.length) {
+                matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score: 1.0 })
+              } else if (score >= fuzzyThreshold) {
+                matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score })
               }
             }
-            
-            if (matches.length === 1) {
+            matches.sort((a, b) => b.score - a.score)
+            if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score + 0.1)) {
               const m = matches[0]
               raw = raw.slice(0, m.startIndex) + edit.replacementContent + raw.slice(m.endIndex)
               replaced = true
             } else if (matches.length > 1) {
-              throw new Error(`AST Token matching found ${matches.length} identical blocks. Please provide a larger block of code to uniquely identify the section to replace.`)
+              throw new Error(`AST Token matching found ${matches.length} similar blocks (scores: ${matches.slice(0, 3).map(m => m.score.toFixed(2)).join(', ')}). Provide more context to uniquely identify the section.`)
             }
           }
         }
@@ -72,9 +67,13 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
         log.warn(`[AST Patch] Failed for ${filePath}:`, err)
       }
     }
-    
     if (!replaced) {
       if (!raw.includes(edit.targetContent)) {
+        const normalized = edit.targetContent.replace(/\s+/g, ' ').trim()
+        const rawNormalized = raw.replace(/\s+/g, ' ')
+        if (rawNormalized.includes(normalized)) {
+          throw new Error(`Target content found with different whitespace. AST matching failed. Ensure exact whitespace/formatting matches file:\n${edit.targetContent.slice(0, 100)}...`)
+        }
         throw new Error(`Target content not found in file. Ensure exact whitespace matching for:\n${edit.targetContent.slice(0, 100)}...`)
       }
       const occurrences = raw.split(edit.targetContent).length - 1
@@ -84,7 +83,6 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
       raw = raw.replace(edit.targetContent, edit.replacementContent)
     }
   }
-  
   await fs.writeFile(filePath, isCrlf ? raw.replace(/\n/g, '\r\n') : raw, 'utf-8')
 }
 
@@ -386,7 +384,6 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         await fs.mkdir(ctx.artifactsPath, { recursive: true })
         await fs.writeFile(targetPath, Buffer.from(base64Data, 'base64'))
         log.info(`[tool:generateImage] saved image to ${targetPath}`)
-        await pushArtifactsChanged(convId)
         return { success: true, filePath: targetPath, message: `Image generated successfully and saved to ${targetPath}` }
       } catch (err: any) { log.error('[tool:generateImage] Error:', err.message); return { success: false, error: `Image generation failed: ${err.message}` } }
     },
@@ -401,30 +398,29 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 }
 
 export function browserTools(convId: string, modelSupportsVision = true) {
-  const waitForPageLoad = (wc: any, timeoutMs = 8000) => {
+  const runOnMain = async (toolName: string, args: any, localFn: () => Promise<any>) => {
+    const runner = (globalThis as any).callMainProcessTool
+    if (runner) return runner(toolName, args, convId)
+    return localFn()
+  }
+
+  const waitForPageLoad = (wc: any) => {
     return new Promise((resolve) => {
       if (!wc.isLoading()) return resolve(true)
-      let resolved = false
-      const cleanUp = () => {
+      const onLoad = () => {
         wc.off('did-stop-loading', onLoad)
         wc.off('did-fail-load', onLoad)
-      }
-      const onLoad = () => {
-        if (resolved) return
-        resolved = true
-        cleanUp()
         resolve(true)
       }
       wc.once('did-stop-loading', onLoad)
       wc.once('did-fail-load', onLoad)
-      setTimeout(() => { if (!resolved) { resolved = true; cleanUp(); resolve(false) } }, timeoutMs)
     })
   }
 
   const browserNavigate = tool({
     description: 'Navigates the active browser viewport to a specified URL and blocks until the page load completes.',
     inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
-    execute: async ({ url }) => {
+    execute: async ({ url }) => runOnMain('browserNavigate', { url }, async () => {
       log.info(`[tool:browserNavigate] url="${url}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -435,7 +431,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         await waitForPageLoad(wc)
         return { success: true, url: wc.getURL() }
       } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully navigated to ${output.url}` }] })
   })
 
@@ -446,7 +442,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       text: z.string().describe('The text to type.'),
       frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
     }),
-    execute: async ({ selector, text, frameSelector }) => {
+    execute: async ({ selector, text, frameSelector }) => runOnMain('browserType', { selector, text, frameSelector }, async () => {
       log.info(`[tool:browserType] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -478,17 +474,17 @@ export function browserTools(convId: string, modelSupportsVision = true) {
             el.dispatchEvent(new Event('change', { bubbles: true }));
           })()
         `)
-        await waitForPageLoad(wc, 1000)
+        await waitForPageLoad(wc)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browserType] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully typed text into element` }] })
   })
 
   const browserScroll = tool({
     description: 'Scrolls the active webpage viewport.',
     inputSchema: z.object({ direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'), amount: z.number().int().positive().optional().describe('Pixels to scroll (default 400).') }),
-    execute: async ({ direction, amount }) => {
+    execute: async ({ direction, amount }) => runOnMain('browserScroll', { direction, amount }, async () => {
       log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -503,14 +499,14 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         await wc.executeJavaScript(`window.scrollBy(${x}, ${y})`)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browserScroll] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully scrolled viewport` }] })
   })
 
   const browserScreenshot = tool({
     description: 'Captures a PNG screenshot of the active browser viewport.',
     inputSchema: z.object({}),
-    execute: async () => {
+    execute: async () => runOnMain('browserScreenshot', {}, async () => {
       log.info('[tool:browserScreenshot] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -527,7 +523,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         await fs.writeFile(screenshotPath, png)
         return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
       } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: async ({ output }: any) => {
       if (output.success && output.filePath) {
         try {
@@ -546,7 +542,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       selector: z.string().describe('CSS selector of the element to click, or the integer agentId value (e.g. "1").'),
       frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
     }),
-    execute: async ({ selector, frameSelector }) => {
+    execute: async ({ selector, frameSelector }) => runOnMain('browserClickSelector', { selector, frameSelector }, async () => {
       log.info(`[tool:browserClickSelector] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -567,14 +563,14 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         await waitForPageLoad(wc)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browserClickSelector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked element` }] })
   })
 
   const browserGetPageContent = tool({
     description: 'Extracts the page URL, title, visible text content, and interactive element definitions with agentId labels from the active browser viewport. Interactive elements will render numeric badges directly on screenshots matching these agentId labels.',
     inputSchema: z.object({}),
-    execute: async () => {
+    execute: async () => runOnMain('browserGetPageContent', {}, async () => {
       log.info('[tool:browserGetPageContent] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
@@ -633,7 +629,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         const wrappedText = `[UNTRUSTED WEB PAGE CONTENT START]\nURL: ${result.url}\nTitle: ${result.title}\n\nVisible Page Text:\n${result.text}\n[UNTRUSTED WEB PAGE CONTENT END]`
         return { success: true, url: result.url, title: result.title, text: wrappedText, interactiveElements: result.interactiveElements }
       } catch (e: unknown) { log.error('[tool:browserGetPageContent] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    },
+    }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
   })
 
