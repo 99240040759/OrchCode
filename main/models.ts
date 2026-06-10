@@ -64,7 +64,12 @@ const zai = createOpenAI({
 export const googleBypass = createGoogleGenerativeAI({
   baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta`,
   apiKey: 'placeholder',
-  fetch: createAuthFetch()
+  fetch: (url, options) => {
+    const headers = new Headers(options?.headers || {})
+    headers.set('Authorization', `Bearer ${requireAuthToken()}`)
+    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+    return fetch(url, { ...options, headers, signal: AbortSignal.timeout(30000) })
+  }
 })
 
 const GEMMA4_THINKING_MODEL_IDS = new Set([

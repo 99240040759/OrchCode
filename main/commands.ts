@@ -36,11 +36,8 @@ const destroyListeners = new Map<string, () => void>()
 
 export function cleanupAllPtys() {
   activePtys.forEach((child) => {
-    try {
-      child.kill('SIGKILL')
-    } catch (err) {
-      log.debug('[terminal] PTY kill error:', err)
-    }
+    try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+    setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
   })
   activePtys.clear()
   activePtyOwners.clear()
@@ -53,7 +50,8 @@ export function cleanupPtysForThread(threadId: string) {
     if (convId === threadId) {
       const child = activePtys.get(id)
       if (child) {
-        try { child.kill() } catch (err) { log.debug('[terminal] Thread PTY kill error:', err) }
+        try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+        setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
         activePtys.delete(id); activePtyOwners.delete(id)
       }
       activePtyConversations.delete(id)
@@ -144,10 +142,12 @@ export const ipcCommands = {
         const token = requireAuthToken()
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
+        const headers = { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' }
         const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/api/generate-title`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+          headers,
+          body: JSON.stringify({ text }),
+          signal: AbortSignal.timeout(30000)
         })
         if (!response.ok) throw new Error(`Failed to generate title: ${response.statusText}`)
         const data = await response.json(), title = data.title?.trim() ?? null
@@ -311,7 +311,8 @@ export const ipcCommands = {
       if (listener) { event.sender.off('destroyed', listener); destroyListeners.delete(id) }
       const child = activePtys.get(id)
       if (child) {
-        try { child.kill() } catch (err) { log.debug('[terminal] Kill child error:', err) }
+        try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+        setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
         activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id)
       }
     }

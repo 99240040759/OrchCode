@@ -14,8 +14,8 @@ export function getConversationPath(id: string): string { return join(getConvers
 export function getConversationScreenshotsPath(id: string): string { return join(getConversationPath(id), 'screenshots') }
 
 // --- Limiters ---
-export const tavilyLimiter = new Bottleneck({ maxConcurrent: 1, minTime: 500 })
-export const globalApiLimiter = new Bottleneck({ maxConcurrent: 1, minTime: 1000 })
+export const tavilyLimiter = new Bottleneck({ maxConcurrent: 2, minTime: 200 })
+export const globalApiLimiter = new Bottleneck({ maxConcurrent: 10, minTime: 10000 })
 
 // --- Window Manager ---
 export class WindowManager {

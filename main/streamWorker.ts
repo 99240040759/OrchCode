@@ -37,7 +37,7 @@ interface ToolStreamPart {
 
 const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
 const SUMMARISE_THRESHOLD = 180_000
-let refreshLock = false
+const threadCompactionLocks = new Map<string, boolean>()
 
 const AttachmentSchema = z.object({
   type: z.enum(['image', 'document']),
@@ -176,9 +176,12 @@ export async function handleAgentStreamRequest(
   const send = (msg: Record<string, unknown>) => {
     try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) }
   }
-
   const existingEntry = activeAbortControllers.get(threadId)
-  if (existingEntry) existingEntry.controller.abort()
+  if (existingEntry) {
+    log.warn(`[stream] Duplicate stream attempt for ${threadId}, aborting previous`)
+    existingEntry.controller.abort()
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
   const controller = new AbortController()
   const streamSessionId = crypto.randomUUID()
   activeAbortControllers.set(threadId, { controller, sessionId: streamSessionId })
@@ -286,22 +289,25 @@ export async function handleAgentStreamRequest(
         }
       },
       prepareStep: async ({ messages: currentMessages }) => {
-        if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD || refreshLock) return undefined
-        refreshLock = true
-        log.info(`[stream] Context at ${sessionAccumulatedTokens} tokens — auto-summarising`)
-        const summary = await summariseContext(currentMessages as ModelMessage[])
-        if (!summary) { refreshLock = false; return undefined }
-        await compactThreadHistory(threadId, summary)
-        await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens)
-        await setThreadAccumulatedTokens(threadId, 0)
-        persistedLifetimeTokens += sessionAccumulatedTokens
-        persistedAccumulatedTokens = 0
-        sessionAccumulatedTokens = 0
-        refreshLock = false
-        send({ type: 'token-update', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens }, threadId })
-        return {
-          system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nSummary:\n\n${summary}\n\nContinue from this state.`,
-          messages: sanitizeMessages((currentMessages as ModelMessage[]).slice(-10))
+        if (persistedAccumulatedTokens + sessionAccumulatedTokens < SUMMARISE_THRESHOLD || threadCompactionLocks.get(threadId)) return undefined
+        threadCompactionLocks.set(threadId, true)
+        try {
+          log.info(`[stream] Context at ${sessionAccumulatedTokens} tokens — auto-summarising`)
+          const summary = await summariseContext(currentMessages as ModelMessage[])
+          if (!summary) return undefined
+          await compactThreadHistory(threadId, summary)
+          await updateThreadAccumulatedTokens(threadId, sessionAccumulatedTokens)
+          await setThreadAccumulatedTokens(threadId, 0)
+          persistedLifetimeTokens += sessionAccumulatedTokens
+          persistedAccumulatedTokens = 0
+          sessionAccumulatedTokens = 0
+          send({ type: 'token-update', payload: { accumulatedTokens: 0, lifetimeTokens: persistedLifetimeTokens + sessionAccumulatedTokens }, threadId })
+          return {
+            system: systemInstruction + `\n\n── CONTEXT COMPACTED ──\nSummary:\n\n${summary}\n\nContinue from this state.`,
+            messages: sanitizeMessages((currentMessages as ModelMessage[]).slice(-10))
+          }
+        } finally {
+          threadCompactionLocks.delete(threadId)
         }
       },
       onAbort: () => { saveProgress(true) },

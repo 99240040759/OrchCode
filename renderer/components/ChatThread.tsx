@@ -231,16 +231,13 @@ const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
-
   const handleScroll = () => {
     if (!scrollRef.current) return
     const { scrollTop } = scrollRef.current
     isAtBottomRef.current = Math.abs(scrollTop) < 15
   }
   React.useLayoutEffect(() => {
-    if (scrollRef.current && isAtBottomRef.current) {
-      scrollRef.current.scrollTop = 0
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
   }, [messageAtoms.length])
 
   const messageGroups = (() => {

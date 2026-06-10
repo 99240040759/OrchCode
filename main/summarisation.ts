@@ -3,7 +3,6 @@ import log from 'electron-log'
 import { googleBypass } from './models'
 
 const SUMMARISE_MODEL = 'gemini-3.1-flash-lite'
-
 export async function summariseContext(messages: ModelMessage[]): Promise<string | null> {
   try {
     const transcript = messages
@@ -34,10 +33,10 @@ export async function summariseContext(messages: ModelMessage[]): Promise<string
         return `[${role}] ${content}`
       })
       .join('\n\n')
-
     const result = await generateText({
       model: googleBypass(SUMMARISE_MODEL),
-      prompt: `Summarise this conversation history. Your summary must be EXTREMELY LONG and HIGHLY DETAILED. Do not compress or lose information. Preserve absolutely everything you can including: every single primary and secondary goal, all exact file paths modified, detailed architectural and design decisions, a comprehensive log of the current state, and step-by-step next actions. Write extensively and do not leave out context.\n\n${transcript}`
+      prompt: `Summarise this conversation history. Your summary must be EXTREMELY LONG and HIGHLY DETAILED. Do not compress or lose information. Preserve absolutely everything you can including: every single primary and secondary goal, all exact file paths modified, detailed architectural and design decisions, a comprehensive log of the current state, and step-by-step next actions. Write extensively and do not leave out context.\n\n${transcript}`,
+      abortSignal: AbortSignal.timeout(30000)
     })
     return result.text?.trim() || null
   } catch (err) {

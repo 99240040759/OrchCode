@@ -14,7 +14,7 @@ const workspaceRegistry = new Map<string, WorkspaceContext>()
 const initPromises = new Map<string, Promise<WorkspaceContext>>()
 const workspaceLastAccess = new Map<string, number>()
 const activeStreams = new Set<string>()
-
+const MAX_WORKSPACES = 10
 export function markWorkspaceActive(conversationId: string): void { activeStreams.add(conversationId) }
 export function markWorkspaceIdle(conversationId: string): void { activeStreams.delete(conversationId) }
 
@@ -22,10 +22,21 @@ const validateConversationId = (id: string) => { if (!id || typeof id !== 'strin
 
 
 
+function evictOldestWorkspace(): void {
+  if (workspaceRegistry.size <= MAX_WORKSPACES) return
+  const inactive = Array.from(workspaceLastAccess.entries()).filter(([id]) => !activeStreams.has(id)).sort((a, b) => a[1] - b[1])
+  if (inactive.length > 0) {
+    const [oldestId] = inactive[0]
+    workspaceRegistry.delete(oldestId)
+    workspaceLastAccess.delete(oldestId)
+    initPromises.delete(oldestId)
+  }
+}
 export async function getOrCreateWorkspaceContext(conversationId: string, userSelectedPath?: string): Promise<WorkspaceContext> {
   validateConversationId(conversationId)
   if (workspaceRegistry.has(conversationId)) { workspaceLastAccess.set(conversationId, Date.now()); return workspaceRegistry.get(conversationId)! }
   if (initPromises.has(conversationId)) return initPromises.get(conversationId)!
+  evictOldestWorkspace()
   const promise = (async () => {
     const isUserWorkspace = !!userSelectedPath, rootPath = userSelectedPath ?? getConversationPath(conversationId)
     const artifactsPath = join(getConversationPath(conversationId), 'artifacts')
@@ -127,14 +138,14 @@ const DEFAULT_IGNORED_DIRS = ['.git', '.gemini', 'node_modules', 'dist', 'out', 
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
 const workspaceFilesCache = new Map<string, string[]>()
-
+const workspaceFilesCacheTime = new Map<string, number>()
+const CACHE_TTL_MS = 60_000
 function getCacheKey(p: string) {
   const res = resolve(p)
   return process.platform === 'win32' ? res.toLowerCase() : res
 }
-
-export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(getCacheKey(rootPath)) }
-export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear() }
+export function invalidateWorkspaceFilesCache(rootPath: string): void { const k = getCacheKey(rootPath); workspaceFilesCache.delete(k); workspaceFilesCacheTime.delete(k) }
+export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear(); workspaceFilesCacheTime.clear() }
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore()
@@ -144,12 +155,19 @@ function buildIgnore(rootPath: string): Ignore {
 }
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
-  const resolved = resolve(rootPath), key = getCacheKey(rootPath), cached = workspaceFilesCache.get(key)
-  if (cached) return cached
+  const resolved = resolve(rootPath), key = getCacheKey(rootPath)
+  const cacheTime = workspaceFilesCacheTime.get(key)
+  if (cacheTime && Date.now() - cacheTime < CACHE_TTL_MS) {
+    const cached = workspaceFilesCache.get(key)
+    if (cached) return cached
+  }
+  workspaceFilesCache.delete(key)
+  workspaceFilesCacheTime.delete(key)
   const ig = buildIgnore(rootPath)
   const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, followSymbolicLinks: false, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
   const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
   workspaceFilesCache.set(key, files)
+  workspaceFilesCacheTime.set(key, Date.now())
   return files
 }
