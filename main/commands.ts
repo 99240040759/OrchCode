@@ -10,7 +10,7 @@ import { startGoogleAuth, getAuthUser, logoutUser, requireAuthToken, authEvents 
 import WindowManager from './utils'
 import { getCurrentUpdateStatus, triggerUpdateCheck, triggerInstall } from './updater'
 import { getAvailableModels } from './models'
-import { listArtifacts, getConversationPath } from './utils'
+import { listArtifacts, getConversationPath, getApiBaseUrl } from './utils'
 import { pool } from './workerPool'
 import {
   getOrCreateWorkspaceContext, updateWorkspacePath, getWorkspaceContext,
@@ -143,7 +143,7 @@ export const ipcCommands = {
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
         const headers = { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' }
-        const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/api/generate-title`, {
+        const response = await fetch(`${getApiBaseUrl()}/generate-title`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ text }),

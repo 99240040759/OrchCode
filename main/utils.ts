@@ -12,6 +12,10 @@ export function getSessionPath(): string { return join(getUserData(), 'session.b
 export function getConversationsPath(): string { return join(getUserData(), 'conversations') }
 export function getConversationPath(id: string): string { return join(getConversationsPath(), id) }
 export function getConversationScreenshotsPath(id: string): string { return join(getConversationPath(id), 'screenshots') }
+export function getApiBaseUrl(): string {
+  if (process.env.GCP_FUNCTIONS_URL) return process.env.GCP_FUNCTIONS_URL.replace(/\/$/, '')
+  return `${process.env.SUPABASE_URL}/functions/v1/api`
+}
 
 // --- Limiters ---
 export const tavilyLimiter = new Bottleneck({ maxConcurrent: 2, minTime: 200 })

@@ -5,6 +5,6 @@ out
 .eslintcache
 *.log*
 .env
-.orch-artifacts
+.env.yaml
 *.tsbuildinfo
 /report

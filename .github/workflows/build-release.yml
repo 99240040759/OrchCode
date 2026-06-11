@@ -13,6 +13,7 @@ env:
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+  GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   EP_TARGET_COMMITISH: main
   ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder

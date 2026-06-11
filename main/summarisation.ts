@@ -1,5 +1,6 @@
 import log from 'electron-log'
 import { requireAuthToken } from './auth'
+import { getApiBaseUrl } from './utils'
 
 const SUMMARISE_MODEL = 'gemini-3.1-flash-lite'
 
@@ -32,7 +33,7 @@ export async function summariseContext(messages: any[]): Promise<string | null> 
       })
       .join('\n\n')
 
-    const url = `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta/models/${SUMMARISE_MODEL}:generateContent`
+    const url = `${getApiBaseUrl()}/gemini/v1beta/models/${SUMMARISE_MODEL}:generateContent`
     const headers = new Headers()
     headers.set('Authorization', `Bearer ${requireAuthToken()}`)
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')

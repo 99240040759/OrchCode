@@ -24,7 +24,8 @@ export default defineConfig({
     define: {
       'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN),
       'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL),
-      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY)
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY),
+      'process.env.GCP_FUNCTIONS_URL': JSON.stringify(process.env.GCP_FUNCTIONS_URL)
     }
   },
   preload: {

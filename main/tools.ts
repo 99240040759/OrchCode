@@ -9,7 +9,7 @@ import log from 'electron-log'
 import {
   getWorkspaceContext, assertWithinWorkspace, isFileBinary, getMimeType, invalidateWorkspaceFilesCache, getOrCreateWorkspaceContext
 } from './workspace'
-import WindowManager, { getConversationScreenshotsPath, tavilyLimiter } from './utils'
+import WindowManager, { getConversationScreenshotsPath, tavilyLimiter, getApiBaseUrl } from './utils'
 import { requireAuthToken } from './auth'
 import { getParserForExtension, getTokens, findSyntaxErrors, getFileOutline } from './astParser'
 
@@ -364,32 +364,36 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     inputSchema: z.object({
       query: z.string().describe('The web search query string.'),
       domain: z.string().optional().describe('Optional domain to prioritize in the search results (e.g. "github.com").'),
-      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Maximum number of search results to return (1-10, default 5).')
+      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Maximum number of search results to return (1-10, default 5).'),
+      searchDepth: z.enum(['basic', 'advanced']).optional().default('basic').describe('Search depth: basic or advanced.'),
+      topic: z.enum(['general', 'news']).optional().default('general').describe('Topic category: general or news.'),
+      includeImages: z.boolean().optional().default(false).describe('Whether to retrieve relevant images.')
     }),
-    execute: async ({ query, domain, maxResults }) => {
+    execute: async ({ query, domain, maxResults, searchDepth, topic, includeImages }) => {
       return tavilyLimiter.schedule(async () => {
-        log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'}`)
+        log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'} depth=${searchDepth} topic=${topic}`)
         try {
           const token = requireAuthToken()
           const anonKey = process.env.SUPABASE_ANON_KEY
           if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
 
-          const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/api/tavily`, {
+          const response = await fetch(`${getApiBaseUrl()}/tavily`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, domain, maxResults })
+            body: JSON.stringify({ query, domain, maxResults, searchDepth, topic, includeImages })
           })
           if (!response.ok) throw new Error(`Proxy error: HTTP ${response.status}`)
           const data = await response.json()
           const results = (data.results ?? []).map((r: any) => ({ title: r.title, url: r.url, snippet: r.content, score: r.score }))
-          return { query, answer: data.answer ?? null, results, totalResults: results.length }
+          const images = (data.images ?? []).map((img: any) => typeof img === 'string' ? img : img.url || img)
+          return { query, answer: data.answer ?? null, results, images, totalResults: results.length }
         } catch (err: any) {
           log.error('[tool:searchWeb] Tavily error:', err.message)
           return { success: false, error: `Web search failed: ${err.message}` }
         }
       })
     },
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Answer: ${output.answer || 'N/A'}\nResults:\n${JSON.stringify(output.results, null, 2)}` }] })
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Answer: ${output.answer || 'N/A'}\nResults:\n${JSON.stringify(output.results, null, 2)}${output.images?.length ? `\nImages:\n${JSON.stringify(output.images, null, 2)}` : ''}` }] })
   })
 
   const generateImage = tool({
@@ -409,7 +413,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         const token = requireAuthToken()
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
-        const response = await fetch(`${process.env.SUPABASE_URL}/functions/v1/api/generate-image`, {
+        const response = await fetch(`${getApiBaseUrl()}/generate-image`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt, width, height, seed, steps })

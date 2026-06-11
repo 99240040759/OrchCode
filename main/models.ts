@@ -1,6 +1,7 @@
 import log from 'electron-log'
 import OpenAI from 'openai'
 import { requireAuthToken } from './auth'
+import { getApiBaseUrl } from './utils'
 
 export interface ModelCapabilities { vision: boolean; nativeFiles: boolean }
 export interface ModelInfo { id: string; name: string; capabilities: ModelCapabilities }
@@ -23,7 +24,7 @@ function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
 
 export async function getAvailableModels(force = false): Promise<AvailableModels> {
   if (!force && cachedModels && Date.now() - cachedModelsAt < MODELS_TTL_MS) return cachedModels
-  const response = await createAuthFetch(true)(`${process.env.SUPABASE_URL}/functions/v1/api/models`)
+  const response = await createAuthFetch(true)(`${getApiBaseUrl()}/models`)
   if (!response.ok) throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   cachedModels = await response.json(); cachedModelsAt = Date.now()
   return cachedModels!
@@ -83,17 +84,18 @@ export async function streamLlmResponse(
   const rawModel = Object.values(models).find(m => m.id === modelId) || models[modelId]
   if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
   let baseUrl = '', modelName = rawModel.id
+  const apiBase = getApiBaseUrl()
   if (rawModel.id.startsWith('zai/')) {
-    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/z-ai/v1`
+    baseUrl = `${apiBase}/z-ai/v1`
     modelName = rawModel.id.replace('zai/', '')
   } else if (rawModel.id.startsWith('opencode/')) {
-    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/opencode/v1`
+    baseUrl = `${apiBase}/opencode/v1`
     modelName = rawModel.id.replace('opencode/', '')
   } else if (rawModel.id.startsWith('nvidia/')) {
-    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/nvidia/v1`
+    baseUrl = `${apiBase}/nvidia/v1`
     modelName = rawModel.id.replace('nvidia/', '')
   } else {
-    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta/openai`
+    baseUrl = `${apiBase}/gemini/v1beta/openai`
   }
   log.info(`[custom-stream] Using OpenAI unified SDK for ${modelId}`)
   const openai = new OpenAI({
