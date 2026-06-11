@@ -170,13 +170,15 @@
 .chat-thread-container::-webkit-scrollbar { display: none }
 .chat-thread-spacer-top { height: 0px; flex-shrink: 0 }
 @keyframes slide-up-fade { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
-.chat-thread-message-wrapper { padding: var(--space-sm) calc(var(--space-xl) + 12px); overflow-anchor: none; animation: slide-up-fade var(--transition-speed-panel) var(--transition-curve-default) forwards; will-change: transform, opacity }
+.chat-thread-message-wrapper { padding: var(--space-sm) calc(var(--space-xl) + 12px); overflow-anchor: none }
 .chat-section { position: relative; display: flex; flex-direction: column }
-.chat-thread-message-wrapper.message-user { box-shadow: none }
+.chat-thread-message-wrapper.message-user { position: sticky; top: 0; z-index: 10; background: linear-gradient(to bottom, var(--bg-app) var(--space-sm), transparent var(--space-sm)); padding-left: var(--space-xl); padding-right: var(--space-xl); max-width: 768px; margin: 0 auto; width: 100%; box-sizing: border-box }
 .chat-thread-spacer-bottom { height: 24px; flex-shrink: 0; overflow-anchor: none }
 .chat-thread-anchor { overflow-anchor: auto; height: 1px; margin-top: -1px }
-.chat-message-user-container { display: flex; margin-bottom: 0; padding-left: 0; justify-content: flex-end }
-.chat-message-user { position: relative; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 18px 18px 4px 18px; padding: 10px var(--space-lg); max-width: 80%; width: fit-content; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text }
+.chat-message-user-container { display: flex; margin-bottom: 0; padding-left: 0; width: 100% }
+.chat-message-user { position: relative; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 20px; padding: 10px var(--space-lg); width: 100%; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text; box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.5); max-height: 90px; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none }
+.chat-message-user::-webkit-scrollbar { display: none }
+
 .chat-message-user-content { display: flex; flex-direction: column; gap: var(--space-xs) }
 .message-attachments { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-bottom: 8px }
 .message-attachment-chip { display: flex; align-items: center; gap: 6px; padding: var(--space-xxs) var(--space-xs); border-radius: 6px; background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-secondary); transition: background-color 0.15s ease; max-width: 160px }
@@ -192,7 +194,7 @@
 .chat-error-container { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 8px; background-color: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); margin: 12px 0 }
 .chat-error-icon { color: #ef4444; margin-top: 3px; flex-shrink: 0 }
 .chat-error-message { font-size: var(--font-size-md); color: var(--text-primary); line-height: 1.5 }
-.input-bar-container { width: 100%; max-width: 720px; background-color: #1a1a1a; border: 1px solid var(--border-color); border-radius: 20px; display: flex; flex-direction: column; box-shadow: none; transition: border-color 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); position: relative; color: #cccccc }
+.input-bar-container { width: 100%; max-width: 720px; background-color: #1a1a1a; border: 1px solid var(--border-color); border-radius: 20px; display: flex; flex-direction: column; box-shadow: 0 -10px 20px -5px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3); transition: border-color 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); position: relative; color: #cccccc }
 .input-bar-text-area { width: 100%; background: transparent; border: none; outline: none; resize: none; font-family: var(--font-display); font-size: var(--font-size-md-plus); color: inherit; line-height: 1.5 }
 .input-bar-text-area::placeholder { color: var(--text-secondary); opacity: 0.4 }
 .input-bar-text-container-inner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); padding: var(--space-sm) var(--space-lg) var(--space-xxs) var(--space-lg); width: 100%; box-sizing: border-box; transition: padding var(--transition-speed-panel) var(--transition-curve-default) }
@@ -269,22 +271,30 @@
 .markdown-content h1 { font-size: var(--font-size-2xl); font-weight: 600; margin: 24px 0 12px; color: var(--text-primary); line-height: 1.25; letter-spacing: -0.02em }
 .markdown-content h2 { font-size: var(--font-size-xl); font-weight: 600; margin: 20px 0 10px; color: var(--text-primary); line-height: 1.3; letter-spacing: -0.015em }
 .markdown-content h3 { font-size: var(--font-size-lg); font-weight: 600; margin: 16px 0 8px; color: var(--text-primary); line-height: 1.35; letter-spacing: -0.01em }
-.markdown-content table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: var(--font-size-sm); border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05) }
-.markdown-content th { background-color: rgba(255, 255, 255, 0.03); color: var(--text-primary); font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08) }
-.markdown-content td { padding: 8px 12px; color: var(--text-assistant-body); border-bottom: 1px solid rgba(255, 255, 255, 0.04) }
-.markdown-content tr:last-child td { border-bottom: none }
+.markdown-content table { width: 100%; table-layout: auto; border-collapse: collapse; margin: 18px 0; font-size: var(--font-size-sm); border: 1px solid var(--border-color); word-break: break-word; word-wrap: break-word }
+.markdown-content th { background-color: rgba(255, 255, 255, 0.05); color: var(--text-primary); font-weight: 600; text-align: left; padding: 10px 12px; border: 1px solid var(--border-color); word-break: break-word; word-wrap: break-word; white-space: normal }
+.markdown-content td { padding: 8px 12px; color: var(--text-assistant-body); border: 1px solid var(--border-color); word-break: break-word; word-wrap: break-word; white-space: normal }
 .markdown-content tr:hover td { background-color: rgba(255, 255, 255, 0.01) }
 .markdown-content :not(pre)>code { background-color: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.03); border-radius: 4px; padding: 2px 6px; font-family: var(--font-mono); font-size: var(--font-size-xs); color: #e2b473 }
 .markdown-content code { font-family: var(--font-mono) }
 .markdown-content code:not([class]) { font-size: 0.85em; background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 4px; color: #e2b473 }
 .markdown-content code[class] { font-size: var(--font-size-sm) }
+.monaco-like-codeblock { background-color: #1e1e1e !important; border: 1px solid var(--border-color); border-radius: 8px; margin: 18px 0; display: flex; flex-direction: column; overflow: hidden; padding: 0 !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) }
+.codeblock-header { display: flex; align-items: center; justify-content: space-between; height: 30px; background-color: #181818; border-bottom: 1px solid rgba(255, 255, 255, 0.03); padding: 0 12px; user-select: none }
+.codeblock-dots { display: flex; gap: 6px }
+.codeblock-dot { width: 8px; height: 8px; border-radius: 50% }
+.codeblock-dot.red { background-color: #ff5f56 }
+.codeblock-dot.yellow { background-color: #ffbd2e }
+.codeblock-dot.green { background-color: #27c93f }
+.codeblock-header-title { font-family: var(--font-display); font-size: 11px; color: var(--text-secondary); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px }
+
 .markdown-content pre { background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 34px 16px 14px 16px; margin: 18px 0; overflow-x: auto; position: relative }
 .markdown-content pre code { background: transparent; padding: 0; border-radius: 0; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); line-height: 1.6; color: #e5e5e5; white-space: pre-wrap; word-break: break-word }
 .markdown-content pre code.hljs { background: transparent !important; padding: 0 !important; border: none !important; border-radius: 0 !important }
 .markdown-content hr { display: none }
-
 .code-block-lang { position: absolute; top: 8px; left: 16px; font-size: var(--font-size-xxs); font-family: var(--font-mono); color: var(--text-secondary); opacity: 0.5; text-transform: lowercase }
 .code-block-copy-btn { position: absolute; top: 8px; right: 16px; background: transparent; border: none; color: var(--text-secondary); opacity: 0.5; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 4px; transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease }
+
 .code-block-copy-btn:hover { color: var(--text-primary); opacity: 1; background-color: rgba(255, 255, 255, 0.05) }
 .file-link { display: inline-flex; align-items: center; gap: 6px; background-color: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 2px 8px; color: var(--text-primary); font-size: 13px; font-weight: 500; user-select: none; cursor: pointer; margin: 0 4px; vertical-align: middle; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) }
 .file-link:hover { background-color: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.16); transform: translateY(-0.5px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) }
@@ -396,7 +406,7 @@
 .token-ring-circle { transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease }
 .token-ring-label, .token-counter, .lifetime-tokens { position: absolute; font-size: var(--font-size-micro); font-weight: 700; font-family: var(--font-mono); top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; line-height: 1; letter-spacing: -0.03em; opacity: 0; transition: opacity 0.15s ease; font-variant-numeric: tabular-nums }
 .token-ring-wrapper:hover .token-ring-label { opacity: 1 }
-.message-bubble-wrapper { position: relative; width: 100% }
+.message-bubble-wrapper { position: relative; width: 100%; animation: slide-up-fade var(--transition-speed-panel) var(--transition-curve-default) forwards; will-change: transform, opacity }
 .message-meta-actions { position: absolute; bottom: -18px; display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity var(--transition-speed-normal) var(--transition-curve-default); z-index: 10 }
 .message-bubble-wrapper:hover .message-meta-actions { opacity: 0.6 }
 .message-meta-actions:hover { opacity: 1 }
@@ -436,3 +446,64 @@
 .file-mention-chip { display: inline-flex; align-items: center; gap: 4px; background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px; padding: 2px 6px; color: var(--text-primary); font-size: 13px; font-weight: 500; user-select: none; margin: 0 4px; vertical-align: middle }
 .file-mention-chip-icon { display: inline-flex; align-items: center; flex-shrink: 0 }
 .resize-active * { transition: none !important; animation: none !important }
+
+/* Office Previews Styling */
+.office-preview-wrapper { display: flex; flex-direction: column; height: 100%; width: 100%; overflow: hidden; background-color: var(--bg-app); color: var(--text-primary); position: relative }
+.office-loading-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-secondary) }
+.office-error-message { padding: 20px; color: var(--accent-red); font-size: 13px; text-align: center }
+
+/* DOCX Viewer */
+.docx-view-wrapper { overflow-y: auto; padding: 24px; box-sizing: border-box }
+.docx-render-container { max-width: 800px; margin: 0 auto; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 40px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) }
+.docx-render-container p { margin-bottom: 12px; line-height: 1.6 }
+.docx-render-container h1, .docx-render-container h2, .docx-render-container h3 { margin-top: 24px; margin-bottom: 12px; font-weight: 600; color: var(--text-primary) }
+.docx-render-container table { border-collapse: collapse; width: 100%; margin: 16px 0 }
+.docx-render-container th, .docx-render-container td { border: 1px solid var(--border-color); padding: 8px 12px; text-align: left }
+
+/* XLSX Viewer */
+.xlsx-view-wrapper { display: flex; flex-direction: column }
+.xlsx-tabs-bar { display: flex; gap: 4px; padding: 8px 12px; background-color: var(--bg-titlebar); border-bottom: 1px solid var(--border-color); overflow-x: auto; scrollbar-width: none }
+.xlsx-tabs-bar::-webkit-scrollbar { display: none }
+.xlsx-tab-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-color); background-color: transparent; color: var(--text-secondary); cursor: pointer; font-size: 12px; transition: all 0.15s ease; white-space: nowrap }
+.xlsx-tab-btn:hover { background-color: var(--bg-trans-hover); color: var(--text-primary) }
+.xlsx-tab-btn.active { background-color: var(--bg-trans-active); color: var(--accent-brass); border-color: var(--accent-brass) }
+.xlsx-table-container { flex: 1; overflow: auto; background-color: var(--bg-app) }
+.xlsx-table-grid { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; user-select: text; min-width: 100% }
+.xlsx-row-index-header, .xlsx-col-header, .xlsx-row-index-cell { background-color: var(--bg-sidebar); color: var(--text-muted); text-align: center; border: 1px solid var(--border-color); font-weight: 500; height: 22px; user-select: none }
+.xlsx-row-index-header { width: 40px; position: sticky; left: 0; top: 0; z-index: 3 }
+.xlsx-col-header { min-width: 100px; padding: 2px 8px; position: sticky; top: 0; z-index: 2 }
+.xlsx-row-index-cell { position: sticky; left: 0; z-index: 1; width: 40px; font-weight: normal }
+.xlsx-grid-cell { border: 1px solid var(--border-color); padding: 2px 6px; white-space: nowrap; max-width: 250px; overflow: hidden; text-overflow: ellipsis }
+.xlsx-grid-cell:empty { background-color: transparent }
+
+/* PPTX Viewer */
+.pptx-view-wrapper { display: flex; flex-direction: column; background-color: #0b0b0b }
+.pptx-slide-container { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: hidden }
+.pptx-slide-canvas { max-width: 100%; max-height: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.6); border-radius: 4px; background-color: #1e1e1e }
+.pptx-carousel-bottom { height: 72px; display: flex; background-color: var(--bg-titlebar); border-top: 1px solid var(--border-color); flex-shrink: 0; overflow-x: auto; scrollbar-width: thin; padding: 10px 16px }
+.pptx-carousel-list { display: flex; gap: 8px; align-items: center; height: 100% }
+.pptx-carousel-btn { flex-shrink: 0; height: 48px; width: 80px; border-radius: 4px; border: 1px solid var(--border-color); background-color: var(--bg-sidebar); color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s ease }
+.pptx-carousel-btn:hover { background-color: var(--bg-trans-hover); border-color: var(--text-muted); color: var(--text-primary) }
+.pptx-carousel-btn.active { border-color: var(--accent-brass); background-color: var(--bg-trans-active); color: var(--accent-brass) }
+.pptx-carousel-thumb-index { font-size: 11px; font-weight: 600 }
+.pptx-carousel-thumb-label { font-size: 9px; opacity: 0.8; margin-top: 2px }
+
+/* Office Preview Fixes */
+.docx-hidden { display: none !important }
+.pdf-view-wrapper { height: 100% }
+.pdf-view-iframe { width: 100%; height: 100%; border: none }
+
+/* Overview Panel Classes */
+.overview-flex-container { display: flex; flex-direction: column; gap: 12px }
+.overview-panel-content { padding-top: 6px; padding-bottom: 4px }
+.overview-bar-bg { height: 6px; background: var(--bg-sidebar); border-radius: 4px; overflow: hidden }
+.overview-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease }
+.overview-info-row { display: flex; justify-content: space-between; margin-top: 6px }
+.overview-info-text { font-size: 11px; color: var(--text-secondary) }
+.overview-compaction-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 6px; line-height: 1.45 }
+.overview-loading-artifacts { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px 0; color: var(--text-secondary) }
+
+/* Summarize Card Pill */
+.summarize-card { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 6px; margin: 6px 0; font-size: 11px; width: fit-content; max-width: 100%; box-sizing: border-box }
+.summarize-title { font-weight: 500; color: var(--text-primary) }
+.summarize-info { font-size: 11px; color: var(--text-muted); margin-left: 4px }

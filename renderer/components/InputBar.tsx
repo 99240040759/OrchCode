@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
+import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 import { workspaceService } from '../services/services'
@@ -85,10 +85,14 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const sessionTokens = useAtomValue(sessionTokensAtom)
   const availableModels = useAtomValue(availableModelsAtom)
   const [attachments, setAttachments] = useState<Array<{ type: 'image' | 'document'; name: string; mimeType: string; base64: string }>>([])
-  const supportsVision = !!availableModels[selectedModel]?.capabilities?.vision
+  const supportsVision = !!availableModels[selectedModel]?.multimodal
+  const isPanelOpen = useAtomValue(isArtifactPanelOpenAtom), panelMode = useAtomValue(artifactPanelModeAtom), isBrowserActive = isPanelOpen && panelMode === 'browser'
   useEffect(() => {
-    if (!supportsVision && attachments.length > 0) setAttachments([])
-  }, [supportsVision])
+    if (isBrowserActive && Object.keys(availableModels).length > 0 && !availableModels[selectedModel]?.multimodal) {
+      const fv = Object.keys(availableModels).find(k => availableModels[k].multimodal); if (fv) setSelectedModel(fv)
+    }
+  }, [isBrowserActive, availableModels, selectedModel, setSelectedModel])
+  useEffect(() => { if (!supportsVision && attachments.length > 0) setAttachments([]) }, [supportsVision])
   const [isListening, setIsListening] = useState(false)
   const recognitionRef = useRef<any>(null)
   useEffect(() => {
@@ -128,11 +132,12 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  const setIsDiffMode = useSetAtom(isDiffModeAtom)
 
   const handleOpenFile = async (filePath: string) => {
     try {
       const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
-      if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+      if (fileData) { setIsDiffMode(false); setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
   }
 
@@ -391,7 +396,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             <DropdownMenu.Portal>
               <DropdownMenu.Content asChild sideOffset={6}>
                 <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-md">
-                  {Object.entries(availableModels).map(([key, model]) => (
+                  {Object.entries(availableModels).filter(([_, model]) => !isBrowserActive || model.multimodal).map(([key, model]) => (
                     <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
                       <span className="font-medium">{model.name}</span>
                     </DropdownMenu.Item>

@@ -58,21 +58,24 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
     <ScrollArea.Root className="ScrollAreaRoot">
       <ScrollArea.Viewport className="ScrollAreaViewport">
         <div className="overview-container">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="overview-flex-container">
             <div className="panel-root overview-panel">
               <div className="panel-header">
                 <div className="panel-header-left"><Coins size={14} color="var(--text-secondary)" /><span>Context Usage</span></div>
                 <div className="panel-header-right" title="Tokens used in current active window session"><TokenIndicator current={sessionTokens} max={MAX_TOKENS} /></div>
               </div>
-              <div className="panel-content" style={{ paddingTop: 6, paddingBottom: 4 }}>
-                <div style={{ height: 6, background: 'var(--bg-sidebar)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 4, transition: 'width 0.3s ease' }} />
+              <div className="panel-content overview-panel-content">
+                <div className="overview-bar-bg">
+                  <div className="overview-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{pct}% used</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }} title="Total tokens consumed across entire conversation history including compacted blocks">
+                <div className="overview-info-row">
+                  <span className="overview-info-text">Active Context: {formatTokens(sessionTokens)} / 200k ({pct}%)</span>
+                  <span className="overview-info-text" title="Total tokens consumed across entire conversation history including compacted blocks">
                     Total Session: {formatTokens(lifetimeTokens)}
                   </span>
+                </div>
+                <div className="overview-compaction-note">
+                  To maintain performance and keep response times fast, conversation history is automatically compacted when active usage approaches 180k tokens.
                 </div>
               </div>
             </div>
@@ -82,7 +85,7 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
               </div>
               <div className="panel-content">
                 {loading ? (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '16px 0', color: 'var(--text-secondary)' }}>
+                  <div className="overview-loading-artifacts">
                     <Loader className="animate-spin" size={16} />
                     <span>Loading artifacts...</span>
                   </div>

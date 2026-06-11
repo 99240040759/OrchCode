@@ -3,8 +3,7 @@ import OpenAI from 'openai'
 import { requireAuthToken } from './auth'
 import { getApiBaseUrl } from './utils'
 
-export interface ModelCapabilities { vision: boolean; nativeFiles: boolean }
-export interface ModelInfo { id: string; name: string; capabilities: ModelCapabilities }
+export interface ModelInfo { id: string; name: string; multimodal: boolean }
 export type AvailableModels = Record<string, ModelInfo>
 
 
@@ -107,10 +106,9 @@ export async function streamLlmResponse(
   const openAiMessages = [...messages]
   if (systemInstruction) { openAiMessages.unshift({ role: 'system', content: systemInstruction }) }
   const openAiTools = tools ? getOpenAiTools(tools) : undefined
-  return openai.chat.completions.create({
-    model: modelName,
-    messages: openAiMessages as any,
-    tools: openAiTools?.length ? openAiTools : undefined,
-    stream: true
-  }, { signal: abortSignal })
+  const payload: any = { model: modelName, messages: openAiMessages as any, tools: openAiTools?.length ? openAiTools : undefined, stream: true }
+  if (modelId === 'gemma-4-26b-a4b-it') payload.reasoning_effort = 'high'
+  else if (modelId === 'nvidia/moonshotai/kimi-k2.6') payload.reasoning_effort = 'minimal'
+  else if (modelId.startsWith('opencode/')) { payload.reasoning_effort = 'xhigh'; payload.reasoning = { effort: 'xhigh', enabled: true } }
+  return openai.chat.completions.create(payload, { signal: abortSignal })
 }

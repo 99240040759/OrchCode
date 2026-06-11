@@ -82,7 +82,7 @@ const TerminalView = ({ workspacePath, ref }: TerminalViewProps) => {
       term.open(termContainerRef.current)
       try { fitAddon.fit() } catch (err) { console.debug('[TerminalView] Fit error:', err) }
 
-      const terminalId = `pty-${self.crypto.randomUUID()}`
+      const terminalId = `pty-${conversationId}`
       ptyIdRef.current = terminalId
       let activePort: MessagePort | null = null
 
@@ -142,10 +142,7 @@ const TerminalView = ({ workspacePath, ref }: TerminalViewProps) => {
         debouncedResize.cancel()
         resizeObs.disconnect()
         if (activePort) try { activePort.close() } catch {}
-        if (ptyIdRef.current) {
-          window.api.invoke('terminal:close', { id: ptyIdRef.current }).catch(() => {})
-          ptyIdRef.current = null
-        }
+        ptyIdRef.current = null
         term.dispose()
       }
     }, [conversationId, workspacePath])

@@ -1,11 +1,11 @@
 import React from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Folder } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { globalPromptTriggerAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom } from '../store/agentStore'
+import { globalPromptTriggerAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom, isDiffModeAtom } from '../store/agentStore'
 import { isAgentArtifact, getArtifactIcon, getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
 import { toast } from 'sonner'
 import mermaid from 'mermaid'
@@ -22,21 +22,32 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  const setIsDiffMode = useSetAtom(isDiffModeAtom)
   const conversationId = useAtomValue(activeThreadIdAtom)
   const filePath = stripFileProtocol(href)
   const fileName = filePath.split(/[/\\]/).pop() ?? ''
+  const [isDir, setIsDir] = React.useState(false)
+  React.useEffect(() => {
+    window.api.invoke('file:is-directory', { filePath, conversationId })
+      .then((res: any) => { if (res) setIsDir(true) })
+      .catch(() => {})
+  }, [filePath, conversationId])
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault()
     try {
+      if (isDir) {
+        await window.api.invoke('file:open-path', { filePath, conversationId })
+        return
+      }
       const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as FileReadResult | undefined
-      if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+      if (fileData) { setIsDiffMode(false); setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error(err) }
   }
   const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? children.split(/[/\\]/).pop() ?? children : children
   return (
-    <span className="file-link" onClick={handleClick} title={`Open ${filePath}`} style={{ cursor: 'pointer' }}>
+    <span className="file-link" onClick={handleClick} title={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`} style={{ cursor: 'pointer' }}>
       <span className="file-icon-wrapper-native" style={{ display: 'inline-flex', alignItems: 'center', marginRight: '4px', verticalAlign: 'middle' }}>
-        <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />
+        {isDir ? <Folder size={14} style={{ color: 'var(--accent-purple)' }} /> : <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />}
       </span>
       <span className="file-name-wrapper">{displayName}</span>
     </span>
@@ -56,13 +67,22 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
     return hljs.highlight(code, { language: lang }).value
   })()
   return (
-    <pre className={`language-${language} pre-wrapper`}>
-      {language && <span className="code-block-lang">{language}</span>}
-      <button className="code-block-copy-btn" title="Copy code" onClick={handleCopy}>
-        {copied ? <Check size={13} /> : <Copy size={13} />}
-      </button>
-      <code className={`hljs language-${language}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
-    </pre>
+    <div className={`monaco-like-codeblock language-${language}`}>
+      <div className="codeblock-header">
+        <div className="codeblock-dots">
+          <span className="codeblock-dot red" />
+          <span className="codeblock-dot yellow" />
+          <span className="codeblock-dot green" />
+        </div>
+        <span className="codeblock-header-title">{language || 'code'}</span>
+        <button className="code-block-copy-btn" title="Copy code" onClick={handleCopy} style={{ position: 'relative', top: 0, right: 0, opacity: 0.7 }}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+      </div>
+      <pre className="codeblock-body" style={{ margin: 0, padding: '12px 16px', background: '#1e1e1e', overflow: 'hidden' }}>
+        <code className={`hljs language-${language}`} style={{ padding: 0, background: 'transparent', whiteSpace: 'pre-wrap', wordBreak: 'break-all', display: 'block' }} dangerouslySetInnerHTML={{ __html: highlighted }} />
+      </pre>
+    </div>
   )
 }
 
@@ -106,10 +126,24 @@ const LocalImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ s
   return <img src={dataUrl || src} alt={alt || 'Image'} title={title} className="local-image-preview" style={{ maxWidth: '180px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--border-color)', objectFit: 'contain', marginTop: '6px', display: 'block' }} />
 }
 
+const renderWithBr = (node: React.ReactNode): React.ReactNode => {
+  if (typeof node === 'string') {
+    if (!node.includes('<br')) return node
+    return node.split(/<br\s*\/?>/gi).reduce((acc: React.ReactNode[], part, idx) => idx === 0 ? [part] : [...acc, <br key={idx} />, part], [])
+  }
+  if (React.isValidElement(node) && node.props && (node.props as any).children) {
+    return React.cloneElement(node, { ...node.props, children: React.Children.map((node.props as any).children, renderWithBr) } as any)
+  }
+  return node
+}
 const components = {
   pre: ({ children }: any) => <>{children}</>,
   a: ({ href, children, ...props }: any) => href?.startsWith('file://') ? <FileLink href={href}>{children}</FileLink> : <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
   img: ({ src, alt, title }: any) => src ? <LocalImage src={src} alt={alt} title={title} /> : null,
+  p: ({ children }: any) => <p>{React.Children.map(children, renderWithBr)}</p>,
+  li: ({ children }: any) => <li>{React.Children.map(children, renderWithBr)}</li>,
+  td: ({ children }: any) => <td>{React.Children.map(children, renderWithBr)}</td>,
+  th: ({ children }: any) => <th>{React.Children.map(children, renderWithBr)}</th>,
   code: ({ className, children, ...props }: any) => {
     const match = /language-(\w+)/.exec(className || '')
     const language = match ? match[1] : ''
@@ -120,7 +154,6 @@ const components = {
     return <code className={className} {...props}>{children}</code>
   }
 }
-
 const MarkdownRenderer = ({ content, isArtifact = false, id, ref }: MarkdownRendererProps) => {
   const normalizedContent = React.useMemo(() => normalizeMarkdownLinks(content), [content])
   return (

@@ -11,7 +11,7 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        external: ['node-pty', 'playwright-core'],
+        external: ['node-pty'],
         input: {
           index: resolve(__dirname, 'main/main.ts'),
           agentWorker: resolve(__dirname, 'main/agentWorker.ts'),

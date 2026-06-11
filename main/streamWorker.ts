@@ -1,14 +1,12 @@
 import crypto from 'node:crypto'
 import log from 'electron-log'
-import { z } from 'zod'
-import { promises as fs } from 'node:fs'
 import { getAvailableModels, streamLlmResponse, getOpenAiTools } from './models'
 import { getOrCreateWorkspaceContext, getWorkspaceContext, updateWorkspacePath, markWorkspaceActive, markWorkspaceIdle } from './workspace'
 import { getUserSkillsPath, listInstalledSkills } from './skills'
 import { createCoreTools, browserTools } from './tools'
 import {
   getThreadMessages, getThread, saveMessage,
-  setThreadAccumulatedTokens, getThreadWorkspace, setThreadWorkspace, addOpenedWorkspace,
+  getThreadWorkspace, setThreadWorkspace, addOpenedWorkspace,
   compactThreadHistory, updateThreadTokens
 } from './db'
 import { summariseContext } from './summarisation'
@@ -18,52 +16,170 @@ import { countTokens, countMessagesTokens } from './tokenizer'
 import { jsonrepair } from 'jsonrepair'
 import { parse as parsePartialJson } from 'partial-json'
 
-
-
-
-
 const activeAbortControllers = new Map<string, { controller: AbortController; sessionId: string }>()
 const SUMMARISE_THRESHOLD = 180_000
-const threadCompactionLocks = new Map<string, boolean>()
+const KEEP_LAST_N_MESSAGES = 20
 
-const AttachmentSchema = z.object({
-  type: z.enum(['image', 'document']),
-  name: z.string().min(1).max(255),
-  mimeType: z.string().max(255).optional(),
-  base64: z.string().max(14_000_000).optional()
-})
-const StreamRequestSchema = z.object({
-  promptText: z.string().max(200_000),
-  threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/),
-  modelType: z.string().max(255).optional(),
-  attachments: z.array(AttachmentSchema).max(8).optional()
-})
 
-export { StreamRequestSchema }
+// ─── Reasoning tag stripper ───────────────────────────────────────────────────
+// Models like DeepSeek-R1, QwQ, o1, Gemma emit <think>...</think> / <thought>...</thought>
+// blocks in delta.content. We strip these from UI-facing stream (orderedBlocks +
+// text_delta events) but keep raw content.
+class ReasoningStripper {
+  private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>']
+  private inBlock = false; private tagBuffer = ''
+  process(delta: string): { content: string; reasoning: string } {
+    let content = '', reasoning = ''
+    for (let i = 0; i < delta.length; i++) {
+      const ch = delta[i]
+      if (!this.inBlock) {
+        if (ch === '<') this.tagBuffer = '<'
+        else if (this.tagBuffer) {
+          this.tagBuffer += ch
+          const buf = this.tagBuffer.toLowerCase()
+          if (/^<(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = true; this.tagBuffer = '' }
+          else if (!ReasoningStripper.TAGS.some(tag => tag.startsWith(buf))) { content += this.tagBuffer; this.tagBuffer = '' }
+        } else content += ch
+      } else {
+        this.tagBuffer += ch
+        if (/<\/(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = false; this.tagBuffer = '' }
+        else reasoning += ch
+      }
+    }
+    if (!this.inBlock && this.tagBuffer && !this.tagBuffer.startsWith('<')) { content += this.tagBuffer; this.tagBuffer = '' }
+    if (reasoning.includes('</')) reasoning = reasoning.replace(/<\/?(think|thought|reasoning|thinking)>/gi, '')
+    return { content, reasoning }
+  }
+  flush(): { content: string; reasoning: string } {
+    const content = (!this.inBlock && !this.tagBuffer.startsWith('<')) ? this.tagBuffer : ''
+    this.tagBuffer = ''; this.inBlock = false
+    return { content, reasoning: '' }
+  }
+}
 
-const FILE_WRITE_TOOLS = ['writeToFile', 'multiReplaceFileContent', 'generateImage']
 
+
+
+const FILE_WRITE_TOOLS = ['write_to_file', 'multi_replace_file_content', 'generate_image']
+
+// ─── Format a raw tool output into model-facing content ───────────────────────
+// The formatted text is what goes into the tool role message the model reads.
+// Structured, unambiguous, with explicit success/error markers so any model
+// can immediately understand what happened without guessing JSON shapes.
+async function formatToolOutputForModel(
+  toolName: string, rawOutput: any, toolObj: any, multimodal: boolean
+): Promise<{ text: string; imageData?: { base64: string; mimeType: string } }> {
+  if (!toolObj?.toModelOutput) {
+    const raw = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput ?? '')
+    return { text: `[${toolName}] ${raw}` }
+  }
+  try {
+    const modelOutput = await Promise.resolve(toolObj.toModelOutput({ output: rawOutput }))
+    if (!modelOutput) return { text: `[${toolName}] (no output)` }
+
+    if (modelOutput.type === 'image-data') {
+      if (multimodal && modelOutput.data) {
+        const label = rawOutput?.absolutePath ?? rawOutput?.filePath ?? toolName
+        return { text: `[${toolName}] Image captured: ${label}`, imageData: { base64: modelOutput.data, mimeType: modelOutput.mediaType || 'image/png' } }
+      }
+      return { text: `[${toolName}] Binary image result (vision not supported by this model, cannot display).` }
+    }
+
+    if (modelOutput.type === 'content' && Array.isArray(modelOutput.value)) {
+      const textParts: string[] = []
+      let imageData: { base64: string; mimeType: string } | undefined
+      for (const part of modelOutput.value) {
+        if (part.type === 'text' && part.text) textParts.push(part.text)
+        else if (part.type === 'image-data' && part.data && multimodal) {
+          imageData = { base64: part.data, mimeType: part.mediaType || 'image/png' }
+        }
+      }
+      const text = textParts.join('\n')
+      return { text: text || `[${toolName}] (empty output)`, imageData }
+    }
+
+    return { text: `[${toolName}] ${JSON.stringify(modelOutput)}` }
+  } catch (err) {
+    log.warn(`[stream] toModelOutput failed for ${toolName}:`, err)
+    const raw = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput ?? '')
+    return { text: `[${toolName}] ${raw}` }
+  }
+}
+
+// ─── Build tool role messages + post-step feedback injection ─────────────────
+// Each tool result becomes a `role: tool` message (OpenAI protocol requires this).
+// After all tool results, we inject a `role: user` continuation prompt that
+// explicitly tells the model to: evaluate what it got, decide what's next,
+// and act — this is the "agentic reinforcement" that makes dumb models loop correctly.
+async function buildToolMessages(
+  toolResults: Array<{ tool_call_id: string; tool_name: string; result: any; isError: boolean; formatted: { text: string; imageData?: { base64: string; mimeType: string } } }>,
+  multimodal: boolean,
+  stepCount: number
+): Promise<{ toolMessages: any[]; imageUserMessages: any[]; continuationMessages: any[] }> {
+  const toolMessages: any[] = []
+  const stepImageParts: any[] = []
+
+  for (const res of toolResults) {
+    // Rich structured tool result message
+    const statusLine = res.isError ? '❌ FAILED' : '✅ SUCCESS'
+    const content = `${statusLine} — Tool: ${res.tool_name}\n${res.formatted.text || '(empty output)'}`
+    toolMessages.push({ role: 'tool', tool_call_id: res.tool_call_id, content })
+    if (res.formatted.imageData && multimodal) {
+      const { base64, mimeType } = res.formatted.imageData
+      stepImageParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } })
+    }
+  }
+
+  const imageUserMessages: any[] = stepImageParts.length > 0
+    ? [{ role: 'user', content: [{ type: 'text', text: 'Visual output from the previous tool calls:' }, ...stepImageParts] }]
+    : []
+
+  // Build continuation directive — structured assessment + next-action prompt.
+  // This is what makes the feedback loop agentic: the model is explicitly told
+  // to re-assess its plan after every step, not just dump the next tool call blindly.
+  const errorResults = toolResults.filter(r => r.isError)
+  const successResults = toolResults.filter(r => !r.isError)
+  const summaryLines: string[] = []
+  if (successResults.length) summaryLines.push(`Completed: ${successResults.map(r => r.tool_name).join(', ')}`)
+  if (errorResults.length) summaryLines.push(`Failed: ${errorResults.map(r => r.tool_name).join(', ')} — review error output above and correct course`)
+
+  const continuationPrompt = [
+    `[STEP ${stepCount} COMPLETE — ASSESS AND CONTINUE]`,
+    summaryLines.join(' | '),
+    errorResults.length > 0
+      ? `One or more tools failed. Diagnose the error from the tool output above. Do NOT repeat the same call unchanged. Adjust your approach, fix the issue, and try again or choose an alternative strategy.`
+      : `All tools succeeded. Review the output above. If your goal is complete, stop and summarise what was accomplished. If more steps are needed, continue with the next action immediately without asking for permission.`,
+    `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`
+  ].filter(Boolean).join('\n')
+
+  const continuationMessages: any[] = [{ role: 'user', content: continuationPrompt }]
+
+  return { toolMessages, imageUserMessages, continuationMessages }
+}
+
+
+
+// ─── Port setup (abort + inject + buf transfer) ───────────────────────────────
 async function setupStreamRequest(
   port: Electron.MessagePortMain,
-  threadId: string,
   controller: AbortController,
-  attachments?: any[]
+  attachments: any[] | undefined,
+  onInject: (text: string) => void
 ) {
   let resolveAttachments: ((bufs: Buffer[]) => void) | null = null
-  const bufsPromise = attachments && attachments.length
-    ? new Promise<Buffer[]>((resolve) => { resolveAttachments = resolve })
+  const bufsPromise = attachments?.length
+    ? new Promise<Buffer[]>(resolve => { resolveAttachments = resolve })
     : Promise.resolve([])
 
-  port.on('message', (e) => {
+  port.on('message', e => {
     if (e.data === 'abort') {
       controller.abort()
-      try { port.close() } catch (err) { log.debug('[stream] Port close error:', err) }
-    }
-    if (e.data?.type === 'bufs') {
+      try { port.close() } catch {}
+    } else if (e.data?.type === 'bufs') {
       resolveAttachments?.(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b)))
-    }
-    if (e.data?.type === 'inject') {
-      controller.abort(new Error('__inject__:' + (e.data.text ?? '')))
+    } else if (e.data?.type === 'inject') {
+      // Queue inject, do NOT abort — loop picks it up at next turn boundary
+      onInject(e.data.text ?? '')
     }
   })
   port.on('close', () => controller.abort())
@@ -73,81 +189,126 @@ async function setupStreamRequest(
   if (attachments && bufs.length) {
     attachments.forEach((a, i) => { if (bufs[i]) a.base64 = bufs[i].toString('base64') })
   }
-
-  const wsPath = await getThreadWorkspace(threadId)
-  if (wsPath) await updateWorkspacePath(threadId, wsPath)
 }
 
-function buildBrowserInstruction(isBrowserActive: boolean, modelSupportsVision: boolean): string {
-  return isBrowserActive
-    ? `\n── BROWSER ACTIVE ──\nYou have active browser control. Use these tools:\n1. browserNavigate(url)\n2. browserType(selector, text, frameSelector?)\n3. browserScroll(direction, amount?)\n4. browserMouseClickCoordinate(x, y, button?)\n${modelSupportsVision ? `5. browserScreenshot(): ALWAYS screenshot after navigation/typing.` : `5. browserGetPageContent(): Extract page text and interactive elements for non-vision models.`}`
-    : ''
-}
-
+// ─── System prompt ────────────────────────────────────────────────────────────
 async function buildSkillsSection(): Promise<string> {
   const installedSkills = await listInstalledSkills()
   const skillsRootPath = getUserSkillsPath().replace(/\\/g, '/')
-  return installedSkills.length > 0
-    ? `── ADVANCED SKILLS ──\nSkills directory: ${skillsRootPath}\nAvailable: ${installedSkills.map(s => `- ${s.name}${s.description ? ` (${s.description})` : ''}`).join('\n')}\nUse listDir/readFile to explore. Follow workflows inside.`
-    : ''
+  if (installedSkills.length === 0) return ''
+  return `
+## 7. Advanced Skills (Outside Workspace)
+- You have access to pre-installed capability skills located at: ${skillsRootPath}
+- Available skills:
+${installedSkills.map(s => `  * ${s.name}: ${s.description || 'No description'}`).join('\n')}
+- **HOW TO USE:** If the user request matches any of the available skills, you MUST:
+  1. Use \`list_dir\` to browse the skill folder: \`${skillsRootPath}/<skill_name>\`.
+  2. Use \`view_file\` to read the \`SKILL.md\` file inside that folder.
+  3. Strictly follow the instructions, design rules, templates, and execution scripts specified in the \`SKILL.md\` file.
+  4. You are explicitly authorized to read/write within the skills directory to execute these workflows.
+`
 }
 
-function buildSystemPrompt(threadId: string, rootPath: string, browserInstruction: string, skillsSection: string, estimatedContextTokens: number): string {
-  const tokenWarning = estimatedContextTokens > 150000 ? `\n\n⚠️ CONTEXT WARNING: Session using ~${Math.round(estimatedContextTokens / 1000)}k tokens. Approaching 200k limit. Be concise.` : ''
+function buildBrowserInstruction(isBrowserActive: boolean, multimodal: boolean): string {
+  if (!isBrowserActive) return ''
+  return `
+## Browser Active
+You have active browser control. Use these tools:
+1. browser_navigate(url)
+2. browser_type(selector, text, frame_selector?)
+3. browser_scroll(direction, amount?)
+4. browser_click_selector(selector, frame_selector?)
+${multimodal
+    ? `5. browser_screenshot(): ALWAYS screenshot after navigation/typing/clicking to verify state.`
+    : `5. browser_get_page_content(): Extract page text and interactive elements for non-vision models.`
+  }`
+}
+
+function buildSystemPrompt(
+  threadId: string,
+  rootPath: string,
+  browserInstruction: string,
+  skillsSection: string,
+  inputTokens: number
+): string {
+  const tokenWarning = inputTokens > 150_000
+    ? `\n\n⚠️ CONTEXT WARNING: ~${Math.round(inputTokens / 1000)}k tokens in context. Approaching 200k limit — be concise in responses.`
+    : ''
   return `You are Orch Code, an advanced, highly specialized AI software engineering agent.${tokenWarning}
 Active Conversation Thread ID: ${threadId}
 
-=========================================
-1. IDENTITY & PROFESSIONAL BEHAVIOR
-=========================================
+## 1. Identity & Professional Behavior
 - You are Orch Code, a world-class developer assistant designed to write clean, correct, and premium code.
 - Always communicate concisely and professionally. Focus on code accuracy, design elegance, and developer productivity.
 
-=========================================
-2. WORKSPACE & ENVIRONMENT ISOLATION
-=========================================
+## 2. Workspace & Environment Isolation
 - Active Workspace Folder: ${rootPath || 'No workspace directory currently selected.'}
 - Your operations are strictly bound to this workspace. Do not write or touch files outside this directory.
-- Always verify your understanding of the codebase first: search using \`searchWorkspace\` or browse directories using \`listDir\`.
-- Always inspect the structure or contents of a target file using \`viewFile\` (using startLine/endLine pagination if needed) or \`getFileOutline\` before proposing edits.
+- Always verify your understanding of the codebase first: search using \`search_workspace\` or browse directories using \`list_dir\`.
+- Always inspect the structure or contents of a target file using \`view_file\` (using start_line/end_line pagination if needed) before proposing edits.
 
-=========================================
-3. SEARCH, SKILLS & WEB SEARCH PRIORITIES
-=========================================
-- **Priority 1 (Local Code & Structure):** Always use \`searchWorkspace\` and \`listDir\` first to locate code symbols, config files, and understand codebase layout. Local code is the ground truth.
-- **Priority 2 (Specialized Skills):** Check the \`── ADVANCED SKILLS ──\` section below. If any installed skill tools or workflows exist, prioritize using them to perform specialized repository tasks.
-- **Priority 3 (Web Search):** Use \`searchWeb\` ONLY when you need external library documentation, API specs, external dependency details, or debugging information for a general framework error that is not documented locally. Do not use web search for finding local workspace resources.
+## 3. Search, Skills & Web Search Priorities
+- **Priority 1 (Local Code & Structure):** Always use \`search_workspace\` and \`list_dir\` first to locate code symbols, config files, and understand codebase layout. Local code is the ground truth.
+- **Priority 2 (Specialized Skills):** Check the "Advanced Skills (Outside Workspace)" section below. If any installed skill tools or workflows exist, prioritize using them to perform specialized repository tasks.
+- **Priority 3 (Web Search):** Use \`search_web\` ONLY when you need external library documentation, API specs, external dependency details, or debugging information for a general framework error that is not documented locally. Do not use web search for finding local workspace resources.
 
-=========================================
-4. SURGICAL CODE EDITING & FORMATTING CONSTRAINTS
-=========================================
+## 4. Surgical Code Editing & Formatting Constraints
 - **Surgical Edits:** When modifying code, only change the absolute minimum lines required to execute the fix or feature.
 - **Code Compression:** Avoid unnecessary empty lines or exploded whitespace. Collapse control flows, brackets, and simple blocks where syntactically clean.
 - **No Refactoring Unchanged Code:** Do not clean up, reformat, or alter surrounding lines of code that are unrelated to the task. Keep changes highly localized.
-- **AST Matching Resilience:** \`multiReplaceFileContent\` utilizes Abstract Syntax Tree (AST) matching where possible. For best results, make sure your target blocks are unique and contain sufficient context.
+- **AST Matching Resilience:** \`multi_replace_file_content\` utilizes Abstract Syntax Tree (AST) matching where possible. For best results, make sure your target blocks are unique and contain sufficient context.
 
-=========================================
-5. STRUCTURED PLANNING & USER APPROVAL
-=========================================
+## 5. Structured Planning & User Approval
 - **When to Plan:** If the request involves major architectural changes, multiple files, complex logic, or significant ambiguity, you MUST write an implementation plan at \`artifacts/implementation_plan.md\` first and wait for the user's approval.
 - **When NOT to Plan:** For simple one-off tasks (small fixes, additions of single functions, formatting adjustments, small scripts), proceed to direct execution immediately without blocking.
 - **Artifacts Directory:** Write all planning artifacts (including \`implementation_plan.md\`, \`task.md\`, and \`walkthrough.md\`) to the sandboxed directory \`artifacts/\` (e.g. \`artifacts/implementation_plan.md\`, \`artifacts/task.md\`, \`artifacts/walkthrough.md\`). Do NOT write them to the user's workspace root directory.
 
-=========================================
-6. TOOL UTILIZATION PROTOCOLS
-=========================================
-- **File System Tools:** Use only the native APIs (\`viewFile\`, \`writeToFile\`, \`multiReplaceFileContent\`, \`listDir\`, \`searchWorkspace\`, \`getFileOutline\`) for all file actions.
-- **Shell Commands:** Do NOT run shell utilities (\`grep\`, \`find\`, \`sed\`, \`awk\`, \`cat\`, \`echo\`) inside \`runCommand\` to read, write, or search files. \`runCommand\` is strictly reserved for:
+## 6. Tool Utilization Protocols
+- **File System Tools:** Use only the native APIs (\`view_file\`, \`write_to_file\`, \`multi_replace_file_content\`, \`list_dir\`, \`search_workspace\`) for all file actions.
+- **Shell Commands:** Do NOT run shell utilities (\`grep\`, \`find\`, \`sed\`, \`awk\`, \`cat\`, \`echo\`) inside \`run_command\` to read, write, or search files. \`run_command\` is strictly reserved for:
   - Running compilation or build commands (e.g. \`npm run build\`).
   - Running tests or lint suites (e.g. \`npm run test\`, \`jest\`).
   - Package installations (e.g. \`npm install\`).
   - Checking formatting or running code formatters.
 
 ${browserInstruction}
-${skillsSection}
-`
+${skillsSection}`
 }
 
+// ─── Context compaction: summarise and trim messages array ────────────────────
+async function runCompaction(
+  messages: any[],
+  threadId: string,
+  modelType: string | undefined,
+  send: (msg: Record<string, unknown>) => void
+): Promise<{ compacted: boolean; newMessages: any[]; savedTokens: number }> {
+  try {
+    log.info(`[stream] Context at ${countMessagesTokens(messages, modelType)} tokens — compacting`)
+    const summary = await summariseContext(messages)
+    if (!summary) {
+      log.warn('[stream] Summarisation returned null — skipping compaction')
+      return { compacted: false, newMessages: messages, savedTokens: 0 }
+    }
+    const savedTokens = countMessagesTokens(messages, modelType)
+    // Keep last KEEP_LAST_N_MESSAGES raw messages after compaction
+    const keepFrom = Math.max(0, messages.length - KEEP_LAST_N_MESSAGES)
+    const recentMessages = messages.slice(keepFrom)
+    const summarySystemMsg = {
+      role: 'system',
+      content: `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`
+    }
+    const newMessages = [summarySystemMsg, ...recentMessages]
+    // Persist compaction to DB
+    await compactThreadHistory(threadId, summary, KEEP_LAST_N_MESSAGES)
+    send({ type: 'summarize', payload: { savedTokens, totalTokens: countMessagesTokens(newMessages, modelType) }, threadId })
+    return { compacted: true, newMessages, savedTokens }
+  } catch (err) {
+    log.error('[stream] Compaction error:', err)
+    return { compacted: false, newMessages: messages, savedTokens: 0 }
+  }
+}
+
+// ─── Main export ──────────────────────────────────────────────────────────────
 export async function handleAgentStreamRequest(
   port: Electron.MessagePortMain,
   threadId: string,
@@ -160,38 +321,73 @@ export async function handleAgentStreamRequest(
   const startTime = startTimeParam ?? Date.now()
   const text = promptText ?? ''
   log.info(`[stream] "${text.slice(0, 80)}" thread: "${threadId}"`)
+
   const send = (msg: Record<string, unknown>) => {
     try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) }
   }
+
+  // Kill any duplicate stream for this thread
   const existingEntry = activeAbortControllers.get(threadId)
   if (existingEntry) {
     log.warn(`[stream] Duplicate stream attempt for ${threadId}, aborting previous`)
     existingEntry.controller.abort()
     await new Promise(resolve => setTimeout(resolve, 100))
   }
+
   const controller = new AbortController()
   const streamSessionId = crypto.randomUUID()
   activeAbortControllers.set(threadId, { controller, sessionId: streamSessionId })
   markWorkspaceActive(threadId)
 
+  // Inject queue: text from inject events, consumed at next turn boundary
+  let pendingInject: string | null = null
+  const onInject = (text: string) => { pendingInject = text; log.info(`[stream] Inject queued for ${threadId}: "${text.slice(0, 60)}"`) }
+
   try {
-    await setupStreamRequest(port, threadId, controller, attachments)
+    await setupStreamRequest(port, controller, attachments, onInject)
   } catch (err) {
-    log.error(`[stream] Failed setup/workspace bind for ${threadId}:`, err)
+    log.error(`[stream] Setup failed for ${threadId}:`, err)
+    markWorkspaceIdle(threadId)
+    const entry = activeAbortControllers.get(threadId)
+    if (entry?.sessionId === streamSessionId) activeAbortControllers.delete(threadId)
+    try { port.close() } catch {}
     throw err
   }
 
-  let assistantMsgId = '', assistantContent = ''
+  const assistantMsgId = crypto.randomUUID()
+  let assistantContent = ''
   const orderedBlocks: StreamBlock[] = []
   let lifetimeTokensAdded = 0
   let currentContextTokens = 0
-  let persistedLifetimeTokens = 0
+
+  // Progressive save state
+  let lastSaveMs = 0
+  let saveInFlight = false
+  let saveQueued = false
+  const saveProgress = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastSaveMs < 800) return
+    if (saveInFlight) { if (force) saveQueued = true; return }
+    if (!assistantContent && orderedBlocks.length === 0) return
+    saveInFlight = true
+    const doSave = () => {
+      saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent, data: JSON.stringify(orderedBlocks) })
+        .then(() => { lastSaveMs = Date.now() })
+        .catch(err => log.error('[stream] Progressive save failed:', err))
+        .finally(() => {
+          saveInFlight = false
+          if (saveQueued) { saveQueued = false; doSave() }
+        })
+    }
+    if (force) doSave(); else setImmediate(doSave)
+  }
 
   try {
     const history = await getThreadMessages(threadId)
     const threadData = await getThread(threadId)
     currentContextTokens = threadData?.accumulatedTokens ?? 0
-    persistedLifetimeTokens = threadData?.lifetimeTokens ?? 0
+
+    // Persist user message
     const userMsgId = crypto.randomUUID()
     await saveMessage(threadId, {
       id: userMsgId,
@@ -200,6 +396,7 @@ export async function handleAgentStreamRequest(
       data: attachments?.length ? JSON.stringify({ attachments }) : undefined
     })
 
+    // Workspace binding
     const ctx = getWorkspaceContext(threadId) || (await getOrCreateWorkspaceContext(threadId))
     if (ctx.isUserWorkspace && !(await getThreadWorkspace(threadId))) {
       try {
@@ -207,297 +404,294 @@ export async function handleAgentStreamRequest(
         await addOpenedWorkspace(ctx.rootPath)
       } catch (err) { log.error('[stream] Auto-bind error:', err) }
     }
+    const wsPath = await getThreadWorkspace(threadId)
+    if (wsPath) await updateWorkspacePath(threadId, wsPath)
 
+    // Model resolution
     const models = await getAvailableModels()
     const availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
-    const rawModel: ModelInfo | undefined = modelType ? (models[modelType] || Object.values(models).find(m => m.id === modelType)) : availableList[0]
+    const rawModel: ModelInfo | undefined = modelType
+      ? (models[modelType] || availableList.find(m => m.id === modelType))
+      : availableList[0]
     if (!rawModel) throw new Error(`Requested model "${modelType}" is not available.`)
 
-    const modelSupportsVision = !!rawModel.capabilities?.vision
-    const modelSupportsNativeFiles = !!rawModel.capabilities?.nativeFiles
-    const { messages: historyMessages, systemInstructionSuffix } = await buildMessagesFromHistory(history, modelSupportsVision, modelSupportsNativeFiles)
-    
-    const messages = sanitizeMessages(historyMessages)
-    messages.push({ role: 'user', content: attachments?.length ? buildAttachmentParts(text, attachments as any, modelSupportsVision, modelSupportsNativeFiles) as any : text })
+    const multimodal = !!rawModel.multimodal
 
-    const browserInstruction = buildBrowserInstruction(!!isBrowserActive, modelSupportsVision)
+    // Build message history
+    const { messages: historyMessages, systemInstructionSuffix } = await buildMessagesFromHistory(history, multimodal)
+    let messages: any[] = sanitizeMessages(historyMessages)
+    // Push current user message (with attachments if any)
+    messages.push({
+      role: 'user',
+      content: attachments?.length
+        ? await buildAttachmentParts(text, attachments as any, multimodal)
+        : text
+    })
+
+    // Build tools
+    const browserInstruction = buildBrowserInstruction(!!isBrowserActive, multimodal)
     const skillsSection = await buildSkillsSection()
-    const coreTools = createCoreTools(threadId, modelSupportsVision)
-    const activeTools = {
+    const coreTools = createCoreTools(threadId, multimodal)
+    const activeTools: Record<string, any> = {
       ...coreTools,
-      ...(isBrowserActive ? browserTools(threadId, modelSupportsVision) : {})
+      ...(isBrowserActive ? browserTools(threadId, multimodal) : {})
     }
 
-    assistantMsgId = crypto.randomUUID()
-    let lastSaveMs = 0, saveInFlight = false, saveQueued = false
-
-    const saveProgress = (force = false) => {
-      const now = Date.now()
-      if (!force && now - lastSaveMs < 1000) return
-      if (saveInFlight) { if (force) saveQueued = true; return }
-      if (assistantContent || orderedBlocks.length > 0) {
-        saveInFlight = true
-        const doSave = () => {
-          saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) })
-            .then(() => { lastSaveMs = Date.now() })
-            .catch(err => log.error('[stream] Progressive save failed:', err))
-            .finally(() => {
-              saveInFlight = false
-              if (saveQueued) { saveQueued = false; saveProgress(true) }
-            })
-        }
-        if (force) doSave()
-        else setImmediate(doSave)
-      }
-    }
-
-    let stepCount = 0
+    // ─── AUTONOMOUS AGENTIC LOOP ──────────────────────────────────────────────
     let shouldContinue = true
+    let stepCount = 0
 
-    while (shouldContinue && stepCount < 100) {
+    while (shouldContinue) {
       if (controller.signal.aborted) break
       stepCount++
-      log.info(`[stream] Executing step ${stepCount} for thread ${threadId}`)
+      log.info(`[stream] Step ${stepCount} — thread ${threadId}`)
 
-      const exactHistoryTokens = countMessagesTokens(messages, modelType)
-      const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, exactHistoryTokens)
-      const fullSystemInstruction = systemInstruction + (systemInstructionSuffix || '')
-      const sysPromptTokens = countTokens(fullSystemInstruction, modelType)
-      const toolSchemaTokens = activeTools ? countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType) : 0
-      const stepInputTokens = exactHistoryTokens + sysPromptTokens + toolSchemaTokens
+      // ── 1. Check context size, compact if needed ─────────────────────────
+      const inputTokens = countMessagesTokens(messages, modelType)
+      if (inputTokens >= SUMMARISE_THRESHOLD) {
+        const { compacted, newMessages } = await runCompaction(messages, threadId, modelType, send)
+        if (compacted) {
+          messages = newMessages
+          // Persist the blocks so far
+          saveProgress(true)
+        }
+      }
+
+      // ── 2. Consume any pending inject (user message injection) ─────────────
+      if (pendingInject !== null) {
+        const injText = pendingInject
+        pendingInject = null
+        messages.push({ role: 'user', content: injText })
+        send({ type: 'inject_queued', payload: injText, threadId })
+        log.info(`[stream] Inject consumed for thread ${threadId}`)
+      }
+
+      // ── 3. Compute tokens + build system prompt ───────────────────────────
+      const stepInputTokens = countMessagesTokens(messages, modelType)
+      const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + (systemInstructionSuffix || '')
+      const sysTokens = countTokens(systemInstruction, modelType)
+      const toolSchemaTokens = countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType)
+      currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens
       lifetimeTokensAdded += stepInputTokens
-      currentContextTokens = stepInputTokens
-      send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded }, threadId })
+      send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
-      const chunkStream = await streamLlmResponse(
-        rawModel.id,
-        messages,
-        fullSystemInstruction,
-        activeTools,
-        controller.signal
-      )
+      // ── 4. Stream LLM call ────────────────────────────────────────────────
+      const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal)
 
-      let hasToolCallsInStep = false
-      const stepToolCalls: Array<{ id: string, name: string, args: Record<string, unknown> }> = []
-      const toolCallAccumulators = new Map<number, { id: string, name: string, args: string, sent_start?: boolean }>()
+      // Per-step reasoning stripper — strips <think>/<thought> from UI stream
+      // but raw content still goes into LLM messages for model self-consistency
+      const stripper = new ReasoningStripper()
+      let hasToolCalls = false
+      const stepToolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = []
+      const toolCallAccumulators = new Map<number, { id: string; name: string; args: string; sentStart?: boolean }>()
+      let stepAssistantContent = ''
 
       for await (const chunk of chunkStream) {
         if (controller.signal.aborted) break
         const choice = chunk.choices?.[0]
         if (!choice) continue
         const delta = choice.delta
-        if (delta) {
-          if (delta.content) {
-            const textDelta = delta.content
-            assistantContent += textDelta
+
+        if (delta?.content) {
+          stepAssistantContent += delta.content
+          assistantContent += delta.content
+          const uiDelta = stripper.process(delta.content)
+          if (uiDelta.content) {
             const last = orderedBlocks[orderedBlocks.length - 1]
-            if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: textDelta })
-            else last.content += textDelta
-            send({ type: 'text_delta', payload: textDelta, threadId })
+            if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: uiDelta.content })
+            else (last as any).content += uiDelta.content
+            send({ type: 'text_delta', payload: uiDelta.content, threadId })
             void saveProgress(false)
           }
-
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index
-              let accumulated = toolCallAccumulators.get(idx)
-              if (!accumulated) {
-                accumulated = { id: tc.id || '', name: tc.function?.name || '', args: '' }
-                toolCallAccumulators.set(idx, accumulated)
-              }
-              if (tc.id && !accumulated.id) accumulated.id = tc.id
-              if (tc.function?.name && !accumulated.name) accumulated.name = tc.function.name
-              if (accumulated.id && accumulated.name && !accumulated.sent_start) {
-                accumulated.sent_start = true
-                send({ type: 'tool_call_start', payload: { tool_call_id: accumulated.id, tool_name: accumulated.name }, threadId })
-              }
-              const deltaArgs = tc.function?.arguments || ''
-              accumulated.args += deltaArgs
-              if (deltaArgs) send({ type: 'tool_call_delta', payload: { tool_call_id: accumulated.id, delta: deltaArgs }, threadId })
-            }
+          if (uiDelta.reasoning) {
+            const last = orderedBlocks[orderedBlocks.length - 1]
+            if (!last || last.type !== 'reasoning') orderedBlocks.push({ type: 'reasoning', content: uiDelta.reasoning })
+            else (last as any).content += uiDelta.reasoning
+            void saveProgress(false)
           }
         }
-        const assistantTokens = countTokens(assistantContent, modelType)
-        const toolCallsTokens = toolCallAccumulators.size ? countTokens(JSON.stringify(Array.from(toolCallAccumulators.values())), modelType) : 0
-        const activeTokens = stepInputTokens + assistantTokens + toolCallsTokens
-        send({ type: 'token_update', payload: { accumulatedTokens: activeTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded + assistantTokens + toolCallsTokens }, threadId })
-        if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') {
-          for (const [, accumulated] of toolCallAccumulators.entries()) {
-            if (accumulated.id || accumulated.name) {
-              let parsedArgs = {}
-              try { parsedArgs = JSON.parse(accumulated.args) } catch {
-                try { parsedArgs = JSON.parse(jsonrepair(accumulated.args)) } catch {
-                  try { parsedArgs = parsePartialJson(accumulated.args) ?? {} } catch {}
-                }
-              }
-              hasToolCallsInStep = true
-              stepToolCalls.push({ id: accumulated.id, name: accumulated.name, args: parsedArgs })
-              orderedBlocks.push({ type: 'tool_call', tool_call_id: accumulated.id, tool_name: accumulated.name, args: parsedArgs, status: 'pending' })
-              send({ type: 'tool_call', payload: { tool_call_id: accumulated.id, tool_name: accumulated.name, args: parsedArgs }, threadId })
+        const rDelta = delta?.reasoning_content || delta?.reasoning
+        if (rDelta) {
+          const last = orderedBlocks[orderedBlocks.length - 1]
+          if (!last || last.type !== 'reasoning') orderedBlocks.push({ type: 'reasoning', content: rDelta })
+          else (last as any).content += rDelta
+          void saveProgress(false)
+        }
+
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index
+            let acc = toolCallAccumulators.get(idx)
+            if (!acc) {
+              acc = { id: tc.id || '', name: tc.function?.name || '', args: '' }
+              toolCallAccumulators.set(idx, acc)
             }
+            if (tc.id && !acc.id) acc.id = tc.id
+            if (tc.function?.name && !acc.name) acc.name = tc.function.name
+            if (acc.id && acc.name && !acc.sentStart) {
+              acc.sentStart = true
+              send({ type: 'tool_call_start', payload: { tool_call_id: acc.id, tool_name: acc.name }, threadId })
+            }
+            const argsDelta = tc.function?.arguments || ''
+            acc.args += argsDelta
+            if (argsDelta) send({ type: 'tool_call_delta', payload: { tool_call_id: acc.id, delta: argsDelta }, threadId })
+          }
+        }
+
+        if (choice.finish_reason === 'tool_calls') {
+          for (const [, acc] of toolCallAccumulators) {
+            if (!acc.id && !acc.name) continue
+            let parsedArgs: Record<string, unknown> = {}
+            try { parsedArgs = JSON.parse(acc.args) } catch {
+              try { parsedArgs = JSON.parse(jsonrepair(acc.args)) } catch {
+                try { parsedArgs = parsePartialJson(acc.args) ?? {} } catch {}
+              }
+            }
+            hasToolCalls = true
+            stepToolCalls.push({ id: acc.id, name: acc.name, args: parsedArgs })
+            orderedBlocks.push({ type: 'tool_call', tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs, status: 'pending' })
+            send({ type: 'tool_call', payload: { tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs }, threadId })
           }
           toolCallAccumulators.clear()
+        } else if (choice.finish_reason === 'stop') {
+          // Discard any partial accumulators — model said stop, not tool_calls
+          toolCallAccumulators.clear()
         }
+      }
+
+      // Flush stripper — emit any buffered text that wasn't inside a reasoning block
+      const trailing = stripper.flush()
+      if (trailing.content) {
+        const last = orderedBlocks[orderedBlocks.length - 1]
+        if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: trailing.content })
+        else (last as any).content += trailing.content
+        send({ type: 'text_delta', payload: trailing.content, threadId })
       }
 
       saveProgress(true)
       if (controller.signal.aborted) break
 
-      if (!hasToolCallsInStep || stepToolCalls.length === 0) {
-        const assistantTokens = countTokens(assistantContent, modelType)
-        lifetimeTokensAdded += assistantTokens
-        currentContextTokens += assistantTokens
+      // ── 5. No tool calls → agent is done ─────────────────────────────────
+      if (!hasToolCalls || stepToolCalls.length === 0) {
         shouldContinue = false
         break
       }
 
-      const assistantTokens = countTokens(assistantContent, modelType)
-      const toolCallsTokens = countTokens(JSON.stringify(stepToolCalls), modelType)
-      lifetimeTokensAdded += assistantTokens + toolCallsTokens
-      currentContextTokens += assistantTokens + toolCallsTokens
+      // ── 6. Push assistant message with tool_calls ─────────────────────────
+      messages.push({
+        role: 'assistant',
+        content: stepAssistantContent || null,
+        tool_calls: stepToolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.args) }
+        }))
+      })
 
-      log.info(`[stream] Executing ${stepToolCalls.length} tools for step ${stepCount}`)
+      // ── 7. Execute tools in parallel ──────────────────────────────────────
+      log.info(`[stream] Executing ${stepToolCalls.length} tools in step ${stepCount}`)
       const toolResults = await Promise.all(
-        stepToolCalls.map(async (tc) => {
-          const toolObj = (activeTools as any)[tc.name]
+        stepToolCalls.map(async tc => {
+          const toolObj = activeTools[tc.name]
           if (!toolObj) {
-            const errVal = `Tool "${tc.name}" not found.`, b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
+            const errVal = `Tool "${tc.name}" not found.`
+            const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
             if (b && b.type === 'tool_call') { b.result = { success: false, error: errVal }; b.status = 'error' }
-            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: errVal }, isError: true }
+            send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: errVal } }, threadId })
+            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: errVal }, isError: true, formatted: { text: `Error: ${errVal}` } }
           }
+
           send({ type: 'tool_result_pending', payload: { tool_call_id: tc.id }, threadId })
           try {
-            const output = await toolObj.execute(tc.args, { tool_call_id: tc.id } as any)
+            const rawOutput = await toolObj.execute(tc.args, { tool_call_id: tc.id, signal: controller.signal })
+            const isErr = !rawOutput || rawOutput.success === false || rawOutput.type === 'error-text' || rawOutput.type === 'error-json'
             const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
-            const isErr = !output || output.success === false || output.type === 'error-text' || output.type === 'error-json'
-            if (b && b.type === 'tool_call') { b.result = output; b.status = isErr ? 'error' : 'complete' }
-            send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: output }, threadId })
+            if (b && b.type === 'tool_call') { b.result = rawOutput; b.status = isErr ? 'error' : 'complete' }
+            send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: rawOutput }, threadId })
             if (FILE_WRITE_TOOLS.includes(tc.name)) (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
-            return { tool_call_id: tc.id, tool_name: tc.name, result: output, isError: isErr }
+            const formatted = await formatToolOutputForModel(tc.name, rawOutput, toolObj, multimodal)
+            return { tool_call_id: tc.id, tool_name: tc.name, result: rawOutput, isError: isErr, formatted }
           } catch (err: any) {
-            log.error(`[stream] Tool execution failed: ${tc.name}:`, err)
+            log.error(`[stream] Tool execution error: ${tc.name}:`, err)
             const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
             if (b && b.type === 'tool_call') { b.result = { success: false, error: err.message }; b.status = 'error' }
             send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: err.message } }, threadId })
-            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: err.message }, isError: true }
+            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: err.message }, isError: true, formatted: { text: `Error: ${err.message}` } }
           }
         })
       )
 
-      messages.push({
-        role: 'assistant',
-        content: assistantContent || null,
-        tool_calls: stepToolCalls.length ? stepToolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: JSON.stringify(tc.args) }
-        })) : undefined
-      })
+      // ── 8. Push tool role messages + agentic continuation directive ──────────
 
-      let toolOutputsTokens = 0
-      for (const res of toolResults) {
-        let formattedOutput: string
-        const outputVal = res.result
-        if (outputVal && typeof outputVal === 'object' && 'type' in outputVal) {
-          formattedOutput = JSON.stringify(outputVal)
-        } else if (res.tool_name === 'browserScreenshot' && (outputVal as any)?.success && (outputVal as any)?.filePath) {
-          try {
-            const cleanPath = (outputVal as { filePath: string }).filePath.replace('file://', '')
-            const base64Image = (await fs.readFile(cleanPath)).toString('base64')
-            formattedOutput = JSON.stringify({ type: 'content', value: [{ type: 'image-data', data: base64Image, mediaType: 'image/png' }, { type: 'text', text: `Screenshot: ${(outputVal as any).filePath}` }] })
-          } catch (err: any) { formattedOutput = `Failed to read screenshot: ${err.message}` }
-        } else if (res.tool_name === 'viewFile' && (outputVal as any)?.isBinary && (outputVal as any)?.mimeType?.startsWith('image/') && (outputVal as any)?.base64Content) {
-          formattedOutput = JSON.stringify({ type: 'content', value: [{ type: 'image-data', data: (outputVal as any).base64Content, mediaType: (outputVal as any).mimeType }, { type: 'text', text: `Analyzed binary image: ${(outputVal as any).absolutePath}` }] })
-        } else {
-          formattedOutput = typeof outputVal === 'string' ? outputVal : JSON.stringify(res.isError ? (outputVal ?? 'Error') : (outputVal ?? ''))
-        }
-        messages.push({ role: 'tool', tool_call_id: res.tool_call_id, content: formattedOutput })
-        let outToks = 0
-        if (formattedOutput.includes('image-data')) {
-          try {
-            const parsed = JSON.parse(formattedOutput)
-            if (parsed?.type === 'content' && Array.isArray(parsed.value)) {
-              for (const v of parsed.value) {
-                if (v.type === 'image-data') outToks += 260
-                else if (v.type === 'text' && v.text) outToks += countTokens(v.text, modelType)
-              }
-            } else { outToks += countTokens(formattedOutput, modelType) }
-          } catch { outToks += countTokens(formattedOutput, modelType) }
-        } else { outToks += countTokens(formattedOutput, modelType) }
-        toolOutputsTokens += outToks
-        lifetimeTokensAdded += outToks
-        currentContextTokens += outToks
-        send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded }, threadId })
-      }
-      assistantContent = ''
+      const { toolMessages, imageUserMessages, continuationMessages } = await buildToolMessages(toolResults, multimodal, stepCount)
+      for (const tm of toolMessages) messages.push(tm)
+      for (const im of imageUserMessages) messages.push(im)
+      for (const cm of continuationMessages) messages.push(cm)
+
+      // Reset per-step assistant content; orderedBlocks accumulates across all steps
+      stepAssistantContent = ''
       saveProgress(true)
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
-    if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Final success saveMessage error:', saveErr) } }
-
-    if (currentContextTokens >= SUMMARISE_THRESHOLD && !threadCompactionLocks.get(threadId)) {
-      threadCompactionLocks.set(threadId, true)
-      try {
-        log.info(`[stream] Context at ${currentContextTokens} tokens — auto-summarising`)
-        const summary = await summariseContext(messages)
-        if (summary) {
-          await compactThreadHistory(threadId, summary)
-          await updateThreadTokens(threadId, 0, lifetimeTokensAdded)
-          persistedLifetimeTokens += lifetimeTokensAdded
-          orderedBlocks.push({ type: 'summarize' as any, savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens } as any)
-          send({ type: 'summarize', payload: { savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens }, threadId })
-          currentContextTokens = countTokens(summary, modelType)
-          await setThreadAccumulatedTokens(threadId, currentContextTokens)
-          send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens }, threadId })
-        }
-      } finally { threadCompactionLocks.delete(threadId) }
+    // Append duration block and send finish
+    if (!orderedBlocks.some(x => x.type === 'duration')) {
+      orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+    }
+    // Final DB save \u2014 must await to ensure consistency before finish event
+    if (assistantContent || orderedBlocks.length > 0) {
+      try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent, data: JSON.stringify(orderedBlocks) }) }
+      catch (saveErr) { log.error('[stream] Final save error:', saveErr) }
     }
 
-    if (!orderedBlocks.some(x => x.type === 'duration')) orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
     send({
       type: 'finish',
       payload: {
         accumulatedTokens: currentContextTokens,
-        lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded,
+        lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded,
         content: assistantContent,
         orderedBlocks
       },
       threadId
     })
+
   } catch (err: any) {
     const error = err as Error & { name?: string }
-    const injectReason = controller.signal.reason as Error | undefined
-    const isInject = injectReason?.message?.startsWith('__inject__:') || error?.message?.startsWith('__inject__:')
-    if (isInject) {
-      const injectedText = (injectReason?.message || error.message).slice('__inject__:'.length)
-      log.info(`[stream] Inject received for ${threadId}: "${injectedText.slice(0, 60)}"`)
-      for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') { x.status = 'complete'; x.result = { type: 'text', value: '[Tool execution interrupted by user injection]' } } }
-      if (!orderedBlocks.some(x => x.type === 'duration')) orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
-      if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Inject save error:', saveErr) } }
-      send({ type: 'inject_resume', payload: injectedText, threadId })
-      send({ type: 'finish', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded, content: assistantContent, orderedBlocks }, threadId })
-    } else if (error.name !== 'AbortError' && error.message !== 'terminated' && !controller.signal.aborted) {
+    const isAbort = error.name === 'AbortError' || error.message === 'terminated' || controller.signal.aborted
+
+    if (!isAbort) {
       log.error('[stream] error:', error)
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
-      if (!orderedBlocks.some(x => x.type === 'duration')) orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+      if (!orderedBlocks.some(x => x.type === 'duration')) {
+        orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+      }
       orderedBlocks.push({ type: 'error', message: error.message })
-      if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Final saveMessage error:', saveErr) } }
+      try {
+        await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) })
+      } catch (saveErr) { log.error('[stream] Error save failed:', saveErr) }
       send({ type: 'error', payload: error.message, threadId })
       throw err
     } else {
-      // Clean abort cleanup
+      // Clean abort
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
-      if (!orderedBlocks.some(x => x.type === 'duration')) orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
-      if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Aborted]', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Abort save error:', saveErr) } }
+      if (!orderedBlocks.some(x => x.type === 'duration')) {
+        orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+      }
+      if (assistantContent || orderedBlocks.length > 0) {
+        try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Aborted]', data: JSON.stringify(orderedBlocks) }) }
+        catch (saveErr) { log.error('[stream] Abort save error:', saveErr) }
+      }
     }
   } finally {
-    try { if (lifetimeTokensAdded > 0 || currentContextTokens > 0) await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded) } catch (err) { log.error('[stream] Final tokens save error:', err) }
+    try {
+      if (lifetimeTokensAdded > 0 || currentContextTokens > 0) {
+        await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded)
+      }
+    } catch (err) { log.error('[stream] Final tokens save error:', err) }
     markWorkspaceIdle(threadId)
     const entry = activeAbortControllers.get(threadId)
-    if (entry && entry.sessionId === streamSessionId) activeAbortControllers.delete(threadId)
-    try { port.close() } catch (err) { log.debug('[stream] Final port close error:', err) }
+    if (entry?.sessionId === streamSessionId) activeAbortControllers.delete(threadId)
+    try { port.close() } catch {}
   }
 }
-
-

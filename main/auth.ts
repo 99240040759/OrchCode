@@ -1,4 +1,4 @@
-import { shell, BrowserWindow, safeStorage } from 'electron'
+
 import { EventEmitter } from 'node:events'
 
 type AuthEventMap = {
@@ -76,6 +76,7 @@ async function loadSession(): Promise<AuthSession | null> {
   try {
     const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
     if (!exists) return null
+    const { safeStorage } = require('electron')
     currentSession = JSON.parse(safeStorage.decryptString(await fs.readFile(sessionFilePath)))
     return currentSession
   } catch (err) {
@@ -89,10 +90,12 @@ async function saveSession(session: AuthSession | null) {
     await fs.rm(sessionFilePath, { force: true })
     return
   }
+  const { safeStorage } = require('electron')
   await fs.writeFile(sessionFilePath, safeStorage.encryptString(JSON.stringify(session)))
 }
 
 function broadcastUserStatus(user: UserProfile | null) {
+  const { BrowserWindow } = require('electron')
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) win.webContents.send('auth:status-changed', user)
   })
@@ -122,6 +125,7 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
     const supabaseUrl = process.env.SUPABASE_URL!
     pendingLoginResolve = resolve; pendingLoginReject = reject
     const redirectUrl = `${supabaseUrl}/auth/v1/authorize?` + new URLSearchParams({ provider: 'google', redirect_to: 'orch-code://auth-callback', code_challenge: challenge, code_challenge_method: 's256' }).toString()
+    const { shell } = require('electron')
     void shell.openExternal(redirectUrl).catch((err) => { const r = pendingLoginReject; pendingLoginReject = null; pendingLoginResolve = null; r?.(err instanceof Error ? err : new Error(String(err))) })
   })
   return promise.finally(() => { loginInProgress = false })

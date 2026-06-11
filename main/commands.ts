@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { extname, relative, join } from 'node:path'
-import { app, BrowserWindow, dialog, WebContentsView, utilityProcess, MessageChannelMain, ipcMain, nativeTheme } from 'electron'
+import { extname, relative, join, isAbsolute } from 'node:path'
+import { app, BrowserWindow, dialog, WebContentsView, utilityProcess, MessageChannelMain, ipcMain, nativeTheme, shell } from 'electron'
 import { execa } from 'execa'
 import log from 'electron-log'
 import { z } from 'zod'
@@ -20,13 +20,23 @@ import {
 import {
   updateThreadTitle, getActiveThreadId, getThread, getThreads, setActiveThreadId,
   getThreadMessages, deleteThread, getThreadWorkspace, createThread,
-  deleteOpenedWorkspace, deleteWorkspaceThreads, bindWorkspaceTransaction
+  deleteOpenedWorkspace, deleteWorkspaceThreads, addOpenedWorkspace, setThreadWorkspace
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { MAX_FILE_READ_BYTES } from './tools'
 
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 const convIdSchema = z.string().min(1).max(256)
+
+function resolveCommandPath(ctx: any, filePath: string): string {
+  const norm = filePath.replace(/\\/g, '/'), clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
+  if (isAbsolute(clean)) {
+    if (clean.startsWith(ctx.artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, clean)
+    return assertWithinWorkspace(ctx.rootPath, clean)
+  }
+  if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/??artifacts\//, ''))
+  return assertWithinWorkspace(ctx.rootPath, clean)
+}
 
 // --- Terminal (PTY) State & Helpers ---
 const activePtys = new Map<string, any>()
@@ -211,7 +221,7 @@ export const ipcCommands = {
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
       const selectedPath = result.filePaths[0]
-      try { await bindWorkspaceTransaction(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { await addOpenedWorkspace(selectedPath); await setThreadWorkspace(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       const ctx = await updateWorkspacePath(conversationId, selectedPath)
       return ctx
     }
@@ -220,7 +230,7 @@ export const ipcCommands = {
     schema: z.object({ conversationId: convIdSchema, workspacePath: z.string().min(1) }),
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
-      try { await bindWorkspaceTransaction(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+      try { await addOpenedWorkspace(workspacePath); await setThreadWorkspace(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
       const ctx = await updateWorkspacePath(conversationId, workspacePath)
       return ctx
     }
@@ -249,7 +259,7 @@ export const ipcCommands = {
     schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema }),
     execute: async ({ filePath, conversationId }: any) => {
       const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
-      const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId), stat = await fs.stat(safePath)
+      const safePath = resolveCommandPath(ctx, filePath), stat = await fs.stat(safePath)
       if (stat.isDirectory()) throw new Error('Cannot read a directory as a file.')
       if (stat.size > MAX_FILE_READ_BYTES) throw new Error('File exceeds 25 MB limit.')
       const rawBuffer = await fs.readFile(safePath), filename = safePath.split(/[/\\]/).pop() ?? '', ext = extname(safePath).toLowerCase()
@@ -262,7 +272,7 @@ export const ipcCommands = {
     execute: async ({ filePath, conversationId }: any) => {
       try {
         const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
-        const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId)
+        const safePath = resolveCommandPath(ctx, filePath)
         const relativePath = relative(ctx.rootPath, safePath)
         const gitPath = relativePath.replace(/\\/g, '/')
         const { stdout } = await execa('git', ['show', `HEAD:${gitPath}`], { cwd: ctx.rootPath, timeout: 5000, reject: true, shell: false })
@@ -276,28 +286,57 @@ export const ipcCommands = {
       }
     }
   },
+  'file:is-directory': {
+    schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema }),
+    execute: async ({ filePath, conversationId }: any) => {
+      try {
+        const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
+        const safePath = resolveCommandPath(ctx, filePath)
+        const stat = await fs.stat(safePath)
+        return stat.isDirectory()
+      } catch { return false }
+    }
+  },
+  'file:open-path': {
+    schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema }),
+    execute: async ({ filePath, conversationId }: any) => {
+      try {
+        const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
+        const safePath = resolveCommandPath(ctx, filePath)
+        await shell.openPath(safePath)
+        return true
+      } catch (err: any) { log.error('[commands] file:open-path error:', err.message); return false }
+    }
+  },
 
   // Terminal Commands
   'terminal:create': {
     schema: z.object({ id: z.string().optional(), cols: z.number().int().min(10).max(500), rows: z.number().int().min(3).max(200), cwd: z.string().optional(), conversationId: z.string().optional() }),
     execute: (opts: any, event: any) => {
-      const id = opts.id || `pty-${crypto.randomUUID()}`, shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash')
+      const id = opts.id || `pty-${crypto.randomUUID()}`
+      const existing = activePtys.get(id)
+      if (existing) {
+        log.info(`[commands] Reconnecting PTY: ${id}`)
+        const { port1, port2 } = new MessageChannelMain()
+        event.sender.postMessage(`terminal:port:${id}`, null, [port2])
+        existing.postMessage({ type: 'reconnect-port' }, [port1])
+        activePtyOwners.set(id, event.sender.id)
+        const destroyListener = () => { try { existing.kill() } catch {}; activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) }
+        const old = destroyListeners.get(id); if (old) event.sender.off('destroyed', old)
+        destroyListeners.set(id, destroyListener); event.sender.once('destroyed', destroyListener)
+        return { id }
+      }
+      const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash')
       const convCtx = opts.conversationId ? getWorkspaceContext(opts.conversationId) : undefined
-      const workingDir = convCtx ? (opts.cwd ? assertWithinWorkspace(convCtx.rootPath, opts.cwd, opts.conversationId!) : convCtx.rootPath) : process.env.HOME || process.cwd()
+      const workingDir = convCtx ? (opts.cwd ? assertWithinWorkspace(convCtx.rootPath, opts.cwd) : convCtx.rootPath) : process.env.HOME || process.cwd()
       let ptyWorkerPath = join(__dirname, 'ptyWorker.js')
-      const child = utilityProcess.fork(ptyWorkerPath, [], {
-        stdio: 'inherit',
-        env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath }
-      })
+      const child = utilityProcess.fork(ptyWorkerPath, [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`terminal:port:${id}`, null, [port2])
       child.postMessage({ type: 'init-pty', cols: opts.cols, rows: opts.rows, cwd: workingDir, shell }, [port1])
       activePtys.set(id, child); activePtyOwners.set(id, event.sender.id)
       if (opts.conversationId) activePtyConversations.set(id, opts.conversationId)
-      const destroyListener = () => {
-        try { child.kill() } catch (err) { log.debug('[terminal] Child PTY worker kill error:', err) }
-        activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id)
-      }
+      const destroyListener = () => { try { child.kill() } catch {}; activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) }
       destroyListeners.set(id, destroyListener); event.sender.once('destroyed', destroyListener)
       child.once('exit', () => { event.sender.off('destroyed', destroyListener); activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) })
       return { id }
@@ -337,8 +376,11 @@ export const ipcCommands = {
       if (bv) {
         bv.setBounds(normalizeBounds(bounds)); try { mainWindow.contentView.addChildView(bv) } catch (err) { console.debug('[browser] Add child view error:', err) }
         setupListeners(bv, event.sender)
-        const targetUrl = normalizeBrowserUrl(url)
-        if (bv.webContents.getURL() !== targetUrl) await bv.webContents.loadURL(targetUrl)
+        const curUrl = bv.webContents.getURL()
+        if (curUrl === 'about:blank' || curUrl === '') {
+          const targetUrl = normalizeBrowserUrl(url)
+          await bv.webContents.loadURL(targetUrl)
+        }
         return
       }
       const partition = conversationId ? `persist:conversation_${conversationId}` : undefined

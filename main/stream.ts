@@ -33,23 +33,25 @@ export function registerStreamIpc() {
       event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
 
       const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
-      worker.removeAllListeners('message'); worker.removeAllListeners('exit')
+      // Give the worker a fresh DB port for this job
       const { port1: dbPort1, port2: dbPort2 } = new MessageChannelMain()
       db.shareDBPort(dbPort1)
       worker.postMessage({ type: 'db-port' }, [dbPort2])
       const win = WindowManager.getMainWindow()
       if (win && !win.isDestroyed()) win.setProgressBar(2)
 
+      // Scoped exit handler — only fires if this worker is still on this thread's job
       const onExit = (code: number | null) => {
         pool.clearJob(worker)
         worker.off('message', onMsg)
+        worker.off('exit', onExit)
         const w = WindowManager.getMainWindow()
         if (w && !w.isDestroyed()) {
           w.setProgressBar(-1)
           w.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
         }
       }
-      worker.once('exit', onExit)
+      worker.on('exit', onExit)
 
       const onMsg = (msg: any) => {
         if (msg?.type === 'artifacts-changed') {

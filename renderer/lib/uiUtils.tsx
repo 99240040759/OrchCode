@@ -132,51 +132,37 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import Lottie from 'lottie-react'
 import errorAnimation from '../assets/error.json'
 
-interface ErrorBoundaryProps {
-  children: ReactNode
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean
-  error: Error | null
-}
-
+interface ErrorBoundaryProps { children: ReactNode; name?: string; fallback?: ReactNode }
+interface ErrorBoundaryState { hasError: boolean; error: Error | null }
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
-    hasError: false,
-    error: null
-  }
-
-  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error }
-  }
-
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught error caught by ErrorBoundary:', error, errorInfo)
-  }
-
-  private handleReload = () => {
-    window.location.reload()
-  }
-
+  public state: ErrorBoundaryState = { hasError: false, error: null }
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState { return { hasError: true, error } }
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error(`Uncaught error in [${this.props.name || 'Boundary'}]:`, error, errorInfo) }
+  private handleReload = () => window.location.reload()
+  private handleReset = () => this.setState({ hasError: false, error: null })
   public render() {
     if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback
+      if (this.props.name) {
+        return (
+          <div className="panel-error-fallback" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%', padding: '24px', boxSizing: 'border-box', backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#ef4444' }}>{this.props.name} Error</h3>
+            <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{this.state.error?.message || 'Component crashed.'}</p>
+            <button onClick={this.handleReset} className="error-boundary-button" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', width: 'auto' }}>Reset Panel</button>
+          </div>
+        )
+      }
       return (
         <div className="error-boundary-container">
           <div className="error-boundary-lottie-wrapper">
             <Lottie animationData={errorAnimation} loop={true} className="error-boundary-lottie" />
           </div>
           <h1 className="error-boundary-title">Something went wrong</h1>
-          <p className="error-boundary-subtitle">
-            {this.state.error?.message || 'An unexpected application crash has occurred.'}
-          </p>
-          <button onClick={this.handleReload} className="error-boundary-button">
-            Reload Application
-          </button>
+          <p className="error-boundary-subtitle">{this.state.error?.message || 'An unexpected application crash has occurred.'}</p>
+          <button onClick={this.handleReload} className="error-boundary-button">Reload Application</button>
         </div>
       )
     }
-
     return this.props.children
   }
 }

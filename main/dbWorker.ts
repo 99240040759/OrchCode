@@ -94,12 +94,6 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const db = getDB(dbPath), now = new Date().toISOString()
     return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
-  updateThreadAccumulatedTokens(dbPath, threadId, tokens) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = accumulatedTokens + ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(tokens, tokens, threadId)
-  },
-  setThreadAccumulatedTokens(dbPath, threadId, tokens) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
-  },
   updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded) {
     prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, threadId)
   },
@@ -117,12 +111,6 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   },
   addOpenedWorkspace(dbPath, path) {
     prepare(getDB(dbPath), 'INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)').run(path, new Date().toISOString())
-  },
-  bindWorkspaceTransaction(dbPath, threadId, workspacePath) {
-    getDB(dbPath).transaction(() => {
-      methods.addOpenedWorkspace(dbPath, workspacePath)
-      methods.setThreadWorkspace(dbPath, threadId, workspacePath)
-    })()
   },
   deleteOpenedWorkspace(dbPath, path) {
     prepare(getDB(dbPath), 'DELETE FROM opened_workspaces WHERE path = ?').run(path)

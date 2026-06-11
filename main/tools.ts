@@ -11,7 +11,8 @@ import {
 } from './workspace'
 import WindowManager, { getConversationScreenshotsPath, tavilyLimiter, getApiBaseUrl } from './utils'
 import { requireAuthToken } from './auth'
-import { getParserForExtension, getTokens, findSyntaxErrors, getFileOutline } from './astParser'
+import { getParserForExtension, getTokens, findSyntaxErrors } from './astParser'
+import { getUserSkillsPath } from './skills'
 
 
 
@@ -56,8 +57,8 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
             }
             matches.sort((a, b) => b.score - a.score)
             if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score + 0.1)) {
-              const m = matches[0]
-              raw = raw.slice(0, m.startIndex) + edit.replacementContent + raw.slice(m.endIndex)
+              const m = matches[0], lineStart = Math.max(0, raw.lastIndexOf('\n', m.startIndex) + 1), isAtLineStart = /^[ \t]*$/.test(raw.slice(lineStart, m.startIndex))
+              raw = raw.slice(0, isAtLineStart ? lineStart : m.startIndex) + edit.replacementContent + raw.slice(m.endIndex)
               replaced = true
             } else if (matches.length > 1) {
               throw new Error(`AST Token matching found ${matches.length} similar blocks (scores: ${matches.slice(0, 3).map(m => m.score.toFixed(2)).join(', ')}). Provide more context to uniquely identify the section.`)
@@ -141,19 +142,26 @@ function checkBrowserViewActive(convId?: string) {
   return null
 }
 
-export function createCoreTools(convId: string, modelSupportsVision = true) {
+export function createCoreTools(convId: string, multimodal = true) {
   const resolve = () => wctx(convId)
-  const safe = (p: string) => assertWithinWorkspace(resolve().rootPath, p, convId)
+  const resolveRelativePath = (p: string): string => {
+    const ctx = resolve(), path = require('node:path'), norm = p.replace(/\\/g, '/'), absPath = path.isAbsolute(p) ? path.resolve(p) : path.resolve(ctx.rootPath, p), normAbs = absPath.replace(/\\/g, '/'), skillsPath = getUserSkillsPath().replace(/\\/g, '/'), artifactsPath = ctx.artifactsPath.replace(/\\/g, '/')
+    if (normAbs.startsWith(skillsPath)) return assertWithinWorkspace(getUserSkillsPath(), path.relative(getUserSkillsPath(), absPath))
+    if (normAbs.startsWith(artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, path.relative(ctx.artifactsPath, absPath))
+    const clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
+    if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/??artifacts\//, ''))
+    if (clean.startsWith('.gemini/skills/') || clean.startsWith('./.gemini/skills/')) return assertWithinWorkspace(getUserSkillsPath(), clean.replace(/^\.?\/??\.gemini\/skills\//, ''))
+    return assertWithinWorkspace(ctx.rootPath, p)
+  }
 
   // -- FILE TOOLS --
-  const listDir = tool({
+  const list_dir = tool({
     description: 'Lists all files, subdirectories, and their metadata directly inside a directory within the active workspace. Useful for understanding project layout, checking folder structures, and locating files. Returns file sizes and sub-item counts.',
-    inputSchema: z.object({ directoryPath: z.string().describe('The absolute, fully-qualified system path of the directory to list. Must reside within the workspace boundaries.') }),
+    inputSchema: z.object({ directory_path: z.string().describe('The path of the directory to list (relative to the workspace root).') }),
     execute: async (args: any) => {
       try {
-        const directoryPath = args.directoryPath || args.path
-        if (!directoryPath) throw new Error('directoryPath parameter is required')
-        const ctx = resolve(), safePath = safe(directoryPath)
+        const directory_path = args.directory_path || ''
+        const ctx = resolve(), safePath = resolveRelativePath(directory_path)
         const rawEntries = await fs.readdir(safePath, { withFileTypes: true })
         const entries = await Promise.all(rawEntries.map(async (entry) => {
           const fullPath = join(safePath, entry.name), relativePath = relative(ctx.rootPath, fullPath), isDirectory = entry.isDirectory()
@@ -164,7 +172,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         }))
         entries.sort((a, b) => (a.isDirectory && !b.isDirectory) ? -1 : (!a.isDirectory && b.isDirectory) ? 1 : a.name.localeCompare(b.name))
         return { entries, dirPath: safePath, rootPath: ctx.rootPath }
-      } catch (err: any) { log.error('[tool:listDir] error:', err.message); return { success: false, error: err.message } }
+      } catch (err: any) { log.error('[tool:list_dir] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {
       if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
@@ -173,39 +181,46 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     }
   })
 
-  const viewFile = tool({
-    description: 'Reads the text or binary content of a file within the workspace. For text files, returns a line-numbered block range. Reading is capped at 800 lines per call to optimize model context—use startLine/endLine pagination to read larger files. Automatically parses binary content (like images) and returns base64 content if vision is supported.',
+  const view_file = tool({
+    description: 'Reads the text or binary content of a file within the workspace. For text files and office documents (PDF, DOCX, XLSX, PPTX), returns their parsed plain text content. Reading is capped at 800 lines per call—use pagination to read larger files. Automatically handles images if vision is supported.',
     inputSchema: z.object({
-      absolutePath: z.string().describe('The absolute, fully-qualified system path of the target file to read.'),
-      startLine: z.number().int().min(1).optional().describe('The 1-indexed line number to start reading from (inclusive). Defaults to 1.'),
-      endLine: z.number().int().min(1).optional().describe('The 1-indexed line number to stop reading at (inclusive). Range cannot exceed 800 lines. Defaults to startLine + 799.')
+      absolute_path: z.string().describe('The path of the target file to read (relative to the workspace root).'),
+      start_line: z.number().int().min(1).optional().describe('The 1-indexed line number to start reading from (inclusive). Defaults to 1.'),
+      end_line: z.number().int().min(1).optional().describe('The 1-indexed line number to stop reading at (inclusive). Range cannot exceed 800 lines. Defaults to start_line + 799.')
     }),
     execute: async (args: any) => {
       try {
-        const absolutePath = args.absolutePath || args.path || args.filePath || args.targetFile
-        if (!absolutePath) throw new Error('absolutePath parameter is required')
-        const { startLine, endLine } = args
-        const safePath = safe(absolutePath), stat = await fs.stat(safePath)
+        const absolute_path = args.absolute_path
+        if (!absolute_path) throw new Error('absolute_path parameter is required')
+        const start_line = args.start_line
+        const end_line = args.end_line
+        const safePath = resolveRelativePath(absolute_path), stat = await fs.stat(safePath)
         if (!stat.isFile()) throw new Error(`Not a file: "${safePath}"`)
         if (stat.size > MAX_FILE_READ_BYTES) throw new Error('File exceeds 25 MB read limit.')
         const rawBuffer = await fs.readFile(safePath)
         if (isFileBinary(safePath, rawBuffer)) {
-          const mimeType = getMimeType(safePath)
+          const mimeType = getMimeType(safePath), ext = extname(safePath).toLowerCase()
+          const isOffice = mimeType === 'application/pdf' || ext === '.pdf' || mimeType.includes('spreadsheet') || mimeType.includes('excel') || ext === '.xlsx' || ext === '.xls' || mimeType.includes('word') || ext === '.docx' || mimeType.includes('presentation') || ext === '.pptx'
+          if (isOffice) {
+            const { extractTextFromBinaryAttachment } = require('./schema')
+            const text = await extractTextFromBinaryAttachment(basename(safePath), mimeType, rawBuffer.toString('base64'))
+            return { content: text, absolutePath: safePath, isBinary: false, sizeBytes: stat.size, readStart: 1, readEnd: text.split('\n').length }
+          }
           return { content: `[Binary File: ${mimeType}] Base64 data included.`, base64Content: rawBuffer.toString('base64'), mimeType, absolutePath: safePath, isBinary: true, sizeBytes: stat.size }
         }
         const content = rawBuffer.toString('utf-8'), allLines = content.split('\n'), totalLines = allLines.length
-        const start = startLine !== undefined ? Math.max(1, startLine) : 1
-        if (start > totalLines) throw new Error(`Invalid startLine: file only has ${totalLines} lines.`)
-        const end = endLine !== undefined ? Math.min(totalLines, endLine) : Math.min(totalLines, start + 799)
-        if (end < start) throw new Error('Invalid line range: endLine cannot be less than startLine.')
+        const start = start_line !== undefined ? Math.max(1, start_line) : 1
+        if (start > totalLines) throw new Error(`Invalid start_line: file only has ${totalLines} lines.`)
+        const end = end_line !== undefined ? Math.min(totalLines, end_line) : Math.min(totalLines, start + 799)
+        if (end < start) throw new Error('Invalid line range: end_line cannot be less than start_line.')
         if (end - start + 1 > 800) throw new Error('Line range limit exceeded: cannot read more than 800 lines at a time.')
         const targetLines = allLines.slice(start - 1, end), contentChunk = targetLines.join('\n')
         return { content: contentChunk, absolutePath: safePath, totalLines, readStart: start, readEnd: end, truncated: end < totalLines }
-      } catch (err: any) { log.error('[tool:viewFile] error:', err.message); return { success: false, error: err.message } }
+      } catch (err: any) { log.error('[tool:view_file] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {
       if (output.isBinary && output.mimeType?.startsWith('image/') && output.base64Content) {
-        if (!modelSupportsVision) return { type: 'content', value: [{ type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Vision not supported.` }], isBinary: true }
+        if (!multimodal) return { type: 'content', value: [{ type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Vision not supported.` }], isBinary: true }
         return { type: 'image-data', data: output.base64Content, mediaType: output.mimeType }
       }
       const text = `[METADATA: readStart=${output.readStart}, readEnd=${output.readEnd}]\n` + (output.content || output.error || 'No content')
@@ -213,66 +228,62 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     }
   })
  
-  const writeToFile = tool({
+  const write_to_file = tool({
     description: 'Creates a new file in the workspace or overwrites an existing one if the overwrite flag is true. Automatically creates any parent directories if they do not exist.',
-    inputSchema: z.object({ targetFile: z.string().describe('The absolute, fully-qualified system path where the file should be created.'), codeContent: z.string().describe('The complete string content to write into the file.'), overwrite: z.boolean().default(false).describe('Set to true to explicitly overwrite the file if it already exists; otherwise, will error.') }),
+    inputSchema: z.object({ target_file: z.string().describe('The path where the file should be created (relative to the workspace root).'), code_content: z.string().describe('The complete string content to write into the file.'), overwrite: z.boolean().default(false).describe('Set to true to explicitly overwrite the file if it already exists; otherwise, will error.') }),
     execute: async (args: any) => {
       try {
-        const targetFile = args.targetFile || args.path || args.filePath || args.absolutePath
-        if (!targetFile) throw new Error('targetFile parameter is required')
-        const codeContent = args.codeContent ?? args.content ?? args.code ?? args.text ?? args.data
-        if (codeContent === undefined) throw new Error('codeContent parameter is required')
+        const target_file = args.target_file
+        if (!target_file) throw new Error('target_file parameter is required')
+        const code_content = args.code_content
+        if (code_content === undefined) throw new Error('code_content parameter is required')
         const overwrite = !!(args.overwrite ?? false)
-        const ctx = resolve(), safePath = safe(targetFile)
+        const ctx = resolve(), safePath = resolveRelativePath(target_file)
         let exists = false
         try { await fs.stat(safePath); exists = true } catch (err) { log.debug('[fileTools] File existence check failed:', err) }
         if (exists && !overwrite) throw new Error(`File already exists: "${safePath}". Set overwrite=true.`)
         await fs.mkdir(dirname(safePath), { recursive: true })
-        await fs.writeFile(safePath, codeContent, 'utf-8')
+        await fs.writeFile(safePath, code_content, 'utf-8')
         invalidateWorkspaceFilesCache(ctx.rootPath)
         let syntaxErrors: any[] = []
         try {
           const ext = extname(safePath), parser = await getParserForExtension(ext)
           if (parser) {
-            const tree = parser.parse(codeContent)
+            const tree = parser.parse(code_content)
             if (tree.rootNode.hasError()) syntaxErrors = findSyntaxErrors(tree.rootNode)
           }
-        } catch (e) { log.warn('[writeToFile syntax check] failed:', e) }
+        } catch (e) { log.warn('[write_to_file syntax check] failed:', e) }
         return { success: true, absolutePath: safePath, created: !exists, syntaxErrors }
-      } catch (err: any) { log.error('[tool:writeToFile] error:', err.message); return { success: false, error: err.message } }
+      } catch (err: any) { log.error('[tool:write_to_file] error:', err.message); return { success: false, error: err.message } }
     },
     toModelOutput: ({ output }: any) => {
       if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
-      let msg = `Successfully wrote to file ${output.absolutePath}.`
-      if (output.syntaxErrors?.length) {
-        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
-      }
-      return { type: 'content', value: [{ type: 'text', text: msg }] }
+      return { type: 'content', value: [{ type: 'text', text: `Successfully wrote to file ${output.absolutePath}.` }] }
     }
   })
  
-  const multiReplaceFileContent = tool({
+  const multi_replace_file_content = tool({
     description: 'Surgically edits one or more non-contiguous text blocks in an existing file. Uses Abstract Syntax Tree (AST) token matching for supported source code files (which is resilient to minor spacing, indentation, and quote changes), and falls back to exact string replacement for plain text or unsupported formats. Each chunk\'s targetContent must match exactly a unique section in the file.',
     inputSchema: z.object({
-      targetFile: z.string().describe('The absolute, fully-qualified system path of the file to modify.'),
+      target_file: z.string().describe('The path of the file to modify (relative to the workspace root).'),
       instruction: z.string().describe('A high-level explanation describing the purpose of these edits or what bug is being fixed.'),
-      replacementChunks: z.array(z.object({
-        targetContent: z.string().describe('The exact string block to be replaced. Must match exactly, including indentation and whitespace.'),
-        replacementContent: z.string().describe('The new content to insert in place of the targetContent.')
+      replacement_chunks: z.array(z.object({
+        target_content: z.string().describe('The exact string block to be replaced. Must match exactly, including indentation and whitespace.'),
+        replacement_content: z.string().describe('The new content to insert in place of the target_content.')
       })).min(1).describe('The list of separate, non-adjacent edit chunks to apply.')
     }),
     execute: async (args: any) => {
       try {
-        const targetFile = args.targetFile || args.path || args.filePath || args.absolutePath
-        if (!targetFile) throw new Error('targetFile parameter is required')
-        const rawChunks = args.replacementChunks || args.chunks || args.edits || args.replacements
-        if (!rawChunks || !Array.isArray(rawChunks)) throw new Error('replacementChunks parameter is required and must be an array')
-        const replacementChunks = rawChunks.map((c: any) => ({
-          targetContent: c.targetContent ?? c.oldText ?? c.find ?? c.search ?? '',
-          replacementContent: c.replacementContent ?? c.newText ?? c.replace ?? ''
+        const target_file = args.target_file
+        if (!target_file) throw new Error('target_file parameter is required')
+        const rawChunks = args.replacement_chunks
+        if (!rawChunks || !Array.isArray(rawChunks)) throw new Error('replacement_chunks parameter is required and must be an array')
+        const replacement_chunks = rawChunks.map((c: any) => ({
+          targetContent: c.target_content ?? '',
+          replacementContent: c.replacement_content ?? ''
         }))
-        const safePath = safe(targetFile), ctx = resolve()
-        await applyEditsToFile(safePath, replacementChunks)
+        const safePath = resolveRelativePath(target_file), ctx = resolve()
+        await applyEditsToFile(safePath, replacement_chunks)
         invalidateWorkspaceFilesCache(ctx.rootPath)
         let syntaxErrors: any[] = []
         try {
@@ -282,21 +293,17 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
             const tree = parser.parse(content)
             if (tree.rootNode.hasError()) syntaxErrors = findSyntaxErrors(tree.rootNode)
           }
-        } catch (e) { log.warn('[multiReplaceFileContent syntax check] failed:', e) }
-        return { success: true, absolutePath: safePath, chunksApplied: replacementChunks.length, syntaxErrors }
-      } catch (err: any) { const errMsg = err?.message || String(err || 'Unknown error'); log.error('[tool:multiReplaceFileContent] error:', errMsg); return { success: false, error: errMsg } }
+        } catch (e) { log.warn('[multi_replace_file_content syntax check] failed:', e) }
+        return { success: true, absolutePath: safePath, chunksApplied: replacement_chunks.length, syntaxErrors }
+      } catch (err: any) { const errMsg = err?.message || String(err || 'Unknown error'); log.error('[tool:multi_replace_file_content] error:', errMsg); return { success: false, error: errMsg } }
     },
     toModelOutput: ({ output }: any) => {
       if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
-      let msg = `Successfully applied ${output.chunksApplied} edits to file ${output.absolutePath}.`
-      if (output.syntaxErrors?.length) {
-        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
-      }
-      return { type: 'content', value: [{ type: 'text', text: msg }] }
+      return { type: 'content', value: [{ type: 'text', text: `Successfully applied ${output.chunksApplied} edits to file ${output.absolutePath}.` }] }
     }
   })
 
-  const searchWorkspace = tool({
+  const search_workspace = tool({
     description: 'Performs a fast, parallel regular expression search (using Ripgrep) across all files in the active workspace. Useful for finding code symbols, function definitions, classes, or references.',
     inputSchema: z.object({ query: z.string().describe('The regular expression query or literal string to search for across files.'), includes: z.array(z.string()).optional().describe('Optional glob patterns to filter files to search (e.g. ["src/**/*.ts", "package.json"]).') }),
     execute: async ({ query, includes }) => {
@@ -319,7 +326,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         if (lines.length > 200) return { success: true, results: lines.slice(0, 200).join('\n') + `\n\n... (truncated ${lines.length - 200} matches)` }
         return { success: true, results: cleaned }
       } catch (err: any) {
-        log.error('[tool:searchWorkspace] error:', err.message)
+        log.error('[tool:search_workspace] error:', err.message)
         return { success: false, error: err.code === 'ENOENT' ? 'ripgrep not found.' : err.message }
       }
     },
@@ -329,27 +336,27 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
 
 
   // -- SHELL TOOLS --
-  const runCommand = tool({
+  const run_command = tool({
     description: 'Executes a command-line script in the workspace directory. Returns stdout, stderr, and the integer exit code. Blocks destructive or dangerous commands (like sudo, shutdown, passwd, mkfs, and cmd/powershell/bash shells directly). Execution is run with PAGER=cat and FORCE_COLOR=1.',
     inputSchema: z.object({
-      commandLine: z.string().max(4096).describe('The command string to execute in the terminal (e.g. "npm run test").'),
+      command_line: z.string().max(4096).describe('The command string to execute in the terminal (e.g. "npm run test").'),
       cwd: z.string().optional().describe('Optional absolute path to run the command in. Must be within the workspace root.'),
-      waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds before the process is killed or sent to background (max 180000, defaults to 60000).')
+      wait_ms_before_async: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds before the process is killed or sent to background (max 180000, defaults to 60000).')
     }),
-    execute: async (args: any) => {
+    execute: async (args: any, options?: any) => {
       try {
-        const commandLine = args.commandLine || args.command || args.cmd
-        if (!commandLine) return { success: false, stdout: '', stderr: 'commandLine parameter is required.', exitCode: 1 }
-        const ctx = resolveWorkspace(convId), runDir = args.cwd ? assertWithinWorkspace(ctx.rootPath, args.cwd, convId) : ctx.rootPath
-        const tokens = tokenizeCommand(commandLine.trim()), executable = tokens[0], runArgs = tokens.slice(1)
+        const command_line = args.command_line
+        if (!command_line) return { success: false, stdout: '', stderr: 'command_line parameter is required.', exitCode: 1 }
+        const ctx = resolveWorkspace(convId), runDir = args.cwd ? assertWithinWorkspace(ctx.rootPath, args.cwd) : ctx.rootPath
+        const tokens = tokenizeCommand(command_line.trim()), executable = tokens[0], runArgs = tokens.slice(1)
         if (!executable) return { success: false, stdout: '', stderr: 'Empty command.', exitCode: 1 }
         const blockedCmd = checkBlocklist(tokens)
         if (blockedCmd) return { success: false, stdout: '', stderr: `Command blocked: '${blockedCmd}' is not permitted.`, exitCode: 1 }
-        log.info(`[tool:runCommand] cwd=${runDir} exe=${executable} args=${JSON.stringify(runArgs)}`)
-        const result = await execa(executable, runArgs, { shell: false, cwd: runDir, timeout: args.waitMsBeforeAsync ?? 60000, reject: false, env: { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' } })
+        log.info(`[tool:run_command] cwd=${runDir} exe=${executable} args=${JSON.stringify(runArgs)}`)
+        const result = await execa(executable, runArgs, { shell: false, cwd: runDir, timeout: args.wait_ms_before_async ?? 60000, reject: false, cancelSignal: options?.signal, env: { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' } })
         return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, success: result.exitCode === 0, cwd: runDir }
       } catch (err: any) {
-        log.error('[tool:runCommand] error:', err.message)
+        log.error('[tool:run_command] error:', err.message)
         return { success: false, error: err.message, stdout: '', stderr: err.message, exitCode: 1 }
       } finally {
         try { invalidateWorkspaceFilesCache(resolveWorkspace(convId).rootPath) } catch {}
@@ -359,28 +366,27 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   })
 
   // -- WEB TOOLS --
-  const searchWeb = tool({
+  const search_web = tool({
     description: 'Searches the web using the Tavily API and returns a synthesized summary along with list of relevant results containing URL citations.',
     inputSchema: z.object({
       query: z.string().describe('The web search query string.'),
       domain: z.string().optional().describe('Optional domain to prioritize in the search results (e.g. "github.com").'),
-      maxResults: z.number().int().min(1).max(10).optional().default(5).describe('Maximum number of search results to return (1-10, default 5).'),
-      searchDepth: z.enum(['basic', 'advanced']).optional().default('basic').describe('Search depth: basic or advanced.'),
+      max_results: z.number().int().min(1).max(10).optional().default(5).describe('Maximum number of search results to return (1-10, default 5).'),
+      search_depth: z.enum(['basic', 'advanced']).optional().default('basic').describe('Search depth: basic or advanced.'),
       topic: z.enum(['general', 'news']).optional().default('general').describe('Topic category: general or news.'),
-      includeImages: z.boolean().optional().default(false).describe('Whether to retrieve relevant images.')
+      include_images: z.boolean().optional().default(false).describe('Whether to retrieve relevant images.')
     }),
-    execute: async ({ query, domain, maxResults, searchDepth, topic, includeImages }) => {
+    execute: async ({ query, domain, max_results, search_depth, topic, include_images }) => {
       return tavilyLimiter.schedule(async () => {
-        log.info(`[tool:searchWeb] query="${query}" domain=${domain ?? 'any'} depth=${searchDepth} topic=${topic}`)
+        log.info(`[tool:search_web] query="${query}" domain=${domain ?? 'any'} depth=${search_depth} topic=${topic}`)
         try {
           const token = requireAuthToken()
           const anonKey = process.env.SUPABASE_ANON_KEY
           if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
-
           const response = await fetch(`${getApiBaseUrl()}/tavily`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, domain, maxResults, searchDepth, topic, includeImages })
+            body: JSON.stringify({ query, domain, maxResults: max_results, searchDepth: search_depth, topic, includeImages: include_images })
           })
           if (!response.ok) throw new Error(`Proxy error: HTTP ${response.status}`)
           const data = await response.json()
@@ -388,7 +394,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
           const images = (data.images ?? []).map((img: any) => typeof img === 'string' ? img : img.url || img)
           return { query, answer: data.answer ?? null, results, images, totalResults: results.length }
         } catch (err: any) {
-          log.error('[tool:searchWeb] Tavily error:', err.message)
+          log.error('[tool:search_web] Tavily error:', err.message)
           return { success: false, error: `Web search failed: ${err.message}` }
         }
       })
@@ -396,7 +402,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Answer: ${output.answer || 'N/A'}\nResults:\n${JSON.stringify(output.results, null, 2)}${output.images?.length ? `\nImages:\n${JSON.stringify(output.images, null, 2)}` : ''}` }] })
   })
 
-  const generateImage = tool({
+  const generate_image = tool({
     description: 'Generates a new image based on a detailed text prompt using the FLUX.2-klein-4b model and saves it as a PNG file directly to the workspace artifacts directory.',
     inputSchema: z.object({
       prompt: z.string().describe('The detailed text prompt describing the image to generate (elements, style, colors, composition).'),
@@ -408,7 +414,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     execute: async ({ prompt, width, height, seed, steps }) => {
       const snap = (v: number) => Math.min(Math.max(Math.round(v / 16) * 16, 512), 1568);
       const sw = snap(width), sh = snap(height);
-      log.info(`[tool:generateImage] prompt="${prompt}" size=${sw}x${sh} seed=${seed} steps=${steps}`)
+      log.info(`[tool:generate_image] prompt="${prompt}" size=${sw}x${sh} seed=${seed} steps=${steps}`)
       try {
         if (!convId) throw new Error('No active conversation ID provided. Image generation cannot resolve workspace.')
         const ctx = getWorkspaceContext(convId) || (await getOrCreateWorkspaceContext(convId))
@@ -439,47 +445,21 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         const fileName = `img-${Date.now()}.png`, targetPath = join(ctx.artifactsPath, fileName)
         await fs.mkdir(ctx.artifactsPath, { recursive: true })
         await fs.writeFile(targetPath, Buffer.from(base64Data, 'base64'))
-        log.info(`[tool:generateImage] saved image to ${targetPath}`)
+        log.info(`[tool:generate_image] saved image to ${targetPath}`)
         return { success: true, filePath: targetPath, message: `Image generated successfully and saved to ${targetPath}` }
-      } catch (err: any) { log.error('[tool:generateImage] Error:', err.message); return { success: false, error: `Image generation failed: ${err.message}` } }
+      } catch (err: any) { log.error('[tool:generate_image] Error:', err.message); return { success: false, error: `Image generation failed: ${err.message}` } }
     },
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.message }] })
   })
 
-  const getFileOutlineTool = tool({
-    description: 'Extracts a structural outline of a source code file (classes, interfaces, functions, methods, and types) with their start/end line numbers. Extremely token-efficient for understanding large files without reading their full contents.',
-    inputSchema: z.object({ absolutePath: z.string().describe('The absolute, fully-qualified system path of the target file to analyze.') }),
-    execute: async (args: any) => {
-      try {
-        const absolutePath = args.absolutePath || args.path || args.filePath || args.absolutePath
-        if (!absolutePath) throw new Error('absolutePath parameter is required')
-        const safePath = safe(absolutePath), content = await fs.readFile(safePath, 'utf-8')
-        const ext = extname(safePath), parser = await getParserForExtension(ext)
-        if (!parser) throw new Error(`Unsupported file type for code outlining: "${ext}"`)
-        const tree = parser.parse(content), symbols = getFileOutline(tree.rootNode), syntaxErrors = findSyntaxErrors(tree.rootNode)
-        return { success: true, absolutePath: safePath, symbols, syntaxErrors }
-      } catch (err: any) { log.error('[tool:getFileOutline] error:', err.message); return { success: false, error: err.message } }
-    },
-    toModelOutput: ({ output }: any) => {
-      if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
-      let msg = `Structural outline of ${output.absolutePath}:\n`
-      if (!output.symbols?.length) msg += 'No classes or functions defined.\n'
-      else msg += output.symbols.map((s: any) => `[${s.type.toUpperCase()}] ${s.name} (Lines ${s.startLine}-${s.endLine})`).join('\n') + '\n'
-      if (output.syntaxErrors?.length) {
-        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
-      }
-      return { type: 'content', value: [{ type: 'text', text: msg }] }
-    }
-  })
-
   return {
-    listDir, viewFile, writeToFile, multiReplaceFileContent, searchWorkspace,
-    runCommand,
-    searchWeb, generateImage, getFileOutline: getFileOutlineTool
+    list_dir, view_file, write_to_file, multi_replace_file_content, search_workspace,
+    run_command,
+    search_web, generate_image
   }
 }
 
-export function browserTools(convId: string, modelSupportsVision = true) {
+export function browserTools(convId: string, multimodal = true) {
   const runOnMain = async (toolName: string, args: any, localFn: () => Promise<any>) => {
     const runner = (globalThis as any).callMainProcessTool
     if (runner) return runner(toolName, args, convId)
@@ -499,11 +479,11 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     })
   }
 
-  const browserNavigate = tool({
+  const browser_navigate = tool({
     description: 'Navigates the active browser viewport to a specified URL and blocks until the page load completes.',
     inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
-    execute: async ({ url }) => runOnMain('browserNavigate', { url }, async () => {
-      log.info(`[tool:browserNavigate] url="${url}"`)
+    execute: async ({ url }) => runOnMain('browser_navigate', { url }, async () => {
+      log.info(`[tool:browser_navigate] url="${url}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
@@ -512,27 +492,27 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         await wc.loadURL(target)
         await waitForPageLoad(wc)
         return { success: true, url: wc.getURL() }
-      } catch (e: unknown) { log.error('[tool:browserNavigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_navigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully navigated to ${output.url}` }] })
   })
 
-  const browserType = tool({
+  const browser_type = tool({
     description: 'Types text into an input field on the active webpage. Supports CSS selectors, agentId values, and piercing iframes.',
     inputSchema: z.object({
       selector: z.string().describe('CSS selector of the input field or the integer agentId value (e.g. "1").'),
       text: z.string().describe('The text to type.'),
-      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
+      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
     }),
-    execute: async ({ selector, text, frameSelector }) => runOnMain('browserType', { selector, text, frameSelector }, async () => {
-      log.info(`[tool:browserType] selector="${selector}"`)
+    execute: async ({ selector, text, frame_selector }) => runOnMain('browser_type', { selector, text, frame_selector }, async () => {
+      log.info(`[tool:browser_type] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
       try {
         await wc.executeJavaScript(`
           (() => {
-            const doc = ${frameSelector ? `(() => { const f = document.querySelector(${JSON.stringify(frameSelector)}); return f ? f.contentDocument : document })()` : 'document'};
+            const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
             if (!doc) throw new Error('Frame not found');
             let el = doc.querySelector(${JSON.stringify(selector)});
             if (!el && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
@@ -558,16 +538,16 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         `)
         await waitForPageLoad(wc)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserType] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_type] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully typed text into element` }] })
   })
 
-  const browserScroll = tool({
+  const browser_scroll = tool({
     description: 'Scrolls the active webpage viewport.',
     inputSchema: z.object({ direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'), amount: z.number().int().positive().optional().describe('Pixels to scroll (default 400).') }),
-    execute: async ({ direction, amount }) => runOnMain('browserScroll', { direction, amount }, async () => {
-      log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
+    execute: async ({ direction, amount }) => runOnMain('browser_scroll', { direction, amount }, async () => {
+      log.info(`[tool:browser_scroll] direction="${direction}" amount=${amount ?? 400}`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
@@ -580,16 +560,16 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         else if (direction === 'right') x = dist
         await wc.executeJavaScript(`window.scrollBy(${x}, ${y})`)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserScroll] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_scroll] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully scrolled viewport` }] })
   })
 
-  const browserScreenshot = tool({
+  const browser_screenshot = tool({
     description: 'Captures a PNG screenshot of the active browser viewport.',
     inputSchema: z.object({}),
-    execute: async () => runOnMain('browserScreenshot', {}, async () => {
-      log.info('[tool:browserScreenshot] executing...')
+    execute: async () => runOnMain('browser_screenshot', {}, async () => {
+      log.info('[tool:browser_screenshot] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
@@ -604,12 +584,12 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
         await fs.writeFile(screenshotPath, png)
         return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
-      } catch (e: unknown) { log.error('[tool:browserScreenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_screenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: async ({ output }: any) => {
       if (output.success && output.filePath) {
         try {
-          if (!modelSupportsVision) { return { type: 'content', value: [{ type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted from tool output because this model does not support vision. Note: Rely on DOM analysis or text feedback.` }] } }
+          if (!multimodal) { return { type: 'content', value: [{ type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted from tool output because this model does not support vision. Note: Rely on DOM analysis or text feedback.` }] } }
           const base64Image = output.buffer ? Buffer.from(output.buffer).toString('base64') : (await fs.readFile(output.filePath.replace('file://', ''))).toString('base64')
           return { type: 'content', value: [{ type: 'image-data', data: base64Image, mediaType: 'image/png' }, { type: 'text', text: `Screenshot captured: ${output.filePath}` }] }
         } catch (e: unknown) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e instanceof Error ? e.message : String(e)}` }] } }
@@ -618,21 +598,21 @@ export function browserTools(convId: string, modelSupportsVision = true) {
     }
   })
 
-  const browserClickSelector = tool({
+  const browser_click_selector = tool({
     description: 'Clicks an element on the active webpage using a CSS selector or the integer agentId value returned from browserGetPageContent.',
     inputSchema: z.object({
       selector: z.string().describe('CSS selector of the element to click, or the integer agentId value (e.g. "1").'),
-      frameSelector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
+      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
     }),
-    execute: async ({ selector, frameSelector }) => runOnMain('browserClickSelector', { selector, frameSelector }, async () => {
-      log.info(`[tool:browserClickSelector] selector="${selector}"`)
+    execute: async ({ selector, frame_selector }) => runOnMain('browser_click_selector', { selector, frame_selector }, async () => {
+      log.info(`[tool:browser_click_selector] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
       try {
         await wc.executeJavaScript(`
           (() => {
-            const doc = ${frameSelector ? `(() => { const f = document.querySelector(${JSON.stringify(frameSelector)}); return f ? f.contentDocument : document })()` : 'document'};
+            const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
             if (!doc) throw new Error('Frame not found');
             let target = doc.querySelector(${JSON.stringify(selector)});
             if (!target && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
@@ -644,16 +624,16 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         `)
         await waitForPageLoad(wc)
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browserClickSelector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_click_selector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked element` }] })
   })
 
-  const browserGetPageContent = tool({
+  const browser_get_page_content = tool({
     description: 'Extracts the page URL, title, visible text content, and interactive element definitions with agentId labels from the active browser viewport. Interactive elements will render numeric badges directly on screenshots matching these agentId labels.',
     inputSchema: z.object({}),
-    execute: async () => runOnMain('browserGetPageContent', {}, async () => {
-      log.info('[tool:browserGetPageContent] executing...')
+    execute: async () => runOnMain('browser_get_page_content', {}, async () => {
+      log.info('[tool:browser_get_page_content] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
@@ -710,10 +690,10 @@ export function browserTools(convId: string, modelSupportsVision = true) {
         `)
         const wrappedText = `[UNTRUSTED WEB PAGE CONTENT START]\nURL: ${result.url}\nTitle: ${result.title}\n\nVisible Page Text:\n${result.text}\n[UNTRUSTED WEB PAGE CONTENT END]`
         return { success: true, url: result.url, title: result.title, text: wrappedText, interactiveElements: result.interactiveElements }
-      } catch (e: unknown) { log.error('[tool:browserGetPageContent] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: unknown) { log.error('[tool:browser_get_page_content] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
   })
 
-  return { browserNavigate, browserType, browserScroll, browserScreenshot, browserClickSelector, browserGetPageContent }
+  return { browser_navigate, browser_type, browser_scroll, browser_screenshot, browser_click_selector, browser_get_page_content }
 }

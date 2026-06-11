@@ -1,24 +1,20 @@
 import React from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { Plus } from 'lucide-react'
-import { authUserAtom } from '../store/agentStore'
+import { authUserAtom, sidebarExpandedAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/services'
-
-// LeftSidebar is a controlled component (App.tsx passes expanded prop).
-interface SidebarProps {
-  expanded: boolean
-  onStartConversation?: () => void
-  threadListContent?: React.ReactNode
-}
+import ThreadList from './ThreadList'
+import { useChat } from '../hooks/useChat'
 import { isMac } from '../lib/sharedUtils'
 
-const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onStartConversation, threadListContent }) => {
+const LeftSidebar: React.FC = () => {
   const authUser = useAtomValue(authUserAtom)
-
-  const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (err) { console.error('Google Sign-in failed:', err) } }
-  const handleLogout = async () => { try { await authService.logout() } catch (err) { console.error('Logout failed:', err) } }
+  const [expanded] = useAtom(sidebarExpandedAtom)
+  const { newConversation } = useChat()
+  const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (e) { console.error(e) } }
+  const handleLogout = async () => { try { await authService.logout() } catch (e) { console.error(e) } }
 
   return (
     <aside className={`sidebar-root ${expanded ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
@@ -27,7 +23,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onStartConversation, th
         </div>
 
         <div className="sidebar-top-section">
-          <div className="sidebar-start-conv" onClick={onStartConversation}>
+          <div className="sidebar-start-conv" onClick={() => newConversation()}>
             <Plus size={16} strokeWidth={2} className="text-secondary" />
             <span>New Conversation</span>
           </div>
@@ -35,7 +31,7 @@ const LeftSidebar: React.FC<SidebarProps> = ({ expanded, onStartConversation, th
 
         <div className="sidebar-divider-container"><div className="sidebar-divider" /></div>
 
-        <div className="sidebar-body">{threadListContent}</div>
+        <div className="sidebar-body"><ThreadList /></div>
 
         <div className="sidebar-divider-container"><div className="sidebar-divider" /></div>
 

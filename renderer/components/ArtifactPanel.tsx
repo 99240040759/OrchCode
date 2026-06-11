@@ -6,7 +6,7 @@ import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import {
   isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom,
   activeWorkspaceAtom, activeThreadIdAtom, openFilesAtom, artifactsAtom,
-  updateThreadArtifactsAtom,
+  updateThreadArtifactsAtom, isDiffModeAtom,
   type EditorFile, type ArtifactPanelMode
 } from '../store/agentStore'
 import type { editor } from 'monaco-editor'
@@ -20,6 +20,7 @@ import BrowserView from './BrowserView'
 import { MediaPreview } from './InputBar'
 import { MarkdownView } from './MarkdownRenderer'
 import { EmptyState } from '../lib/uiUtils'
+import { OfficePreview } from './OfficePreview'
 
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
 import { isMac } from '../lib/sharedUtils'
@@ -66,7 +67,7 @@ const ArtifactPanel: React.FC = () => {
   const [fileLoading, setFileLoading] = useState(false)
   const [artifacts, setArtifacts] = useAtom(artifactsAtom)
   const convId = useAtomValue(activeThreadIdAtom)
-  const [isDiffMode, setIsDiffMode] = useState(false)
+  const [isDiffMode, setIsDiffMode] = useAtom(isDiffModeAtom)
   const [originalContent, setOriginalContent] = useState<string | null>(null)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
@@ -74,6 +75,8 @@ const ArtifactPanel: React.FC = () => {
   const browserWasOpenedRef = useRef(false)
   const convIdRef = useRef(convId)
   convIdRef.current = convId
+  const [lastActiveFile, setLastActiveFile] = useState<EditorFile | null>(null)
+  useEffect(() => { if (activeFile) setLastActiveFile(activeFile) }, [activeFile])
 
   const handleEditorMount = (editor: editor.IStandaloneCodeEditor) => { editorRef.current = editor }
   const handleDiffEditorMount = (editor: editor.IStandaloneDiffEditor) => { diffEditorRef.current = editor }
@@ -144,8 +147,6 @@ const ArtifactPanel: React.FC = () => {
     if (panelMode === 'terminal') requestAnimationFrame(() => terminalRef.current?.fit())
   }, [panelMode])
 
-  useEffect(() => { setIsDiffMode(false) }, [activeFile?.path])
-
   useEffect(() => {
     if (!isOpen && browserWasOpenedRef.current) { window.api.invoke('browser:close').catch(() => {}); browserWasOpenedRef.current = false }
   }, [isOpen])
@@ -183,19 +184,27 @@ const ArtifactPanel: React.FC = () => {
         <Tabs.Content value="browser" forceMount className={`artifact-panel-tab-content ${panelMode === 'browser' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
           <BrowserView />
         </Tabs.Content>
-        <Tabs.Content value={activeFile?.path ?? ''} className="artifact-panel-tab-content">
-          {fileLoading ? (
+        <div className={`artifact-panel-tab-content ${panelMode === 'editor' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
+          {fileLoading && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '100%', color: 'var(--text-secondary)' }}>
               <Loader className="animate-spin" size={24} />
               <span>Loading file...</span>
             </div>
-          ) : !activeFile ? <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." /> :
-            activeFile.isBinary ? <MediaPreview displayFile={activeFile} /> :
-            activeFile.name.endsWith('.md') ? <MarkdownView displayFile={activeFile} activeWorkspace={activeWorkspace} /> :
-            <React.Suspense fallback={<div className="editor-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}><Loader className="animate-spin mr-2" size={16} />Loading editor...</div>}>
-              <CodeEditorView displayFile={activeFile} activeWorkspace={activeWorkspace} themeLoaded={themeLoaded} isDiffMode={isDiffMode} setIsDiffMode={setIsDiffMode} originalContent={originalContent} handleDiffEditorMount={handleDiffEditorMount} handleEditorMount={handleEditorMount} handleSearchClick={handleSearchClick} />
-            </React.Suspense>}
-        </Tabs.Content>
+          )}
+          <div style={{ display: !fileLoading && !activeFile ? 'flex' : 'none', height: '100%' }}>
+            <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." />
+          </div>
+          <div style={{ display: !fileLoading && activeFile && lastActiveFile ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+            {lastActiveFile && (
+              (/\.(docx|xlsx|pptx|pdf)$/i).test(lastActiveFile.name) ? <OfficePreview displayFile={lastActiveFile} /> :
+              lastActiveFile.isBinary ? <MediaPreview displayFile={lastActiveFile} /> :
+              lastActiveFile.name.endsWith('.md') ? <MarkdownView displayFile={lastActiveFile} activeWorkspace={activeWorkspace} /> :
+              <React.Suspense fallback={<div className="editor-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}><Loader className="animate-spin mr-2" size={16} />Loading editor...</div>}>
+                <CodeEditorView displayFile={lastActiveFile} activeWorkspace={activeWorkspace} themeLoaded={themeLoaded} isDiffMode={isDiffMode} setIsDiffMode={setIsDiffMode} originalContent={originalContent} handleDiffEditorMount={handleDiffEditorMount} handleEditorMount={handleEditorMount} handleSearchClick={handleSearchClick} />
+              </React.Suspense>
+            )}
+          </div>
+        </div>
       </div>
     </Tabs.Root>
   )

@@ -4,7 +4,6 @@ import ignore, { type Ignore } from 'ignore'
 import mime from 'mime-types'
 import fg from 'fast-glob'
 import { getConversationPath } from './utils'
-import { getUserSkillsPath } from './skills'
 
 Object.assign(mime.types, { ts: 'application/typescript', tsx: 'application/typescript', kt: 'text/x-kotlin', kts: 'text/x-kotlin', gradle: 'text/x-groovy', properties: 'text/x-properties', env: 'text/plain', gitignore: 'text/plain', editorconfig: 'text/plain' })
 
@@ -82,7 +81,7 @@ const isWithin = (base: string, target: string) => {
   return !isAbsolute(rel) && !rel.startsWith('..' + sep) && rel !== '..'
 }
 
-export function assertWithinWorkspace(rootPath: string, targetPath: string, conversationId?: string): string {
+export function assertWithinWorkspace(rootPath: string, targetPath: string): string {
   const normalizedTarget = normalize(isAbsolute(targetPath) ? targetPath : join(rootPath, targetPath))
   let resolvedTarget: string
   try { resolvedTarget = realpathSync(normalizedTarget) }
@@ -96,29 +95,10 @@ export function assertWithinWorkspace(rootPath: string, targetPath: string, conv
     }
     resolvedTarget = existsSync(testPath) ? normalize(join(realpathSync(testPath), unresolvedSuffix)) : normalizedTarget
   }
-  if (conversationId) {
-    const isRelativeArtifacts = !isAbsolute(targetPath) && (targetPath.replace(/\\/g, '/').startsWith('artifacts/') || targetPath.replace(/\\/g, '/').startsWith('./artifacts/'))
-    if (isRelativeArtifacts) {
-      const relativeSuffix = targetPath.replace(/\\/g, '/').replace(/^\.?\/??artifacts\//, '')
-      resolvedTarget = normalize(join(getConversationPath(conversationId), 'artifacts', relativeSuffix))
-    }
-  }
   const resolvedRoot = realpathSync(resolve(rootPath))
-  let resolvedSkills = '', resolvedConv = ''
-  try {
-    const sPath = getUserSkillsPath()
-    if (!existsSync(sPath)) require('node:fs').mkdirSync(sPath, { recursive: true })
-    resolvedSkills = realpathSync(resolve(sPath))
-  } catch {}
-  if (conversationId) {
-    try {
-      const cPath = getConversationPath(conversationId)
-      if (!existsSync(cPath)) require('node:fs').mkdirSync(cPath, { recursive: true })
-      resolvedConv = realpathSync(resolve(cPath))
-    } catch {}
+  if (!isWithin(resolvedRoot, resolvedTarget)) {
+    throw new Error(`Path traversal blocked: "${targetPath}" resolves to "${resolvedTarget}" which is outside directory "${rootPath}".`)
   }
-  const isAllowed = isWithin(resolvedRoot, resolvedTarget) || (resolvedSkills && isWithin(resolvedSkills, resolvedTarget)) || (resolvedConv && isWithin(resolvedConv, resolvedTarget))
-  if (!isAllowed) throw new Error(`Path traversal blocked: "${targetPath}" resolves to "${resolvedTarget}" which is outside workspace root "${rootPath}".`)
   return resolvedTarget
 }
 

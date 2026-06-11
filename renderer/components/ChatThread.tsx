@@ -7,7 +7,8 @@ import {
   chatMessagesAtom,
   isArtifactPanelOpenAtom,
   activeEditorFileAtom,
-  artifactPanelModeAtom
+  artifactPanelModeAtom,
+  isDiffModeAtom
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStore'
@@ -29,13 +30,13 @@ const StreamingMarkdown = ({ content, targetId, isStreaming }: { content: string
 
 const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
   if (tools.length === 1) {
-    const isBlock = tools[0].tool_name === 'runCommand'
+    const isBlock = tools[0].tool_name === 'run_command'
     return <div style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined, margin: isBlock ? '6px 0' : 0, alignItems: 'center' }}><ToolCallBlock toolCall={tools[0]} /></div>
   }
   return (
     <div className="chat-tool-group-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: 0, alignItems: 'center', width: '100%' }}>
       {tools.map((t, idx) => {
-        const isBlock = t.tool_name === 'runCommand'
+        const isBlock = t.tool_name === 'run_command'
         return <div key={t.id || idx} style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined }}><ToolCallBlock toolCall={t} /></div>
       })}
     </div>
@@ -47,6 +48,8 @@ const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
 const ActiveGeneratingSpinner = ({ startTime }: { startTime?: number }) => {
   const [elapsed, setElapsed] = React.useState(0)
   const startRef = React.useRef(startTime || Date.now())
+  // Sync ref when startTime prop changes (e.g. thread switch reusing the component)
+  React.useLayoutEffect(() => { startRef.current = startTime || Date.now(); setElapsed(0) }, [startTime])
   React.useEffect(() => {
     const timer = setInterval(() => setElapsed((Date.now() - startRef.current) / 1000), 100)
     return () => clearInterval(timer)
@@ -143,14 +146,15 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
+  const setIsDiffMode = useSetAtom(isDiffModeAtom)
   return (
     <div className="chat-message-user-container">
       <div className="chat-message-user chat-message-user-content">
         {attachments.length > 0 && (
           <div className="message-attachments">
             {attachments.map((att, idx) => {
-              const openDoc = () => { setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: false, mimeType: att.mimeType || 'text/plain', content: decodeBase64Utf8(att.base64) }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
-              const openImg = () => { setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: true, mimeType: att.mimeType || 'image/png', base64: att.base64 }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+              const openDoc = () => { setIsDiffMode(false); setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: false, mimeType: att.mimeType || 'text/plain', content: decodeBase64Utf8(att.base64) }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
+              const openImg = () => { setIsDiffMode(false); setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: true, mimeType: att.mimeType || 'image/png', base64: att.base64 }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
               return (
                 <div key={idx} className="message-attachment-chip" onClick={att.type === 'image' ? openImg : openDoc} title={att.name || 'attachment'}>
                   {att.type === 'image'
@@ -194,11 +198,16 @@ const ChatThread: React.FC = () => {
     }
   }, [messageAtoms.length, lastMsgContent, lastMsgBlocksLength, lastMsgIsStreaming])
 
+  // Read roles by traversing atoms via the same splitAtom store — avoids index drift
+  // between chatMessagesAtom snapshot and chatMessageAtomsAtom (splitAtom can lag one render)
   const messageGroups = (() => {
     const groups: Array<{ key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> }> = []
     let currentGroup: { key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> } | null = null
-    messageAtoms.forEach((atom, idx) => {
-      const msg = messages[idx]; if (!msg) return
+    // Use messages[] for role/id but messageAtoms[] for the actual atom reference
+    // Both derive from same base atom so length is always equal within the same render
+    messages.forEach((msg, idx) => {
+      const atom = messageAtoms[idx]
+      if (!atom || !msg) return
       if (msg.role === 'user') {
         currentGroup = { key: `group-${msg.id}`, userAtom: atom, assistantAtoms: [] }
         groups.push(currentGroup)

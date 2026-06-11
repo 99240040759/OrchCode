@@ -20,6 +20,7 @@ export function setDBPort(port: any) {
       else pending.resolve(result)
     }
   })
+  dbPort.on('close', () => { pendingQueries.forEach(p => p.reject(new Error('DB port closed'))); pendingQueries.clear() })
   dbPort.start()
 }
 let worker: any = null
@@ -96,13 +97,10 @@ export function getThreadMessages(threadId: string): Promise<ThreadMessage[]> { 
 export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }): Promise<ThreadMessage> { return runQuery('saveMessage', threadId, message) }
 export function deleteThread(threadId: string): Promise<boolean> { return runQuery('deleteThread', threadId) }
 export function updateThreadTitle(threadId: string, title: string): Promise<boolean> { return runQuery('updateThreadTitle', threadId, title) }
-export function updateThreadAccumulatedTokens(threadId: string, tokens: number): Promise<void> { return runQuery('updateThreadAccumulatedTokens', threadId, tokens) }
-export function setThreadAccumulatedTokens(threadId: string, tokens: number): Promise<void> { return runQuery('setThreadAccumulatedTokens', threadId, tokens) }
 export function updateThreadTokens(threadId: string, accumulated: number, lifetimeAdded: number): Promise<void> { return runQuery('updateThreadTokens', threadId, accumulated, lifetimeAdded) }
 export function setThreadWorkspace(threadId: string, workspacePath: string): Promise<void> { return runQuery('setThreadWorkspace', threadId, workspacePath) }
 export function getThreadWorkspace(threadId: string): Promise<string | null> { return runQuery('getThreadWorkspace', threadId) }
 export function addOpenedWorkspace(path: string): Promise<void> { return runQuery('addOpenedWorkspace', path) }
-export function bindWorkspaceTransaction(threadId: string, workspacePath: string): Promise<void> { return runQuery('bindWorkspaceTransaction', threadId, workspacePath) }
 export function deleteOpenedWorkspace(path: string): Promise<void> { return runQuery('deleteOpenedWorkspace', path) }
 export function deleteWorkspaceThreads(workspacePath: string): Promise<string[]> { return runQuery('deleteWorkspaceThreads', workspacePath) }
 export function compactThreadHistory(threadId: string, summary: string, keepCount = 10): Promise<void> { return runQuery('compactThreadHistory', threadId, summary, keepCount) }

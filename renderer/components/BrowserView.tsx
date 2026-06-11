@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useAtom } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
-import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom } from '../store/agentStore'
+import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom, threadBrowserUrlAtom } from '../store/agentStore'
 import debounce from 'lodash.debounce'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [urlInput, setUrlInput] = useState('https://google.com')
+  const [urlInput, setUrlInput] = useAtom(threadBrowserUrlAtom)
   const [displayUrl, setDisplayUrl] = useState('')
   const [title, setTitle] = useState('Browser')
   const [isLoaded, setIsLoaded] = useState(false)

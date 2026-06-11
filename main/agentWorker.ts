@@ -16,7 +16,7 @@ export function callMainProcessTool(toolName: string, args: any, threadId?: stri
 ;(globalThis as any).callMainProcessTool = callMainProcessTool
 
 type StreamIpcMessage =
-  | { type: 'start-stream'; threadId: string; modelType?: string; attachments?: any[]; promptText?: string; token?: string; isBrowserActive?: boolean }
+  | { type: 'start-stream'; threadId: string; modelType?: string; attachments?: any[]; promptText?: string; token?: string; isBrowserActive?: boolean; startTime?: number }
   | { type: 'tool-response'; requestId: string; result?: any; error?: any }
   | { type: 'update-token'; token: string }
   | { type: 'db-port' }
@@ -28,7 +28,7 @@ proc.parentPort.on('message', async (e: { data: StreamIpcMessage; ports: Electro
     const [port] = e.ports
     if (port) setDBPort(port)
   } else if (msg.type === 'start-stream') {
-    const { threadId, modelType, attachments, promptText, isBrowserActive, startTime } = msg as any
+    const { threadId, modelType, attachments, promptText, isBrowserActive, startTime } = msg
     const [port] = e.ports
     if (!port) return
     log.info(`[agentWorker] Starting stream for thread: ${threadId}`)

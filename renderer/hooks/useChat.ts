@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react'
 import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import {
-  agentRunStateAtom, chatMessagesAtom, activeThreadIdAtom, threadListAtom,
+  chatMessagesAtom, activeThreadIdAtom, threadListAtom,
   selectedModelAtom, activeWorkspaceAtom, isThreadLoadingAtom,
   openFilesAtom, activeEditorFileAtom, artifactsAtom, artifactPanelModeAtom, runningThreadsAtom,
   updateThreadMessagesAtom, updateThreadRunStateAtom, updateThreadTokensAtom, updateThreadWorkspaceAtom,
@@ -20,10 +20,9 @@ const isToolResultError = (r: unknown): boolean => {
 
 export function useChat() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
-  const runState = useAtomValue(agentRunStateAtom)
   const [messages, setMessages] = useAtom(chatMessagesAtom)
   const [threads, setThreads] = useAtom(threadListAtom)
-  const setRunningThreads = useSetAtom(runningThreadsAtom)
+  const [runningThreads, setRunningThreads] = useAtom(runningThreadsAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
   const setIsThreadLoading = useSetAtom(isThreadLoadingAtom)
@@ -43,9 +42,9 @@ export function useChat() {
 
   const activeStreamThreadIdRef = useRef('')
   const activeRunIdRef = useRef<string | null>(null)
-  const flushRafRef = useRef<number | null>(null)
+  const flushRafsRef = useRef<Record<string, number | null>>({})
   const isMountedRef = useRef(true)
-  const isRunningRef = useRef(false)
+  const isRunningMapRef = useRef<Record<string, boolean>>({})
   const threadsRef = useRef(threads)
   const selectLockRef = useRef(false)
 
@@ -54,7 +53,7 @@ export function useChat() {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
-      if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current)
+      Object.values(flushRafsRef.current).forEach(id => { if (id !== null && id !== undefined) cancelAnimationFrame(id) })
     }
   }, [])
 
@@ -68,7 +67,7 @@ export function useChat() {
   useEffect(() => {
     const unsub = window.api.on('stream:worker-crashed', (payload: any) => {
       const crashedId = payload?.threadId; if (!crashedId) return
-      if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+      const rafId = flushRafsRef.current[crashedId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[crashedId] = null }
       updateThreadRunState({ threadId: crashedId, state: 'error' })
       updateThreadMessages({
         threadId: crashedId,
@@ -97,7 +96,7 @@ export function useChat() {
     window.api.stopStream(tid)
     updateThreadRunState({ threadId: tid, state: 'idle' })
     setRunningThreads(prev => { const n = new Set(prev); n.delete(tid); return n })
-    if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+    const rafId = flushRafsRef.current[tid]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[tid] = null }
     updateThreadMessages({ threadId: tid, update: prev => prev.map(m => !m.isStreaming ? m : {
       ...m, isStreaming: false,
       orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
@@ -109,20 +108,27 @@ export function useChat() {
   useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
   useEffect(() => { messagesRef.current = messages }, [messages])
 
+  // Only clean up isStreaming on unmount — NOT on every thread switch.
+  // Thread switches must preserve streaming state of background threads.
   useEffect(() => {
     return () => {
-      setMessages(prev => prev.map(m =>
-        m.isStreaming
-          ? { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }
-          : m
-      ))
+      const curId = activeThreadIdRef.current
+      if (curId) {
+        setMessages(prev => prev.map(m =>
+          m.isStreaming
+            ? { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }
+            : m
+        ))
+      }
     }
-  }, [activeThreadId, setMessages])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selectThread = async (threadId: string) => {
     if (!threadId || selectLockRef.current) return
     selectLockRef.current = true
-    updateThreadRunState({ threadId, state: 'idle' })
+    // Only reset to idle if this thread isn't actively running in the background
+    if (!runningThreads.has(threadId)) updateThreadRunState({ threadId, state: 'idle' })
     const requestId = Math.random().toString(36).substring(2)
     const requestIdRef = { current: requestId }
     activeStreamThreadIdRef.current = threadId
@@ -146,9 +152,6 @@ export function useChat() {
         updateThreadWorkspace({ threadId, workspace })
         updateThreadMessages({ threadId, update: loadedMsgs })
         updateThreadTokens({ threadId, session: fresh?.accumulatedTokens ?? 0, lifetime: fresh?.lifetimeTokens ?? 0 })
-        updateThreadOpenFiles({ threadId, openFiles: [] })
-        updateThreadActiveEditorFile({ threadId, file: null })
-        updateThreadArtifacts({ threadId, artifacts: [] })
         setActiveThreadId(threadId)
         setIsThreadLoading(false)
       }
@@ -220,14 +223,15 @@ export function useChat() {
     } catch (err) { console.error('[useChat] Open workspace error:', err); throw err }
   }
 
-  const run = async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string, _fromInject?: boolean) => {
-    if (isRunningRef.current || (!_fromInject && runState !== 'idle' && runState !== 'error')) return
-    isRunningRef.current = true
+  const run = async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
+    const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${window.crypto.randomUUID()}`
+    if (isRunningMapRef.current[resolvedThreadId]) return
+    if (runningThreads.has(resolvedThreadId)) return
+    isRunningMapRef.current[resolvedThreadId] = true
     const runId = Math.random().toString(36).substring(2)
     activeRunIdRef.current = runId
-    const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${crypto.randomUUID()}`
     try {
-      if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+      const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
       const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
       const isNewThread = !existingThread || existingThread.title === 'New Chat'
       activeStreamThreadIdRef.current = resolvedThreadId
@@ -235,8 +239,8 @@ export function useChat() {
       updateThreadRunState({ threadId: resolvedThreadId, state: 'thinking' })
       setRunningThreads(prev => new Set(prev).add(resolvedThreadId))
       const startTimeVal = Date.now()
-      updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: startTimeVal }] })
-      const assistantMsgId = crypto.randomUUID()
+      updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: window.crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: startTimeVal }] })
+      const assistantMsgId = window.crypto.randomUUID()
       updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: startTimeVal, isStreaming: true }] })
       if (isNewThread) {
         threadService.generateTitle(promptText.slice(0, 400), resolvedThreadId)
@@ -248,14 +252,14 @@ export function useChat() {
       let assistantIsStreaming = true
 
       const flushNow = () => {
-        if (flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+        const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
         if (!isMountedRef.current) return
         const snapshot = [...orderedBlocks]
         updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m) })
       }
       const scheduleFlush = () => {
-        if (flushRafRef.current === null) {
-          flushRafRef.current = requestAnimationFrame(() => { flushRafRef.current = null; flushNow() })
+        if (!flushRafsRef.current[resolvedThreadId]) {
+          flushRafsRef.current[resolvedThreadId] = requestAnimationFrame(() => { flushRafsRef.current[resolvedThreadId] = null; flushNow() })
         }
       }
 
@@ -272,7 +276,7 @@ export function useChat() {
           else { last.content += chunkText; scheduleFlush() }
         } else if (chunkType === 'tool_call_start') {
           updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
-          orderedBlocks.push({ type: 'tool_call', tool_call_id: chunkData?.tool_call_id as string ?? crypto.randomUUID(), tool_name: chunkData?.tool_name as string ?? 'unknown', args: {} as Record<string, unknown>, args_delta: '', status: 'pending' })
+          orderedBlocks.push({ type: 'tool_call', tool_call_id: chunkData?.tool_call_id as string ?? window.crypto.randomUUID(), tool_name: chunkData?.tool_name as string ?? 'unknown', args: {} as Record<string, unknown>, args_delta: '', status: 'pending' })
           flushNow()
         } else if (chunkType === 'tool_call_delta') {
           const tcId = chunkData?.tool_call_id as string, delta = chunkData?.delta as string ?? ''
@@ -280,7 +284,7 @@ export function useChat() {
           if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { old.args_delta = (old.args_delta || '') + delta; scheduleFlush() } }
         } else if (chunkType === 'tool_call') {
           updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
-          const tcId = chunkData?.tool_call_id as string ?? crypto.randomUUID()
+          const tcId = chunkData?.tool_call_id as string ?? window.crypto.randomUUID()
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
           if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') orderedBlocks[idx] = { ...old, args: (chunkData?.args ?? {}) as Record<string, unknown>, args_delta: undefined } }
           else orderedBlocks.push({ type: 'tool_call', tool_call_id: tcId, tool_name: chunkData?.tool_name as string ?? 'unknown', args: (chunkData?.args ?? {}) as Record<string, unknown>, status: 'pending' })
@@ -290,6 +294,11 @@ export function useChat() {
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
           if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') orderedBlocks[idx] = { ...old, result: chunkData?.result, status: isToolResultError(chunkData?.result) ? 'error' : 'complete', args_delta: undefined } }
           flushNow()
+        } else if (chunkType === 'tool_result_pending') {
+          // Server signals tool is executing — mark block as actively running (already pending, just UI feedback)
+          const tcId = chunkData?.tool_call_id as string
+          const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
+          if (idx !== -1) scheduleFlush()
         } else if (chunkType === 'summarize') {
           orderedBlocks.push({ type: 'summarize', savedTokens: Number(chunkData?.savedTokens ?? 0), totalTokens: Number(chunkData?.totalTokens ?? 0) })
           flushNow()
@@ -301,9 +310,9 @@ export function useChat() {
           finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
-        } else if (chunkType === 'inject_resume') {
-          const injectedText = chunkText || (chunkData?.injectedText as string) || ''
-          if (injectedText && isMountedRef.current) { isRunningRef.current = false; run(injectedText, undefined, resolvedThreadId, true) }
+        } else if (chunkType === 'inject_queued') {
+          // Inject queued server-side — no restart needed, loop continues
+          console.debug('[useChat] inject queued:', chunkText)
         } else if (chunkType === 'token_update') {
           if (chunkData?.accumulatedTokens !== undefined) updateThreadTokens({ threadId: resolvedThreadId, session: Number(chunkData.accumulatedTokens) })
           if (chunkData?.lifetimeTokens !== undefined) updateThreadTokens({ threadId: resolvedThreadId, lifetime: Number(chunkData.lifetimeTokens) })
@@ -315,17 +324,16 @@ export function useChat() {
           const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'idle' })
+          setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
         }
       }
 
-      updateThreadRunState({ threadId: resolvedThreadId, state: 'streaming' })
-      updateThreadRunState({ threadId: resolvedThreadId, state: 'thinking' })
+      // State already set to 'thinking' on line 235 — do not re-set here to avoid trampling 'tool-calling' state
       try {
         await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments, startTime: startTimeVal }, processChunk)
       } catch (err: unknown) {
         if (!isMountedRef.current) return
-        const isCur = resolvedThreadId === activeStreamThreadIdRef.current
-        if (isCur && flushRafRef.current !== null) { cancelAnimationFrame(flushRafRef.current); flushRafRef.current = null }
+        const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
         assistantIsStreaming = false
         const errorMsg = err instanceof Error ? err.message : String(err)
         const isCrashError = errorMsg.includes('Utility worker'), isAbortError = (err instanceof Error && err.name === 'AbortError') || errorMsg === 'terminated' || errorMsg.includes('aborted')
@@ -339,8 +347,8 @@ export function useChat() {
         }
       }
     } finally {
+      isRunningMapRef.current[resolvedThreadId] = false
       if (activeRunIdRef.current === runId) {
-        isRunningRef.current = false
         setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
       }
     }

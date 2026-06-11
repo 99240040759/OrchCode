@@ -1,6 +1,6 @@
 import Parser from 'web-tree-sitter'
 import { join } from 'node:path'
-import { app } from 'electron'
+
 export type Language = Parser.Language
 export type Node = Parser.SyntaxNode
 const EXT_TO_WASM: Record<string, string> = {
@@ -24,9 +24,11 @@ export async function getParserForExtension(ext: string): Promise<Parser | null>
   if (!wasmFile) return null
   if (!isInitialized) { await Parser.init(); isInitialized = true }
   const parser = new Parser()
-  const isPackaged = process.env.IS_PACKAGED === 'true' || (app && app.isPackaged)
+  let electronApp: any
+  try { electronApp = require('electron').app } catch {}
+  const isPackaged = process.env.IS_PACKAGED === 'true' || (electronApp && electronApp.isPackaged)
   const resourcesPath = process.env.RESOURCES_PATH || process.resourcesPath
-  const appPath = process.env.APP_PATH || (app && app.getAppPath()) || process.cwd()
+  const appPath = process.env.APP_PATH || (electronApp && electronApp.getAppPath()) || process.cwd()
   const wasmsDir = isPackaged ? join(resourcesPath, 'wasms') : join(appPath, 'resources', 'wasms')
   const Lang = await Parser.Language.load(join(wasmsDir, wasmFile))
   parser.setLanguage(Lang)
@@ -53,36 +55,4 @@ export function findSyntaxErrors(node: Node): { line: number; column: number; te
   walk(node)
   return errors
 }
-export interface FileSymbol { name: string; type: 'class' | 'function' | 'method' | 'interface'; startLine: number; endLine: number }
-export function getFileOutline(node: Node): FileSymbol[] {
-  const outline: FileSymbol[] = []
-  function walk(n: Node) {
-    const t = n.type
-    const isClass = t.includes('class_declaration') || t.includes('interface_declaration') || t.includes('struct_specifier') || t === 'struct_item'
-    const isFunc = t.includes('function_declaration') || t.includes('function_definition') || t === 'method_definition' || t === 'arrow_function' || t === 'generator_function'
-    if (isClass || isFunc) {
-      let name = ''
-      const nameNode = n.childForFieldName ? n.childForFieldName('name') : null
-      if (nameNode) name = nameNode.text
-      else {
-        for (let i = 0; i < n.childCount; i++) {
-          const c = n.child(i)
-          if (c && (c.type === 'identifier' || c.type === 'property_identifier' || c.type.includes('name'))) { name = c.text; break }
-        }
-      }
-      if (name) {
-        outline.push({
-          name,
-          type: isClass ? (t.includes('interface') ? 'interface' : 'class') : (t === 'method_definition' ? 'method' : 'function'),
-          startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1
-        })
-      }
-    }
-    for (let i = 0; i < n.childCount; i++) {
-      const child = n.child(i)
-      if (child) walk(child)
-    }
-  }
-  walk(node)
-  return outline
-}
+

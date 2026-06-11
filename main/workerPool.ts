@@ -20,6 +20,9 @@ class WorkerPool {
     const { shareDBPort } = require('./db')
     log.info(`[workerPool] DB worker restarted. Re-sharing DB ports with ${this.workers.length} workers.`)
     for (const w of this.workers) {
+      // Skip workers currently executing a stream — closing their DB port mid-flight
+      // would reject all pending DB queries. They will receive a fresh port on next stream start.
+      if (this.activeJobs.has(w)) { log.debug(`[workerPool] Skipping DB port reshare for busy worker pid ${w.pid}`); continue }
       try {
         const { port1, port2 } = new MessageChannelMain()
         shareDBPort(port1)

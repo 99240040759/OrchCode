@@ -54,30 +54,20 @@ export async function listInstalledSkills(): Promise<{ name: string; description
 
 export async function initializeSkills(): Promise<void> {
   try {
-    const srcSkillsDir = getSkillsPath()
-    const destSkillsDir = getUserSkillsPath()
-
+    const srcSkillsDir = getSkillsPath(), destSkillsDir = getUserSkillsPath()
     log.info(`[main] Initializing skills: src=${srcSkillsDir} dest=${destSkillsDir}`)
-
-    if (!existsSync(srcSkillsDir)) {
-      log.warn(`[main] Source skills directory does not exist: ${srcSkillsDir}`)
+    if (!existsSync(srcSkillsDir)) { log.warn(`[main] Source skills directory does not exist: ${srcSkillsDir}`); return }
+    const { app } = require('electron'), currentVersion = app.getVersion(), versionFile = join(destSkillsDir, '.skills-version')
+    if (existsSync(versionFile) && (await fs.readFile(versionFile, 'utf-8')).trim() === currentVersion) {
+      log.info('[main] Skills already up to date. Skipping copy.')
       return
     }
-
     await fs.mkdir(destSkillsDir, { recursive: true })
-
     const skillFolders = await fs.readdir(srcSkillsDir, { withFileTypes: true })
     for (const folder of skillFolders) {
-      if (folder.isDirectory()) {
-        const src = join(srcSkillsDir, folder.name)
-        const dest = join(destSkillsDir, folder.name)
-        await fs.cp(src, dest, { recursive: true, force: false })
-      }
+      if (folder.isDirectory()) await fs.cp(join(srcSkillsDir, folder.name), join(destSkillsDir, folder.name), { recursive: true, force: true })
     }
-
+    await fs.writeFile(versionFile, currentVersion, 'utf-8')
     log.info('[main] Skills initialized successfully.')
-  } catch (err) {
-    log.error('[main] Failed to initialize skills:', err)
-    throw err
-  }
+  } catch (err) { log.error('[main] Failed to initialize skills:', err); throw err }
 }

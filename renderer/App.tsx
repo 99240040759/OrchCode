@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import LeftSidebar from './components/LeftSidebar'
-import ThreadList from './components/ThreadList'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from './lib/uiUtils'
 import {
-  sidebarExpandedAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeThreadAtom,
-  hasMessagesAtom, globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom,
+  sidebarExpandedAtom, isArtifactPanelOpenAtom, activeThreadAtom,
+  globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom,
   artifactPanelModeAtom
 } from './store/agentStore'
 import { useChat } from './hooks/useChat'
@@ -22,8 +21,6 @@ function AppInner(): React.JSX.Element {
   const setAvailableModels = useSetAtom(availableModelsAtom)
   const setAuthUser = useSetAtom(authUserAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
-  const activeWorkspace = useAtomValue(activeWorkspaceAtom)
-  const hasMessages = useAtomValue(hasMessagesAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
   const activeThread = useAtomValue(activeThreadAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
@@ -123,15 +120,25 @@ function AppInner(): React.JSX.Element {
       <title>{activeThreadTitle} — Orch Code</title>
       <meta name="description" content="AI pair programming assistant" />
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
-      <LeftSidebar expanded={sidebarExpanded} onStartConversation={() => newConversation()} threadListContent={<ThreadList />} />
+      <ErrorBoundary name="Sidebar">
+        <LeftSidebar />
+      </ErrorBoundary>
       <div className="app-content-wrapper">
         <div className="app-container">
           <main className="workspace-main">
             <div className="split-view-container">
               <div className="chat-pane-wrapper">
-                <ChatPane fullWidth={!isArtifactPanelOpen} onSubmit={(p, a) => run(p, a)} onStop={stop} onOpenArtifacts={() => setArtifactPanelOpen(true)} onOpenWorkspace={openWorkspace} workspaceName={activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle} hasMessages={hasMessages} />
+                <ErrorBoundary name="Chat Panel">
+                  <ChatPane />
+                </ErrorBoundary>
               </div>
-              <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}><React.Suspense fallback={<div className="editor-loading">Loading Artifacts...</div>}><ArtifactPanel /></React.Suspense></div>
+              <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}>
+                <ErrorBoundary name="Artifacts Panel">
+                  <React.Suspense fallback={<div className="editor-loading">Loading Artifacts...</div>}>
+                    <ArtifactPanel />
+                  </React.Suspense>
+                </ErrorBoundary>
+              </div>
             </div>
           </main>
         </div>

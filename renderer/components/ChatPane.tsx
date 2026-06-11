@@ -1,25 +1,30 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { ChevronDown, Code, Loader } from 'lucide-react'
 import TitleBar from './TitleBar'
 import Lottie from 'lottie-react'
 import emptyStateAnimation from '../assets/empty-state.json'
 import InputBar from './InputBar'
 import ChatThread from './ChatThread'
-import { isThreadLoadingAtom } from '../store/agentStore'
+import { isThreadLoadingAtom, isArtifactPanelOpenAtom, hasMessagesAtom, activeWorkspaceAtom, activeThreadAtom } from '../store/agentStore'
+import { useChat } from '../hooks/useChat'
 
-interface ChatPaneProps {
-  fullWidth: boolean
-  onSubmit: (prompt: string, attachments?: any[]) => void
-  onStop: () => void
-  onOpenArtifacts: () => void
-  onOpenWorkspace: () => void
-  workspaceName: string
-  hasMessages: boolean
-}
-
-export const ChatPane: React.FC<ChatPaneProps> = ({ fullWidth, onSubmit, onStop, onOpenArtifacts, onOpenWorkspace, workspaceName, hasMessages }) => {
+export const ChatPane: React.FC = () => {
     const isLoading = useAtomValue(isThreadLoadingAtom)
+    const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
+    const hasMessages = useAtomValue(hasMessagesAtom)
+    const activeWorkspace = useAtomValue(activeWorkspaceAtom)
+    const activeThread = useAtomValue(activeThreadAtom)
+    const { run, stop, openWorkspace } = useChat()
+
+    const fullWidth = !isArtifactPanelOpen
+    const activeThreadTitle = activeThread?.title || 'New Chat'
+    const workspaceName = activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle
+    const onSubmit = (p: string, a?: any[]) => run(p, a)
+    const onStop = () => stop()
+    const onOpenArtifacts = () => setArtifactPanelOpen(true)
+    const onOpenWorkspace = () => openWorkspace()
+
 
     return (
       <div className="chat-pane-root">
