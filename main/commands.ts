@@ -32,6 +32,11 @@ function resolveCommandPath(ctx: any, filePath: string): string {
   const norm = filePath.replace(/\\/g, '/'), clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
   const normArt = ctx.artifactsPath.replace(/\\/g, '/'), win = process.platform === 'win32'
   if (isAbsolute(clean)) {
+    const m = clean.match(/\/conversations\/(session-[a-zA-Z0-9-_]+)\/artifacts\//i)
+    if (m) {
+      const art = join(getConversationPath(m[1]), 'artifacts'), nArt = art.replace(/\\/g, '/')
+      if (win ? clean.toLowerCase().startsWith(nArt.toLowerCase()) : clean.startsWith(nArt)) return assertWithinWorkspace(art, clean)
+    }
     const isArt = win ? clean.toLowerCase().startsWith(normArt.toLowerCase()) : clean.startsWith(normArt)
     return assertWithinWorkspace(isArt ? ctx.artifactsPath : ctx.rootPath, clean)
   }
