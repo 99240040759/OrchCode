@@ -1,7 +1,9 @@
 export function normalizePathOrUrl(url: string): string {
   const clean = url.replace(/\\/g, '/')
-  if (!clean.startsWith('file://') && !clean.startsWith('/') && !clean.match(/^[a-zA-Z]:/)) return url
-  let fmt = clean.replace(/^file:\/\/\/?/, 'file:///').replace(/^file:\/\/\/([a-zA-Z]:)/, 'file:///$1')
+  if (clean.startsWith('#') || (clean.includes(':') && !clean.match(/^[a-zA-Z]:/) && !clean.startsWith('file://'))) return url
+  let fmt = (!clean.startsWith('file://') && !clean.startsWith('/') && !clean.match(/^[a-zA-Z]:/))
+    ? 'file:///' + (clean.startsWith('./') ? clean.slice(2) : clean)
+    : clean.replace(/^file:\/\/\/?/, 'file:///').replace(/^file:\/\/\/([a-zA-Z]:)/, 'file:///$1')
   if (!fmt.startsWith('file:///')) fmt = fmt.startsWith('/') ? 'file://' + fmt : 'file:///' + fmt
   try { fmt = encodeURI(decodeURI(fmt)) } catch { fmt = encodeURI(fmt) }
   return fmt

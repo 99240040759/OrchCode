@@ -510,32 +510,40 @@ export function browserTools(convId: string, multimodal = true) {
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
       try {
-        await wc.executeJavaScript(`
+        const result = await wc.executeJavaScript(`
           (() => {
-            const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
-            if (!doc) throw new Error('Frame not found');
-            let el = doc.querySelector(${JSON.stringify(selector)});
-            if (!el && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
-              el = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+            try {
+              const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
+              if (!doc) throw new Error('Frame not found');
+              let el = null;
+              if (/^[\\d]+$/.test(${JSON.stringify(selector)})) {
+                el = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+              } else {
+                el = doc.querySelector(${JSON.stringify(selector)});
+              }
+              if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
+              el.focus();
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+                || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+              if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && nativeInputValueSetter) {
+                nativeInputValueSetter.call(el, ${JSON.stringify(text)});
+              } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                el.value = ${JSON.stringify(text)};
+              } else {
+                el.textContent = ${JSON.stringify(text)};
+              }
+              el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true }));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return { success: true };
+            } catch (err) {
+              return { success: false, error: err.message };
             }
-            if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
-            el.focus();
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-              || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-            if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && nativeInputValueSetter) {
-              nativeInputValueSetter.call(el, ${JSON.stringify(text)});
-            } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-              el.value = ${JSON.stringify(text)};
-            } else {
-              el.textContent = ${JSON.stringify(text)};
-            }
-            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true }));
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
           })()
         `)
+        if (result && result.success === false) return { success: false, error: result.error }
         await waitForPageLoad(wc)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browser_type] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
@@ -610,18 +618,26 @@ export function browserTools(convId: string, multimodal = true) {
       if (check) return check
       const wc = getOrCreateBrowserWebContents(convId)!
       try {
-        await wc.executeJavaScript(`
+        const result = await wc.executeJavaScript(`
           (() => {
-            const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
-            if (!doc) throw new Error('Frame not found');
-            let target = doc.querySelector(${JSON.stringify(selector)});
-            if (!target && /^[\\d]+$/.test(${JSON.stringify(selector)})) {
-              target = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+            try {
+              const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
+              if (!doc) throw new Error('Frame not found');
+              let target = null;
+              if (/^[\\d]+$/.test(${JSON.stringify(selector)})) {
+                target = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
+              } else {
+                target = doc.querySelector(${JSON.stringify(selector)});
+              }
+              if (!target) throw new Error('Element not found for selector: ' + ${JSON.stringify(selector)});
+              target.click();
+              return { success: true };
+            } catch (err) {
+              return { success: false, error: err.message };
             }
-            if (!target) throw new Error('Element not found for selector: ' + ${JSON.stringify(selector)});
-            target.click();
           })()
         `)
+        if (result && result.success === false) return { success: false, error: result.error }
         await waitForPageLoad(wc)
         return { success: true }
       } catch (e: unknown) { log.error('[tool:browser_click_selector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }

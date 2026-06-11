@@ -26,7 +26,7 @@ const KEEP_LAST_N_MESSAGES = 20
 // blocks in delta.content. We strip these from UI-facing stream (orderedBlocks +
 // text_delta events) but keep raw content.
 class ReasoningStripper {
-  private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>']
+  private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>', '</think>', '</thought>', '</reasoning>', '</thinking>']
   private inBlock = false; private tagBuffer = ''
   process(delta: string): { content: string; reasoning: string } {
     let content = '', reasoning = ''
@@ -37,7 +37,7 @@ class ReasoningStripper {
         else if (this.tagBuffer) {
           this.tagBuffer += ch
           const buf = this.tagBuffer.toLowerCase()
-          if (/^<(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = true; this.tagBuffer = '' }
+          if (/^<\/?(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = !this.tagBuffer.startsWith('</'); this.tagBuffer = '' }
           else if (!ReasoningStripper.TAGS.some(tag => tag.startsWith(buf))) { content += this.tagBuffer; this.tagBuffer = '' }
         } else content += ch
       } else {
@@ -149,7 +149,8 @@ async function buildToolMessages(
     errorResults.length > 0
       ? `One or more tools failed. Diagnose the error from the tool output above. Do NOT repeat the same call unchanged. Adjust your approach, fix the issue, and try again or choose an alternative strategy.`
       : `All tools succeeded. Review the output above. If your goal is complete, stop and summarise what was accomplished. If more steps are needed, continue with the next action immediately without asking for permission.`,
-    `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`
+    `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`,
+    `Provide a single, very brief one-sentence summary of your immediate next step in your normal text response before emitting any tool calls.`
   ].filter(Boolean).join('\n')
 
   const continuationMessages: any[] = [{ role: 'user', content: continuationPrompt }]
@@ -240,6 +241,7 @@ Active Conversation Thread ID: ${threadId}
 ## 1. Identity & Professional Behavior
 - You are Orch Code, a world-class developer assistant designed to write clean, correct, and premium code.
 - Always communicate concisely and professionally. Focus on code accuracy, design elegance, and developer productivity.
+- **Immediate Action Summary:** Before emitting any tool calls, always provide a single, extremely brief one-sentence summary of your immediate next step in your normal text response so the user knows what you are doing.
 
 ## 2. Workspace & Environment Isolation
 - Active Workspace Folder: ${rootPath || 'No workspace directory currently selected.'}
@@ -538,26 +540,22 @@ export async function handleAgentStreamRequest(
             if (argsDelta) send({ type: 'tool_call_delta', payload: { tool_call_id: acc.id, delta: argsDelta }, threadId })
           }
         }
-
-        if (choice.finish_reason === 'tool_calls') {
-          for (const [, acc] of toolCallAccumulators) {
-            if (!acc.id && !acc.name) continue
-            let parsedArgs: Record<string, unknown> = {}
-            try { parsedArgs = JSON.parse(acc.args) } catch {
-              try { parsedArgs = JSON.parse(jsonrepair(acc.args)) } catch {
-                try { parsedArgs = parsePartialJson(acc.args) ?? {} } catch {}
-              }
+      }
+      if (!controller.signal.aborted && toolCallAccumulators.size > 0) {
+        for (const [, acc] of toolCallAccumulators) {
+          if (!acc.id && !acc.name) continue
+          let parsedArgs: Record<string, unknown> = {}
+          try { parsedArgs = JSON.parse(acc.args) } catch {
+            try { parsedArgs = JSON.parse(jsonrepair(acc.args)) } catch {
+              try { parsedArgs = parsePartialJson(acc.args) ?? {} } catch {}
             }
-            hasToolCalls = true
-            stepToolCalls.push({ id: acc.id, name: acc.name, args: parsedArgs })
-            orderedBlocks.push({ type: 'tool_call', tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs, status: 'pending' })
-            send({ type: 'tool_call', payload: { tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs }, threadId })
           }
-          toolCallAccumulators.clear()
-        } else if (choice.finish_reason === 'stop') {
-          // Discard any partial accumulators — model said stop, not tool_calls
-          toolCallAccumulators.clear()
+          hasToolCalls = true
+          stepToolCalls.push({ id: acc.id, name: acc.name, args: parsedArgs })
+          orderedBlocks.push({ type: 'tool_call', tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs, status: 'pending' })
+          send({ type: 'tool_call', payload: { tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs }, threadId })
         }
+        toolCallAccumulators.clear()
       }
 
       // Flush stripper — emit any buffered text that wasn't inside a reasoning block
