@@ -400,13 +400,15 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     description: 'Generates a new image based on a detailed text prompt using the FLUX.2-klein-4b model and saves it as a PNG file directly to the workspace artifacts directory.',
     inputSchema: z.object({
       prompt: z.string().describe('The detailed text prompt describing the image to generate (elements, style, colors, composition).'),
-      width: z.number().int().min(256).max(1440).optional().default(1024).describe('Image width in pixels (default: 1024).'),
-      height: z.number().int().min(256).max(1440).optional().default(1024).describe('Image height in pixels (default: 1024).'),
+      width: z.number().int().min(512).max(1568).optional().default(1024).describe('Image width in pixels (must be a multiple of 16 between 512 and 1568).'),
+      height: z.number().int().min(512).max(1568).optional().default(1024).describe('Image height in pixels (must be a multiple of 16 between 512 and 1568).'),
       seed: z.number().int().optional().default(0).describe('Seed for deterministic generation.'),
       steps: z.number().int().min(1).max(50).optional().default(4).describe('Denoising steps (1-50, default: 4).')
     }),
     execute: async ({ prompt, width, height, seed, steps }) => {
-      log.info(`[tool:generateImage] prompt="${prompt}" size=${width}x${height} seed=${seed} steps=${steps}`)
+      const snap = (v: number) => Math.min(Math.max(Math.round(v / 16) * 16, 512), 1568);
+      const sw = snap(width), sh = snap(height);
+      log.info(`[tool:generateImage] prompt="${prompt}" size=${sw}x${sh} seed=${seed} steps=${steps}`)
       try {
         if (!convId) throw new Error('No active conversation ID provided. Image generation cannot resolve workspace.')
         const ctx = getWorkspaceContext(convId) || (await getOrCreateWorkspaceContext(convId))
@@ -416,7 +418,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         const response = await fetch(`${getApiBaseUrl()}/generate-image`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, width, height, seed, steps })
+          body: JSON.stringify({ prompt, width: sw, height: sh, seed, steps })
         })
         if (!response.ok) { const errText = await response.text(); throw new Error(`Proxy error (HTTP ${response.status}): ${errText}`) }
         const data = await response.json()

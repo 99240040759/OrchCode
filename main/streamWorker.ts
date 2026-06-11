@@ -131,7 +131,7 @@ Active Conversation Thread ID: ${threadId}
 =========================================
 - **When to Plan:** If the request involves major architectural changes, multiple files, complex logic, or significant ambiguity, you MUST write an implementation plan at \`artifacts/implementation_plan.md\` first and wait for the user's approval.
 - **When NOT to Plan:** For simple one-off tasks (small fixes, additions of single functions, formatting adjustments, small scripts), proceed to direct execution immediately without blocking.
-- **Artifacts Directory:** Use the sandboxed directory \`artifacts/\` inside the conversation space for plans. Do not create walkthroughs or task files here; only use it for the implementation plan.
+- **Artifacts Directory:** Write all planning artifacts (including \`implementation_plan.md\`, \`task.md\`, and \`walkthrough.md\`) to the sandboxed directory \`artifacts/\` (e.g. \`artifacts/implementation_plan.md\`, \`artifacts/task.md\`, \`artifacts/walkthrough.md\`). Do NOT write them to the user's workspace root directory.
 
 =========================================
 6. TOOL UTILIZATION PROTOCOLS
@@ -318,6 +318,10 @@ export async function handleAgentStreamRequest(
             }
           }
         }
+        const assistantTokens = countTokens(assistantContent, modelType)
+        const toolCallsTokens = toolCallAccumulators.size ? countTokens(JSON.stringify(Array.from(toolCallAccumulators.values())), modelType) : 0
+        const activeTokens = stepInputTokens + assistantTokens + toolCallsTokens
+        send({ type: 'token_update', payload: { accumulatedTokens: activeTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded + assistantTokens + toolCallsTokens }, threadId })
         if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') {
           for (const [, accumulated] of toolCallAccumulators.entries()) {
             if (accumulated.id || accumulated.name) {
@@ -422,38 +426,32 @@ export async function handleAgentStreamRequest(
           } catch { outToks += countTokens(formattedOutput, modelType) }
         } else { outToks += countTokens(formattedOutput, modelType) }
         toolOutputsTokens += outToks
+        lifetimeTokensAdded += outToks
+        currentContextTokens += outToks
+        send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens + lifetimeTokensAdded }, threadId })
       }
-      currentContextTokens += toolOutputsTokens
-      if (currentContextTokens >= SUMMARISE_THRESHOLD && !threadCompactionLocks.get(threadId)) {
-        threadCompactionLocks.set(threadId, true)
-        try {
-          log.info(`[stream] Context at ${currentContextTokens} tokens — auto-summarising`)
-          const summary = await summariseContext(messages)
-          if (summary) {
-            await compactThreadHistory(threadId, summary)
-            await updateThreadTokens(threadId, 0, lifetimeTokensAdded)
-            persistedLifetimeTokens += lifetimeTokensAdded
-            orderedBlocks.push({ type: 'summarize' as any, savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens } as any)
-            send({ type: 'summarize', payload: { savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens }, threadId })
-            lifetimeTokensAdded = 0
-            messages.length = 0
-            const freshHistory = await getThreadMessages(threadId)
-            const { messages: reloaded } = await buildMessagesFromHistory(freshHistory, modelSupportsVision, modelSupportsNativeFiles)
-            messages.push(...sanitizeMessages(reloaded))
-            const newHistoryTokens = countMessagesTokens(messages, modelType)
-            const newSystemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, newHistoryTokens)
-            const newFullSystemInstruction = newSystemInstruction + (systemInstructionSuffix || '')
-            const newSysPromptTokens = countTokens(newFullSystemInstruction, modelType)
-            const newToolSchemaTokens = activeTools ? countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType) : 0
-            currentContextTokens = newHistoryTokens + newSysPromptTokens + newToolSchemaTokens
-            await setThreadAccumulatedTokens(threadId, currentContextTokens)
-            send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens }, threadId })
-          }
-        } finally { threadCompactionLocks.delete(threadId) }
-      }
-
       assistantContent = ''
       saveProgress(true)
+    }
+
+    if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Final success saveMessage error:', saveErr) } }
+
+    if (currentContextTokens >= SUMMARISE_THRESHOLD && !threadCompactionLocks.get(threadId)) {
+      threadCompactionLocks.set(threadId, true)
+      try {
+        log.info(`[stream] Context at ${currentContextTokens} tokens — auto-summarising`)
+        const summary = await summariseContext(messages)
+        if (summary) {
+          await compactThreadHistory(threadId, summary)
+          await updateThreadTokens(threadId, 0, lifetimeTokensAdded)
+          persistedLifetimeTokens += lifetimeTokensAdded
+          orderedBlocks.push({ type: 'summarize' as any, savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens } as any)
+          send({ type: 'summarize', payload: { savedTokens: currentContextTokens, totalTokens: persistedLifetimeTokens }, threadId })
+          currentContextTokens = countTokens(summary, modelType)
+          await setThreadAccumulatedTokens(threadId, currentContextTokens)
+          send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: persistedLifetimeTokens }, threadId })
+        }
+      } finally { threadCompactionLocks.delete(threadId) }
     }
 
     if (!orderedBlocks.some(x => x.type === 'duration')) orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
@@ -467,7 +465,6 @@ export async function handleAgentStreamRequest(
       },
       threadId
     })
-    if (assistantContent || orderedBlocks.length > 0) { try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '', data: JSON.stringify(orderedBlocks) }) } catch (saveErr) { log.error('[stream] Final success saveMessage error:', saveErr) } }
   } catch (err: any) {
     const error = err as Error & { name?: string }
     const injectReason = controller.signal.reason as Error | undefined
