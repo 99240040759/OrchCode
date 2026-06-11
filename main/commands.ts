@@ -30,9 +30,10 @@ const convIdSchema = z.string().min(1).max(256)
 
 function resolveCommandPath(ctx: any, filePath: string): string {
   const norm = filePath.replace(/\\/g, '/'), clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
+  const normArt = ctx.artifactsPath.replace(/\\/g, '/'), win = process.platform === 'win32'
   if (isAbsolute(clean)) {
-    if (clean.startsWith(ctx.artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, clean)
-    return assertWithinWorkspace(ctx.rootPath, clean)
+    const isArt = win ? clean.toLowerCase().startsWith(normArt.toLowerCase()) : clean.startsWith(normArt)
+    return assertWithinWorkspace(isArt ? ctx.artifactsPath : ctx.rootPath, clean)
   }
   if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/??artifacts\//, ''))
   return assertWithinWorkspace(ctx.rootPath, clean)

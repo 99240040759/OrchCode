@@ -28,27 +28,44 @@ const KEEP_LAST_N_MESSAGES = 20
 class ReasoningStripper {
   private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>', '</think>', '</thought>', '</reasoning>', '</thinking>']
   private inBlock = false; private tagBuffer = ''
-  process(delta: string): { content: string; reasoning: string } {
-    let content = '', reasoning = ''
+  process(delta: string): Array<{ type: 'text' | 'reasoning'; content: string }> {
+    const res: Array<{ type: 'text' | 'reasoning'; content: string }> = []
+    let currentType: 'text' | 'reasoning' = this.inBlock ? 'reasoning' : 'text', currentVal = ''
+    const push = () => { if (currentVal) { res.push({ type: currentType, content: currentVal }); currentVal = '' } }
     for (let i = 0; i < delta.length; i++) {
       const ch = delta[i]
       if (!this.inBlock) {
-        if (ch === '<') this.tagBuffer = '<'
+        if (ch === '<') { push(); this.tagBuffer = '<' }
         else if (this.tagBuffer) {
           this.tagBuffer += ch
           const buf = this.tagBuffer.toLowerCase()
-          if (/^<\/?(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = !this.tagBuffer.startsWith('</'); this.tagBuffer = '' }
-          else if (!ReasoningStripper.TAGS.some(tag => tag.startsWith(buf))) { content += this.tagBuffer; this.tagBuffer = '' }
-        } else content += ch
+          if (/^<\/?(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) {
+            this.inBlock = !this.tagBuffer.startsWith('</'); currentType = this.inBlock ? 'reasoning' : 'text'; this.tagBuffer = ''
+          } else if (!ReasoningStripper.TAGS.some(tag => tag.startsWith(buf))) {
+            if (currentType !== 'text') { push(); currentType = 'text' }
+            currentVal += this.tagBuffer; this.tagBuffer = ''
+          }
+        } else {
+          if (currentType !== 'text') { push(); currentType = 'text' }
+          currentVal += ch
+        }
       } else {
         this.tagBuffer += ch
-        if (/<\/(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) { this.inBlock = false; this.tagBuffer = '' }
-        else reasoning += ch
+        if (/<\/(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) {
+          push(); this.inBlock = false; currentType = 'text'; this.tagBuffer = ''
+        } else {
+          if (currentType !== 'reasoning') { push(); currentType = 'reasoning' }
+          currentVal += ch
+        }
       }
     }
-    if (!this.inBlock && this.tagBuffer && !this.tagBuffer.startsWith('<')) { content += this.tagBuffer; this.tagBuffer = '' }
-    if (reasoning.includes('</')) reasoning = reasoning.replace(/<\/?(think|thought|reasoning|thinking)>/gi, '')
-    return { content, reasoning }
+    if (!this.inBlock && this.tagBuffer && !this.tagBuffer.startsWith('<')) {
+      if (currentType !== 'text') { push(); currentType = 'text' }
+      currentVal += this.tagBuffer; this.tagBuffer = ''
+    }
+    push()
+    for (const seg of res) { if (seg.type === 'reasoning' && seg.content.includes('</')) seg.content = seg.content.replace(/<\/?(think|thought|reasoning|thinking)>?/gi, '') }
+    return res.filter(s => s.content)
   }
   flush(): { content: string; reasoning: string } {
     const content = (!this.inBlock && !this.tagBuffer.startsWith('<')) ? this.tagBuffer : ''
@@ -498,20 +515,20 @@ export async function handleAgentStreamRequest(
         if (delta?.content) {
           stepAssistantContent += delta.content
           assistantContent += delta.content
-          const uiDelta = stripper.process(delta.content)
-          if (uiDelta.content) {
-            const last = orderedBlocks[orderedBlocks.length - 1]
-            if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: uiDelta.content })
-            else (last as any).content += uiDelta.content
-            send({ type: 'text_delta', payload: uiDelta.content, threadId })
-            void saveProgress(false)
+          const segments = stripper.process(delta.content)
+          for (const seg of segments) {
+            if (seg.type === 'text') {
+              const last = orderedBlocks[orderedBlocks.length - 1]
+              if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: seg.content })
+              else (last as any).content += seg.content
+              send({ type: 'text_delta', payload: seg.content, threadId })
+            } else if (seg.type === 'reasoning') {
+              const last = orderedBlocks[orderedBlocks.length - 1]
+              if (!last || last.type !== 'reasoning') orderedBlocks.push({ type: 'reasoning', content: seg.content })
+              else (last as any).content += seg.content
+            }
           }
-          if (uiDelta.reasoning) {
-            const last = orderedBlocks[orderedBlocks.length - 1]
-            if (!last || last.type !== 'reasoning') orderedBlocks.push({ type: 'reasoning', content: uiDelta.reasoning })
-            else (last as any).content += uiDelta.reasoning
-            void saveProgress(false)
-          }
+          if (segments.length > 0) void saveProgress(false)
         }
         const rDelta = delta?.reasoning_content || delta?.reasoning
         if (rDelta) {
