@@ -197,6 +197,7 @@ async function refreshSessionIfNeeded(): Promise<void> {
   await saveSession(currentSession)
   broadcastUserStatus(currentSession.user)
 }
+let refreshIntervalId: NodeJS.Timeout | null = null
 export async function initAuth() {
   currentSession = await loadSession()
   if (currentSession) {
@@ -204,6 +205,9 @@ export async function initAuth() {
     broadcastUserStatus(currentSession.user)
     await refreshSessionIfNeeded()
   }
-  setInterval(() => { if (currentSession) refreshSessionIfNeeded() }, 5 * 60 * 1000)
+  if (refreshIntervalId) clearInterval(refreshIntervalId)
+  refreshIntervalId = setInterval(() => { if (currentSession) refreshSessionIfNeeded() }, 5 * 60 * 1000)
 }
-export function cleanupAuth() {}
+export function cleanupAuth() {
+  if (refreshIntervalId) { clearInterval(refreshIntervalId); refreshIntervalId = null }
+}

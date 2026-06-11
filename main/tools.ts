@@ -1,4 +1,4 @@
-import { tool } from 'ai'
+export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import { join, relative, extname, dirname, basename } from 'node:path'
@@ -11,7 +11,8 @@ import {
 } from './workspace'
 import WindowManager, { getConversationScreenshotsPath, tavilyLimiter } from './utils'
 import { requireAuthToken } from './auth'
-import { getParserForExtension, getTokens } from './astParser'
+import { getParserForExtension, getTokens, findSyntaxErrors, getFileOutline } from './astParser'
+
 
 
 export const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
@@ -92,8 +93,7 @@ const BLOCKED_EXECUTABLES = new Set([
   'mkfs', 'fdisk', 'format', 'dd',
   'passwd', 'chroot',
   'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
-  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh',
-  'node', 'python', 'python3', 'perl', 'ruby', 'php'
+  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
 ])
 const WRAPPERS = new Set(['env', 'npx', 'pnpx', 'yarn', 'npm', 'pnpm', 'bun', 'sudo', 'su', 'runas', 'gksudo'])
 
@@ -123,19 +123,21 @@ function resolveWorkspace(convId: string) {
 }
 
 // --- Browser Tools Helpers ---
-function getBrowserWebContents() {
-  const bv = WindowManager.getBrowserView()
-  return bv ? bv.webContents : null
+function getOrCreateBrowserWebContents(convId: string) {
+  let bv = WindowManager.getBrowserViewForConversation(convId)
+  if (!bv) {
+    const { WebContentsView } = require('electron')
+    const partition = `persist:conversation_${convId}`
+    const newBv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } }) as import('electron').WebContentsView
+    newBv.setBounds({ x: 0, y: 0, width: 1024, height: 768 })
+    WindowManager.setBrowserViewForConversation(convId, newBv)
+    bv = newBv
+  }
+  return bv!.webContents
 }
 
 function checkBrowserViewActive(convId?: string) {
-  if (!WindowManager.getBrowserView()) {
-    return { success: false, error: 'The Browser panel is not currently open in the Artifacts screen. Please click the Browser icon in the right side panel to open it before using browser tools.' }
-  }
-  const ownerConvId = WindowManager.getBrowserConversationId()
-  if (convId && ownerConvId && ownerConvId !== convId) {
-    return { success: false, error: 'Browser is currently owned by another conversation. The user must switch to this conversation and open the browser panel first.' }
-  }
+  if (convId) getOrCreateBrowserWebContents(convId)
   return null
 }
 
@@ -147,8 +149,10 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   const listDir = tool({
     description: 'Lists all files, subdirectories, and their metadata directly inside a directory within the active workspace. Useful for understanding project layout, checking folder structures, and locating files. Returns file sizes and sub-item counts.',
     inputSchema: z.object({ directoryPath: z.string().describe('The absolute, fully-qualified system path of the directory to list. Must reside within the workspace boundaries.') }),
-    execute: async ({ directoryPath }) => {
+    execute: async (args: any) => {
       try {
+        const directoryPath = args.directoryPath || args.path
+        if (!directoryPath) throw new Error('directoryPath parameter is required')
         const ctx = resolve(), safePath = safe(directoryPath)
         const rawEntries = await fs.readdir(safePath, { withFileTypes: true })
         const entries = await Promise.all(rawEntries.map(async (entry) => {
@@ -176,8 +180,11 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
       startLine: z.number().int().min(1).optional().describe('The 1-indexed line number to start reading from (inclusive). Defaults to 1.'),
       endLine: z.number().int().min(1).optional().describe('The 1-indexed line number to stop reading at (inclusive). Range cannot exceed 800 lines. Defaults to startLine + 799.')
     }),
-    execute: async ({ absolutePath, startLine, endLine }) => {
+    execute: async (args: any) => {
       try {
+        const absolutePath = args.absolutePath || args.path || args.filePath || args.targetFile
+        if (!absolutePath) throw new Error('absolutePath parameter is required')
+        const { startLine, endLine } = args
         const safePath = safe(absolutePath), stat = await fs.stat(safePath)
         if (!stat.isFile()) throw new Error(`Not a file: "${safePath}"`)
         if (stat.size > MAX_FILE_READ_BYTES) throw new Error('File exceeds 25 MB read limit.')
@@ -199,7 +206,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => {
       if (output.isBinary && output.mimeType?.startsWith('image/') && output.base64Content) {
         if (!modelSupportsVision) return { type: 'content', value: [{ type: 'text', text: `Binary image file: ${output.absolutePath} (${output.sizeBytes} bytes). Vision not supported.` }], isBinary: true }
-        return { type: 'content', value: [{ type: 'image-data', data: output.base64Content, mediaType: output.mimeType }, { type: 'text', text: `Successfully analyzed binary image: ${output.absolutePath}` }], isBinary: true }
+        return { type: 'image-data', data: output.base64Content, mediaType: output.mimeType }
       }
       const text = `[METADATA: readStart=${output.readStart}, readEnd=${output.readEnd}]\n` + (output.content || output.error || 'No content')
       return { type: 'content', value: [{ type: 'text', text }], isBinary: output.isBinary }
@@ -209,8 +216,13 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
   const writeToFile = tool({
     description: 'Creates a new file in the workspace or overwrites an existing one if the overwrite flag is true. Automatically creates any parent directories if they do not exist.',
     inputSchema: z.object({ targetFile: z.string().describe('The absolute, fully-qualified system path where the file should be created.'), codeContent: z.string().describe('The complete string content to write into the file.'), overwrite: z.boolean().default(false).describe('Set to true to explicitly overwrite the file if it already exists; otherwise, will error.') }),
-    execute: async ({ targetFile, codeContent, overwrite }) => {
+    execute: async (args: any) => {
       try {
+        const targetFile = args.targetFile || args.path || args.filePath || args.absolutePath
+        if (!targetFile) throw new Error('targetFile parameter is required')
+        const codeContent = args.codeContent ?? args.content ?? args.code ?? args.text ?? args.data
+        if (codeContent === undefined) throw new Error('codeContent parameter is required')
+        const overwrite = !!(args.overwrite ?? false)
         const ctx = resolve(), safePath = safe(targetFile)
         let exists = false
         try { await fs.stat(safePath); exists = true } catch (err) { log.debug('[fileTools] File existence check failed:', err) }
@@ -218,10 +230,25 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         await fs.mkdir(dirname(safePath), { recursive: true })
         await fs.writeFile(safePath, codeContent, 'utf-8')
         invalidateWorkspaceFilesCache(ctx.rootPath)
-        return { success: true, absolutePath: safePath, created: !exists }
+        let syntaxErrors: any[] = []
+        try {
+          const ext = extname(safePath), parser = await getParserForExtension(ext)
+          if (parser) {
+            const tree = parser.parse(codeContent)
+            if (tree.rootNode.hasError()) syntaxErrors = findSyntaxErrors(tree.rootNode)
+          }
+        } catch (e) { log.warn('[writeToFile syntax check] failed:', e) }
+        return { success: true, absolutePath: safePath, created: !exists, syntaxErrors }
       } catch (err: any) { log.error('[tool:writeToFile] error:', err.message); return { success: false, error: err.message } }
     },
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully wrote to file ${output.absolutePath}` }] })
+    toModelOutput: ({ output }: any) => {
+      if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
+      let msg = `Successfully wrote to file ${output.absolutePath}.`
+      if (output.syntaxErrors?.length) {
+        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
+      }
+      return { type: 'content', value: [{ type: 'text', text: msg }] }
+    }
   })
  
   const multiReplaceFileContent = tool({
@@ -234,15 +261,39 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         replacementContent: z.string().describe('The new content to insert in place of the targetContent.')
       })).min(1).describe('The list of separate, non-adjacent edit chunks to apply.')
     }),
-    execute: async ({ targetFile, instruction: _instruction, replacementChunks }) => {
+    execute: async (args: any) => {
       try {
+        const targetFile = args.targetFile || args.path || args.filePath || args.absolutePath
+        if (!targetFile) throw new Error('targetFile parameter is required')
+        const rawChunks = args.replacementChunks || args.chunks || args.edits || args.replacements
+        if (!rawChunks || !Array.isArray(rawChunks)) throw new Error('replacementChunks parameter is required and must be an array')
+        const replacementChunks = rawChunks.map((c: any) => ({
+          targetContent: c.targetContent ?? c.oldText ?? c.find ?? c.search ?? '',
+          replacementContent: c.replacementContent ?? c.newText ?? c.replace ?? ''
+        }))
         const safePath = safe(targetFile), ctx = resolve()
         await applyEditsToFile(safePath, replacementChunks)
         invalidateWorkspaceFilesCache(ctx.rootPath)
-        return { success: true, absolutePath: safePath, chunksApplied: replacementChunks.length }
-      } catch (err: any) { log.error('[tool:multiReplaceFileContent] error:', err.message); return { success: false, error: err.message } }
+        let syntaxErrors: any[] = []
+        try {
+          const content = await fs.readFile(safePath, 'utf-8')
+          const ext = extname(safePath), parser = await getParserForExtension(ext)
+          if (parser) {
+            const tree = parser.parse(content)
+            if (tree.rootNode.hasError()) syntaxErrors = findSyntaxErrors(tree.rootNode)
+          }
+        } catch (e) { log.warn('[multiReplaceFileContent syntax check] failed:', e) }
+        return { success: true, absolutePath: safePath, chunksApplied: replacementChunks.length, syntaxErrors }
+      } catch (err: any) { const errMsg = err?.message || String(err || 'Unknown error'); log.error('[tool:multiReplaceFileContent] error:', errMsg); return { success: false, error: errMsg } }
     },
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully applied ${output.chunksApplied} edits to file ${output.absolutePath}` }] })
+    toModelOutput: ({ output }: any) => {
+      if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
+      let msg = `Successfully applied ${output.chunksApplied} edits to file ${output.absolutePath}.`
+      if (output.syntaxErrors?.length) {
+        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
+      }
+      return { type: 'content', value: [{ type: 'text', text: msg }] }
+    }
   })
 
   const searchWorkspace = tool({
@@ -253,7 +304,7 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
         const ctx = resolve(), runDir = ctx.rootPath, args = ['-n', '-I', '--smart-case']
         if (includes) includes.forEach(g => args.push('-g', g))
         args.push('--', query, runDir)
-        const result = await execa(rgPath, args, { shell: false, cwd: runDir, reject: false, timeout: 10000 })
+        const result = await execa(rgPath.replace('app.asar', 'app.asar.unpacked'), args, { shell: false, cwd: runDir, reject: false, timeout: 10000 })
         if (result.exitCode !== 0 && result.stdout.trim() === '') {
           if (result.exitCode === 1) return { success: true, results: 'No matches found.' }
           if ((result as any).code === 'ENOENT' || result.stderr?.includes('not found') || result.stderr?.includes('No such file')) return { success: false, error: 'ripgrep not found.' }
@@ -285,18 +336,17 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
       cwd: z.string().optional().describe('Optional absolute path to run the command in. Must be within the workspace root.'),
       waitMsBeforeAsync: z.number().int().min(0).max(180000).optional().default(60000).describe('Timeout in milliseconds before the process is killed or sent to background (max 180000, defaults to 60000).')
     }),
-    execute: async ({ commandLine, cwd, waitMsBeforeAsync }) => {
+    execute: async (args: any) => {
       try {
-        const ctx = resolveWorkspace(convId)
-        const runDir = cwd ? assertWithinWorkspace(ctx.rootPath, cwd, convId) : ctx.rootPath
-        const tokens = tokenizeCommand(commandLine.trim())
-        const executable = tokens[0]
-        const args = tokens.slice(1)
+        const commandLine = args.commandLine || args.command || args.cmd
+        if (!commandLine) return { success: false, stdout: '', stderr: 'commandLine parameter is required.', exitCode: 1 }
+        const ctx = resolveWorkspace(convId), runDir = args.cwd ? assertWithinWorkspace(ctx.rootPath, args.cwd, convId) : ctx.rootPath
+        const tokens = tokenizeCommand(commandLine.trim()), executable = tokens[0], runArgs = tokens.slice(1)
         if (!executable) return { success: false, stdout: '', stderr: 'Empty command.', exitCode: 1 }
         const blockedCmd = checkBlocklist(tokens)
         if (blockedCmd) return { success: false, stdout: '', stderr: `Command blocked: '${blockedCmd}' is not permitted.`, exitCode: 1 }
-        log.info(`[tool:runCommand] cwd=${runDir} exe=${executable} args=${JSON.stringify(args)}`)
-        const result = await execa(executable, args, { shell: false, cwd: runDir, timeout: waitMsBeforeAsync ?? 60000, reject: false, env: { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' } })
+        log.info(`[tool:runCommand] cwd=${runDir} exe=${executable} args=${JSON.stringify(runArgs)}`)
+        const result = await execa(executable, runArgs, { shell: false, cwd: runDir, timeout: args.waitMsBeforeAsync ?? 60000, reject: false, env: { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' } })
         return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, success: result.exitCode === 0, cwd: runDir }
       } catch (err: any) {
         log.error('[tool:runCommand] error:', err.message)
@@ -390,10 +440,36 @@ export function createCoreTools(convId: string, modelSupportsVision = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.message }] })
   })
 
+  const getFileOutlineTool = tool({
+    description: 'Extracts a structural outline of a source code file (classes, interfaces, functions, methods, and types) with their start/end line numbers. Extremely token-efficient for understanding large files without reading their full contents.',
+    inputSchema: z.object({ absolutePath: z.string().describe('The absolute, fully-qualified system path of the target file to analyze.') }),
+    execute: async (args: any) => {
+      try {
+        const absolutePath = args.absolutePath || args.path || args.filePath || args.absolutePath
+        if (!absolutePath) throw new Error('absolutePath parameter is required')
+        const safePath = safe(absolutePath), content = await fs.readFile(safePath, 'utf-8')
+        const ext = extname(safePath), parser = await getParserForExtension(ext)
+        if (!parser) throw new Error(`Unsupported file type for code outlining: "${ext}"`)
+        const tree = parser.parse(content), symbols = getFileOutline(tree.rootNode), syntaxErrors = findSyntaxErrors(tree.rootNode)
+        return { success: true, absolutePath: safePath, symbols, syntaxErrors }
+      } catch (err: any) { log.error('[tool:getFileOutline] error:', err.message); return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => {
+      if (output.success === false) return { type: 'content', value: [{ type: 'text', text: `Error: ${output.error}` }] }
+      let msg = `Structural outline of ${output.absolutePath}:\n`
+      if (!output.symbols?.length) msg += 'No classes or functions defined.\n'
+      else msg += output.symbols.map((s: any) => `[${s.type.toUpperCase()}] ${s.name} (Lines ${s.startLine}-${s.endLine})`).join('\n') + '\n'
+      if (output.syntaxErrors?.length) {
+        msg += `\n⚠️ WARNING: File contains syntax errors:\n` + output.syntaxErrors.map((e: any) => `Line ${e.line}, Col ${e.column}: ${e.text}`).join('\n')
+      }
+      return { type: 'content', value: [{ type: 'text', text: msg }] }
+    }
+  })
+
   return {
     listDir, viewFile, writeToFile, multiReplaceFileContent, searchWorkspace,
     runCommand,
-    searchWeb, generateImage
+    searchWeb, generateImage, getFileOutline: getFileOutlineTool
   }
 }
 
@@ -424,9 +500,9 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserNavigate] url="${url}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
-        const target = url.startsWith('http') ? url : `https://${url}`
+        const target = (url.startsWith('http') || url.startsWith('file:')) ? url : (/^[a-zA-Z]:[/\\]/.test(url) ? `file:///${url.replace(/\\/g, '/')}` : (url.startsWith('/') ? `file://${url}` : `https://${url}`))
         await wc.loadURL(target)
         await waitForPageLoad(wc)
         return { success: true, url: wc.getURL() }
@@ -446,7 +522,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserType] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
         await wc.executeJavaScript(`
           (() => {
@@ -488,7 +564,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserScroll] direction="${direction}" amount=${amount ?? 400}`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
         const dist = amount || 400
         let x = 0, y = 0
@@ -510,7 +586,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info('[tool:browserScreenshot] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
         const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
@@ -546,7 +622,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info(`[tool:browserClickSelector] selector="${selector}"`)
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
         await wc.executeJavaScript(`
           (() => {
@@ -574,7 +650,7 @@ export function browserTools(convId: string, modelSupportsVision = true) {
       log.info('[tool:browserGetPageContent] executing...')
       const check = checkBrowserViewActive(convId)
       if (check) return check
-      const wc = getBrowserWebContents()!
+      const wc = getOrCreateBrowserWebContents(convId)!
       try {
         const result = await wc.executeJavaScript(`
           (() => {

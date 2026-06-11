@@ -11,10 +11,11 @@ import {
 } from '../store/agentStore'
 import ToolCallBlock from './ToolCallBlock'
 import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStore'
-import { ChevronDown, AlertTriangle, Copy, Check, Loader } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { decodeBase64Utf8 } from '../lib/sharedUtils'
+import logoImg from '../assets/logo.png'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,100 +25,48 @@ const StreamingMarkdown = ({ content, targetId, isStreaming }: { content: string
   return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
 }
 
-// ─── ReasoningBlock ──────────────────────────────────────────────────────────
+// ─── ToolGroupBlock ──────────────────────────────────────────────────────────
 
-const ReasoningBlock = ({ content, durationMs, isStreaming, targetId }: { content: string; durationMs?: number; isStreaming?: boolean; targetId: string }) => {
-  const [isOpen, setIsOpen] = React.useState(!!isStreaming)
-  const [userToggled, setUserToggled] = React.useState(false)
-  const scrollRef = React.useRef<HTMLDivElement>(null)
-
-  React.useEffect(() => {
-    if (!userToggled) setIsOpen(!!isStreaming)
-  }, [isStreaming, userToggled])
-
-  React.useEffect(() => {
-    let cb: (() => void) | undefined
-    if (isStreaming) {
-      const raf = requestAnimationFrame(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      })
-      cb = () => cancelAnimationFrame(raf)
-    }
-    return cb
-  }, [content, isStreaming])
-
-  const seconds = durationMs ? Math.round(durationMs / 1000).toString() : ''
-  const title = isStreaming ? `Thinking${seconds ? ` for ${seconds}s` : ''}` : `Thought for ${seconds}s`
-
+const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
+  if (tools.length === 1) {
+    const isBlock = tools[0].tool_name === 'runCommand'
+    return <div style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined, margin: isBlock ? '6px 0' : 0, alignItems: 'center' }}><ToolCallBlock toolCall={tools[0]} /></div>
+  }
   return (
-    <details
-      open={isOpen}
-      onToggle={(e) => {
-        const open = (e.target as HTMLDetailsElement).open
-        if (open !== isOpen) { setUserToggled(true); setIsOpen(open) }
-      }}
-      className="chat-reasoning-details"
-    >
-      <summary className="chat-reasoning-summary">
-        <span>{title}</span>
-        <ChevronDown size={14} className="chat-reasoning-chevron" />
-      </summary>
-      <div ref={scrollRef} className="assistant-content chat-reasoning-body">
-        <StreamingMarkdown content={content || 'Thinking...'} targetId={targetId} isStreaming={!!isStreaming} />
-      </div>
-    </details>
+    <div className="chat-tool-group-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: 0, alignItems: 'center', width: '100%' }}>
+      {tools.map((t, idx) => {
+        const isBlock = t.tool_name === 'runCommand'
+        return <div key={t.id || idx} style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined }}><ToolCallBlock toolCall={t} /></div>
+      })}
+    </div>
   )
 }
 
-// ─── ToolGroupBlock ──────────────────────────────────────────────────────────
+// ─── ActiveGeneratingSpinner ──────────────────────────────────────────────────
 
-const ToolGroupBlock = ({ tools, isStreaming, isLast }: { tools: ToolCallEntry[]; isStreaming?: boolean; isLast: boolean }) => {
-  const isPending = tools.some(t => t.status === 'pending')
-  const [isOpen, setIsOpen] = React.useState(isPending || (isLast && !!isStreaming))
-  const [userToggled, setUserToggled] = React.useState(false)
-  const prevToolCountRef = React.useRef(tools.length)
+const ActiveGeneratingSpinner = ({ startTime }: { startTime?: number }) => {
+  const [elapsed, setElapsed] = React.useState(0)
+  const startRef = React.useRef(startTime || Date.now())
   React.useEffect(() => {
-    if (tools.length > prevToolCountRef.current) {
-      setUserToggled(false)
-      setIsOpen(true)
-    }
-    prevToolCountRef.current = tools.length
-  }, [tools.length])
-  React.useEffect(() => { if (!userToggled) setIsOpen(isPending || (isLast && !!isStreaming)) }, [isPending, isStreaming, isLast, userToggled])
-  const completeCount = tools.filter(t => t.status === 'complete').length
-  const errorCount = tools.filter(t => t.status === 'error').length
-  const label = isPending
-    ? `Running operation${tools.length > 1 ? 's' : ''} (${completeCount}/${tools.length})`
-    : `Executed ${tools.length} operation${tools.length > 1 ? 's' : ''}${errorCount > 0 ? ` (${errorCount} failed)` : ''}`
+    const timer = setInterval(() => setElapsed((Date.now() - startRef.current) / 1000), 100)
+    return () => clearInterval(timer)
+  }, [startTime])
   return (
-    <details open={isOpen} onToggle={(e) => { const open = (e.target as HTMLDetailsElement).open; if (open !== isOpen) { setUserToggled(true); setIsOpen(open) } }} className="chat-reasoning-details chat-tool-group-details">
-      <summary className="chat-reasoning-summary">
-        <span>{label}</span>
-        <ChevronDown size={14} className="chat-reasoning-chevron" />
-      </summary>
-      <div className="chat-tool-group-body" style={{ marginTop: 8, paddingLeft: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tools.map((t, idx) => <div key={t.id || idx}><ToolCallBlock toolCall={t} /></div>)}
-      </div>
-    </details>
+    <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
+      <img src={logoImg} style={{ width: '14px', height: '14px', objectFit: 'contain' }} alt="logo" />
+      <span className="chat-message-generating-text">Working for {Math.round(elapsed)}s</span>
+    </div>
   )
 }
 
 // ─── AssistantMessage ─────────────────────────────────────────────────────────
 
 const AssistantMessage = ({ message }: { message: ChatMessage }) => {
-  const statusText = (() => {
-    if (!message.orderedBlocks?.length) return 'Thinking'
-    const last = message.orderedBlocks[message.orderedBlocks.length - 1]
-    if (last.type === 'tool' && last.status === 'pending') return 'Working'
-    if (last.type === 'text') return 'Generating'
-    if (last.type === 'reasoning') return 'Thinking'
-    return 'Thinking'
-  })()
   const segments = (() => {
     type Seg =
-      | { type: 'reasoning'; block: StreamBlock & { type: 'reasoning' }; blockIndex: number }
       | { type: 'text'; block: StreamBlock & { type: 'text' }; blockIndex: number }
       | { type: 'error'; block: StreamBlock & { type: 'error' }; blockIndex: number }
+      | { type: 'summarize'; block: StreamBlock & { type: 'summarize' }; blockIndex: number }
       | { type: 'tool-group'; tools: ToolCallEntry[]; key: string }
     const result: Seg[] = []
     let currentGroup: ToolCallEntry[] = []
@@ -129,41 +78,32 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
       }
     }
     message.orderedBlocks?.forEach((b, idx) => {
-      if (b.type === 'tool') {
+      if (b.type === 'tool_call') {
         if (groupStartIdx === -1) groupStartIdx = idx
-        currentGroup.push({ id: b.toolCallId, toolName: b.toolName, args: b.args, argsDelta: b.argsDelta, result: b.result, status: b.status })
+        currentGroup.push({ id: b.tool_call_id, tool_name: b.tool_name, args: b.args, args_delta: b.args_delta, result: b.result, status: b.status })
       } else {
+        if (b.type === 'text' && !b.content.trim()) return
+        if (b.type === 'duration') return
         flush()
-        if (b.type === 'reasoning') result.push({ type: 'reasoning', block: b, blockIndex: idx })
-        else if (b.type === 'text') { if (b.content.trim() || message.isStreaming) result.push({ type: 'text', block: b, blockIndex: idx }) }
-        else if (b.type === 'error') result.push({ type: 'error', block: b, blockIndex: idx })
+        if (b.type === 'summarize') { result.push({ type: 'summarize', block: b, blockIndex: idx }) }
+        else if (b.type === 'text') { result.push({ type: 'text', block: b, blockIndex: idx }) }
+        else if (b.type === 'error') { result.push({ type: 'error', block: b, blockIndex: idx }) }
       }
     })
     flush()
     return result
   })()
 
+  const durationBlock = message.orderedBlocks?.find((b: any) => b.type === 'duration')
+  const showActiveSpinner = message.isStreaming && !durationBlock
+
   return (
     <div className="chat-message-assistant-container">
-      {segments.map((seg, i) => {
-        const isLast = i === segments.length - 1
-        if (seg.type === 'reasoning') return (
-          <ReasoningBlock
-            key={`reasoning-${seg.blockIndex}`}
-            content={seg.block.content}
-            durationMs={seg.block.durationMs}
-            isStreaming={seg.block.isStreaming}
-            targetId={`streaming-reasoning-${message.id}-${seg.blockIndex}`}
-          />
-        )
-        if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} isStreaming={message.isStreaming} isLast={isLast} />
+      {segments.map((seg) => {
+        if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} />
         if (seg.type === 'text') return (
           <div key={`text-${seg.blockIndex}`} className="assistant-content chat-message-assistant">
-            <StreamingMarkdown
-              content={seg.block.content}
-              targetId={`streaming-text-${message.id}-${seg.blockIndex}`}
-              isStreaming={!!message.isStreaming}
-            />
+            <StreamingMarkdown content={seg.block.content} targetId={`streaming-text-${message.id}-${seg.blockIndex}`} isStreaming={!!message.isStreaming} />
           </div>
         )
         if (seg.type === 'error') return (
@@ -172,24 +112,30 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
             <span className="chat-error-message">{seg.block.message}</span>
           </div>
         )
+        if (seg.type === 'summarize') return (
+          <div key={`summarize-${seg.blockIndex}`} style={{ margin: '6px 0', width: '100%' }}>
+            <ToolCallBlock toolCall={{ id: `summarize-${seg.blockIndex}`, tool_name: 'summarize', args: { savedTokens: (seg.block as any).savedTokens, totalTokens: (seg.block as any).totalTokens }, status: 'complete' }} />
+          </div>
+        )
         return null
       })}
       {!message.orderedBlocks && message.content && (
         <div className="assistant-content chat-message-assistant"><MarkdownRenderer content={message.content} /></div>
       )}
-      {message.isStreaming && (
-        <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Loader size={14} className="animate-spin" style={{ color: 'var(--accent-blue)' }} />
-          <span className="shimmer-text chat-message-generating-text">{statusText}</span>
+      {durationBlock && (
+        <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
+          <img src={logoImg} style={{ width: '14px', height: '14px', objectFit: 'contain', opacity: 0.8 }} alt="logo" />
+          <span className="chat-message-generating-text">Worked for {Math.round((durationBlock as any).durationSeconds)}s</span>
         </div>
       )}
+      {showActiveSpinner && <ActiveGeneratingSpinner startTime={message.timestamp} />}
     </div>
   )
 }
 
 // ─── UserMessage ─────────────────────────────────────────────────────────────
 
-const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActions?: React.ReactNode }) => {
+const UserMessage = ({ message }: { message: ChatMessage }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
   if (message.data) {
     try { const d = JSON.parse(message.data); if (d?.attachments) attachments = d.attachments } catch (err) { console.error('[ChatThread] Error parsing attachments:', err) }
@@ -217,7 +163,6 @@ const UserMessage = ({ message, metaActions }: { message: ChatMessage; metaActio
           </div>
         )}
         {message.content && <div><MarkdownRenderer content={message.content} /></div>}
-        {metaActions}
       </div>
     </div>
   )
@@ -231,21 +176,29 @@ const ChatThread: React.FC = () => {
   const messages = useAtomValue(chatMessagesAtom)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const isAtBottomRef = React.useRef(true)
+
   const handleScroll = () => {
     if (!scrollRef.current) return
-    const { scrollTop } = scrollRef.current
-    isAtBottomRef.current = Math.abs(scrollTop) < 15
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
+    isAtBottomRef.current = (scrollHeight - scrollTop - clientHeight) < 25
   }
+
+  const lastMsg = messages[messages.length - 1]
+  const lastMsgContent = lastMsg?.content || ''
+  const lastMsgBlocksLength = lastMsg?.orderedBlocks?.length || 0
+  const lastMsgIsStreaming = lastMsg?.isStreaming || false
+
   React.useLayoutEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0
-  }, [messageAtoms.length])
+    if (scrollRef.current && isAtBottomRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messageAtoms.length, lastMsgContent, lastMsgBlocksLength, lastMsgIsStreaming])
 
   const messageGroups = (() => {
     const groups: Array<{ key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> }> = []
     let currentGroup: { key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> } | null = null
     messageAtoms.forEach((atom, idx) => {
-      const msg = messages[idx]
-      if (!msg) return
+      const msg = messages[idx]; if (!msg) return
       if (msg.role === 'user') {
         currentGroup = { key: `group-${msg.id}`, userAtom: atom, assistantAtoms: [] }
         groups.push(currentGroup)
@@ -261,10 +214,9 @@ const ChatThread: React.FC = () => {
   if (messageAtoms.length === 0) return null
 
   return (
-    <div className="chat-thread-container" ref={scrollRef} onScroll={handleScroll} style={{ flexDirection: 'column-reverse' }}>
-      <div className="chat-thread-spacer-bottom" style={{ flexShrink: 0 }} />
-      <div className="chat-thread-anchor" style={{ flexShrink: 0 }} />
-      {messageGroups.slice().reverse().map((group) => (
+    <div className="chat-thread-container" ref={scrollRef} onScroll={handleScroll}>
+      <div className="chat-thread-spacer-top" style={{ flexShrink: 0 }} />
+      {messageGroups.map((group) => (
         <div key={group.key} className="chat-section" style={{ display: 'flex', flexDirection: 'column' }}>
           {group.userAtom && <MessageWrapper messageAtom={group.userAtom} />}
           {group.assistantAtoms.map(({ atom, id }) => (
@@ -272,7 +224,8 @@ const ChatThread: React.FC = () => {
           ))}
         </div>
       ))}
-      <div className="chat-thread-spacer-top" style={{ flexShrink: 0 }} />
+      <div className="chat-thread-anchor" style={{ flexShrink: 0 }} />
+      <div className="chat-thread-spacer-bottom" style={{ flexShrink: 0 }} />
     </div>
   )
 }
@@ -281,53 +234,10 @@ const ChatThread: React.FC = () => {
 
 const MessageWrapper = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)
-  const [copied, setCopied] = React.useState(false)
-
-  const textToCopy = message.content || (message.orderedBlocks?.filter((b): b is StreamBlock & { type: 'text' } => b.type === 'text').map(b => b.content).join('') ?? '')
-
-  const handleCopy = () => {
-    if (!textToCopy) return
-    navigator.clipboard.writeText(textToCopy)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  const timeStr = message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-
   return (
     <div className={`chat-thread-message-wrapper message-${message.role}`}>
       <div className="message-bubble-wrapper">
-        {message.role === 'user' ? (
-          <UserMessage
-            message={message}
-            metaActions={
-              !message.isStreaming && (
-                <div className="message-meta-actions">
-                  <span className="message-timestamp">{timeStr}</span>
-                  {!!textToCopy && (
-                    <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
-                      {copied ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
-                  )}
-                </div>
-              )
-            }
-          />
-        ) : (
-          <>
-            <AssistantMessage message={message} />
-            {!message.isStreaming && (
-              <div className="message-meta-actions">
-                <span className="message-timestamp">{timeStr}</span>
-                {!!textToCopy && (
-                  <button className="message-copy-btn" onClick={handleCopy} title="Copy message text">
-                    {copied ? <Check size={12} /> : <Copy size={12} />}
-                  </button>
-                )}
-              </div>
-            )}
-          </>
-        )}
+        {message.role === 'user' ? <UserMessage message={message} /> : <AssistantMessage message={message} />}
       </div>
     </div>
   )

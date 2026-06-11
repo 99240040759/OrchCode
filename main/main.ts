@@ -186,13 +186,7 @@ function createMainWindow(): BrowserWindow {
     handleCommandLineArgs(process.argv, mainWindow!)
   })
   mainWindow.on('closed', () => {
-    const browserView = WindowManager.getBrowserView()
-    if (browserView) {
-      try {
-        browserView.webContents.close()
-      } catch (err) { log.debug('[main] Failed to close browser view:', err) }
-      WindowManager.setBrowserView(null)
-    }
+    WindowManager.clearAllBrowserViews()
     cleanupAllPtys()
     mainWindow = null
     WindowManager.setMainWindow(null)

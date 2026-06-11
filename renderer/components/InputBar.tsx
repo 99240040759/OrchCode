@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus } from 'lucide-react'
+import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom } from '../store/agentStore'
@@ -85,6 +85,38 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const sessionTokens = useAtomValue(sessionTokensAtom)
   const availableModels = useAtomValue(availableModelsAtom)
   const [attachments, setAttachments] = useState<Array<{ type: 'image' | 'document'; name: string; mimeType: string; base64: string }>>([])
+  const supportsVision = !!availableModels[selectedModel]?.capabilities?.vision
+  useEffect(() => {
+    if (!supportsVision && attachments.length > 0) setAttachments([])
+  }, [supportsVision])
+  const [isListening, setIsListening] = useState(false)
+  const recognitionRef = useRef<any>(null)
+  useEffect(() => {
+    return () => { recognitionRef.current?.stop() }
+  }, [])
+  const toggleListening = () => {
+    if (isListening) { recognitionRef.current?.stop(); return }
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRec) { toast.error("Speech recognition not supported"); return }
+    const rec = new SpeechRec()
+    rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'
+    let finalTranscript = ''
+    rec.onstart = () => setIsListening(true)
+    rec.onresult = (e: any) => {
+      let interimTranscript = ''
+      for (let i = e.resultIndex; i < e.results.length; ++i) {
+        if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript
+        else interimTranscript += e.results[i][0].transcript
+      }
+      if (editorRef.current) {
+        const text = finalTranscript + interimTranscript
+        editorRef.current.innerText = text; setInputValue(text)
+      }
+    }
+    rec.onerror = () => setIsListening(false)
+    rec.onend = () => setIsListening(false)
+    recognitionRef.current = rec; rec.start()
+  }
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isRunning = runState !== 'idle' && runState !== 'error'
   const activeWorkspace = useAtomValue(activeWorkspaceAtom)
@@ -326,20 +358,29 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         </div>
       </div>
       <div className="input-bar-toolbar">
-        <div className="input-bar-toolbar-left">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <div className="toolbar-icon-btn" title="Add file or image"><Plus size={16} /></div>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-sm">
-                  <DropdownMenu.Item onSelect={() => triggerFileSelect('image')} className="app-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownMenu.Item>
-                  <DropdownMenu.Item onSelect={() => triggerFileSelect('document')} className="app-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownMenu.Item>
-                </div>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+        <style>{`
+          @keyframes mic-pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+            100% { transform: scale(1); }
+          }
+        `}</style>
+        <div className="input-bar-toolbar-left" style={{ gap: 'var(--space-xs)' }}>
+          {supportsVision && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <div className="toolbar-icon-btn" title="Add file or image"><Plus size={16} /></div>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content asChild sideOffset={6}>
+                  <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-sm">
+                    <DropdownMenu.Item onSelect={() => triggerFileSelect('image')} className="app-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => triggerFileSelect('document')} className="app-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownMenu.Item>
+                  </div>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild disabled={Object.keys(availableModels).length === 0}>
               <div className="toolbar-selector" title={Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model'}>
@@ -360,8 +401,24 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </div>
-        <div className="input-bar-toolbar-right">
+        <div className="input-bar-toolbar-right" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
           <TokenIndicator current={sessionTokens} max={MAX_TOKENS} />
+          <button
+            type="button"
+            onClick={toggleListening}
+            className={`toolbar-icon-btn ${isListening ? 'listening' : ''}`}
+            title={isListening ? "Stop voice input" : "Start voice input"}
+            style={{
+              color: isListening ? '#ef4444' : 'var(--text-secondary)',
+              animation: isListening ? 'mic-pulse 1.5s infinite ease-in-out' : 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+          >
+            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
           <SubmitButton isRunning={isRunning} hasInput={!!(inputValue.trim() || attachments.length > 0)} handleStop={handleStop} handleInject={handleInject} />
         </div>
       </div>

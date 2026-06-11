@@ -24,7 +24,7 @@
     -webkit-user-drag: none;
   }
 
-  input, textarea, [contenteditable="true"], code, pre, .assistant-content, .markdown-content, .chat-reasoning-body {
+  input, textarea, [contenteditable="true"], code, pre, .assistant-content, .markdown-content {
     user-select: text;
   }
 

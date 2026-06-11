@@ -12,6 +12,7 @@ const StreamRequestSchema = z.object({
   promptText: z.string().max(200_000),
   threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/),
   modelType: z.string().max(255).optional(),
+  startTime: z.number().optional(),
   attachments: z.array(z.object({
     type: z.enum(['image', 'document']),
     name: z.string().min(1).max(255),
@@ -32,6 +33,7 @@ export function registerStreamIpc() {
       event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
 
       const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
+      worker.removeAllListeners('message'); worker.removeAllListeners('exit')
       const { port1: dbPort1, port2: dbPort2 } = new MessageChannelMain()
       db.shareDBPort(dbPort1)
       worker.postMessage({ type: 'db-port' }, [dbPort2])
@@ -82,7 +84,7 @@ export function registerStreamIpc() {
       }
       worker.on('message', onMsg)
       worker.postMessage(
-        { type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive: !!WindowManager.getBrowserView() },
+        { type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive: !!WindowManager.getBrowserView(), startTime: request.startTime },
         [port1]
       )
       return { ok: true }

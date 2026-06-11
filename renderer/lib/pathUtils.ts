@@ -14,11 +14,24 @@ export function stripFileProtocol(href: string): string {
   return filePath
 }
 
+export function convertPlainPathsToMarkdownLinks(content: string): string {
+  if (!content) return ''
+  let processed = content.replace(/`([a-zA-Z]:[\\/][^`\n]*)`/g, (_, path) => `[${path}](file:///${path.replace(/\\/g, '/')})`)
+  const links: string[] = []
+  let placeholderIndex = 0
+  processed = processed.replace(/(!?\[[^\[\]]*\]\([^)]*\)|```[\s\S]*?```|`[^`\n]+`|file:\/\/\/[a-zA-Z]:[\\/][^\s\)\(]*)/g, (match) => {
+    links.push(match)
+    return `__MD_LINK_PLACEHOLDER_${placeholderIndex++}__`
+  })
+  const windowsPathRegex = /\b([a-zA-Z]:[\\/][^\s\)\(]*[^\s\)\(\.,!\?;:])(?=\s|$|\b)/g
+  processed = processed.replace(windowsPathRegex, (match) => `[${match}](file:///${match.replace(/\\/g, '/')})`)
+  return processed.replace(/__MD_LINK_PLACEHOLDER_(\d+)__/g, (_, idx) => links[parseInt(idx, 10)])
+}
+
 export function normalizeMarkdownLinks(content: string): string {
   if (!content) return ''
-  // Match markdown links/images: label is [text] or ![text], url is (url)
-  // Use [^\[\]] to avoid crossing bracket boundaries (fixes nested [![img](u)](link))
-  return content.replace(/(!?\[[^\[\]]*\])\(([^)]*)\)/g, (_, label, url) => {
+  const withLinks = convertPlainPathsToMarkdownLinks(content)
+  return withLinks.replace(/(!?\[[^\[\]]*\])\(([^)]*)\)/g, (_, label, url) => {
     return `${label}(${normalizePathOrUrl(url)})`
   })
 }

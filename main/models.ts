@@ -1,13 +1,11 @@
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { createOpenAI } from '@ai-sdk/openai'
-import type { ProviderOptions } from '@ai-sdk/provider-utils'
-import type { streamText } from 'ai'
-import { globalApiLimiter } from './utils'
+import log from 'electron-log'
+import OpenAI from 'openai'
 import { requireAuthToken } from './auth'
 
 export interface ModelCapabilities { vision: boolean; nativeFiles: boolean }
 export interface ModelInfo { id: string; name: string; capabilities: ModelCapabilities }
 export type AvailableModels = Record<string, ModelInfo>
+
 
 let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
@@ -19,13 +17,7 @@ function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
     headers.set('Authorization', `Bearer ${useAnon ? (process.env.SUPABASE_ANON_KEY || '') : requireAuthToken()}`)
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
     if (extra) { for (const [k, v] of Object.entries(extra)) headers.set(k, v) }
-    
-    const fetchOptions: RequestInit = {
-      signal: AbortSignal.timeout(30000),
-      ...options,
-      headers
-    }
-    return fetch(url, fetchOptions)
+    return fetch(url, { ...options, headers })
   }
 }
 
@@ -37,52 +29,86 @@ export async function getAvailableModels(force = false): Promise<AvailableModels
   return cachedModels!
 }
 
-const google = createGoogleGenerativeAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta`,
-  apiKey: 'placeholder',
-  fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
-})
-
-const nvidia = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/nvidia/v1`,
-  apiKey: 'placeholder',
-  fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
-})
-
-const opencode = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/opencode/v1`,
-  apiKey: 'placeholder',
-  fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
-})
-
-const zai = createOpenAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/z-ai/v1`,
-  apiKey: 'placeholder',
-  fetch: (url, options) => globalApiLimiter.schedule(() => createAuthFetch()(url, options))
-})
-
-export const googleBypass = createGoogleGenerativeAI({
-  baseURL: `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta`,
-  apiKey: 'placeholder',
-  fetch: (url, options) => {
-    const headers = new Headers(options?.headers || {})
-    headers.set('Authorization', `Bearer ${requireAuthToken()}`)
-    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
-    return fetch(url, { ...options, headers, signal: AbortSignal.timeout(30000) })
+function zodToJsonSchema(schema: any): any {
+  if (!schema) return {}
+  const def = schema._def || {}, typeName = def.typeName, description = schema.description || def.description
+  let result: any = {}
+  switch (typeName) {
+    case 'ZodString': result = { type: 'string' }; break
+    case 'ZodNumber': result = { type: 'number' }; break
+    case 'ZodBoolean': result = { type: 'boolean' }; break
+    case 'ZodEnum': result = { type: 'string', enum: def.values }; break
+    case 'ZodOptional': case 'ZodNullable': case 'ZodDefault':
+      result = zodToJsonSchema(def.innerType || def.schema); break
+    case 'ZodEffects':
+      result = zodToJsonSchema(def.schema || def.innerType); break
+    case 'ZodArray':
+      result = { type: 'array', items: zodToJsonSchema(schema.element || def.element) }; break
+    case 'ZodObject': {
+      const properties: Record<string, any> = {}, required: string[] = [], shape = schema.shape || def.shape || {}
+      for (const [k, v] of Object.entries(shape)) {
+        properties[k] = zodToJsonSchema(v)
+        let isOpt = false, inner = v as any
+        while (inner) {
+          const innerDef = inner._def || {}, innerTypeName = innerDef.typeName
+          if (innerTypeName === 'ZodOptional' || innerTypeName === 'ZodDefault') { isOpt = true; break }
+          inner = innerDef.innerType || innerDef.schema
+        }
+        if (!isOpt) required.push(k)
+      }
+      result = { type: 'object', properties, ...(required.length ? { required } : {}) }; break
+    }
+    case 'ZodRecord': result = { type: 'object', additionalProperties: zodToJsonSchema(def.valueType) }; break
+    default: result = {}
   }
-})
-
-const GEMMA4_THINKING_MODEL_IDS = new Set([
-  'gemma-4-26b-a4b-it',
-])
-
-export function resolveModel(modelId: string): {
-  model: Parameters<typeof streamText>[0]['model']
-  providerOptions: ProviderOptions
-} {
-  if (modelId.startsWith('zai/')) return { model: zai.chat(modelId.replace('zai/', '')), providerOptions: {} }
-  if (modelId.startsWith('opencode/')) return { model: opencode.chat(modelId.replace('opencode/', '')), providerOptions: {} }
-  if (modelId.startsWith('nvidia/')) return { model: nvidia.chat(modelId.replace('nvidia/', '')), providerOptions: {} }
-  if (GEMMA4_THINKING_MODEL_IDS.has(modelId)) return { model: google(modelId), providerOptions: { google: { chatTemplateKwargs: { enable_thinking: true } } } as ProviderOptions }
-  return { model: google(modelId), providerOptions: { google: { thinkingConfig: { thinkingLevel: 'auto', includeThoughts: true } } } as ProviderOptions }
+  if (description) result.description = description
+  return result
+}
+export function getOpenAiTools(toolsRecord: Record<string, any>) {
+  const list: any[] = []
+  for (const [name, toolObj] of Object.entries(toolsRecord)) {
+    const jsonSchema = zodToJsonSchema(toolObj.parameters || toolObj.inputSchema)
+    list.push({ type: 'function', function: { name, description: toolObj.description || '', parameters: jsonSchema } })
+  }
+  return list
+}
+export async function streamLlmResponse(
+  modelId: string,
+  messages: OpenAI.ChatCompletionMessageParam[],
+  systemInstruction?: string,
+  tools?: any,
+  abortSignal?: AbortSignal
+): Promise<any> {
+  const models = await getAvailableModels()
+  const rawModel = Object.values(models).find(m => m.id === modelId) || models[modelId]
+  if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
+  let baseUrl = '', modelName = rawModel.id
+  if (rawModel.id.startsWith('zai/')) {
+    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/z-ai/v1`
+    modelName = rawModel.id.replace('zai/', '')
+  } else if (rawModel.id.startsWith('opencode/')) {
+    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/opencode/v1`
+    modelName = rawModel.id.replace('opencode/', '')
+  } else if (rawModel.id.startsWith('nvidia/')) {
+    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/nvidia/v1`
+    modelName = rawModel.id.replace('nvidia/', '')
+  } else {
+    baseUrl = `${process.env.SUPABASE_URL}/functions/v1/api/gemini/v1beta/openai`
+  }
+  log.info(`[custom-stream] Using OpenAI unified SDK for ${modelId}`)
+  const openai = new OpenAI({
+    apiKey: requireAuthToken(),
+    baseURL: baseUrl,
+    defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY || '' },
+    timeout: 30 * 60 * 1000
+  })
+  const openAiMessages = [...messages]
+  if (systemInstruction) { openAiMessages.unshift({ role: 'system', content: systemInstruction }) }
+  const openAiTools = tools ? getOpenAiTools(tools) : undefined
+  return openai.chat.completions.create({
+    model: modelName,
+    messages: openAiMessages as any,
+    tools: openAiTools?.length ? openAiTools : undefined,
+    stream: true
+  }, { signal: abortSignal })
 }

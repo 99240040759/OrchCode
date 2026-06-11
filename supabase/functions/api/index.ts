@@ -6,7 +6,9 @@ const GEMINI_PATH_PATTERNS = [
   /^\/v1beta\/models$/,
   /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]generateContent$/,
   /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]streamGenerateContent$/,
-  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]countTokens$/
+  /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]countTokens$/,
+  /^\/v1beta\/openai\/chat\/completions$/,
+  /^\/v1beta\/openai\/models$/
 ]
 
 // Model Definitions
@@ -35,7 +37,8 @@ async function handleGemini(req: Request, env: EnvMap, url: URL): Promise<Respon
   if (!apiKey) return errorResponse('Server Configuration Error: GOOGLE_GENERATIVE_AI_API_KEY is missing.', 500)
   const subpath = url.pathname.replace(/^\/(functions\/v1\/)?api\/gemini/, '')
   if (!GEMINI_PATH_PATTERNS.some((p) => p.test(subpath))) return errorResponse(`Path not allowed: ${subpath}`, 403)
-  return proxyRequest(req, `https://generativelanguage.googleapis.com${subpath}${url.search}`, { 'x-goog-api-key': apiKey })
+  const h = subpath.startsWith('/v1beta/openai') ? { Authorization: `Bearer ${apiKey}` } : { 'x-goog-api-key': apiKey }
+  return proxyRequest(req, `https://generativelanguage.googleapis.com${subpath}${url.search}`, h)
 }
 
 async function handleModels(req: Request, env: EnvMap): Promise<Response> {
@@ -52,7 +55,7 @@ async function handleModels(req: Request, env: EnvMap): Promise<Response> {
       const responseKey = prefix.toLowerCase()
       const name = env[`${prefix}_MODEL_NAME`] || defaultName
       const lid = id.toLowerCase()
-      const vision = lid.includes('gemini') || lid.includes('gemma') || lid.includes('kimi') || lid.includes('mimo') || lid.includes('glm-4.6v')
+      const vision = lid.includes('gemini') || lid.includes('gemma') || lid.includes('kimi') || lid.includes('mimo')
       const nativeFiles = lid.includes('gemini')
       models[responseKey] = { id, name, capabilities: { vision, nativeFiles } }
     }

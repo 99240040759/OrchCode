@@ -1,16 +1,17 @@
 export type StreamBlock =
   | { type: 'text'; content: string }
-  | { type: 'reasoning'; content: string; durationMs?: number; isStreaming?: boolean }
   | {
-      type: 'tool'
-      toolCallId: string
-      toolName: string
+      type: 'tool_call'
+      tool_call_id: string
+      tool_name: string
       args: Record<string, unknown>
-      argsDelta?: string
+      args_delta?: string
       result?: unknown
       status: 'pending' | 'complete' | 'error'
     }
   | { type: 'error'; message: string }
+  | { type: 'summarize'; savedTokens: number; totalTokens: number }
+  | { type: 'duration'; durationSeconds: number }
 
 export interface ChatMessage {
   id: string
@@ -22,8 +23,8 @@ export interface ChatMessage {
   isStreaming?: boolean
 }
 
-export type ToolStreamBlock = Extract<StreamBlock, { type: 'tool' }>
-export type ToolCallEntry = Omit<ToolStreamBlock, 'type' | 'toolCallId'> & { id: string }
+export type ToolStreamBlock = Extract<StreamBlock, { type: 'tool_call' }>
+export type ToolCallEntry = Omit<ToolStreamBlock, 'type' | 'tool_call_id'> & { id: string }
 
 
 export interface EditorFile {

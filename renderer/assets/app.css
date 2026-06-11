@@ -26,7 +26,7 @@
 .app-dropdown-item { display: flex; align-items: center; gap: var(--space-xs); padding: 6px var(--space-xs); border-radius: 6px; cursor: pointer; font-size: var(--font-size-sm); color: var(--text-secondary); transition: all var(--transition-speed-normal) var(--transition-curve-default); outline: none; user-select: none }
 .app-dropdown-item:hover, .app-dropdown-item[data-highlighted] { background-color: var(--bg-brass-hover); color: var(--accent-brass) }
 .app-dropdown-item.selected { color: var(--accent-brass); font-weight: 500 }
-.titlebar { height: var(--titlebar-height); background-color: var(--bg-titlebar); display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 0 0 0 var(--space-md); -webkit-app-region: drag; position: relative; z-index: 100 }
+.titlebar { height: var(--titlebar-height); background-color: var(--bg-titlebar); display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 0 0 0 var(--space-md); -webkit-app-region: drag; position: relative; z-index: 100; box-shadow: none; border-bottom: 1px solid var(--border-color) }
 .titlebar-left { display: flex; align-items: center; gap: var(--space-xs); flex-shrink: 0; -webkit-app-region: no-drag }
 .titlebar-left-mac { padding-left: 80px; width: 108px }
 .titlebar-left-win { padding-left: 12px; width: 40px }
@@ -166,17 +166,17 @@
 .prompt-sub-links { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap }
 .prompt-sub-link { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--font-size-xs); font-weight: 500; cursor: pointer; text-decoration: none; padding: 4px 8px; border-radius: 4px; transition: color 0.15s ease, background-color 0.15s ease }
 .prompt-sub-link:hover { color: var(--text-secondary); background-color: rgba(255, 255, 255, 0.04); text-decoration: none }
-.chat-thread-container { scrollbar-width: none; -ms-overflow-style: none; flex: 1; width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; overflow-anchor: auto; padding: 0 0 var(--space-md); display: flex; flex-direction: column-reverse; -webkit-mask-image: linear-gradient(to bottom, black 88%, transparent 98%); mask-image: linear-gradient(to bottom, black 88%, transparent 98%) }
+.chat-thread-container { scrollbar-width: none; -ms-overflow-style: none; flex: 1; width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; overflow-anchor: auto; padding: 0 0 var(--space-md); display: flex; flex-direction: column }
 .chat-thread-container::-webkit-scrollbar { display: none }
 .chat-thread-spacer-top { height: 0px; flex-shrink: 0 }
 @keyframes slide-up-fade { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
-.chat-thread-message-wrapper { padding: var(--space-sm) var(--space-xl); overflow-anchor: none; animation: slide-up-fade var(--transition-speed-panel) var(--transition-curve-default) forwards; will-change: transform, opacity }
+.chat-thread-message-wrapper { padding: var(--space-sm) calc(var(--space-xl) + 12px); overflow-anchor: none; animation: slide-up-fade var(--transition-speed-panel) var(--transition-curve-default) forwards; will-change: transform, opacity }
 .chat-section { position: relative; display: flex; flex-direction: column }
-.chat-thread-message-wrapper.message-user { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--bg-app) 70%, rgba(20, 20, 20, 0.8) 85%, transparent 100%); padding: var(--space-sm) var(--space-xl) 24px var(--space-xl); box-shadow: none }
+.chat-thread-message-wrapper.message-user { box-shadow: none }
 .chat-thread-spacer-bottom { height: 24px; flex-shrink: 0; overflow-anchor: none }
 .chat-thread-anchor { overflow-anchor: auto; height: 1px; margin-top: -1px }
-.chat-message-user-container { display: flex; margin-bottom: 0; padding-left: 0 }
-.chat-message-user { position: relative; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 20px; padding: 10px var(--space-lg); max-width: 100%; width: 100%; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text }
+.chat-message-user-container { display: flex; margin-bottom: 0; padding-left: 0; justify-content: flex-end }
+.chat-message-user { position: relative; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 18px 18px 4px 18px; padding: 10px var(--space-lg); max-width: 80%; width: fit-content; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text }
 .chat-message-user-content { display: flex; flex-direction: column; gap: var(--space-xs) }
 .message-attachments { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-bottom: 8px }
 .message-attachment-chip { display: flex; align-items: center; gap: 6px; padding: var(--space-xxs) var(--space-xs); border-radius: 6px; background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-secondary); transition: background-color 0.15s ease; max-width: 160px }
@@ -186,14 +186,9 @@
 .chat-attachment-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .chat-message-assistant-container { margin-bottom: 0; padding-right: 0; display: flex; flex-direction: column; gap: var(--space-sm) }
 .chat-message-assistant { font-size: var(--font-size-lg); color: var(--text-assistant-body); line-height: 1.6; user-select: text; margin-bottom: 0 }
-.chat-message-generating-container { margin-top: 0; padding: 4px 0; margin-left: 2px }
-.chat-message-generating-text { font-size: var(--font-size-sm) }
-.chat-reasoning-details { margin: 0 }
-.chat-reasoning-summary { cursor: pointer; font-size: var(--font-size-md); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; user-select: none; list-style: none }
-.chat-reasoning-chevron { transform: rotate(-90deg); transition: transform 0.12s ease; flex-shrink: 0; color: var(--text-secondary) }
-.chat-reasoning-details[open] .chat-reasoning-chevron { transform: rotate(0deg) }
-.chat-reasoning-body { margin-top: 6px; padding-bottom: 8px; color: var(--text-secondary); font-size: var(--font-size-sm); line-height: 1.6; max-height: 120px; overflow-y: auto }
-.chat-reasoning-body .markdown-content, .chat-reasoning-body .markdown-content td, .chat-reasoning-body .markdown-content blockquote { color: var(--text-secondary) }
+.chat-message-generating-container { margin-top: 4px; padding: 0; margin-left: 2px }
+.chat-message-generating-text { font-size: var(--font-size-sm); color: var(--text-muted) }
+
 .chat-error-container { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 8px; background-color: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); margin: 12px 0 }
 .chat-error-icon { color: #ef4444; margin-top: 3px; flex-shrink: 0 }
 .chat-error-message { font-size: var(--font-size-md); color: var(--text-primary); line-height: 1.5 }
@@ -207,7 +202,7 @@
 .input-bar-toolbar-right { display: flex; align-items: center; gap: var(--space-xs) }
 .toolbar-selector { display: flex; align-items: center; gap: 6px; background-color: transparent; border: 1px solid transparent; border-radius: 20px; color: var(--text-secondary); font-size: var(--font-size-xs); font-weight: 500; padding: var(--space-xxs) 10px; cursor: pointer; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) }
 .toolbar-selector:hover { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.06); border-color: rgba(226, 168, 86, 0.2) }
-.toolbar-icon-btn { color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s ease }
+.toolbar-icon-btn { background: none; border: none; outline: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s ease }
 .toolbar-icon-btn:hover { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.04) }
 .toolbar-submit-btn { background-color: rgba(255, 255, 255, 0.04); color: var(--text-muted); border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) }
 .toolbar-submit-btn:not(:disabled) { background-color: var(--accent-brass); color: #121212 }
@@ -235,9 +230,10 @@
 .input-attachment-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .input-attachment-close { background: none; border: none; cursor: pointer; padding: 0; display: flex; align-items: center; color: var(--text-secondary); font-size: var(--font-size-xxs); transition: color 0.15s ease }
 .input-attachment-close:hover { color: var(--accent-red) }
-.tool-call-wrapper { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-xs); color: var(--text-secondary); margin-bottom: 0; padding: 2px 6px; user-select: none; height: 23px; contain: layout paint; border-radius: 4px; background-color: transparent; transition: all 0.15s ease; max-width: 100%; box-sizing: border-box; border: none; text-decoration: none; outline: none }
+.chat-tool-group-container { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background-color: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 6px; width: fit-content; max-width: 100% }
+.tool-call-wrapper { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-xs); color: var(--text-secondary); margin-bottom: 0; padding: 4px 8px; user-select: none; height: 24px; contain: layout paint; border-radius: 4px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); transition: all 0.15s ease; max-width: 100%; box-sizing: border-box; text-decoration: none; outline: none }
 .tool-call-interactive { cursor: pointer }
-.tool-call-interactive:hover { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.04) }
+.tool-call-interactive:hover { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.2) }
 .tool-call-non-interactive { cursor: default }
 .tool-call-spinner { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--text-secondary); border-top-color: transparent; animation: spin 0.8s linear infinite; flex-shrink: 0; will-change: transform }
 @media (prefers-reduced-motion:reduce) { .tool-call-spinner { animation: none; border-top-color: var(--text-secondary); opacity: 0.5 } }
@@ -260,18 +256,20 @@
 .diff-add { color: var(--accent-green) }
 .diff-sub { color: var(--accent-red) }
 .file-icon-wrapper { display: inline-block; vertical-align: middle; flex-shrink: 0 }
-.markdown-content { line-height: 1.6; font-weight: 400; color: var(--text-assistant-body) }
+.markdown-content { line-height: 1.65; font-weight: 400; color: var(--text-assistant-body) }
+.markdown-content > *:first-child { margin-top: 0 !important }
+.markdown-content > *:last-child { margin-bottom: 0 !important }
 .markdown-content strong { font-weight: 600; color: var(--text-primary) }
-.markdown-content p { margin: 4px 0 8px 0 }
-.markdown-content ul, .markdown-content ol { margin: 4px 0 8px 16px; padding: 0 }
+.markdown-content p { margin: 10px 0 14px 0 }
+.markdown-content ul, .markdown-content ol { margin: 10px 0 14px 20px; padding: 0 }
 .markdown-content ul { list-style: disc }
 .markdown-content ol { list-style: decimal }
-.markdown-content li { margin-bottom: 2px; line-height: 1.55 }
-.markdown-content blockquote { border-left: 2px solid var(--text-dim); padding-left: 10px; margin: 6px 0; color: var(--text-assistant-body); font-style: normal }
-.markdown-content h1 { font-size: var(--font-size-2xl); font-weight: 600; margin: 14px 0 6px; color: var(--text-primary); line-height: 1.2; letter-spacing: -0.02em }
-.markdown-content h2 { font-size: var(--font-size-xl); font-weight: 600; margin: 12px 0 6px; color: var(--text-primary); line-height: 1.25; letter-spacing: -0.015em }
-.markdown-content h3 { font-size: var(--font-size-lg); font-weight: 600; margin: 10px 0 4px; color: var(--text-primary); line-height: 1.3; letter-spacing: -0.01em }
-.markdown-content table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: var(--font-size-sm); border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05) }
+.markdown-content li { margin-bottom: 6px; line-height: 1.6 }
+.markdown-content blockquote { border-left: 3px solid var(--text-dim); padding-left: 14px; margin: 14px 0; color: var(--text-assistant-body); font-style: normal }
+.markdown-content h1 { font-size: var(--font-size-2xl); font-weight: 600; margin: 24px 0 12px; color: var(--text-primary); line-height: 1.25; letter-spacing: -0.02em }
+.markdown-content h2 { font-size: var(--font-size-xl); font-weight: 600; margin: 20px 0 10px; color: var(--text-primary); line-height: 1.3; letter-spacing: -0.015em }
+.markdown-content h3 { font-size: var(--font-size-lg); font-weight: 600; margin: 16px 0 8px; color: var(--text-primary); line-height: 1.35; letter-spacing: -0.01em }
+.markdown-content table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: var(--font-size-sm); border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05) }
 .markdown-content th { background-color: rgba(255, 255, 255, 0.03); color: var(--text-primary); font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08) }
 .markdown-content td { padding: 8px 12px; color: var(--text-assistant-body); border-bottom: 1px solid rgba(255, 255, 255, 0.04) }
 .markdown-content tr:last-child td { border-bottom: none }
@@ -280,17 +278,11 @@
 .markdown-content code { font-family: var(--font-mono) }
 .markdown-content code:not([class]) { font-size: 0.85em; background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 4px; color: #e2b473 }
 .markdown-content code[class] { font-size: var(--font-size-sm) }
-.markdown-content pre { background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 34px 16px 14px 16px; margin: 16px 0; overflow-x: auto; position: relative }
-.markdown-content pre code { background: transparent; padding: 0; border-radius: 0; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); line-height: 1.6; color: #e5e5e5 }
+.markdown-content pre { background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 34px 16px 14px 16px; margin: 18px 0; overflow-x: auto; position: relative }
+.markdown-content pre code { background: transparent; padding: 0; border-radius: 0; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); line-height: 1.6; color: #e5e5e5; white-space: pre-wrap; word-break: break-word }
+.markdown-content pre code.hljs { background: transparent !important; padding: 0 !important; border: none !important; border-radius: 0 !important }
 .markdown-content hr { display: none }
-.markdown-artifact p { margin: 6px 0 12px 0 }
-.markdown-artifact ul, .markdown-artifact ol { margin: 6px 0 12px 20px }
-.markdown-artifact li { margin-bottom: 4px; line-height: 1.5 }
-.markdown-artifact pre { background: var(--bg-sidebar); padding: 12px 14px; margin: 12px 0; font-size: var(--font-size-md); line-height: 1.55 }
-.markdown-artifact blockquote { border-left: 3px solid var(--text-dim); padding-left: 12px; margin: 10px 0; color: var(--text-secondary); font-style: italic }
-.markdown-artifact h1 { font-size: var(--font-size-3xl); margin: 20px 0 10px; line-height: 1.2; letter-spacing: -0.02em; font-weight: 600 }
-.markdown-artifact h2 { font-size: var(--font-size-2xl); margin: 16px 0 8px; line-height: 1.25; letter-spacing: -0.015em; font-weight: 600 }
-.markdown-artifact h3 { font-size: var(--font-size-xl); margin: 12px 0 6px; line-height: 1.3; letter-spacing: -0.01em; font-weight: 600 }
+
 .code-block-lang { position: absolute; top: 8px; left: 16px; font-size: var(--font-size-xxs); font-family: var(--font-mono); color: var(--text-secondary); opacity: 0.5; text-transform: lowercase }
 .code-block-copy-btn { position: absolute; top: 8px; right: 16px; background: transparent; border: none; color: var(--text-secondary); opacity: 0.5; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 4px; transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease }
 .code-block-copy-btn:hover { color: var(--text-primary); opacity: 1; background-color: rgba(255, 255, 255, 0.05) }
@@ -408,8 +400,8 @@
 .message-meta-actions { position: absolute; bottom: -18px; display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity var(--transition-speed-normal) var(--transition-curve-default); z-index: 10 }
 .message-bubble-wrapper:hover .message-meta-actions { opacity: 0.6 }
 .message-meta-actions:hover { opacity: 1 }
-.message-user .message-meta-actions { right: 12px; bottom: 8px; left: auto }
-.message-assistant .message-meta-actions { left: 12px; right: auto }
+.message-user .message-meta-actions { right: 12px; bottom: -18px; left: auto }
+.message-assistant .message-meta-actions { left: 12px; bottom: -18px; right: auto }
 .message-timestamp { font-size: var(--font-size-xxs); color: var(--text-muted); font-family: var(--font-mono) }
 .message-copy-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 2px; display: flex; align-items: center; justify-content: center; border-radius: 4px; opacity: 1; transition: color var(--transition-speed-normal) var(--transition-curve-default), background-color var(--transition-speed-normal) var(--transition-curve-default) }
 .message-copy-btn:hover { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.05) }

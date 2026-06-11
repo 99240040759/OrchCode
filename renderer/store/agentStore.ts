@@ -14,6 +14,10 @@ export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
 interface ModelInfo {
   id: string
   name: string
+  capabilities?: {
+    vision: boolean
+    nativeFiles: boolean
+  }
 }
 
 /**
@@ -23,49 +27,111 @@ interface ModelInfo {
  * conversationIdAtom is kept as an alias for backward compatibility.
  */
 export const activeThreadIdAtom = atom<string>('')
-
 export const threadListAtom = atom<ThreadEntry[]>([])
-
 export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
-  const threads = get(threadListAtom)
-  const activeId = get(activeThreadIdAtom)
+  const threads = get(threadListAtom); const activeId = get(activeThreadIdAtom)
   return threads.find((t) => t.id === activeId)
 })
-
-/** True while thread messages/workspace are being loaded (thread switch in progress) */
 export const isThreadLoadingAtom = atom<boolean>(false)
 
-export const agentRunStateAtom = atom<AgentRunState>('idle')
+// Scoped records maps
+const chatMessagesMapAtom = atom<Record<string, import('./types').ChatMessage[]>>({})
+const agentRunStateMapAtom = atom<Record<string, AgentRunState>>({})
+const threadTokensMapAtom = atom<Record<string, { session: number; lifetime: number }>>({})
+const threadWorkspaceMapAtom = atom<Record<string, { name: string; path: string } | null>>({})
+const threadArtifactsMapAtom = atom<Record<string, ArtifactEntry[]>>({})
+const threadOpenFilesMapAtom = atom<Record<string, import('./types').EditorFile[]>>({})
+const threadActiveEditorFileMapAtom = atom<Record<string, import('./types').EditorFile | null>>({})
 
-export const runningThreadsAtom = atom<Set<string>>(new Set<string>())
-
-export const chatMessagesAtom = atom<import('./types').ChatMessage[]>([])
-
-export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => message.id)
-
-export const artifactsAtom = atom<ArtifactEntry[]>([])
-export const sessionTokensAtom = atom<number>(0)
-export const lifetimeTokensAtom = atom<number>(0)
-
-export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)
-
-export const activeWorkspaceAtom = atom<{ name: string; path: string } | null>(null)
-
-export const isArtifactPanelOpenAtom = atom<boolean>(false)
-export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
-export const openFilesAtom = atom<import('./types').EditorFile[]>([])
-
-const baseActiveEditorFileAtom = atom<import('./types').EditorFile | null>(null)
-export const activeEditorFileAtom = atom(
-  (get) => get(baseActiveEditorFileAtom),
-  (get, set, file: import('./types').EditorFile | null) => {
-    set(baseActiveEditorFileAtom, file)
-    if (file) {
-      const open = get(openFilesAtom)
-      set(openFilesAtom, open.some(f => f.path === file.path) ? open.map(f => f.path === file.path ? file : f) : [...open, file])
-    }
+// Writable derived atoms bound to activeThreadId
+export const chatMessagesAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(chatMessagesMapAtom)[id] ?? []) : [] },
+  (get, set, update: import('./types').ChatMessage[] | ((prev: import('./types').ChatMessage[]) => import('./types').ChatMessage[])) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(chatMessagesMapAtom); const v = m[id] ?? []
+    set(chatMessagesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
   }
 )
+export const agentRunStateAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(agentRunStateMapAtom)[id] ?? 'idle') : 'idle' },
+  (get, set, update: AgentRunState | ((prev: AgentRunState) => AgentRunState)) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(agentRunStateMapAtom); const v = m[id] ?? 'idle'
+    set(agentRunStateMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
+  }
+)
+export const sessionTokensAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadTokensMapAtom)[id]?.session ?? 0) : 0 },
+  (get, set, update: number | ((prev: number) => number)) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadTokensMapAtom); const v = m[id] ?? { session: 0, lifetime: 0 }
+    set(threadTokensMapAtom, { ...m, [id]: { ...v, session: typeof update === 'function' ? update(v.session) : update } })
+  }
+)
+export const lifetimeTokensAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadTokensMapAtom)[id]?.lifetime ?? 0) : 0 },
+  (get, set, update: number | ((prev: number) => number)) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadTokensMapAtom); const v = m[id] ?? { session: 0, lifetime: 0 }
+    set(threadTokensMapAtom, { ...m, [id]: { ...v, lifetime: typeof update === 'function' ? update(v.lifetime) : update } })
+  }
+)
+export const activeWorkspaceAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadWorkspaceMapAtom)[id] ?? null) : null },
+  (get, set, update: { name: string; path: string } | null | ((prev: { name: string; path: string } | null) => { name: string; path: string } | null)) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadWorkspaceMapAtom); const v = m[id] ?? null
+    set(threadWorkspaceMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
+  }
+)
+export const artifactsAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadArtifactsMapAtom)[id] ?? []) : [] },
+  (get, set, update: ArtifactEntry[] | ((prev: ArtifactEntry[]) => ArtifactEntry[])) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadArtifactsMapAtom); const v = m[id] ?? []
+    set(threadArtifactsMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
+  }
+)
+export const openFilesAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadOpenFilesMapAtom)[id] ?? []) : [] },
+  (get, set, update: import('./types').EditorFile[] | ((prev: import('./types').EditorFile[]) => import('./types').EditorFile[])) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadOpenFilesMapAtom); const v = m[id] ?? []
+    set(threadOpenFilesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
+  }
+)
+export const activeEditorFileAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadActiveEditorFileMapAtom)[id] ?? null) : null },
+  (get, set, file: import('./types').EditorFile | null) => {
+    const id = get(activeThreadIdAtom); if (!id) return; const m = get(threadActiveEditorFileMapAtom)
+    set(threadActiveEditorFileMapAtom, { ...m, [id]: file })
+    if (file) { const open = get(openFilesAtom); set(openFilesAtom, open.some(f => f.path === file.path) ? open.map(f => f.path === file.path ? file : f) : [...open, file]) }
+  }
+)
+
+// Specific-thread update action atoms (for background events/streams)
+export const updateThreadMessagesAtom = atom(null, (get, set, { threadId, update }: { threadId: string; update: import('./types').ChatMessage[] | ((prev: import('./types').ChatMessage[]) => import('./types').ChatMessage[]) }) => {
+  const m = get(chatMessagesMapAtom); const v = m[threadId] ?? []
+  set(chatMessagesMapAtom, { ...m, [threadId]: typeof update === 'function' ? update(v) : update })
+})
+export const updateThreadRunStateAtom = atom(null, (get, set, { threadId, state }: { threadId: string; state: AgentRunState }) => {
+  set(agentRunStateMapAtom, { ...get(agentRunStateMapAtom), [threadId]: state })
+})
+export const updateThreadTokensAtom = atom(null, (get, set, { threadId, session, lifetime }: { threadId: string; session?: number; lifetime?: number }) => {
+  const m = get(threadTokensMapAtom); const v = m[threadId] ?? { session: 0, lifetime: 0 }
+  set(threadTokensMapAtom, { ...m, [threadId]: { session: session !== undefined ? session : v.session, lifetime: lifetime !== undefined ? lifetime : v.lifetime } })
+})
+export const updateThreadWorkspaceAtom = atom(null, (get, set, { threadId, workspace }: { threadId: string; workspace: { name: string; path: string } | null }) => {
+  set(threadWorkspaceMapAtom, { ...get(threadWorkspaceMapAtom), [threadId]: workspace })
+})
+export const updateThreadArtifactsAtom = atom(null, (get, set, { threadId, artifacts }: { threadId: string; artifacts: ArtifactEntry[] }) => {
+  set(threadArtifactsMapAtom, { ...get(threadArtifactsMapAtom), [threadId]: artifacts })
+})
+export const updateThreadOpenFilesAtom = atom(null, (get, set, { threadId, openFiles }: { threadId: string; openFiles: import('./types').EditorFile[] }) => {
+  set(threadOpenFilesMapAtom, { ...get(threadOpenFilesMapAtom), [threadId]: openFiles })
+})
+export const updateThreadActiveEditorFileAtom = atom(null, (get, set, { threadId, file }: { threadId: string; file: import('./types').EditorFile | null }) => {
+  set(threadActiveEditorFileMapAtom, { ...get(threadActiveEditorFileMapAtom), [threadId]: file })
+})
+
+export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom, (message) => message.id)
+export const runningThreadsAtom = atom<Set<string>>(new Set<string>())
+export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)
+export const isArtifactPanelOpenAtom = atom<boolean>(false)
+export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
 
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 

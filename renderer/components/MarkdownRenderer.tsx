@@ -9,7 +9,7 @@ import { globalPromptTriggerAtom, isArtifactPanelOpenAtom, activeEditorFileAtom,
 import { isAgentArtifact, getArtifactIcon, getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
 import { toast } from 'sonner'
 import mermaid from 'mermaid'
-import { stripFileProtocol } from '../lib/pathUtils'
+import { stripFileProtocol, normalizeMarkdownLinks } from '../lib/pathUtils'
 import type { FileReadResult } from '../../preload/index.d'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import hljs from 'highlight.js'
@@ -32,12 +32,13 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
       if (fileData) { setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error(err) }
   }
+  const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? children.split(/[/\\]/).pop() ?? children : children
   return (
     <span className="file-link" onClick={handleClick} title={`Open ${filePath}`} style={{ cursor: 'pointer' }}>
       <span className="file-icon-wrapper-native" style={{ display: 'inline-flex', alignItems: 'center', marginRight: '4px', verticalAlign: 'middle' }}>
         <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />
       </span>
-      <span className="file-name-wrapper">{children}</span>
+      <span className="file-name-wrapper">{displayName}</span>
     </span>
   )
 }
@@ -88,10 +89,11 @@ const LocalImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ s
   const [status, setStatus] = React.useState<'loading' | 'loaded' | 'error'>('loading')
   const conversationId = useAtomValue(activeThreadIdAtom)
   React.useEffect(() => {
-    const isLocal = (src.startsWith('file://') || src.startsWith('/') || src.match(/^[a-zA-Z]:/)) && !src.startsWith('data:')
+    const isLocal = !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')
     if (!isLocal) { setDataUrl(src); setStatus('loaded'); return }
     let active = true
-    window.api.invoke('file:read', { filePath: stripFileProtocol(src), conversationId }).then((fileData: any) => {
+    const filePath = src.startsWith('file://') ? stripFileProtocol(src) : src
+    window.api.invoke('file:read', { filePath, conversationId }).then((fileData: any) => {
       if (active && fileData?.isBinary && fileData.base64) {
         setDataUrl(`data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
         setStatus('loaded')
@@ -99,12 +101,13 @@ const LocalImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ s
     }).catch(() => { if (active) setStatus('error') })
     return () => { active = false }
   }, [src, conversationId])
-  if (status === 'loading') return <div className="local-image-container loading"><div className="local-image-loading-frame"><div className="tool-call-spinner"></div><span className="shimmer-text">Loading image...</span></div></div>
-  if (status === 'error') return <div className="local-image-container loading"><div className="local-image-error-frame"><span>Failed to load image</span></div></div>
-  return <img src={dataUrl || src} alt={alt || 'Image'} title={title} />
+  if (status === 'loading') return <span className="local-image-container loading"><span className="local-image-loading-frame"><span className="tool-call-spinner"></span><span className="shimmer-text">Loading image...</span></span></span>
+  if (status === 'error') return <span className="local-image-container loading"><span className="local-image-error-frame"><span>Failed to load image</span></span></span>
+  return <img src={dataUrl || src} alt={alt || 'Image'} title={title} className="local-image-preview" style={{ maxWidth: '180px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--border-color)', objectFit: 'contain', marginTop: '6px', display: 'block' }} />
 }
 
 const components = {
+  pre: ({ children }: any) => <>{children}</>,
   a: ({ href, children, ...props }: any) => href?.startsWith('file://') ? <FileLink href={href}>{children}</FileLink> : <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
   img: ({ src, alt, title }: any) => src ? <LocalImage src={src} alt={alt} title={title} /> : null,
   code: ({ className, children, ...props }: any) => {
@@ -118,13 +121,16 @@ const components = {
   }
 }
 
-const MarkdownRenderer = ({ content, isArtifact = false, id, ref }: MarkdownRendererProps) => (
-  <div ref={ref} id={id} className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}>
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
-      {content}
-    </ReactMarkdown>
-  </div>
-)
+const MarkdownRenderer = ({ content, isArtifact = false, id, ref }: MarkdownRendererProps) => {
+  const normalizedContent = React.useMemo(() => normalizeMarkdownLinks(content), [content])
+  return (
+    <div ref={ref} id={id} className={`markdown-content${isArtifact ? ' markdown-artifact' : ''}`}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components} urlTransform={(url) => url}>
+        {normalizedContent}
+      </ReactMarkdown>
+    </div>
+  )
+}
 
 export default MarkdownRenderer
 MarkdownRenderer.displayName = 'MarkdownRenderer'

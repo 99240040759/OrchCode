@@ -147,7 +147,6 @@ export const ipcCommands = {
           method: 'POST',
           headers,
           body: JSON.stringify({ text }),
-          signal: AbortSignal.timeout(30000)
         })
         if (!response.ok) throw new Error(`Failed to generate title: ${response.statusText}`)
         const data = await response.json(), title = data.title?.trim() ?? null
@@ -251,6 +250,7 @@ export const ipcCommands = {
     execute: async ({ filePath, conversationId }: any) => {
       const ctx = getWorkspaceContext(conversationId) || (await getOrCreateWorkspaceContext(conversationId))
       const safePath = assertWithinWorkspace(ctx.rootPath, filePath, conversationId), stat = await fs.stat(safePath)
+      if (stat.isDirectory()) throw new Error('Cannot read a directory as a file.')
       if (stat.size > MAX_FILE_READ_BYTES) throw new Error('File exceeds 25 MB limit.')
       const rawBuffer = await fs.readFile(safePath), filename = safePath.split(/[/\\]/).pop() ?? '', ext = extname(safePath).toLowerCase()
       if (isFileBinary(safePath, rawBuffer)) return { name: filename, path: safePath, isBinary: true, mimeType: getMimeType(safePath), base64: rawBuffer.toString('base64') }
@@ -324,12 +324,10 @@ export const ipcCommands = {
     execute: async ({ url, bounds, conversationId }: any, event: any) => {
       const mainWindow = WindowManager.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
-      let bv = WindowManager.getBrowserView()
-      if (bv && WindowManager.getBrowserConversationId() !== conversationId) {
-        if (mainWindow) removeBrowserView(mainWindow, bv)
-        try { bv.webContents.close() } catch (err) { console.debug('[browser] Cleanup error:', err) }
-        bv = null; WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
-      }
+      const activeId = conversationId || 'default'
+      WindowManager.setBrowserConversationId(activeId)
+      WindowManager.getAllBrowserViews().forEach((view, key) => { if (key !== activeId) removeBrowserView(mainWindow, view) })
+      let bv = WindowManager.getBrowserViewForConversation(activeId)
       const setupListeners = (view: any, sender: any) => {
         view.webContents.removeAllListeners('page-title-updated'); view.webContents.removeAllListeners('did-navigate'); view.webContents.removeAllListeners('did-navigate-in-page')
         view.webContents.on('page-title-updated', (_e: any, title: string) => { try { sender.send('browser:title-updated', title) } catch (err) { console.debug('[browser] IPC send error:', err) } })
@@ -345,7 +343,7 @@ export const ipcCommands = {
       }
       const partition = conversationId ? `persist:conversation_${conversationId}` : undefined
       bv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } })
-      WindowManager.setBrowserView(bv); WindowManager.setBrowserConversationId(conversationId || null); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
+      WindowManager.setBrowserViewForConversation(activeId, bv); mainWindow.contentView.addChildView(bv); bv.setBounds(normalizeBounds(bounds))
       setupListeners(bv, event.sender)
       await bv.webContents.loadURL(normalizeBrowserUrl(url || 'https://google.com'))
     }
@@ -359,15 +357,14 @@ export const ipcCommands = {
   'browser:close': {
     schema: z.object({}),
     execute: () => {
-      const win = WindowManager.getMainWindow(), bv = WindowManager.getBrowserView()
-      if (bv) {
-        if (win) removeBrowserView(win, bv)
-        try {
-          bv.webContents.removeAllListeners()
-          bv.webContents.close()
-          setTimeout(() => { try { if (!bv.webContents.isDestroyed()) (bv.webContents as any).destroy() } catch (err) { log.debug('[browser] Delayed destroy error:', err) } }, 100)
-        } catch (err) { log.debug('[browser] WebContents cleanup error:', err) }
-        WindowManager.setBrowserView(null); WindowManager.setBrowserConversationId(null)
+      const win = WindowManager.getMainWindow(), activeId = WindowManager.getBrowserConversationId()
+      if (activeId) {
+        const bv = WindowManager.getBrowserViewForConversation(activeId)
+        if (bv) {
+          if (win) removeBrowserView(win, bv)
+          const hasActiveJob = Array.from((pool as any).activeJobs.values()).some((jobName: any) => jobName === `stream:${activeId}`)
+          if (!hasActiveJob) WindowManager.setBrowserViewForConversation(activeId, null)
+        }
       }
     }
   }

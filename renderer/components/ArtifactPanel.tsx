@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { X, Globe, TerminalSquare, ListTodo, Loader } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import {
   isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom,
   activeWorkspaceAtom, activeThreadIdAtom, openFilesAtom, artifactsAtom,
+  updateThreadArtifactsAtom,
   type EditorFile, type ArtifactPanelMode
 } from '../store/agentStore'
 import type { editor } from 'monaco-editor'
@@ -104,15 +105,17 @@ const ArtifactPanel: React.FC = () => {
     return () => { active = false }
   }, [convId, setArtifacts])
 
+  const updateThreadArtifacts = useSetAtom(updateThreadArtifactsAtom)
+
   useEffect(() => {
     return window.api.on('artifacts:changed', (payload: unknown) => {
       const p = payload as { conversationId: string; artifacts?: ArtifactEntry[] } | undefined
-      if (p?.conversationId === convIdRef.current) {
-        lastArtifactsUpdateRef.current = Date.now()
-        setArtifacts(p.artifacts ?? [])
+      if (p?.conversationId) {
+        if (p.conversationId === convIdRef.current) lastArtifactsUpdateRef.current = Date.now()
+        updateThreadArtifacts({ threadId: p.conversationId, artifacts: p.artifacts ?? [] })
       }
     })
-  }, [setArtifacts])
+  }, [updateThreadArtifacts])
 
   const handleOpenFile = (fileData: EditorFile) => {
     setActiveFile(fileData); setPanelMode('editor')

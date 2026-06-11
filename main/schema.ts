@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import log from 'electron-log'
-import type { ModelMessage } from 'ai'
+import OpenAI from 'openai'
+export type ModelMessage = OpenAI.ChatCompletionMessageParam
 
 // ─── Block Schemas ────────────────────────────────────────────────────────────
 
@@ -18,11 +19,11 @@ const ReasoningBlockSchema = z.object({
 })
 
 const ToolBlockSchema = z.object({
-  type: z.literal('tool'),
-  toolCallId: z.string(),
-  toolName: z.string(),
+  type: z.literal('tool_call'),
+  tool_call_id: z.string(),
+  tool_name: z.string(),
   args: z.record(z.string(), z.any()),
-  argsDelta: z.string().optional(),
+  args_delta: z.string().optional(),
   result: z.any().optional(),
   status: z.enum(['pending', 'complete', 'error'])
 })
@@ -32,11 +33,24 @@ const ErrorBlockSchema = z.object({
   message: z.string()
 })
 
+const SummarizeBlockSchema = z.object({
+  type: z.literal('summarize'),
+  savedTokens: z.number(),
+  totalTokens: z.number()
+})
+
+const DurationBlockSchema = z.object({
+  type: z.literal('duration'),
+  durationSeconds: z.number()
+})
+
 const StreamBlockSchema = z.discriminatedUnion('type', [
   TextBlockSchema,
   ReasoningBlockSchema,
   ToolBlockSchema,
-  ErrorBlockSchema
+  ErrorBlockSchema,
+  SummarizeBlockSchema,
+  DurationBlockSchema
 ])
 
 const UserMessageDataSchema = z.object({
@@ -60,12 +74,15 @@ export function parseAssistantMessageData(dataStr?: string | null): StreamBlock[
   try {
     const raw = JSON.parse(dataStr)
     if (Array.isArray(raw)) {
-      const parsed = z.array(StreamBlockSchema).safeParse(raw)
-      return parsed.success ? parsed.data : undefined
+      const parsedList: StreamBlock[] = []
+      for (const item of raw) {
+        const parsed = StreamBlockSchema.safeParse(item)
+        if (parsed.success) parsedList.push(parsed.data)
+        else log.warn('[schema] Invalid block skipped:', parsed.error.format(), item)
+      }
+      return parsedList.length > 0 ? parsedList : undefined
     }
-  } catch (err) {
-    log.error('[schema] Failed to parse assistant message data:', err)
-  }
+  } catch (err) { log.error('[schema] Failed to parse assistant message data:', err) }
   return undefined
 }
 
@@ -92,8 +109,8 @@ export function buildAttachmentParts(
   attachments: Array<{ type: string; name: string; mimeType?: string; base64: string }>,
   modelSupportsVision: boolean,
   modelSupportsNativeFiles: boolean
-): unknown[] {
-  const parts: unknown[] = [{ type: 'text', text }]
+): any[] {
+  const parts: any[] = [{ type: 'text', text }]
   for (const att of attachments) {
     const mime = att.mimeType || 'application/octet-stream'
     const isText =
@@ -101,21 +118,17 @@ export function buildAttachmentParts(
       mime.endsWith('+json') || mime.endsWith('/xml') || mime.endsWith('/javascript')
     if (isText) {
       try {
-        (parts[0] as { text: string }).text +=
+        parts[0].text +=
           `\n\n── Attachment Text: ${att.name} ──\n${Buffer.from(att.base64, 'base64').toString('utf-8')}`
       } catch {
-        (parts[0] as { text: string }).text += `\n\n[Attachment: ${att.name} - Failed to decode text]`
+        parts[0].text += `\n\n[Attachment: ${att.name} - Failed to decode text]`
       }
     } else if (mime.startsWith('image/')) {
-      if (modelSupportsVision)
-        parts.push({ type: 'image', image: Buffer.from(att.base64, 'base64'), mimeType: mime })
-      else
-        (parts[0] as { text: string }).text += `\n\n[Image: ${att.name} - Omitted (no vision)]`
+      if (modelSupportsVision) parts.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${att.base64}` } })
+      else parts[0].text += `\n\n[Image: ${att.name} - Omitted (no vision)]`
     } else {
-      if (modelSupportsNativeFiles)
-        parts.push({ type: 'file', data: Buffer.from(att.base64, 'base64'), mimeType: mime })
-      else
-        (parts[0] as { text: string }).text += `\n\n[File: ${att.name} - Omitted (no file support)]`
+      if (modelSupportsNativeFiles) parts.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${att.base64}` } })
+      else parts[0].text += `\n\n[File: ${att.name} - Omitted (no native file support)]`
     }
   }
   return parts
@@ -129,21 +142,11 @@ export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
   const result: ModelMessage[] = []
   const seenToolCallIds = new Set<string>()
   for (const msg of messages) {
-    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      for (const part of msg.content as any[]) {
-        if (part.type === 'tool-call') seenToolCallIds.add(part.toolCallId)
-      }
+    if (msg.role === 'assistant') {
+      if (msg.tool_calls) { for (const tc of msg.tool_calls) if (tc.id) seenToolCallIds.add(tc.id) }
       result.push(msg)
     } else if (msg.role === 'tool') {
-      if (Array.isArray(msg.content)) {
-        const validParts = (msg.content as any[]).filter(
-          (part: any) => part.type === 'tool-result' && seenToolCallIds.has(part.toolCallId)
-        )
-        if (validParts.length > 0) result.push({ ...msg, content: validParts as any })
-      } else {
-        const toolCallId = (msg as any).toolCallId
-        if (!toolCallId || seenToolCallIds.has(toolCallId)) result.push(msg)
-      }
+      if (seenToolCallIds.has(msg.tool_call_id)) result.push(msg)
     } else {
       result.push(msg)
     }
@@ -155,29 +158,23 @@ export async function buildMessagesFromHistory(
   history: RawMessage[],
   modelSupportsVision: boolean,
   modelSupportsNativeFiles: boolean
-): Promise<{
-  messages: ModelMessage[]
-  systemInstructionSuffix: string
-}> {
+): Promise<{ messages: ModelMessage[]; systemInstructionSuffix: string }> {
   const rawMessages: ModelMessage[] = []
   let systemInstructionSuffix = ''
-
   for (const m of history) {
     if (m.role === 'system') {
       systemInstructionSuffix += `\n\n${m.content}`
     } else if (m.role === 'user') {
-      let userContent: string | unknown[] = m.content
+      let userContent: any = m.content
       if (m.data) {
         try {
           const dataObj = JSON.parse(m.data)
           if (Array.isArray(dataObj.attachments) && dataObj.attachments.length > 0) {
             userContent = buildAttachmentParts(m.content, dataObj.attachments, modelSupportsVision, modelSupportsNativeFiles)
           }
-        } catch (err) {
-          log.error('[schema] Failed to parse attachment data:', err)
-        }
+        } catch (err) { log.error('[schema] Failed to parse attachment data:', err) }
       }
-      rawMessages.push({ role: 'user', content: userContent as any })
+      rawMessages.push({ role: 'user', content: userContent })
     } else if (m.role === 'assistant') {
       let blocks: StreamBlock[] = []
       if (m.data) {
@@ -187,61 +184,49 @@ export async function buildMessagesFromHistory(
       if (blocks.length === 0) {
         rawMessages.push({ role: 'assistant', content: m.content || '' })
       } else {
-        let assistantParts: any[] = []
-        let toolResults: any[] = []
-        const flush = () => {
-          if (assistantParts.length) { rawMessages.push({ role: 'assistant', content: assistantParts as any }); assistantParts = [] }
-          if (toolResults.length) { rawMessages.push({ role: 'tool', content: toolResults as any }); toolResults = [] }
-        }
+        let textVal = ''
+        const toolCalls: any[] = []
+        const toolResults: any[] = []
         for (const block of blocks) {
           if (block.type === 'text') {
-            if (toolResults.length) flush()
-            assistantParts.push({ type: 'text', text: block.content })
-          } else if (block.type === 'tool') {
-            assistantParts.push({ type: 'tool-call', toolCallId: block.toolCallId, toolName: block.toolName, input: block.args || {} })
+            textVal += block.content
+          } else if (block.type === 'tool_call') {
+            toolCalls.push({ id: block.tool_call_id, type: 'function', function: { name: block.tool_name, arguments: typeof block.args === 'string' ? block.args : JSON.stringify(block.args || {}) } })
             if (block.status === 'complete' || block.status === 'error' || 'result' in block) {
               const outputVal = block.result
-              let formattedOutput: unknown
+              let formattedOutput: string
               if (outputVal && typeof outputVal === 'object' && 'type' in outputVal) {
-                formattedOutput = outputVal
-              } else if (block.toolName === 'browserScreenshot' && (outputVal as any)?.success && (outputVal as any)?.filePath) {
+                formattedOutput = JSON.stringify(outputVal)
+              } else if (block.tool_name === 'browserScreenshot' && (outputVal as any)?.success && (outputVal as any)?.filePath) {
                 try {
                   const cleanPath = (outputVal as { filePath: string }).filePath.replace('file://', '')
                   const base64Image = (await fs.readFile(cleanPath)).toString('base64')
-                  formattedOutput = { type: 'content', value: [
+                  formattedOutput = JSON.stringify({ type: 'content', value: [
                     { type: 'image-data', data: base64Image, mediaType: 'image/png' },
                     { type: 'text', text: `Screenshot: ${(outputVal as any).filePath}` }
-                  ]}
-                } catch (err: any) {
-                  formattedOutput = { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${err.message}` }] }
-                }
-              } else if (block.toolName === 'viewFile' && (outputVal as any)?.isBinary &&
+                  ]})
+                } catch (err: any) { formattedOutput = `Failed to read screenshot: ${err.message}` }
+              } else if (block.tool_name === 'viewFile' && (outputVal as any)?.isBinary &&
                 (outputVal as any)?.mimeType?.startsWith('image/') && (outputVal as any)?.base64Content) {
-                formattedOutput = { type: 'content', value: [
+                formattedOutput = JSON.stringify({ type: 'content', value: [
                   { type: 'image-data', data: (outputVal as any).base64Content, mediaType: (outputVal as any).mimeType },
                   { type: 'text', text: `Analyzed binary image: ${(outputVal as any).absolutePath}` }
-                ]}
+                ]})
               } else {
-                const isError = block.status === 'error'
-                formattedOutput = isError
-                  ? typeof outputVal === 'string' ? { type: 'error-text', value: outputVal } : { type: 'error-json', value: outputVal ?? null }
-                  : typeof outputVal === 'string' ? { type: 'text', value: outputVal } : { type: 'json', value: outputVal ?? null }
+                formattedOutput = typeof outputVal === 'string' ? outputVal : JSON.stringify(block.status === 'error' ? (outputVal ?? 'Error') : (outputVal ?? ''))
               }
-              toolResults.push({ type: 'tool-result', toolCallId: block.toolCallId, toolName: block.toolName, output: formattedOutput as any })
+              toolResults.push({ tool_call_id: block.tool_call_id, content: formattedOutput })
             } else {
-              toolResults.push({ type: 'tool-result', toolCallId: block.toolCallId, toolName: block.toolName, output: { type: 'error-text', value: 'Tool execution was interrupted or cancelled.' } })
+              toolResults.push({ tool_call_id: block.tool_call_id, content: 'Tool execution was interrupted or cancelled.' })
             }
           }
         }
-        flush()
+        rawMessages.push({ role: 'assistant', content: textVal || null, tool_calls: toolCalls.length ? toolCalls : undefined })
+        for (const tr of toolResults) {
+          rawMessages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content })
+        }
       }
     }
   }
-
-  const messages = sanitizeMessages(rawMessages)
-
-  return {
-    messages,
-    systemInstructionSuffix
-  }
+  return { messages: sanitizeMessages(rawMessages), systemInstructionSuffix }
 }

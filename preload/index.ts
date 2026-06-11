@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('api', {
   onTerminalPort: (id: string): void => {
     ipcRenderer.once(`terminal:port:${id}`, (ev) => {
       const p = ev.ports[0]
-      if (p) window.postMessage({ type: 'terminal-port-transfer', id }, window.location.origin || '*', [p])
+      if (p) window.postMessage({ type: 'terminal-port-transfer', id }, window.location.origin === 'null' ? '*' : (window.location.origin || '*'), [p])
     })
   },
 

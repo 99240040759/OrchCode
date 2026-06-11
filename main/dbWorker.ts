@@ -100,6 +100,9 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   setThreadAccumulatedTokens(dbPath, threadId, tokens) {
     prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ? WHERE id = ?').run(tokens, threadId)
   },
+  updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded) {
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, threadId)
+  },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
     const db = getDB(dbPath)
     if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {

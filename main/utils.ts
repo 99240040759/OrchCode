@@ -20,15 +20,21 @@ export const globalApiLimiter = new Bottleneck({ maxConcurrent: 10, minTime: 100
 // --- Window Manager ---
 export class WindowManager {
   private static mainWindow: BrowserWindow | null = null
-  private static browserView: WebContentsView | null = null
-  private static browserConversationId: string | null = null
+  private static browserViews = new Map<string, WebContentsView>()
+  private static activeBrowserConversationId: string | null = null
   static setMainWindow(win: BrowserWindow | null) { this.mainWindow = win }
   static getMainWindow(): BrowserWindow | null { return this.mainWindow }
-  static setBrowserView(view: WebContentsView | null) { this.browserView = view }
-  static getBrowserView(): WebContentsView | null { return this.browserView }
-  static setBrowserConversationId(id: string | null) { this.browserConversationId = id }
-  static getBrowserConversationId(): string | null { return this.browserConversationId }
-  static clear() { this.mainWindow = null; this.browserView = null; this.browserConversationId = null }
+  static getBrowserViewForConversation(id: string): WebContentsView | undefined { return this.browserViews.get(id) }
+  static setBrowserViewForConversation(id: string, view: WebContentsView | null) {
+    if (view) this.browserViews.set(id, view)
+    else { const existing = this.browserViews.get(id); if (existing) { try { existing.webContents.close() } catch {} }; this.browserViews.delete(id) }
+  }
+  static setBrowserConversationId(id: string | null) { this.activeBrowserConversationId = id }
+  static getBrowserConversationId(): string | null { return this.activeBrowserConversationId }
+  static getBrowserView(): WebContentsView | null { return this.activeBrowserConversationId ? (this.browserViews.get(this.activeBrowserConversationId) ?? null) : null }
+  static getAllBrowserViews(): Map<string, WebContentsView> { return this.browserViews }
+  static clearAllBrowserViews() { this.browserViews.forEach(bv => { try { bv.webContents.close() } catch {} }); this.browserViews.clear(); this.activeBrowserConversationId = null }
+  static clear() { this.mainWindow = null; this.clearAllBrowserViews() }
 }
 export default WindowManager
 

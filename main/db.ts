@@ -98,6 +98,7 @@ export function deleteThread(threadId: string): Promise<boolean> { return runQue
 export function updateThreadTitle(threadId: string, title: string): Promise<boolean> { return runQuery('updateThreadTitle', threadId, title) }
 export function updateThreadAccumulatedTokens(threadId: string, tokens: number): Promise<void> { return runQuery('updateThreadAccumulatedTokens', threadId, tokens) }
 export function setThreadAccumulatedTokens(threadId: string, tokens: number): Promise<void> { return runQuery('setThreadAccumulatedTokens', threadId, tokens) }
+export function updateThreadTokens(threadId: string, accumulated: number, lifetimeAdded: number): Promise<void> { return runQuery('updateThreadTokens', threadId, accumulated, lifetimeAdded) }
 export function setThreadWorkspace(threadId: string, workspacePath: string): Promise<void> { return runQuery('setThreadWorkspace', threadId, workspacePath) }
 export function getThreadWorkspace(threadId: string): Promise<string | null> { return runQuery('getThreadWorkspace', threadId) }
 export function addOpenedWorkspace(path: string): Promise<void> { return runQuery('addOpenedWorkspace', path) }
