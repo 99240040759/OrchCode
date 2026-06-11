@@ -96,13 +96,11 @@ async function proxyRequest(req, res, targetUrl, authHeaders) {
     });
 
     res.status(upstreamRes.status);
-    
     for (const [k, v] of upstreamRes.headers.entries()) {
-      if (k !== 'transfer-encoding' && k !== 'content-encoding') {
-        res.setHeader(k, v);
-      }
+      if (k !== 'transfer-encoding' && k !== 'content-encoding') res.setHeader(k, v);
     }
-    
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Access-Control-Allow-Origin', 'app://orch-code');
     res.setHeader('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
