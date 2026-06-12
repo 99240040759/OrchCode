@@ -1,17 +1,16 @@
 import React from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { Plus } from 'lucide-react'
 import { authUserAtom, sidebarExpandedAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/services'
 import ThreadList from './ThreadList'
 import { useChat } from '../hooks/useChat'
-import { isMac } from '../lib/sharedUtils'
 
 const LeftSidebar: React.FC = () => {
   const authUser = useAtomValue(authUserAtom)
-  const [expanded] = useAtom(sidebarExpandedAtom)
+  const expanded = useAtomValue(sidebarExpandedAtom)
   const { newConversation } = useChat()
   const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (e) { console.error(e) } }
   const handleLogout = async () => { try { await authService.logout() } catch (e) { console.error(e) } }
@@ -19,8 +18,6 @@ const LeftSidebar: React.FC = () => {
   return (
     <aside className={`sidebar-root ${expanded ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
       <div className="sidebar-inner">
-        <div className={`sidebar-header-row app-region-drag ${isMac ? 'sidebar-header-row-mac' : 'sidebar-header-row-win'}`}>
-        </div>
 
         <div className="sidebar-top-section">
           <div className="sidebar-start-conv" onClick={() => newConversation()}>
@@ -29,11 +26,7 @@ const LeftSidebar: React.FC = () => {
           </div>
         </div>
 
-        <div className="sidebar-divider-container"><div className="sidebar-divider" /></div>
-
         <div className="sidebar-body"><ThreadList /></div>
-
-        <div className="sidebar-divider-container"><div className="sidebar-divider" /></div>
 
         <div className="sidebar-footer app-region-no-drag">
           {authUser ? (
@@ -47,7 +40,7 @@ const LeftSidebar: React.FC = () => {
                       {authUser.name ? authUser.name.charAt(0).toUpperCase() : authUser.email.charAt(0).toUpperCase()}
                     </div>
                   )}
-                  <span className="text-ellipsis flex-1">{authUser.name || authUser.email}</span>
+                  <span className="text-ellipsis flex-1 sidebar-username">{authUser.name || authUser.email}</span>
                 </button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>

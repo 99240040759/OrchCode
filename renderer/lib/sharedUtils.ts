@@ -32,7 +32,7 @@ export const getOrchThemeColors = () => {
     return val ? oklchToHex(val) : fallback
   }
   return {
-    bgApp: get('--bg-app', '#121212'),
+    bgApp: get('--bg-app', '#1a1a1a'),
     textPrimary: get('--text-primary', '#f3f3f3'),
     textSecondary: get('--text-secondary', '#a1a1aa'),
     textMuted: get('--text-muted', '#71717a'),

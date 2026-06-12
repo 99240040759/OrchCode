@@ -8,14 +8,16 @@ import { ErrorBoundary } from './lib/uiUtils'
 import {
   sidebarExpandedAtom, isArtifactPanelOpenAtom, activeThreadAtom,
   globalPromptTriggerAtom, availableModelsAtom, selectedModelAtom, authUserAtom,
-  artifactPanelModeAtom
+  artifactPanelModeAtom, updateStatusAtom
 } from './store/agentStore'
 import { useChat } from './hooks/useChat'
 import { ChatPane } from './components/ChatPane'
+import TitleBar from './components/TitleBar'
 import { authService } from './services/services'
 import { threadService } from './services/services'
-import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react'
 import { isMac } from './lib/sharedUtils'
+import { PanelLeft, PanelRight, ArrowLeft, ArrowRight } from 'lucide-react'
+import type { UpdateStatus } from '../preload/index.d'
 
 function AppInner(): React.JSX.Element {
   const setAvailableModels = useSetAtom(availableModelsAtom)
@@ -31,6 +33,14 @@ function AppInner(): React.JSX.Element {
   const [globalPrompt, setGlobalPrompt] = useAtom(globalPromptTriggerAtom)
   const availableModels = useAtomValue(availableModelsAtom)
   const sessionInitialized = useRef(false)
+  const setUpdateStatus = useSetAtom(updateStatusAtom)
+
+  useEffect(() => {
+    if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
+    window.api.invoke('updater:get-status').then((status) => { if (status) setUpdateStatus(status as UpdateStatus) })
+    const unsubscribe = window.api.on('updater:status-changed', (status) => { setUpdateStatus(status as UpdateStatus) })
+    return () => { unsubscribe() }
+  }, [setUpdateStatus])
 
   // Renderer-side keyboard shortcuts not covered by Electron menu accelerators
   useEffect(() => {
@@ -115,39 +125,58 @@ function AppInner(): React.JSX.Element {
     return () => { window.removeEventListener('resize', handleResize); clearTimeout(timer) }
   }, [])
 
+
+
   return (
-    <div className="app-root">
+    <div className={`app-root ${sidebarExpanded ? 'sidebar-is-expanded' : 'sidebar-is-collapsed'} ${isMac ? 'is-mac' : 'is-win'}`}>
       <title>{activeThreadTitle} — Orch Code</title>
       <meta name="description" content="AI pair programming assistant" />
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
-      <ErrorBoundary name="Sidebar">
-        <LeftSidebar />
-      </ErrorBoundary>
-      <div className="app-content-wrapper">
-        <div className="app-container">
-          <main className="workspace-main">
-            <div className="split-view-container">
-              <div className="chat-pane-wrapper">
-                <ErrorBoundary name="Chat Panel">
-                  <ChatPane />
-                </ErrorBoundary>
+      <TitleBar />
+      <div className="app-main-layout">
+        <ErrorBoundary name="Sidebar">
+          <LeftSidebar />
+        </ErrorBoundary>
+        <div className="app-content-wrapper">
+          <div className="app-container">
+            <main className="workspace-main">
+              <div className="split-view-container">
+                <div className="chat-pane-wrapper">
+                  <ErrorBoundary name="Chat Panel">
+                    <ChatPane />
+                  </ErrorBoundary>
+                </div>
+                <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}>
+                  <ErrorBoundary name="Artifacts Panel">
+                    <React.Suspense fallback={<div className="editor-loading">Loading Artifacts...</div>}>
+                      <ArtifactPanel />
+                    </React.Suspense>
+                  </ErrorBoundary>
+                </div>
               </div>
-              <div className={`artifact-pane-wrapper ${isArtifactPanelOpen ? 'artifact-pane-expanded' : 'artifact-pane-collapsed'}`}>
-                <ErrorBoundary name="Artifacts Panel">
-                  <React.Suspense fallback={<div className="editor-loading">Loading Artifacts...</div>}>
-                    <ArtifactPanel />
-                  </React.Suspense>
-                </ErrorBoundary>
-              </div>
-            </div>
-          </main>
+            </main>
+          </div>
         </div>
       </div>
-      <div className={`app-sidebar-toggle app-region-no-drag ${isMac ? 'app-sidebar-toggle-mac' : 'app-sidebar-toggle-win'}`} onClick={() => setSidebarExpanded(!sidebarExpanded)} title={sidebarExpanded ? 'Collapse Sidebar' : 'Expand Sidebar'}>
-        {sidebarExpanded ? <PanelLeftClose size={16} strokeWidth={1.5} /> : <PanelLeft size={16} strokeWidth={1.5} />}
+      <div className={`fixed-nav-container ${isMac ? 'fixed-nav-mac' : 'fixed-nav-win'}`}>
+        <button className="fixed-nav-btn" onClick={() => setSidebarExpanded(!sidebarExpanded)} title={sidebarExpanded ? 'Collapse Sidebar' : 'Expand Sidebar'}>
+          <PanelLeft size={16} />
+        </button>
+        <button className="fixed-nav-btn" onClick={() => window.history.back()} title="Back">
+          <ArrowLeft size={16} />
+        </button>
+        <button className="fixed-nav-btn" onClick={() => window.history.forward()} title="Forward">
+          <ArrowRight size={16} />
+        </button>
       </div>
-      <div className={`app-artifact-toggle app-region-no-drag ${isMac ? 'app-artifact-toggle-mac' : 'app-artifact-toggle-win'}`} onClick={() => setArtifactPanelOpen(!isArtifactPanelOpen)} title={isArtifactPanelOpen ? 'Collapse Panel' : 'Expand Panel'}>
-        {isArtifactPanelOpen ? <PanelRightClose size={16} strokeWidth={1.5} /> : <PanelRight size={16} strokeWidth={1.5} />}
+      <div className={`fixed-right-container ${isMac ? 'fixed-right-mac' : 'fixed-right-win'}`}>
+        <button
+          onClick={() => setArtifactPanelOpen(!isArtifactPanelOpen)}
+          title={isArtifactPanelOpen ? 'Collapse Panel' : 'Expand Panel'}
+          className="fixed-toggle-panel-btn"
+        >
+          <PanelRight size={16} strokeWidth={1.5} />
+        </button>
       </div>
     </div>
   )
@@ -158,7 +187,7 @@ function App(): React.JSX.Element {
     <>
       <title>Welcome to Orch Code</title>
       <meta name="description" content="AI onboarding setup" />
-      <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: '#161616', border: '1px solid var(--border-color)', color: '#f3f3f3', fontSize: 13 } }} />
+      <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
       <OnboardingView />
     </>
   ) : <Provider><ErrorBoundary><React.Suspense fallback={<div className="editor-loading">Loading Orch Code...</div>}><AppInner /></React.Suspense></ErrorBoundary></Provider>

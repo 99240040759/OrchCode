@@ -31,13 +31,13 @@ const StreamingMarkdown = ({ content, targetId, isStreaming }: { content: string
 const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
   if (tools.length === 1) {
     const isBlock = tools[0].tool_name === 'run_command'
-    return <div style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined, margin: isBlock ? '6px 0' : 0, alignItems: 'center' }}><ToolCallBlock toolCall={tools[0]} /></div>
+    return <div className={`tool-call-container-wrapper ${isBlock ? 'block-tool' : 'inline-tool'}`}><ToolCallBlock toolCall={tools[0]} /></div>
   }
   return (
-    <div className="chat-tool-group-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: 0, alignItems: 'center', width: '100%' }}>
+    <div className="chat-tool-group-container">
       {tools.map((t, idx) => {
         const isBlock = t.tool_name === 'run_command'
-        return <div key={t.id || idx} style={{ display: isBlock ? 'block' : 'inline-flex', width: isBlock ? '100%' : undefined }}><ToolCallBlock toolCall={t} /></div>
+        return <div key={t.id || idx} className={`tool-call-container-wrapper ${isBlock ? 'block-tool' : 'inline-tool'}`}><ToolCallBlock toolCall={t} /></div>
       })}
     </div>
   )
@@ -55,8 +55,8 @@ const ActiveGeneratingSpinner = ({ startTime }: { startTime?: number }) => {
     return () => clearInterval(timer)
   }, [startTime])
   return (
-    <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
-      <img src={logoImg} style={{ width: '14px', height: '14px', objectFit: 'contain' }} alt="logo" />
+    <div className="chat-message-generating-container">
+      <img src={logoImg} className="chat-message-generating-logo" alt="logo" />
       <span className="chat-message-generating-text">Working for {Math.round(elapsed)}s</span>
     </div>
   )
@@ -116,7 +116,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
           </div>
         )
         if (seg.type === 'summarize') return (
-          <div key={`summarize-${seg.blockIndex}`} style={{ margin: '6px 0', width: '100%' }}>
+          <div key={`summarize-${seg.blockIndex}`} className="tool-call-container-wrapper block-tool">
             <ToolCallBlock toolCall={{ id: `summarize-${seg.blockIndex}`, tool_name: 'summarize', args: { savedTokens: (seg.block as any).savedTokens, totalTokens: (seg.block as any).totalTokens }, status: 'complete' }} />
           </div>
         )
@@ -126,8 +126,8 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
         <div className="assistant-content chat-message-assistant"><MarkdownRenderer content={message.content} /></div>
       )}
       {durationBlock && (
-        <div className="chat-message-generating-container" style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: 0.6 }}>
-          <img src={logoImg} style={{ width: '14px', height: '14px', objectFit: 'contain', opacity: 0.8 }} alt="logo" />
+        <div className="chat-message-generating-container">
+          <img src={logoImg} className="chat-message-generating-logo" alt="logo" />
           <span className="chat-message-generating-text">Worked for {Math.round((durationBlock as any).durationSeconds)}s</span>
         </div>
       )}
@@ -224,17 +224,17 @@ const ChatThread: React.FC = () => {
 
   return (
     <div className="chat-thread-container" ref={scrollRef} onScroll={handleScroll}>
-      <div className="chat-thread-spacer-top" style={{ flexShrink: 0 }} />
+      <div className="chat-thread-spacer-top flex-shrink-0" />
       {messageGroups.map((group) => (
-        <div key={group.key} className="chat-section" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div key={group.key} className="chat-section">
           {group.userAtom && <MessageWrapper messageAtom={group.userAtom} />}
           {group.assistantAtoms.map(({ atom, id }) => (
             <MessageWrapper key={id} messageAtom={atom} />
           ))}
         </div>
       ))}
-      <div className="chat-thread-anchor" style={{ flexShrink: 0 }} />
-      <div className="chat-thread-spacer-bottom" style={{ flexShrink: 0 }} />
+      <div className="chat-thread-anchor flex-shrink-0" />
+      <div className="chat-thread-spacer-bottom flex-shrink-0" />
     </div>
   )
 }

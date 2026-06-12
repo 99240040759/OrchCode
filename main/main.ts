@@ -109,9 +109,7 @@ function createOnboardingWindow(): BrowserWindow {
     resizable: false,
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 16, y: 12 },
-    backgroundColor: '#121212',
+    backgroundColor: '#0d0d0d',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -158,17 +156,13 @@ function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    backgroundColor: '#0d0d0d',
     titleBarStyle: 'hidden',
-    titleBarOverlay:
-      process.platform === 'win32'
-        ? {
-            color: '#1a1a1a',
-            symbolColor: '#b4b4b4',
-            height: 40
-          }
-        : false,
-    trafficLightPosition: { x: 16, y: 12 },
-    backgroundColor: '#121212',
+    titleBarOverlay: process.platform === 'win32' ? {
+      color: '#161616',
+      symbolColor: '#c8ccd4',
+      height: 38
+    } : undefined,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

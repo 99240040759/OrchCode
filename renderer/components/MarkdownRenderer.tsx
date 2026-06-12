@@ -45,9 +45,9 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
   }
   const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? children.split(/[/\\]/).pop() ?? children : children
   return (
-    <span className="file-link" onClick={handleClick} title={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`} style={{ cursor: 'pointer' }}>
-      <span className="file-icon-wrapper-native" style={{ display: 'inline-flex', alignItems: 'center', marginRight: '4px', verticalAlign: 'middle' }}>
-        {isDir ? <Folder size={14} style={{ color: 'var(--accent-purple)' }} /> : <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />}
+    <span className="file-link" onClick={handleClick} title={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`}>
+      <span className="file-icon-wrapper-native">
+        {isDir ? <Folder size={14} className="folder-icon-color" /> : <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />}
       </span>
       <span className="file-name-wrapper">{displayName}</span>
     </span>
@@ -75,12 +75,12 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
           <span className="codeblock-dot green" />
         </div>
         <span className="codeblock-header-title">{language || 'code'}</span>
-        <button className="code-block-copy-btn" title="Copy code" onClick={handleCopy} style={{ position: 'relative', top: 0, right: 0, opacity: 0.7 }}>
+        <button className="code-block-copy-btn" title="Copy code" onClick={handleCopy}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
       </div>
-      <pre className="codeblock-body" style={{ margin: 0, padding: '12px 16px', background: '#1e1e1e', overflow: 'hidden' }}>
-        <code className={`hljs language-${language}`} style={{ padding: 0, background: 'transparent', whiteSpace: 'pre-wrap', wordBreak: 'break-all', display: 'block' }} dangerouslySetInnerHTML={{ __html: highlighted }} />
+      <pre className="codeblock-body">
+        <code className={`codeblock-code hljs language-${language}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
       </pre>
     </div>
   )
@@ -123,7 +123,7 @@ const LocalImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ s
   }, [src, conversationId])
   if (status === 'loading') return <span className="local-image-container loading"><span className="local-image-loading-frame"><span className="tool-call-spinner"></span><span className="shimmer-text">Loading image...</span></span></span>
   if (status === 'error') return <span className="local-image-container loading"><span className="local-image-error-frame"><span>Failed to load image</span></span></span>
-  return <img src={dataUrl || src} alt={alt || 'Image'} title={title} className="local-image-preview" style={{ maxWidth: '180px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--border-color)', objectFit: 'contain', marginTop: '6px', display: 'block' }} />
+  return <img src={dataUrl || src} alt={alt || 'Image'} title={title} className="local-image-preview" />
 }
 
 const renderWithBr = (node: React.ReactNode): React.ReactNode => {

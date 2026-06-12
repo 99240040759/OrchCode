@@ -1,36 +1,19 @@
-import React, { useEffect } from 'react'
-import { useAtom, useAtomValue } from 'jotai'
-import { updateStatusAtom, sidebarExpandedAtom } from '../store/agentStore'
-import type { UpdateStatus } from '../../preload/index.d'
-interface TitleBarProps { title?: string; workspaceName?: string }
+import React from 'react'
+import { useAtomValue } from 'jotai'
+import { updateStatusAtom } from '../store/agentStore'
 import { isMac } from '../lib/sharedUtils'
 
-const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName }) => {
-  const [updateStatus, setUpdateStatus] = useAtom(updateStatusAtom)
-  const sidebarExpanded = useAtomValue(sidebarExpandedAtom)
-
-  useEffect(() => {
-    if (import.meta.env.DEV) { setUpdateStatus({ status: 'idle' }); return }
-    window.api.invoke('updater:get-status').then((status) => {
-      if (status) setUpdateStatus(status as UpdateStatus)
-    })
-    const unsubscribe = window.api.on('updater:status-changed', (status) => {
-      setUpdateStatus(status as UpdateStatus)
-    })
-    return () => { unsubscribe() }
-  }, [setUpdateStatus])
-
+const TitleBar: React.FC = () => {
+  const updateStatus = useAtomValue(updateStatusAtom)
   const handleUpdateClick = () => {
     if (updateStatus.status === 'downloaded') window.api.invoke('updater:install').catch(console.error)
     else if (updateStatus.status === 'available' && isMac) window.api.invoke('updater:open-mac-release').catch(console.error)
     else if (updateStatus.status === 'error') window.api.invoke('updater:check').catch(console.error)
   }
-
   const renderUpdateIndicator = () => {
     const { status, version, progress, error } = updateStatus
     if (status === 'idle') return null
-    let text = ''
-    let extraClass = ''
+    let text = '', extraClass = ''
     switch (status) {
       case 'checking': text = 'Checking...'; extraClass = 'badge-checking'; break
       case 'available': text = isMac ? `Update Available (v${version})` : `Downloading update (v${version})...`; extraClass = isMac ? 'badge-available badge-clickable' : 'badge-info'; break
@@ -46,17 +29,16 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Orch Code', workspaceName 
       </div>
     )
   }
-
   return (
-    <header className={`titlebar ${sidebarExpanded ? 'titlebar-sidebar-expanded' : ''}`}>
-      <div className={`titlebar-left ${isMac ? 'titlebar-left-mac' : 'titlebar-left-win'}`}>
+    <header className="custom-titlebar-wrapper">
+      <div className="custom-titlebar-left">
+        {isMac && <div className="custom-titlebar-mac-spacer" />}
       </div>
-      <div className="titlebar-center">{workspaceName ? workspaceName : title}</div>
-      <div className={`titlebar-right ${isMac ? 'titlebar-right-mac' : 'titlebar-right-win'}`}>
+      <div className="custom-titlebar-right">
         {renderUpdateIndicator()}
+        {!isMac && <div className="custom-titlebar-win-spacer" />}
       </div>
     </header>
   )
 }
-
 export default TitleBar

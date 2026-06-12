@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useAtomValue } from 'jotai'
-import { Trash2, FolderPlus, Loader } from 'lucide-react'
+import { Trash2, FolderPlus, Loader, Folder, FolderOpen, SlidersHorizontal } from 'lucide-react'
 import { threadListAtom, activeThreadIdAtom, runningThreadsAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import { format, isToday, isYesterday } from 'date-fns'
@@ -12,9 +12,10 @@ function useThreadListActions() {
 
 const formatConversationDate = (dateStr: string): string => {
   try {
-    const d = new Date(dateStr)
-    if (isToday(d)) return `Today at ${format(d, 'h:mm a')}`
-    return isYesterday(d) ? `Yesterday at ${format(d, 'h:mm a')}` : format(d, 'MMM d, yyyy h:mm a')
+    const d = new Date(dateStr), diffMs = Date.now() - d.getTime()
+    if (diffMs < 60000) return 'now'
+    if (isToday(d)) return format(d, 'h:mm a')
+    return isYesterday(d) ? 'Yesterday' : format(d, 'MMM d')
   } catch { return 'unknown' }
 }
 
@@ -24,6 +25,7 @@ const ThreadList: React.FC = () => {
   const runningThreads = useAtomValue(runningThreadsAtom)
   const { selectThread, deleteThread, openWorkspace } = useThreadListActions()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
 
   const handleDeleteThread = async (e: React.MouseEvent, threadId: string) => {
     e.stopPropagation()
@@ -31,36 +33,66 @@ const ThreadList: React.FC = () => {
     if (confirmed === 1) await deleteThread(threadId)
   }
 
+  const groups = React.useMemo(() => {
+    const grouped: Record<string, { name: string; threads: any[] }> = {}
+    threads.forEach((t) => {
+      const path = t.workspacePath || ''
+      const name = path ? (path.split(/[/\\]/).pop() ?? 'Workspace') : 'General'
+      if (!grouped[path]) grouped[path] = { name, threads: [] }
+      grouped[path].threads.push(t)
+    })
+    return Object.entries(grouped).sort((a, b) => {
+      const latestA = Math.max(...a[1].threads.map(t => new Date(t.updatedAt || t.createdAt).getTime()))
+      const latestB = Math.max(...b[1].threads.map(t => new Date(t.updatedAt || t.createdAt).getTime()))
+      return latestB - latestA
+    })
+  }, [threads])
+
   return (
     <div className="sidebar-section thread-list-container">
       <div className="sidebar-section-header thread-list-header">
-        <span>Conversations</span>
-        <span title="Open Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}><FolderPlus size={14} /></span>
+        <span>Projects</span>
+        <div className="thread-list-header-actions">
+          <SlidersHorizontal size={14} className="sidebar-section-header-action" />
+          <span title="Open Project Folder" className="sidebar-section-header-action" onClick={() => openWorkspace()}><FolderPlus size={14} /></span>
+        </div>
       </div>
 
       <div className="thread-list-group">
-        {threads.length === 0 ? <div className="sidebar-empty-state">No conversations yet.</div> : threads.map((thread) => {
-          const active = activeThreadId === thread.id
-          const wsName = thread.workspacePath ? (thread.workspacePath.split(/[/\\]/).pop() ?? 'Workspace') : null
-          const isHovered = hoveredId === thread.id
+        {groups.length === 0 ? <div className="sidebar-empty-state">No conversations yet.</div> : groups.map(([path, group]) => {
+          const isCollapsed = !!collapsedGroups[path]
           return (
-            <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)} onMouseEnter={() => setHoveredId(thread.id)} onMouseLeave={() => setHoveredId(null)} style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-              <div className="thread-item-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span className={`thread-item-title-text thread-item-title ${active ? 'thread-item-active-title' : ''}`} style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.title ?? 'New conversation'}</span>
-                {runningThreads.has(thread.id) && <Loader size={14} className="animate-spin running-indicator" style={{ marginLeft: '6px' }} />}
+            <div key={path} className="thread-list-group-wrapper">
+              <div onClick={() => setCollapsedGroups(p => ({ ...p, [path]: !p[path] }))} className="thread-group-header">
+                {isCollapsed ? (
+                  <Folder size={16} strokeWidth={1.5} />
+                ) : (
+                  <FolderOpen size={16} strokeWidth={1.5} />
+                )}
+                <span className="thread-group-title">{group.name}</span>
               </div>
-              <div className="thread-item-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', marginTop: '4px', height: '14px', width: '100%' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: '8px' }}>
-                  {wsName || ''}
-                </span>
-                <span style={{ flexShrink: 0, textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  {isHovered ? (
-                    <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation" style={{ cursor: 'pointer', opacity: 0.8, display: 'inline-flex' }}><Trash2 size={12} /></div>
-                  ) : (
-                    <span className="thread-item-meta-time" style={{ color: 'var(--text-muted)' }}>{formatConversationDate(thread.createdAt)}</span>
-                  )}
-                </span>
-              </div>
+              {!isCollapsed && (
+                <div className="thread-list-group">
+                  {group.threads.map((thread) => {
+                    const active = activeThreadId === thread.id
+                    const isHovered = hoveredId === thread.id
+                    return (
+                      <div key={thread.id} className={`thread-item${active ? ' thread-item-active' : ''}`} onClick={() => selectThread(thread.id)} onMouseEnter={() => setHoveredId(thread.id)} onMouseLeave={() => setHoveredId(null)}>
+                        <span className={`thread-item-title-text ${active ? 'thread-item-active-title' : ''}`}>{thread.title ?? 'New conversation'}</span>
+                        <div className="thread-item-actions">
+                          {runningThreads.has(thread.id) ? (
+                            <Loader size={14} className="animate-spin" />
+                          ) : isHovered ? (
+                            <div className="sidebar-section-header-action thread-item-action-btn" onClick={(e) => handleDeleteThread(e, thread.id)} title="Delete conversation"><Trash2 size={12} /></div>
+                          ) : (
+                            <span className="thread-item-meta-time">{formatConversationDate(thread.createdAt)}</span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}

@@ -1,14 +1,13 @@
 import React, { useState, useRef, useEffect, useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Plus, ChevronDown, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
+import { Plus, ChevronUp, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { agentRunStateAtom, sessionTokensAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom } from '../store/agentStore'
+import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 
 import { workspaceService } from '../services/services'
-import { TokenIndicator } from './OverviewPanel'
 import { toast } from 'sonner'
 
 interface InputBarProps { onSubmit?: (val: string, attachments?: any[]) => void; onStop?: () => void }
@@ -59,7 +58,7 @@ const SubmitButton: React.FC<{ isRunning: boolean; hasInput: boolean; handleStop
     return (
       <>
         {hasInput && (
-          <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" style={{ marginRight: 4 }} type="button">
+          <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" type="button">
             <MessageSquarePlus size={13} strokeWidth={2} />
           </button>
         )}
@@ -67,8 +66,9 @@ const SubmitButton: React.FC<{ isRunning: boolean; hasInput: boolean; handleStop
       </>
     )
   }
+  if (!hasInput) return null
   return (
-    <button className="toolbar-submit-btn" type="submit" title="Submit" disabled={pending || !hasInput}>
+    <button className="toolbar-submit-btn" type="submit" title="Submit" disabled={pending}>
       <ArrowRight size={14} strokeWidth={2.5} />
     </button>
   )
@@ -80,9 +80,8 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const formRef = useRef<HTMLFormElement>(null)
   const [_, submitAction] = useActionState(async () => { handleSend() }, null)
   const runState = useAtomValue(agentRunStateAtom)
-  const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
-  const sessionTokens = useAtomValue(sessionTokensAtom)
   const availableModels = useAtomValue(availableModelsAtom)
+  const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const [attachments, setAttachments] = useState<Array<{ type: 'image' | 'document'; name: string; mimeType: string; base64: string }>>([])
   const supportsVision = !!availableModels[selectedModel]?.multimodal
   const isPanelOpen = useAtomValue(isArtifactPanelOpenAtom), panelMode = useAtomValue(artifactPanelModeAtom), isBrowserActive = isPanelOpen && panelMode === 'browser'
@@ -340,18 +339,17 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ))}
         </div>
       )}
-      <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()} style={{ position: 'relative', flex: 1, display: 'flex', minWidth: 0, cursor: 'text' }}>
-        <div style={{ position: 'relative', flex: 1, display: 'flex', minWidth: 0 }}>
+      <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()}>
+        <div className="input-bar-editor-wrapper">
           {inputValue.trim().length === 0 && (
-            <div style={{ position: 'absolute', left: 0, top: '2px', color: 'var(--text-secondary)', opacity: 0.4, pointerEvents: 'none', userSelect: 'none', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-md-plus)' }}>
-              Ask anything, @ to mention
+            <div className="input-bar-placeholder">
+              Ask anything, @ to mention, / for actions
             </div>
           )}
           <div
             ref={editorRef}
             contentEditable
             className="input-bar-text-area input-bar-text-area-override"
-            style={{ outline: 'none', minHeight: '24px', maxHeight: '180px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1 }}
             onInput={() => { if (editorRef.current) { setInputValue(editorRef.current.innerText || ''); checkSuggestions() } }}
             onKeyDown={handleKeyDown}
             onKeyUp={checkSuggestions}
@@ -369,7 +367,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             100% { transform: scale(1); }
           }
         `}</style>
-        <div className="input-bar-toolbar-left" style={{ gap: 'var(--space-xs)' }}>
+        <div className="input-bar-toolbar-left">
           {supportsVision && (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -388,13 +386,13 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild disabled={Object.keys(availableModels).length === 0}>
               <div className="toolbar-selector" title={Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model'}>
-                <ChevronDown size={14} />
                 <span>{Object.keys(availableModels).length === 0 ? 'No models' : availableModels[selectedModel]?.name || selectedModel || 'Select model'}</span>
-                {Object.keys(availableModels).length > 0 && availableModels[selectedModel]?.badge && (
-                  <span className="model-badge" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--accent-brass)', background: 'rgba(226, 168, 86, 0.1)', padding: '1px 5px', borderRadius: '12px', border: '1px solid rgba(226, 168, 86, 0.2)', marginLeft: '6px' }}>
+                {availableModels[selectedModel]?.badge && (
+                  <span className="model-badge">
                     {availableModels[selectedModel].badge}
                   </span>
                 )}
+                <ChevronUp size={14} />
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -404,7 +402,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                     <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
                       <span className="font-medium">{model.name}</span>
                       {model.badge && (
-                        <span className="model-badge" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--accent-brass)', background: 'rgba(226, 168, 86, 0.1)', padding: '1px 5px', borderRadius: '12px', border: '1px solid rgba(226, 168, 86, 0.2)', marginLeft: '4px' }}>
+                        <span className="model-badge">
                           {model.badge}
                         </span>
                       )}
@@ -415,21 +413,12 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </div>
-        <div className="input-bar-toolbar-right" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <TokenIndicator current={sessionTokens} max={availableModels[selectedModel]?.contextWindow || 200000} />
+        <div className="input-bar-toolbar-right">
           <button
             type="button"
             onClick={toggleListening}
-            className={`toolbar-icon-btn ${isListening ? 'listening' : ''}`}
+            className={`toolbar-icon-btn toolbar-voice-btn ${isListening ? 'listening' : ''}`}
             title={isListening ? "Stop voice input" : "Start voice input"}
-            style={{
-              color: isListening ? '#ef4444' : 'var(--text-secondary)',
-              animation: isListening ? 'mic-pulse 1.5s infinite ease-in-out' : 'none',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer'
-            }}
           >
             {isListening ? <MicOff size={16} /> : <Mic size={16} />}
           </button>

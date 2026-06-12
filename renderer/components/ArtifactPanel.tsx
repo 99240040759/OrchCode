@@ -21,31 +21,33 @@ import { MediaPreview } from './InputBar'
 import { MarkdownView } from './MarkdownRenderer'
 import { EmptyState } from '../lib/uiUtils'
 import { OfficePreview } from './OfficePreview'
-
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
-import { isMac } from '../lib/sharedUtils'
-
 interface HeaderProps {
   panelMode: string; openFiles: EditorFile[]; hoveredTabPath: string | null
   setHoveredTabPath: (p: string | null) => void; handleCloseFile: (file: EditorFile, e: React.MouseEvent) => void
 }
-
-const PanelHeader: React.FC<HeaderProps> = ({ panelMode, openFiles, hoveredTabPath, setHoveredTabPath, handleCloseFile }) => {
+const PanelHeader: React.FC<HeaderProps> = ({ openFiles, hoveredTabPath, setHoveredTabPath, handleCloseFile }) => {
   const trigger = (val: string, label: string, icon: React.ReactNode) => (
     <Tabs.Trigger value={val} className="artifact-tab-trigger">{icon}<span>{label}</span></Tabs.Trigger>
   )
   return (
-    <div className={`artifact-panel-header ${isMac ? 'artifact-panel-header-mac' : 'artifact-panel-header-win'}`}>
+    <div className="artifact-panel-header">
       <Tabs.List className="artifact-panel-tabs-list">
-        {trigger('overview', 'Overview', <ListTodo size={14} color={panelMode === 'overview' ? 'var(--accent-purple)' : 'var(--text-secondary)'} />)}
-        {trigger('terminal', 'Terminal', <TerminalSquare size={14} color={panelMode === 'terminal' ? 'var(--accent-green)' : 'var(--text-secondary)'} />)}
-        {trigger('browser', 'Browser', <Globe size={14} color={panelMode === 'browser' ? 'var(--accent-blue)' : 'var(--text-secondary)'} />)}
+        {trigger('overview', 'Overview', <ListTodo size={14} />)}
+        {trigger('terminal', 'Terminal', <TerminalSquare size={14} />)}
+        {trigger('browser', 'Browser', <Globe size={14} />)}
         {openFiles.map((f) => {
           const hovered = hoveredTabPath === f.path
           const baseName = f.name.split(/[/\\]/).pop() ?? f.name
           return (
             <Tabs.Trigger key={f.path} value={f.path} className="artifact-tab-trigger" onMouseEnter={() => setHoveredTabPath(f.path)} onMouseLeave={() => setHoveredTabPath(null)}>
-              <div className="tab-icon-wrapper">{hovered ? <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span> : isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={baseName} autoAssign width={16} height={16} className="flex-shrink-0" />}</div>
+              <div className="tab-icon-wrapper">
+                {hovered ? (
+                  <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span>
+                ) : (
+                  isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={baseName} autoAssign width={16} height={16} className="flex-shrink-0" />
+                )}
+              </div>
               <span>{getDisplayName(f.name)}</span>
             </Tabs.Trigger>
           )
@@ -168,7 +170,6 @@ const ArtifactPanel: React.FC = () => {
     if (['overview', 'terminal', 'browser'].includes(val)) { setPanelMode(val as ArtifactPanelMode); setActiveFile(null) }
     else { const file = openFiles.find(f => f.path === val); if (file) { setIsDiffMode(false); setActiveFile(file); setPanelMode('editor') } }
   }
-
   const tabsValue = panelMode === 'editor' ? (activeFile?.path ?? 'overview') : panelMode
 
   return (
@@ -186,20 +187,20 @@ const ArtifactPanel: React.FC = () => {
         </Tabs.Content>
         <div className={`artifact-panel-tab-content ${panelMode === 'editor' ? 'tab-content-visible' : 'tab-content-hidden'}`}>
           {fileLoading && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '100%', color: 'var(--text-secondary)' }}>
+            <div className="editor-panel-loading-overlay">
               <Loader className="animate-spin" size={24} />
               <span>Loading file...</span>
             </div>
           )}
-          <div style={{ display: !fileLoading && !activeFile ? 'flex' : 'none', height: '100%' }}>
+          <div className={`editor-panel-empty-state-wrapper ${(!fileLoading && !activeFile) ? '' : 'tab-content-hidden'}`}>
             <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." />
           </div>
-          <div style={{ display: !fileLoading && activeFile && lastActiveFile ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+          <div className={`editor-panel-active-file-wrapper ${(!fileLoading && activeFile && lastActiveFile) ? '' : 'tab-content-hidden'}`}>
             {lastActiveFile && (
               (/\.(docx|xlsx|pptx|pdf)$/i).test(lastActiveFile.name) ? <OfficePreview displayFile={lastActiveFile} /> :
               lastActiveFile.isBinary ? <MediaPreview displayFile={lastActiveFile} /> :
               lastActiveFile.name.endsWith('.md') ? <MarkdownView displayFile={lastActiveFile} activeWorkspace={activeWorkspace} /> :
-              <React.Suspense fallback={<div className="editor-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}><Loader className="animate-spin mr-2" size={16} />Loading editor...</div>}>
+              <React.Suspense fallback={<div className="editor-loading"><Loader className="animate-spin mr-2" size={16} />Loading editor...</div>}>
                 <CodeEditorView displayFile={lastActiveFile} activeWorkspace={activeWorkspace} themeLoaded={themeLoaded} isDiffMode={isDiffMode} setIsDiffMode={setIsDiffMode} originalContent={originalContent} handleDiffEditorMount={handleDiffEditorMount} handleEditorMount={handleEditorMount} handleSearchClick={handleSearchClick} />
               </React.Suspense>
             )}

@@ -56,9 +56,9 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     const targetName = path.split(/[/\\]/).pop() ?? path
     const op = toolName === 'write_to_file' ? (isComp ? 'Created' : isErr ? 'Failed to create' : 'Creating') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
     const suffix = (added || removed) ? (
-      <span className="diff-stats" style={{ display: 'inline-flex', gap: '3px', marginLeft: '6px', fontSize: '10.5px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-        {added > 0 && <span className="diff-add" style={{ color: 'var(--accent-green)' }}>+{added}</span>}
-        {removed > 0 && <span className="diff-sub" style={{ color: 'var(--accent-red)' }}>-{removed}</span>}
+      <span className="diff-stats">
+        {added > 0 && <span className="diff-add">+{added}</span>}
+        {removed > 0 && <span className="diff-sub">-{removed}</span>}
       </span>
     ) : undefined
     return { operation: op, target: targetName, suffix, fullPath: path || null, isFile: true }
@@ -122,7 +122,7 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
 function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   if (toolName === 'generate_image') return <Camera size={15} className="icon-blue" />
   if (toolName === 'browser_screenshot') return <Camera size={15} className="icon-blue" />
-  if (toolName === 'list_dir') return <FolderOpen size={15} style={{ color: '#e2b473' }} />
+  if (toolName === 'list_dir') return <FolderOpen size={15} className="icon-accent-brass" />
   if (isFile) {
     const cleanName = target.split(' ')[0]
     if (cleanName === 'implementation_plan.md') return <ClipboardList size={15} className="icon-purple" />
@@ -147,7 +147,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
 }
 
 const GlobeIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="icon-purple" style={{ flexShrink: 0 }}>
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="icon-purple">
     <circle cx="12" cy="12" r="10" />
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
     <path d="M2 12h20" />
@@ -193,60 +193,27 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
     let stderr = res?.stderr || res?.error || ''
 
     return (
-      <div className="terminal-card" style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        padding: '8px 12px',
-        backgroundColor: 'var(--bg-sidebar)',
-        border: '1px solid var(--border-color)',
-        borderRadius: '8px',
-        margin: '6px 0',
-        fontSize: '11.5px',
-        boxSizing: 'border-box'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', minWidth: 0 }}>
-          <TerminalSquare size={14} style={{ color: '#4ade80', flexShrink: 0 }} />
-          <span style={{ fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+      <div className="terminal-card">
+        <div className="terminal-card-header">
+          <TerminalSquare size={14} className="icon-accent-green" />
+          <span className="terminal-card-title">
             <span>{isPending ? 'Running command:' : isErr ? 'Failed to run:' : 'Ran command:'}</span>
-            <code style={{ fontFamily: 'var(--font-mono)', fontSize: '10.5px', color: '#e2b473', background: 'rgba(255,255,255,0.02)', padding: '2px 4px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>{command}</code>
+            <code className="tool-call-command-code">{command}</code>
           </span>
-          {isPending && <Loader className="animate-spin" size={13} style={{ color: '#4ade80', flexShrink: 0 }} />}
-          {isErr && <AlertCircle size={13} className="icon-red" style={{ flexShrink: 0 }} />}
+          {isPending && <Loader className="animate-spin icon-accent-green" size={13} />}
+          {isErr && <AlertCircle size={13} className="icon-red" />}
         </div>
         {isPending && (
-          <pre style={{
-            backgroundColor: '#0a0a0a',
-            border: '1px solid rgba(255, 255, 255, 0.04)',
-            borderRadius: '6px',
-            padding: '8px',
-            fontSize: '10.5px',
-            fontFamily: 'var(--font-mono)',
-            color: '#4ade80',
-            overflowX: 'auto',
-            maxHeight: '150px',
-            margin: '8px 0 0 0'
-          }}>
+          <pre className="terminal-pre">
             {stdout || stderr || 'Executing...'}
           </pre>
         )}
         {(isComp || isErr) && (stdout || stderr) && (
-          <details style={{ marginTop: '6px', width: '100%' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '10.5px', color: 'var(--text-muted)', userSelect: 'none', outline: 'none' }}>
+          <details className="terminal-details">
+            <summary className="terminal-summary">
               View terminal output
             </summary>
-            <pre style={{
-              backgroundColor: '#0a0a0a',
-              border: '1px solid rgba(255, 255, 255, 0.04)',
-              borderRadius: '6px',
-              padding: '8px',
-              fontSize: '10.5px',
-              fontFamily: 'var(--font-mono)',
-              color: isErr ? '#ef4444' : 'var(--text-primary)',
-              overflowX: 'auto',
-              maxHeight: '200px',
-              margin: '4px 0 0 0'
-            }}>
+            <pre className={`terminal-output-pre ${isErr ? 'error' : ''}`}>
               {stdout || stderr}
             </pre>
           </details>
@@ -271,25 +238,25 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
 
   const Component = (isInteractive ? 'button' : 'div') as React.ElementType
   return (
-    <div className="tool-call-block-container" style={{ display: 'inline-flex', margin: '2px' }}>
+    <div className="tool-call-block-container">
       <Component
         onClick={isInteractive ? handleClick : undefined}
         className={`tool-call-wrapper ${isInteractive ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
         title={isInteractive ? `Open ${fullPath}` : undefined}
       >
-        <span className="muted-text" style={{ fontSize: '11px', opacity: 0.8 }}>{operation}</span>
-        <span className="icon-wrapper" style={{ display: 'inline-flex', alignItems: 'center' }}>
+        <span className="muted-text">{operation}</span>
+        <span className="icon-wrapper tool-call-icon-wrapper">
           {renderToolIcon(toolCall.tool_name, isFile, target)}
         </span>
-        <span className="target-text" style={{ fontWeight: 500, fontSize: '11px', display: 'flex', alignItems: 'center' }}>
+        <span className="target-text tool-call-target-text">
           {target}
           {suffix}
         </span>
         {toolCall.status === 'pending' && !FILE_WRITE_TOOLS.includes(toolCall.tool_name) && <Loader className="animate-spin text-secondary" size={11} />}
         {toolCall.status === 'error' && <AlertCircle size={12} className="icon-red" />}
         {toolCall.status === 'complete' && toolCall.result && typeof toolCall.result === 'object' && Array.isArray((toolCall.result as any).syntaxErrors) && (toolCall.result as any).syntaxErrors.length > 0 && (
-          <span title={`File contains ${(toolCall.result as any).syntaxErrors.length} syntax warnings`} style={{ display: 'inline-flex', marginLeft: '4px' }}>
-            <AlertCircle size={12} style={{ color: '#e2b473' }} />
+          <span title={`File contains ${(toolCall.result as any).syntaxErrors.length} syntax warnings`} className="syntax-warning-badge">
+            <AlertCircle size={12} className="icon-accent-brass" />
           </span>
         )}
       </Component>

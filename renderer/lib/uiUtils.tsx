@@ -19,12 +19,12 @@ export function getDisplayName(fileName: string): string {
 /** Single source of truth for artifact icons — uses Lucide. */
 export function getArtifactIcon(name: string, size = 15): React.ReactNode {
   if (name === 'implementation_plan.md') {
-    return <ClipboardList size={size} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />
+    return <ClipboardList size={size} className="icon-purple" />
   }
   if (name === 'walkthrough.md') {
-    return <BookOpen size={size} style={{ flexShrink: 0, color: 'var(--accent-green)' }} />
+    return <BookOpen size={size} className="icon-green" />
   }
-  return <FileText size={size} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
+  return <FileText size={size} className="icon-secondary" />
 }
 
 // ─── Path Utilities ───────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
     viewBox="0 0 24 24"
     width={size}
     height={size}
-    style={{ flexShrink: 0 }}
+    className="flex-shrink-0"
     xmlns="http://www.w3.org/2000/svg"
   >
     <path
@@ -145,10 +145,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       if (this.props.fallback) return this.props.fallback
       if (this.props.name) {
         return (
-          <div className="panel-error-fallback" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%', padding: '24px', boxSizing: 'border-box', backgroundColor: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#ef4444' }}>{this.props.name} Error</h3>
-            <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{this.state.error?.message || 'Component crashed.'}</p>
-            <button onClick={this.handleReset} className="error-boundary-button" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', width: 'auto' }}>Reset Panel</button>
+          <div className="panel-error-fallback">
+            <h3 className="panel-error-fallback-title">{this.props.name} Error</h3>
+            <p className="panel-error-fallback-desc">{this.state.error?.message || 'Component crashed.'}</p>
+            <button onClick={this.handleReset} className="error-boundary-button panel-error-fallback-btn">Reset Panel</button>
           </div>
         )
       }

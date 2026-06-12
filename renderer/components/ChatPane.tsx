@@ -1,7 +1,6 @@
 import React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { ChevronDown, Code, Loader } from 'lucide-react'
-import TitleBar from './TitleBar'
 import Lottie from 'lottie-react'
 import emptyStateAnimation from '../assets/empty-state.json'
 import InputBar from './InputBar'
@@ -25,14 +24,15 @@ export const ChatPane: React.FC = () => {
     const onOpenArtifacts = () => setArtifactPanelOpen(true)
     const onOpenWorkspace = () => openWorkspace()
 
-
     return (
       <div className="chat-pane-root">
-        <TitleBar title="Orch Code" workspaceName={workspaceName} />
+        <header className="chat-pane-header">
+          <span className="chat-pane-header-title">{workspaceName}</span>
+        </header>
 
         {isLoading && (
           <div className="thread-loading-overlay">
-            <Loader className="animate-spin" size={24} style={{ color: 'var(--accent-blue)' }} />
+            <Loader className="animate-spin" size={24} />
           </div>
         )}
 

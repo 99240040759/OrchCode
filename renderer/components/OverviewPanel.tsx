@@ -15,10 +15,10 @@ export function formatTokens(n: number): string {
 export interface TokenIndicatorProps { current: number; max: number }
 
 function ringColor(fraction: number): string {
-  if (fraction >= 0.95) return '#ef4444'
-  if (fraction >= 0.8) return '#f59e0b'
-  if (fraction >= 0.5) return '#10b981'
-  return '#5e5e5e'
+  if (fraction >= 0.95) return 'var(--accent-red)'
+  if (fraction >= 0.8) return 'var(--accent-orange)'
+  if (fraction >= 0.5) return 'var(--accent-green)'
+  return 'var(--text-muted)'
 }
 
 const RING_RADIUS = 9
