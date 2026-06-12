@@ -50,7 +50,6 @@ const isNewerVersion = (l: string, c: string): boolean => {
 }
 
 async function checkMacUpdate() {
-  if (process.platform !== 'darwin') return
   sendStatus({ status: 'checking' })
   try {
     const currentVersion = app.getVersion()

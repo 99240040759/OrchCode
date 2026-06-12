@@ -32,16 +32,24 @@ export function registerStreamIpc() {
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
 
-      const worker = pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
-      // Give the worker a fresh DB port for this job
+      // Async allocation — waits for a free slot instead of throwing at capacity
+      const worker = await pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
+
+      // Fresh DB port for this job
       const { port1: dbPort1, port2: dbPort2 } = new MessageChannelMain()
       db.shareDBPort(dbPort1)
       worker.postMessage({ type: 'db-port' }, [dbPort2])
+
       const win = WindowManager.getMainWindow()
       if (win && !win.isDestroyed()) win.setProgressBar(2)
 
-      // Scoped exit handler — only fires if this worker is still on this thread's job
+      // Cached browser tools for this job — lazily created on first tool-request, cleared on finish.
+      let cachedBrowserTools: Record<string, any> | null = null
+
+      // Named scoped listeners — safe across concurrent jobs on the same worker instance.
+      // We use named function refs so off() is precise and doesn't disturb other jobs.
       const onExit = (code: number | null) => {
+        cachedBrowserTools = null
         pool.clearJob(worker)
         worker.off('message', onMsg)
         worker.off('exit', onExit)
@@ -51,17 +59,20 @@ export function registerStreamIpc() {
           w.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
         }
       }
-      worker.removeAllListeners('exit')
-      worker.on('exit', onExit)
 
       const onMsg = (msg: any) => {
         if (msg?.type === 'artifacts-changed') {
-          try { const ctx = getWorkspaceContext(request.threadId); if (ctx?.rootPath) invalidateWorkspaceFilesCache(ctx.rootPath) } catch (e) { log.debug('[stream] Cache invalidation error:', e) }
+          try {
+            const ctx = getWorkspaceContext(request.threadId)
+            if (ctx?.rootPath) invalidateWorkspaceFilesCache(ctx.rootPath)
+          } catch (e) { log.debug('[stream] Cache invalidation error:', e) }
           pushArtifactsChanged(msg.threadId)
         }
+
         if (msg?.type === 'tool-request' && msg.threadId === request.threadId) {
           const { requestId, toolName, args } = msg
-          const t = browserTools(request.threadId, true)[toolName]
+          if (!cachedBrowserTools) cachedBrowserTools = browserTools(request.threadId, true)
+          const t = cachedBrowserTools[toolName]
           if (t) {
             t.execute(args).then((res: any) => {
               worker.postMessage({ type: 'tool-response', requestId, result: res })
@@ -70,7 +81,9 @@ export function registerStreamIpc() {
             worker.postMessage({ type: 'tool-response', requestId, error: `Tool ${toolName} not found on Main` })
           }
         }
+
         if (msg?.type === 'stream-finished' && msg.threadId === request.threadId) {
+          cachedBrowserTools = null
           pool.clearJob(worker)
           worker.off('message', onMsg)
           worker.off('exit', onExit)
@@ -85,10 +98,22 @@ export function registerStreamIpc() {
           }
         }
       }
-      worker.removeAllListeners('message')
+
       worker.on('message', onMsg)
+      worker.on('exit', onExit)
+
       worker.postMessage(
-        { type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive: !!WindowManager.getBrowserView(), startTime: request.startTime },
+        {
+          type: 'start-stream',
+          threadId: request.threadId,
+          modelType: request.modelType,
+          attachments: request.attachments,
+          promptText: request.promptText,
+          token: session.idToken,
+          // Scoped: does THIS thread have an active browser session?
+          isBrowserActive: !!WindowManager.getSession(request.threadId),
+          startTime: request.startTime
+        },
         [port1]
       )
       return { ok: true }

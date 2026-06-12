@@ -96,10 +96,10 @@ async function formatToolOutputForModel(
 
     if (modelOutput.type === 'image-data') {
       if (multimodal && modelOutput.data) {
-        const label = rawOutput?.absolutePath ?? rawOutput?.filePath ?? toolName
-        return { text: `[${toolName}] Image captured: ${label}`, imageData: { base64: modelOutput.data, mimeType: modelOutput.mediaType || 'image/png' } }
+        const label = modelOutput.filePath ?? rawOutput?.screenshotPath ?? rawOutput?.absolutePath ?? toolName
+        return { text: `Screenshot: ${label}`, imageData: { base64: modelOutput.data, mimeType: modelOutput.mediaType || 'image/png' } }
       }
-      return { text: `[${toolName}] Binary image result (vision not supported by this model, cannot display).` }
+      return { text: modelOutput.filePath ? `Screenshot saved to ${modelOutput.filePath} (vision not supported)` : `Binary image result (vision not supported)` }
     }
 
     if (modelOutput.type === 'content' && Array.isArray(modelOutput.value)) {
@@ -148,7 +148,7 @@ async function buildToolMessages(
   }
 
   const imageUserMessages: any[] = stepImageParts.length > 0
-    ? [{ role: 'user', content: [{ type: 'text', text: 'Visual output from the previous tool calls:' }, ...stepImageParts] }]
+    ? [{ role: 'user', content: [{ type: 'text', text: `[browser_screenshot] Visual state of the browser after the above tool calls:` }, ...stepImageParts] }]
     : []
 
   // Build continuation directive — structured assessment + next-action prompt.
@@ -231,17 +231,18 @@ function buildBrowserInstruction(isBrowserActive: boolean, multimodal: boolean):
   if (!isBrowserActive) return ''
   return `
 ## Browser Active
-You have active browser control. Use these tools:
-1. browser_navigate(url)
-2. browser_type(selector, text, frame_selector?)
-3. browser_click(selector?, x?, y?, click_type?, delay_ms?, frame_selector?) - Click elements via CSS/Playwright selector OR coordinate (x,y)
-4. browser_keyboard_press(key) - Press keys (e.g. Enter, Tab, PageDown)
-5. browser_mouse_hover(selector, frame_selector?) - Hover over elements
-6. browser_mouse_drag(x1, y1, x2, y2, steps?) - Drag-and-drop
+You have full browser control. Available tools:
+1. browser_navigate(url) — Navigate to a URL and wait for page load.
+2. browser_click(selector?, x?, y?, click_type?) — Click via CSS/Playwright selector (preferred) or coordinates. click_type: 'click' | 'dblclick' | 'right-click'.
+3. browser_type(selector, text) — Fill text into an input field.
+4. browser_keyboard_press(key) — Press keys (e.g. "Enter", "Tab", "Control+A").
 ${multimodal
-    ? `7. browser_screenshot(): ALWAYS screenshot after navigation/typing/clicking to verify state.`
-    : `7. browser_get_page_content(): Extract page text and interactive elements for non-vision models.`
-  }`
+    ? `5. browser_screenshot() — ALWAYS screenshot after navigation/interaction to visually verify page state.
+6. browser_get_page_content() — Extract URL, visible text, and compact accessibility tree.`
+    : `5. browser_get_page_content() — Extract URL, visible text, and compact accessibility tree.
+6. browser_screenshot() — Capture PNG screenshot (saved as file path).`
+  }
+**Workflow**: navigate → interact (click/type/keyboard) → screenshot or get_page_content to verify result.`
 }
 
 function buildSystemPrompt(
@@ -485,10 +486,12 @@ export async function handleAgentStreamRequest(
         const injText = pendingInject
         pendingInject = null
         messages.push({ role: 'user', content: injText })
+        // Persist inject as a proper user message so it survives thread reload
+        const injMsgId = crypto.randomUUID()
+        await saveMessage(threadId, { id: injMsgId, role: 'user', content: injText })
         send({ type: 'inject_queued', payload: injText, threadId })
-        log.info(`[stream] Inject consumed for thread ${threadId}`)
+        log.info(`[stream] Inject consumed and saved for thread ${threadId}`)
       }
-
       // ── 3. Compute tokens + build system prompt ───────────────────────────
       const stepInputTokens = countMessagesTokens(messages, modelType)
       const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + (systemInstructionSuffix || '')

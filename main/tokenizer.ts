@@ -27,7 +27,7 @@ export function countMessagesTokens(messages: any[], _modelId?: string): number 
     } else if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
         if (part.type === 'text' && part.text) total += estimateTokens(part.text)
-        else if (part.type === 'image_url') total += 340 // flat image token cost estimate
+        else if (part.type === 'image_url') total += 800 // high-res browser screenshot estimate (~1280×800+)
       }
     }
     if (msg.tool_calls && Array.isArray(msg.tool_calls)) {

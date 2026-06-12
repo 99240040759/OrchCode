@@ -117,18 +117,19 @@ async function formatStoredToolResult(
   if (toolName === 'view_file' && outputVal?.isBinary && outputVal?.mimeType?.startsWith('image/') && outputVal?.base64Content && multimodal) {
     return { content: '', isImage: true, imgBase64: outputVal.base64Content, imgMime: outputVal.mimeType }
   }
-  // browser_screenshot — try to read, fall back to text
-  if (toolName === 'browser_screenshot' && outputVal?.success && outputVal?.filePath) {
-    if (multimodal) {
-      try {
-        const cleanPath = (outputVal.filePath as string).replace('file://', '')
-        const base64Image = (await fs.readFile(cleanPath)).toString('base64')
-        return { content: '', isImage: true, imgBase64: base64Image, imgMime: 'image/png' }
-      } catch {
-        // File no longer exists — fall through to text
+  // browser_screenshot — try to read from disk, fall back gracefully
+  if (toolName === 'browser_screenshot' && outputVal?.success) {
+    const rawPath = (outputVal.screenshotPath || outputVal.filePath) as string | undefined
+    if (rawPath) {
+      if (multimodal) {
+        try {
+          const cleanPath = rawPath.startsWith('file://') ? rawPath.slice(7) : rawPath
+          const base64Image = (await fs.readFile(cleanPath)).toString('base64')
+          return { content: '', isImage: true, imgBase64: base64Image, imgMime: 'image/png' }
+        } catch { /* file no longer exists — fall through to text */ }
       }
+      return { content: `Screenshot captured at: ${rawPath} (image data unavailable)`, isImage: false }
     }
-    return { content: `Screenshot was captured at: ${outputVal.filePath} (image data unavailable)`, isImage: false }
   }
   // view_file text — produce the METADATA + content format
   if (toolName === 'view_file' && outputVal && typeof outputVal === 'object' && 'content' in outputVal && !outputVal.isBinary) {
@@ -225,7 +226,7 @@ export async function buildMessagesFromHistory(
           const formatted = await formatStoredToolResult(block.tool_name, block.result, block.status, multimodal)
           if (formatted.isImage && formatted.imgBase64 && formatted.imgMime) {
             const textSummary = block.tool_name === 'browser_screenshot'
-              ? `Screenshot captured: ${block.result?.filePath ?? ''}`
+              ? `Screenshot captured: ${block.result?.screenshotPath ?? block.result?.filePath ?? ''}`
               : `Binary image read: ${block.result?.absolute_path ?? block.result?.absolutePath ?? ''}`
             toolResults.push({ tool_call_id: block.tool_call_id, name: block.tool_name, content: JSON.stringify({ success: true, message: textSummary }) })
             stepImageParts.push({ imgBase64: formatted.imgBase64, imgMime: formatted.imgMime })

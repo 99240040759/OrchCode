@@ -4,14 +4,11 @@ import { Package, Coins, Loader } from 'lucide-react'
 import { useAtomValue } from 'jotai'
 import { sessionTokensAtom, lifetimeTokensAtom, selectedModelAtom, availableModelsAtom } from '../store/agentStore'
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
+import { formatTokens } from '../lib/sharedUtils'
 import type { ArtifactEntry } from '../../preload/index.d'
 import Tooltip from './Tooltip'
 
-export function formatTokens(n: number): string {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(0)}k`
-  return String(n)
-}
+
 
 export interface TokenIndicatorProps { current: number; max: number }
 

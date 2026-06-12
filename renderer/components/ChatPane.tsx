@@ -5,7 +5,7 @@ import Lottie from 'lottie-react'
 import emptyStateAnimation from '../assets/empty-state.json'
 import InputBar from './InputBar'
 import ChatThread from './ChatThread'
-import { isThreadLoadingAtom, isArtifactPanelOpenAtom, hasMessagesAtom, activeWorkspaceAtom, activeThreadAtom, threadListAtom } from '../store/agentStore'
+import { isThreadLoadingAtom, isArtifactPanelOpenAtom, hasMessagesAtom, activeWorkspaceAtom,  threadListAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import Dropdown, { DropdownItem, DropdownSeparator } from './Dropdown'
 import Tooltip from './Tooltip'
@@ -15,7 +15,6 @@ export const ChatPane: React.FC = () => {
     const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
     const hasMessages = useAtomValue(hasMessagesAtom)
     const activeWorkspace = useAtomValue(activeWorkspaceAtom)
-    const activeThread = useAtomValue(activeThreadAtom)
     const threads = useAtomValue(threadListAtom)
     const { run, stop, openWorkspace, selectThread, newConversation, loadThreads } = useChat()
     const workspaces = React.useMemo(() => {

@@ -165,8 +165,8 @@ const ArtifactPanel: React.FC = () => {
   }, [panelMode])
 
   useEffect(() => {
-    if (!isOpen && browserWasOpenedRef.current) { window.api.invoke('browser:close').catch(() => {}); browserWasOpenedRef.current = false }
-  }, [isOpen])
+    if (!isOpen && browserWasOpenedRef.current) { window.api.invoke('browser:close', { conversationId: convId }).catch(() => {}); browserWasOpenedRef.current = false }
+  }, [isOpen, convId])
 
   useEffect(() => {
     const handleLayout = () => { try { editorRef.current?.layout(); diffEditorRef.current?.layout() } catch (err) { console.debug('[ArtifactPanel] Layout error:', err) } }

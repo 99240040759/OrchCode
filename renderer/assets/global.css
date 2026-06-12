@@ -211,6 +211,12 @@
     color: var(--text-primary);
   }
 
+  .text-secondary {
+    color: var(--text-secondary);
+  }
+
+  .mr-2 { margin-right: 8px }
+
   .font-semibold {
     font-weight: 600;
   }

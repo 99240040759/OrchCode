@@ -15,6 +15,7 @@ export type StreamPayload = {
   promptText: string
   threadId: string
   modelType?: string
+  startTime?: number
   attachments?: Array<{
     type: 'image' | 'document'
     name: string

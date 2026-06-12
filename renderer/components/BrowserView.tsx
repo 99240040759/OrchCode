@@ -25,7 +25,7 @@ const BrowserView: React.FC = () => {
   }
 
   const navigate = (url: string) => {
-    window.api.invoke('browser:navigate', { url }).catch(() => {})
+    window.api.invoke('browser:navigate', { url, conversationId: activeThreadId }).catch(() => {})
   }
 
   const openBrowserWithBounds = async () => {
@@ -38,7 +38,7 @@ const BrowserView: React.FC = () => {
       }
       await window.api.invoke('browser:open', { url: urlInput, bounds, conversationId: activeThreadId })
       setIsLoaded(true); isLoadedRef.current = true
-      window.api.invoke('browser:resize', bounds).catch(() => {})
+      window.api.invoke('browser:resize', { ...bounds, conversationId: activeThreadId }).catch(() => {})
     } catch (err: any) { console.error('[BrowserView] openBrowser failed:', err); setLoadError(err?.message || 'Failed to open browser. Please try again.') }
   }
 
@@ -53,7 +53,7 @@ const BrowserView: React.FC = () => {
     const debouncedResize = debounce(() => {
       if (active && isLoadedRef.current) {
         const bounds = getBounds()
-        if (bounds.width > 0 && bounds.height > 0) window.api.invoke('browser:resize', bounds).catch(() => {})
+        if (bounds.width > 0 && bounds.height > 0) window.api.invoke('browser:resize', { ...bounds, conversationId: activeThreadId }).catch(() => {})
       }
     }, 50)
     window.addEventListener('resize', debouncedResize)
@@ -75,16 +75,16 @@ const BrowserView: React.FC = () => {
   }, [panelMode, isOpen, activeThreadId])
 
   useEffect(() => {
-    if (isLoaded) window.api.invoke('browser:resize', getBounds()).catch(() => {})
-  }, [sidebarExpanded, isLoaded])
+    if (isLoaded) window.api.invoke('browser:resize', { ...getBounds(), conversationId: activeThreadId }).catch(() => {})
+  }, [sidebarExpanded, isLoaded, activeThreadId])
 
   return (
     <div className="browser-container">
       <div className="browser-header">
         <div className="browser-nav-group">
-          <Tooltip content="Back"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:back').catch(()=>{})}><ArrowLeft size={14} /></button></Tooltip>
-          <Tooltip content="Forward"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:forward').catch(()=>{})}><ArrowRight size={14} /></button></Tooltip>
-          <Tooltip content="Reload"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:reload').catch(()=>{})}><RotateCw size={13} /></button></Tooltip>
+          <Tooltip content="Back"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:back', { conversationId: activeThreadId }).catch(()=>{})}><ArrowLeft size={14} /></button></Tooltip>
+          <Tooltip content="Forward"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:forward', { conversationId: activeThreadId }).catch(()=>{})}><ArrowRight size={14} /></button></Tooltip>
+          <Tooltip content="Reload"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:reload', { conversationId: activeThreadId }).catch(()=>{})}><RotateCw size={13} /></button></Tooltip>
         </div>
         <input className="browser-url-bar" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(urlInput) }} spellCheck={false} placeholder="Enter URL or search..." />
         <Tooltip content="Go"><button className="browser-nav-btn browser-go-btn" onClick={() => navigate(urlInput)}><ExternalLink size={13} /></button></Tooltip>

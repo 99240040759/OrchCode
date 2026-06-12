@@ -1,5 +1,6 @@
 export type StreamBlock =
   | { type: 'text'; content: string }
+  | { type: 'reasoning'; content: string; durationMs?: number; isStreaming?: boolean }
   | {
       type: 'tool_call'
       tool_call_id: string

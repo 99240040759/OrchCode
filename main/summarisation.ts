@@ -58,6 +58,7 @@ export async function summariseContext(messages: any[]): Promise<string | null> 
     const response = await fetch(url, {
       method: 'POST',
       headers,
+      signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
         system_instruction: { parts: [{ text: SUMMARISE_SYSTEM_PROMPT }] },
         contents: [{ role: 'user', parts: [{ text: `Produce a complete, structured, maximally detailed summary of the following agent conversation history:\n\n${transcript}` }] }]

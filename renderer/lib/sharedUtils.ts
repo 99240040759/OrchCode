@@ -1,3 +1,8 @@
+export function formatTokens(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(0)}k`
+  return String(n)
+}
 export const isMac = window.api.platform === 'darwin'
 export const decodeBase64Utf8 = (base64Str: string): string => {
   try {

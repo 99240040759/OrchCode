@@ -8,6 +8,7 @@ import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, a
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
 import Tooltip from './Tooltip'
+import { formatTokens } from '../lib/sharedUtils'
 
 const FILE_WRITE_TOOLS = ['write_to_file', 'multi_replace_file_content']
 
@@ -107,8 +108,6 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
   if (toolName === 'browser_screenshot') return { operation: isComp ? 'Captured' : isErr ? 'Failed to capture' : 'Capturing', target: 'screenshot', fullPath: null, isFile: false }
   if (toolName === 'browser_type') return { operation: isComp ? 'Typed' : isErr ? 'Failed to type' : 'Typing', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
   if (toolName === 'browser_click') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: (getStreamingVal(args, argsDelta, 'selector') || `${getStreamingVal(args, argsDelta, 'x')}, ${getStreamingVal(args, argsDelta, 'y')}`).slice(0, 30), fullPath: null, isFile: false }
-  if (toolName === 'browser_mouse_hover') return { operation: isComp ? 'Hovered' : isErr ? 'Failed to hover' : 'Hovering', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
-  if (toolName === 'browser_mouse_drag') return { operation: isComp ? 'Dragged' : isErr ? 'Failed to drag' : 'Dragging', target: `(${getStreamingVal(args, argsDelta, 'x1')}, ${getStreamingVal(args, argsDelta, 'y1')}) to (${getStreamingVal(args, argsDelta, 'x2')}, ${getStreamingVal(args, argsDelta, 'y2')})`, fullPath: null, isFile: false }
   if (toolName === 'browser_keyboard_press') return { operation: isComp ? 'Pressed key' : isErr ? 'Failed to press key' : 'Pressing key', target: getStreamingVal(args, argsDelta, 'key'), fullPath: null, isFile: false }
 
   if (toolName === 'generate_image') {
@@ -135,14 +134,9 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
     case 'browser_get_page_content': return <GlobeCheck size={15} className="text-accent-purple flex-shrink-0" />
     case 'browser_type': return <Keyboard size={15} className="icon-teal" />
     case 'browser_click': return <MousePointerClick size={15} className="icon-pink" />
-    case 'browser_mouse_hover': return <MousePointerClick size={15} className="icon-pink" />
-    case 'browser_mouse_drag': return <MousePointerClick size={15} className="icon-pink" />
     case 'browser_keyboard_press': return <Keyboard size={15} className="icon-teal" />
-
-    case 'list_dir': return <FolderOpen size={15} className="icon-secondary" />
     case 'search_workspace': return <Search size={15} className="icon-secondary" />
     case 'search_web': return <GlobeIcon />
-    case 'generate_image': return <Camera size={15} className="icon-blue" />
     default: return <TerminalSquare size={15} className="icon-secondary" />
   }
 }
@@ -154,13 +148,6 @@ const GlobeIcon = () => (
     <path d="M2 12h20" />
   </svg>
 )
-
-function formatTokens(n: number): string {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
-}
-
 const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   const setArtifactPanelOpen = useSetAtom(isArtifactPanelOpenAtom)
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)

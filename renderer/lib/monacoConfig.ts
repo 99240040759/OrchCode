@@ -1,11 +1,9 @@
 function isMonacoAlreadyInitialized(): boolean {
-  return !!(window as unknown as { __orchcodeMonacoInitialized?: boolean })
-    .__orchcodeMonacoInitialized
+  return !!(window as any).__orchcodeMonacoInitialized
 }
 
 function markMonacoInitialized(): void {
-  ;(window as unknown as { __orchcodeMonacoInitialized?: boolean }).__orchcodeMonacoInitialized =
-    true
+  ;(window as any).__orchcodeMonacoInitialized = true
 }
 
 import { getOrchThemeColors } from './sharedUtils'

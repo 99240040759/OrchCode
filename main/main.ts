@@ -183,7 +183,7 @@ function createMainWindow(): BrowserWindow {
     handleCommandLineArgs(process.argv, mainWindow!)
   })
   mainWindow.on('closed', () => {
-    WindowManager.clearAllBrowserViews()
+    WindowManager.clearAllSessions()
     cleanupAllPtys()
     mainWindow = null
     WindowManager.setMainWindow(null)
@@ -278,6 +278,7 @@ app.whenReady().then(async () => {
   // Single unified IPC surface: one invoke router + one stream handler
   registerAllIpc()
   registerStreamIpc()
+  pool.preWarm()
 
   void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
   initUpdater()

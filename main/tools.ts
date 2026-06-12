@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { promises as fs } from 'node:fs'
 import { chromium } from 'playwright-core'
 import type { Page, Browser } from 'playwright-core'
-import { join, relative, extname, dirname, basename } from 'node:path'
+import { join, relative, extname, dirname, basename, isAbsolute, resolve as resolvePath } from 'node:path'
 import { execa } from 'execa'
 import { rgPath } from '@vscode/ripgrep'
 import { parse } from 'shell-quote'
@@ -15,8 +15,6 @@ import WindowManager, { getConversationScreenshotsPath, tavilyLimiter, getApiBas
 import { requireAuthToken } from './auth'
 import { getParserForExtension, getTokens, findSyntaxErrors } from './astParser'
 import { getUserSkillsPath } from './skills'
-
-
 
 export const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
 
@@ -67,9 +65,7 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
             }
           }
         }
-      } catch (err) {
-        log.warn(`[AST Patch] Failed for ${filePath}:`, err)
-      }
+      } catch (err) { log.warn(`[AST Patch] Failed for ${filePath}:`, err) }
     }
     if (!replaced) {
       if (!raw.includes(edit.targetContent)) {
@@ -119,44 +115,18 @@ function tokenizeCommand(commandLine: string): string[] {
   return parse(commandLine).map(t => typeof t === 'string' ? t : ('pattern' in t ? t.pattern : ('op' in t ? t.op : ''))).filter(Boolean)
 }
 
-function resolveWorkspace(convId: string) {
-  const ctx = getWorkspaceContext(convId)
-  if (!ctx) throw new Error(`No workspace context for conversation ${convId}. Workspace must be initialized before tool execution.`)
-  return ctx
-}
-
-// --- Browser Tools Helpers ---
-function getOrCreateBrowserWebContents(convId: string) {
-  let bv = WindowManager.getBrowserViewForConversation(convId)
-  if (!bv) {
-    const { WebContentsView } = require('electron')
-    const partition = `persist:conversation_${convId}`
-    const newBv = new WebContentsView({ webPreferences: { webSecurity: true, nodeIntegration: false, contextIsolation: true, sandbox: true, partition } }) as import('electron').WebContentsView
-    newBv.setBounds({ x: 0, y: 0, width: 1024, height: 768 })
-    WindowManager.setBrowserViewForConversation(convId, newBv)
-    bv = newBv
-  }
-  return bv!.webContents
-}
-
-function checkBrowserViewActive(convId?: string) {
-  if (convId) getOrCreateBrowserWebContents(convId)
-  return null
-}
-
 export function createCoreTools(convId: string, multimodal = true) {
   const resolve = () => wctx(convId)
   const resolveRelativePath = (p: string): string => {
-    const ctx = resolve(), path = require('node:path'), norm = p.replace(/\\/g, '/'), absPath = path.isAbsolute(p) ? path.resolve(p) : path.resolve(ctx.rootPath, p), normAbs = absPath.replace(/\\/g, '/'), skillsPath = getUserSkillsPath().replace(/\\/g, '/'), artifactsPath = ctx.artifactsPath.replace(/\\/g, '/')
-    if (normAbs.startsWith(skillsPath)) return assertWithinWorkspace(getUserSkillsPath(), path.relative(getUserSkillsPath(), absPath))
-    if (normAbs.startsWith(artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, path.relative(ctx.artifactsPath, absPath))
+    const ctx = resolve(), norm = p.replace(/\\/g, '/'), absPath = isAbsolute(p) ? resolvePath(p) : resolvePath(ctx.rootPath, p), normAbs = absPath.replace(/\\/g, '/'), skillsPath = getUserSkillsPath().replace(/\\/g, '/'), artifactsPath = ctx.artifactsPath.replace(/\\/g, '/')
+    if (normAbs.startsWith(skillsPath)) return assertWithinWorkspace(getUserSkillsPath(), relative(getUserSkillsPath(), absPath))
+    if (normAbs.startsWith(artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, relative(ctx.artifactsPath, absPath))
     const clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
-    if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/??artifacts\//, ''))
-    if (clean.startsWith('.gemini/skills/') || clean.startsWith('./.gemini/skills/')) return assertWithinWorkspace(getUserSkillsPath(), clean.replace(/^\.?\/??\.gemini\/skills\//, ''))
+    if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/?artifacts\//, ''))
+    if (clean.startsWith('.gemini/skills/') || clean.startsWith('./.gemini/skills/')) return assertWithinWorkspace(getUserSkillsPath(), clean.replace(/^\.?\/?\..gemini\/skills\//, ''))
     return assertWithinWorkspace(ctx.rootPath, p)
   }
 
-  // -- FILE TOOLS --
   const list_dir = tool({
     description: 'Lists all files, subdirectories, and their metadata directly inside a directory within the active workspace. Useful for understanding project layout, checking folder structures, and locating files. Returns file sizes and sub-item counts.',
     inputSchema: z.object({ directory_path: z.string().describe('The path of the directory to list (relative to the workspace root).') }),
@@ -229,7 +199,7 @@ export function createCoreTools(convId: string, multimodal = true) {
       return { type: 'content', value: [{ type: 'text', text }], isBinary: output.isBinary }
     }
   })
- 
+
   const write_to_file = tool({
     description: 'Creates a new file in the workspace or overwrites an existing one if the overwrite flag is true. Automatically creates any parent directories if they do not exist.',
     inputSchema: z.object({ target_file: z.string().describe('The path where the file should be created (relative to the workspace root).'), code_content: z.string().describe('The complete string content to write into the file.'), overwrite: z.boolean().default(false).describe('Set to true to explicitly overwrite the file if it already exists; otherwise, will error.') }),
@@ -263,7 +233,7 @@ export function createCoreTools(convId: string, multimodal = true) {
       return { type: 'content', value: [{ type: 'text', text: `Successfully wrote to file ${output.absolutePath}.` }] }
     }
   })
- 
+
   const multi_replace_file_content = tool({
     description: 'Surgically edits one or more non-contiguous text blocks in an existing file. Uses Abstract Syntax Tree (AST) token matching for supported source code files (which is resilient to minor spacing, indentation, and quote changes), and falls back to exact string replacement for plain text or unsupported formats. Each chunk\'s targetContent must match exactly a unique section in the file.',
     inputSchema: z.object({
@@ -335,9 +305,6 @@ export function createCoreTools(convId: string, multimodal = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.results }] })
   })
 
-
-
-  // -- SHELL TOOLS --
   const run_command = tool({
     description: 'Executes a command-line script in the workspace directory. Returns stdout, stderr, and the integer exit code. Blocks destructive or dangerous commands (like sudo, shutdown, passwd, mkfs, and cmd/powershell/bash shells directly). Execution is run with PAGER=cat and FORCE_COLOR=1.',
     inputSchema: z.object({
@@ -349,7 +316,7 @@ export function createCoreTools(convId: string, multimodal = true) {
       try {
         const command_line = args.command_line
         if (!command_line) return { success: false, stdout: '', stderr: 'command_line parameter is required.', exitCode: 1 }
-        const ctx = resolveWorkspace(convId), runDir = args.cwd ? assertWithinWorkspace(ctx.rootPath, args.cwd) : ctx.rootPath
+        const ctx = wctx(convId), runDir = args.cwd ? assertWithinWorkspace(ctx.rootPath, args.cwd) : ctx.rootPath
         const tokens = tokenizeCommand(command_line.trim()), executable = tokens[0], runArgs = tokens.slice(1)
         if (!executable) return { success: false, stdout: '', stderr: 'Empty command.', exitCode: 1 }
         const blockedCmd = checkBlocklist(tokens)
@@ -361,13 +328,12 @@ export function createCoreTools(convId: string, multimodal = true) {
         log.error('[tool:run_command] error:', err.message)
         return { success: false, error: err.message, stdout: '', stderr: err.message, exitCode: 1 }
       } finally {
-        try { invalidateWorkspaceFilesCache(resolveWorkspace(convId).rootPath) } catch {}
+        try { invalidateWorkspaceFilesCache(wctx(convId).rootPath) } catch {}
       }
     },
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false && output.error ? `Error: ${output.error}` : `Command finished with exit code ${output.exitCode}.\nCwd: ${output.cwd}\nStdout:\n${output.stdout}\nStderr:\n${output.stderr}` }] })
   })
 
-  // -- WEB TOOLS --
   const search_web = tool({
     description: 'Searches the web using the Tavily API and returns a synthesized summary along with list of relevant results containing URL citations.',
     inputSchema: z.object({
@@ -414,8 +380,8 @@ export function createCoreTools(convId: string, multimodal = true) {
       steps: z.number().int().min(1).max(50).optional().default(4).describe('Denoising steps (1-50, default: 4).')
     }),
     execute: async ({ prompt, width, height, seed, steps }) => {
-      const snap = (v: number) => Math.min(Math.max(Math.round(v / 16) * 16, 512), 1568);
-      const sw = snap(width), sh = snap(height);
+      const snap = (v: number) => Math.min(Math.max(Math.round(v / 16) * 16, 512), 1568)
+      const sw = snap(width), sh = snap(height)
       log.info(`[tool:generate_image] prompt="${prompt}" size=${sw}x${sh} seed=${seed} steps=${steps}`)
       try {
         if (!convId) throw new Error('No active conversation ID provided. Image generation cannot resolve workspace.')
@@ -461,242 +427,266 @@ export function createCoreTools(convId: string, multimodal = true) {
   }
 }
 
+// ─── Browser Tools ─────────────────────────────────────────────────────────────
+// Singleton Playwright browser connection (shared, reconnects on disconnect).
 let playwrightBrowser: Browser | null = null
-const activePages = new Map<string, Page>()
 
-async function getPlaywrightPage(convId: string): Promise<Page> {
-  const debugPort = process.env.REMOTE_DEBUGGING_PORT || '9888'
-  if (!playwrightBrowser) playwrightBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`)
-  for (const [id, p] of activePages.entries()) if (p.isClosed()) activePages.delete(id)
-  const bv = WindowManager.getBrowserViewForConversation(convId), bvUrl = bv ? bv.webContents.getURL() : ''
-  let page = activePages.get(convId)
-  if (page && page.url() === bvUrl) return page
-  for (let i = 0; i < 5; i++) {
-    const context = playwrightBrowser.contexts()[0], pages = context.pages()
-    for (const p of pages) {
-      try {
-        const id = await p.evaluate(() => (window as any).__orchConversationId)
-        if (id === convId) { activePages.set(convId, p); return p }
-      } catch {}
-    }
-    if (bvUrl) {
-      const matches = pages.filter(p => p.url() === bvUrl)
-      if (matches.length === 1) {
-        const p = matches[0]
-        await p.evaluate((cid) => { (window as any).__orchConversationId = cid }, convId).catch(() => {})
-        activePages.set(convId, p); return p
-      }
-    }
-    await new Promise(resolve => setTimeout(resolve, 200))
+/**
+ * Get or attach a stable Playwright Page for the given conversation's browser session.
+ *
+ * Correlation strategy (in order):
+ * 1. Use Electron's debugger protocol to get the WebContents' CDP targetId, then find
+ *    the matching Playwright Page by its own CDP targetId. This is the most reliable method.
+ * 2. Fall back to evaluating window.__orchConversationId (set by browser:open listeners).
+ * 3. Last resort: URL match if only one page has the same URL as the WebContents.
+ *
+ * The found page is cached in session.page and reused until it becomes closed.
+ */
+async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
+  const session = WindowManager.getSession(convId)
+  if (!session) throw new Error(`No browser session for conversation ${convId}. Open the browser first.`)
+  if (session.page && !session.page.isClosed()) return session.page
+
+  // Ensure Playwright CDP connection is alive
+  if (!playwrightBrowser || !playwrightBrowser.isConnected()) {
+    playwrightBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${process.env.REMOTE_DEBUGGING_PORT || '9888'}`)
   }
-  throw new Error(`Could not find Playwright page target for conversation ${convId}`)
+
+  const pwCtx = playwrightBrowser.contexts()[0]
+  if (!pwCtx) throw new Error('No Playwright browser context available.')
+
+  const wc = session.view.webContents
+
+  // --- Strategy 1: Electron debugger → CDP targetId matching ---
+  let targetId: string | undefined
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+    const info = await wc.debugger.sendCommand('Target.getTargetInfo', {}) as any
+    targetId = info?.targetInfo?.targetId
+    try { wc.debugger.detach() } catch {}
+  } catch { /* debugger attach can fail when already in use or in restricted contexts */ }
+
+  if (targetId) {
+    for (const p of pwCtx.pages()) {
+      if (p.isClosed()) continue
+      try {
+        const cdp = await p.context().newCDPSession(p)
+        const info = await cdp.send('Target.getTargetInfo', {}) as any
+        await cdp.detach()
+        if (info?.targetInfo?.targetId === targetId) { session.page = p; return p }
+      } catch { /* continue to next page */ }
+    }
+  }
+
+  // --- Strategy 2: Injected __orchConversationId ---
+  for (const p of pwCtx.pages()) {
+    if (p.isClosed()) continue
+    try {
+      const id = await p.evaluate(() => (window as any).__orchConversationId).catch(() => null)
+      if (id === convId) { session.page = p; return p }
+    } catch { /* continue */ }
+  }
+
+  // --- Strategy 3: URL match (last resort, only when unambiguous) ---
+  const wcUrl = wc.getURL()
+  if (wcUrl && wcUrl !== 'about:blank') {
+    const matches = pwCtx.pages().filter(p => !p.isClosed() && p.url() === wcUrl)
+    if (matches.length === 1) { session.page = matches[0]; return matches[0] }
+  }
+
+  throw new Error(`Could not attach Playwright to browser session for ${convId}. No matching CDP target found.`)
 }
 
-export function browserTools(convId: string, multimodal = true) {
-  const runOnMain = async (toolName: string, args: any, localFn: () => Promise<any>) => {
-    const runner = (globalThis as any).callMainProcessTool
-    if (runner) return runner(toolName, args, convId)
-    return localFn()
-  }
+/**
+ * Serialise browser tool actions per conversation.
+ * Prevents two concurrent tool calls from interleaving page state within the same session.
+ */
+function enqueue<T>(convId: string, fn: () => Promise<T>): Promise<T> {
+  const s = WindowManager.getSession(convId)
+  if (!s) return fn()
+  const next = s.queue.then(() => fn(), () => fn()) as Promise<T>
+  // Keep queue chain alive but don't leak rejection
+  s.queue = (next as Promise<any>).then(() => {}, () => {})
+  return next
+}
 
+/**
+ * In utility process: sends a tool-request IPC to main, returns the result.
+ * In main process: `callMainProcessTool` is not set, so localFn() runs directly.
+ */
+function runOnMain(toolName: string, args: any, convId: string, localFn: () => Promise<any>): Promise<any> {
+  const runner = (globalThis as any).callMainProcessTool
+  if (runner) return runner(toolName, args, convId)
+  return localFn()
+}
+
+/**
+ * The 6-tool browser suite.
+ * Exported: browser_navigate, browser_screenshot, browser_click,
+ * browser_type, browser_keyboard_press, browser_get_page_content.
+ */
+export function browserTools(convId: string, multimodal = true) {
   const browser_navigate = tool({
-    description: 'Navigates the active browser viewport to a specified URL and blocks until the page load completes.',
+    description: 'Navigates the active browser viewport to a specified URL and waits for the page to finish loading.',
     inputSchema: z.object({
       url: z.string().describe('The URL to navigate to.'),
-      timeout: z.number().int().nonnegative().optional().describe('Maximum navigation time in milliseconds.')
+      timeout: z.number().int().nonnegative().optional().describe('Maximum navigation time in milliseconds (default 30000).')
     }),
-    execute: async ({ url, timeout }) => runOnMain('browser_navigate', { url, timeout }, async () => {
-      log.info(`[tool:browser_navigate] url="${url}"`)
-      try {
-        const bv = WindowManager.getBrowserViewForConversation(convId)
-        if (!bv) throw new Error('Browser closed.')
-        const target = (url.startsWith('http') || url.startsWith('file:')) ? url : (/^[a-zA-Z]:[/\\]/.test(url) ? `file:///${url.replace(/\\/g, '/')}` : (url.startsWith('/') ? `file://${url}` : `https://${url}`))
-        const timeoutMs = timeout !== undefined ? timeout : 30000
+    execute: ({ url, timeout }) => runOnMain('browser_navigate', { url, timeout }, convId, () =>
+      enqueue(convId, async () => {
+        log.info(`[tool:browser_navigate] convId=${convId} url="${url}"`)
+        const s = WindowManager.getSession(convId)
+        if (!s) throw new Error('Browser session not found. Open browser first.')
+        const target = url.startsWith('http') || url.startsWith('file:') ? url
+          : /^[a-zA-Z]:[/\\]/.test(url) ? `file:///${url.replace(/\\/g, '/')}`
+          : url.startsWith('/') ? `file://${url}` : `https://${url}`
+        const timeoutMs = timeout ?? 30000
         let timer: any
-        const timeoutPromise = new Promise<never>((_, rej) => { timer = setTimeout(() => { try { bv.webContents.stop() } catch {}; rej(new Error(`Navigation timeout of ${timeoutMs}ms exceeded`)) }, timeoutMs) })
-        await Promise.race([bv.webContents.loadURL(target), timeoutPromise])
+        const navPromise = s.view.webContents.loadURL(target)
+        const timeoutPromise = new Promise<never>((_, rej) => {
+          timer = setTimeout(() => { try { s.view.webContents.stop() } catch {}; rej(new Error(`Navigation timeout of ${timeoutMs}ms exceeded`)) }, timeoutMs)
+        })
+        await Promise.race([navPromise, timeoutPromise])
         clearTimeout(timer)
-        return { success: true, url: bv.webContents.getURL() }
-      } catch (e: any) { log.error('[tool:browser_navigate] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully navigated to ${output.url}` }] })
-  })
-
-  const browser_type = tool({
-    description: 'Types text into an input field on the active webpage. Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
-    inputSchema: z.object({
-      selector: z.string().describe('The target element selector (e.g. CSS, text=, or role=).'),
-      text: z.string().describe('The text to type.'),
-      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
-      delay_ms: z.number().int().nonnegative().optional().describe('Delay between key presses. If provided, types key by key instead of filling.'),
-      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
-      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
-      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
-    }),
-    execute: async ({ selector, text, frame_selector, delay_ms, timeout, force, no_wait_after }) => runOnMain('browser_type', { selector, text, frame_selector, delay_ms, timeout, force, no_wait_after }, async () => {
-      log.info(`[tool:browser_type] selector="${selector}"`)
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId)
-        const frame = frame_selector ? page.frameLocator(frame_selector) : page
-        const locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
-        const loc = frame.locator(locatorStr)
-        if (delay_ms !== undefined && delay_ms > 0) await loc.pressSequentially(text, { delay: delay_ms, timeout, noWaitAfter: no_wait_after })
-        else await loc.fill(text, { force, timeout, noWaitAfter: no_wait_after })
-        return { success: true }
-      } catch (e: any) { log.error('[tool:browser_type] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully typed text into element` }] })
+        // Invalidate cached Playwright page — a new DOM was loaded
+        s.page = undefined
+        return { success: true, url: s.view.webContents.getURL() }
+      })
+    ),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Navigated to ${output.url}` }] })
   })
 
   const browser_screenshot = tool({
-    description: 'Captures a PNG screenshot of the active browser viewport.',
+    description: 'Captures a PNG screenshot of the active browser viewport and returns it as an image for visual verification.',
     inputSchema: z.object({}),
-    execute: async () => runOnMain('browser_screenshot', {}, async () => {
-      log.info('[tool:browser_screenshot] executing...')
-      try {
-        const bv = WindowManager.getBrowserViewForConversation(convId)
-        if (!bv) throw new Error('Browser closed.')
+    execute: () => runOnMain('browser_screenshot', {}, convId, () =>
+      enqueue(convId, async () => {
+        log.info(`[tool:browser_screenshot] convId=${convId}`)
+        const s = WindowManager.getSession(convId)
+        if (!s) throw new Error('Browser session not found.')
         const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
         try {
           const pngs = (await fs.readdir(screenshotDir)).filter(f => f.endsWith('.png')).sort()
           for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) await fs.rm(join(screenshotDir, old), { force: true }).catch(() => {})
         } catch {}
-        const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename)
-        const image = await bv.webContents.capturePage()
-        const png = image.toPNG()
-        await fs.writeFile(screenshotPath, png)
-        return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
-      } catch (e: any) { log.error('[tool:browser_screenshot] error:', e.message); return { success: false, error: e.message } }
-    }),
+        const screenshotPath = join(screenshotDir, `screenshot_${Date.now()}.png`)
+        const image = await s.view.webContents.capturePage()
+        await fs.writeFile(screenshotPath, image.toPNG())
+        return { success: true, screenshotPath }
+      })
+    ),
     toModelOutput: async ({ output }: any) => {
-      if (output.success && output.filePath) {
-        try {
-          if (!multimodal) return { type: 'content', value: [{ type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted because model does not support vision.` }] }
-          const base64Image = output.buffer ? Buffer.from(output.buffer).toString('base64') : (await fs.readFile(output.filePath.replace('file://', ''))).toString('base64')
-          return { type: 'content', value: [{ type: 'image-data', data: base64Image, mediaType: 'image/png' }, { type: 'text', text: `Screenshot captured: ${output.filePath}` }] }
-        } catch (e: any) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e.message}` }] } }
-      }
-      return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
+      if (!output.success || !output.screenshotPath) return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
+      if (!multimodal) return { type: 'content', value: [{ type: 'text', text: `Screenshot saved to file://${output.screenshotPath} (vision not supported by this model)` }] }
+      try {
+        const base64 = (await fs.readFile(output.screenshotPath)).toString('base64')
+        return { type: 'image-data', data: base64, mediaType: 'image/png', filePath: `file://${output.screenshotPath}` }
+      } catch (e: any) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e.message}` }] } }
     }
   })
 
   const browser_click = tool({
-    description: 'Clicks an element on the webpage using a CSS/Playwright selector OR using native mouse coordinate click at (x, y). Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
+    description: 'Clicks an element on the webpage using a CSS/Playwright selector (preferred) or native mouse coordinates.',
     inputSchema: z.object({
-      selector: z.string().optional().describe('The target element selector (e.g. CSS, text=, or role=).'),
-      x: z.number().optional().describe('Horizontal pixel coordinate.'),
-      y: z.number().optional().describe('Vertical pixel coordinate.'),
-      click_type: z.enum(['click', 'dbclick', 'right-click']).default('click').describe('Click type.'),
-      delay_ms: z.number().int().nonnegative().optional().describe('Delay in milliseconds between mouse down and mouse up.'),
-      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
-      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
-      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
-      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
+      selector: z.string().optional().describe('CSS or Playwright selector for the element to click. Preferred over coordinates.'),
+      x: z.number().optional().describe('Horizontal pixel coordinate (used only when selector is not provided).'),
+      y: z.number().optional().describe('Vertical pixel coordinate (used only when selector is not provided).'),
+      click_type: z.enum(['click', 'dblclick', 'right-click']).default('click').describe('Type of click to perform.')
     }),
-    execute: async ({ selector, x, y, click_type, delay_ms, frame_selector, timeout, force, no_wait_after }) => runOnMain('browser_click', { selector, x, y, click_type, delay_ms, frame_selector, timeout, force, no_wait_after }, async () => {
-      log.info(`[tool:browser_click] selector="${selector}" x=${x} y=${y} type=${click_type}`)
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId), button = click_type === 'right-click' ? 'right' as const : 'left' as const, clickCount = click_type === 'dbclick' ? 2 : 1
-        if (selector) {
-          const frame = frame_selector ? page.frameLocator(frame_selector) : page, locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector, loc = frame.locator(locatorStr)
-          if (clickCount === 2) await loc.dblclick({ button, delay: delay_ms, force, timeout, noWaitAfter: no_wait_after })
-          else await loc.click({ button, delay: delay_ms, force, timeout, noWaitAfter: no_wait_after })
-        } else if (x !== undefined && y !== undefined) {
-          await page.mouse.click(x, y, { button, clickCount, delay: delay_ms })
-        } else {
-          throw new Error('Either selector or both x and y coordinates must be provided.')
-        }
-        return { success: true }
-      } catch (e: any) { log.error('[tool:browser_click] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked` }] })
+    execute: ({ selector, x, y, click_type }) =>
+      runOnMain('browser_click', { selector, x, y, click_type }, convId, () =>
+        enqueue(convId, async () => {
+          log.info(`[tool:browser_click] convId=${convId} selector="${selector}" x=${x} y=${y} type=${click_type}`)
+          const page = await getOrAttachPlaywrightPage(convId)
+          const button = click_type === 'right-click' ? 'right' as const : 'left' as const
+          if (selector) {
+            const locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
+            const loc = page.locator(locatorStr)
+            if (click_type === 'dblclick') await loc.dblclick({ button })
+            else await loc.click({ button })
+          } else if (x !== undefined && y !== undefined) {
+            await page.mouse.click(x, y, { button })
+          } else {
+            throw new Error('Either selector or both x and y coordinates must be provided.')
+          }
+          return { success: true }
+        })
+      ),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : 'Successfully clicked' }] })
   })
 
-  const browser_get_page_content = tool({
-    description: 'Extracts the page URL, title, visible text content, and the native accessibility tree from the active browser viewport.',
+  const browser_type = tool({
+    description: 'Types text into an input field on the active webpage identified by a CSS or Playwright selector.',
     inputSchema: z.object({
-      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds for DevTools operations.')
+      selector: z.string().describe('CSS or Playwright selector for the input element.'),
+      text: z.string().describe('The text to type into the element.')
     }),
-    execute: async ({ timeout }) => runOnMain('browser_get_page_content', { timeout }, async () => {
-      log.info('[tool:browser_get_page_content] executing...')
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId), url = page.url(), title = await page.title(), text = await page.evaluate(() => document.body.innerText || '')
-        let axTree: any = null
-        try {
-          const client = await page.context().newCDPSession(page)
-          axTree = await client.send('Accessibility.getFullAXTree')
-          await client.detach()
-        } catch (err: any) { log.warn('[browser_get_page_content] Failed to get AXTree via CDP:', err.message) }
-        const wrappedText = `[WEB PAGE CONTENT START]\nURL: ${url}\nTitle: ${title}\n\nVisible Page Text:\n${text.slice(0, 15000)}\n\nAccessibility Tree:\n${axTree ? JSON.stringify(axTree.nodes, null, 2).slice(0, 25000) : 'N/A'}\n[WEB PAGE CONTENT END]`
-        return { success: true, url, title, text: wrappedText, accessibilityTree: axTree }
-      } catch (e: any) { log.error('[tool:browser_get_page_content] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}` }] })
-  })
-
-  const browser_mouse_hover = tool({
-    description: 'Moves the mouse cursor over a matching element on the page to trigger hover actions or menus. Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
-    inputSchema: z.object({
-      selector: z.string().describe('The target element selector (e.g. CSS, text=, or role=).'),
-      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
-      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
-      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
-      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
-    }),
-    execute: async ({ selector, frame_selector, timeout, force, no_wait_after }) => runOnMain('browser_mouse_hover', { selector, frame_selector, timeout, force, no_wait_after }, async () => {
-      log.info(`[tool:browser_mouse_hover] selector="${selector}"`)
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId), frame = frame_selector ? page.frameLocator(frame_selector) : page, locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
-        await frame.locator(locatorStr).hover({ force, timeout, noWaitAfter: no_wait_after })
-        return { success: true }
-      } catch (e: any) { log.error('[tool:browser_mouse_hover] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully hovered element` }] })
-  })
-
-  const browser_mouse_drag = tool({
-    description: 'Performs a drag-and-drop gesture from a start coordinate to an end coordinate in the active viewport.',
-    inputSchema: z.object({
-      x1: z.number().describe('Starting horizontal coordinate.'),
-      y1: z.number().describe('Starting vertical coordinate.'),
-      x2: z.number().describe('Ending horizontal coordinate.'),
-      y2: z.number().describe('Ending vertical coordinate.'),
-      steps: z.number().int().positive().optional().describe('Number of steps for interpolation (defaults to 1).')
-    }),
-    execute: async ({ x1, y1, x2, y2, steps }) => runOnMain('browser_mouse_drag', { x1, y1, x2, y2, steps }, async () => {
-      log.info(`[tool:browser_mouse_drag] from (${x1},${y1}) to (${x2},${y2})`)
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId)
-        await page.mouse.move(x1, y1); await page.mouse.down(); await page.mouse.move(x2, y2, { steps }); await page.mouse.up()
-        return { success: true }
-      } catch (e: any) { log.error('[tool:browser_mouse_drag] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully performed drag and drop` }] })
+    execute: ({ selector, text }) =>
+      runOnMain('browser_type', { selector, text }, convId, () =>
+        enqueue(convId, async () => {
+          log.info(`[tool:browser_type] convId=${convId} selector="${selector}"`)
+          const page = await getOrAttachPlaywrightPage(convId)
+          const locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
+          await page.locator(locatorStr).fill(text)
+          return { success: true }
+        })
+      ),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : 'Successfully typed text' }] })
   })
 
   const browser_keyboard_press = tool({
-    description: 'Presses a key or key sequence (e.g. "Enter", "Tab", "ArrowDown", "Control+A", "Control+C").',
+    description: 'Presses a key or key combination on the keyboard (e.g. "Enter", "Tab", "ArrowDown", "Control+A", "Control+C").',
     inputSchema: z.object({
-      key: z.string().describe('The key or key sequence to press.'),
-      delay_ms: z.number().int().nonnegative().optional().describe('Optional delay in milliseconds between keydown and keyup.')
+      key: z.string().describe('The key or key combination to press (e.g. "Enter", "Tab", "Control+A").')
     }),
-    execute: async ({ key, delay_ms }) => runOnMain('browser_keyboard_press', { key, delay_ms }, async () => {
-      log.info(`[tool:browser_keyboard_press] key="${key}"`)
-      if (checkBrowserViewActive(convId)) return null
-      try {
-        const page = await getPlaywrightPage(convId)
-        await page.keyboard.press(key, { delay: delay_ms })
+    execute: ({ key }) => runOnMain('browser_keyboard_press', { key }, convId, () =>
+      enqueue(convId, async () => {
+        log.info(`[tool:browser_keyboard_press] convId=${convId} key="${key}"`)
+        const page = await getOrAttachPlaywrightPage(convId)
+        await page.keyboard.press(key)
         return { success: true }
-      } catch (e: any) { log.error('[tool:browser_keyboard_press] error:', e.message); return { success: false, error: e.message } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully pressed key` }] })
+      })
+    ),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully pressed "${output.key ?? 'key'}"` }] })
   })
 
-  return { browser_navigate, browser_type, browser_screenshot, browser_get_page_content, browser_mouse_hover, browser_mouse_drag, browser_keyboard_press, browser_click }
+  const browser_get_page_content = tool({
+    description: 'Extracts the current page URL, title, visible text content, and a compact accessibility snapshot from the active browser viewport. Use this when you need to understand page state without a screenshot.',
+    inputSchema: z.object({}),
+    execute: () => runOnMain('browser_get_page_content', {}, convId, () =>
+      enqueue(convId, async () => {
+        log.info(`[tool:browser_get_page_content] convId=${convId}`)
+        const page = await getOrAttachPlaywrightPage(convId)
+        const url = page.url(), title = await page.title()
+        const text = await page.evaluate(() => document.body.innerText || '').catch(() => '')
+        // Compact AX snapshot — top 100 nodes only to prevent massive IPC payloads
+        let axSnippet = 'N/A'
+        try {
+          const client = await page.context().newCDPSession(page)
+          const { nodes } = await client.send('Accessibility.getFullAXTree') as any
+          await client.detach()
+          const compact = (nodes as any[]).slice(0, 100).map((n: any) => ({
+            role: n.role?.value,
+            name: n.name?.value,
+            description: n.description?.value,
+            nodeId: n.nodeId
+          })).filter(n => n.role && n.role !== 'none')
+          axSnippet = JSON.stringify(compact, null, 2)
+        } catch (err: any) { log.warn('[browser_get_page_content] AX tree error:', err.message) }
+        const wrappedText = `[WEB PAGE CONTENT START]\nURL: ${url}\nTitle: ${title}\n\nVisible Text:\n${text.slice(0, 8000)}\n\nAccessibility Snapshot (top 100 nodes):\n${axSnippet}\n[WEB PAGE CONTENT END]`
+        return { success: true, url, title, text: wrappedText }
+      })
+    ),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.text }] })
+  })
+
+  return {
+    browser_navigate,
+    browser_screenshot,
+    browser_click,
+    browser_type,
+    browser_keyboard_press,
+    browser_get_page_content
+  }
 }

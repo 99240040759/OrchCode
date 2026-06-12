@@ -19,13 +19,6 @@ import Tooltip from './Tooltip'
 import { decodeBase64Utf8 } from '../lib/sharedUtils'
 import logoImg from '../assets/logo.png'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// ─── StreamingMarkdown ────────────────────────────────────────────────────────
-
-const StreamingMarkdown = ({ content, targetId, isStreaming }: { content: string; targetId: string; isStreaming: boolean }) => {
-  return <MarkdownRenderer id={targetId} content={content} isStreaming={isStreaming} />
-}
 
 // ─── ToolGroupBlock ──────────────────────────────────────────────────────────
 
@@ -107,7 +100,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
         if (seg.type === 'tool-group') return <ToolGroupBlock key={seg.key} tools={seg.tools} />
         if (seg.type === 'text') return (
           <div key={`text-${seg.blockIndex}`} className="assistant-content chat-message-assistant">
-            <StreamingMarkdown content={seg.block.content} targetId={`streaming-text-${message.id}-${seg.blockIndex}`} isStreaming={!!message.isStreaming} />
+            <MarkdownRenderer content={seg.block.content} id={`streaming-text-${message.id}-${seg.blockIndex}`} isStreaming={!!message.isStreaming} />
           </div>
         )
         if (seg.type === 'error') return (

@@ -171,7 +171,7 @@
 .prompt-sub-link:hover, .prompt-sub-link:focus-visible { color: var(--text-secondary); background-color: rgba(255, 255, 255, 0.04); text-decoration: none }
 .chat-thread-container { scrollbar-width: none; -ms-overflow-style: none; flex: 1; width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; overflow-anchor: auto; padding: 0 0 var(--space-md); display: flex; flex-direction: column }
 .chat-thread-container::-webkit-scrollbar { display: none }
-.chat-thread-spacer-top { height: 0px; flex-shrink: 0 }
+.chat-thread-spacer-top { height: 16px; flex-shrink: 0 }
 @keyframes slide-up-fade { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
 .chat-thread-message-wrapper { padding: var(--space-sm) var(--space-sm); overflow-anchor: none }
 .chat-section { position: relative; display: flex; flex-direction: column }
@@ -179,7 +179,7 @@
 .chat-thread-spacer-bottom { height: 24px; flex-shrink: 0; overflow-anchor: none }
 .chat-thread-anchor { overflow-anchor: auto; height: 1px; margin-top: -1px }
 .chat-message-user-container { display: flex; margin-bottom: 0; padding-left: 0; width: 100% }
-.chat-message-user { position: relative; background-color: var(--bg-input) !important; border: none; border-radius: 10px; padding: 10px var(--space-lg); width: 100%; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text; box-shadow: none; max-height: 90px; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none }
+.chat-message-user { position: relative; background-color: var(--bg-input); border: none; border-radius: 10px; padding: 10px var(--space-lg); width: 100%; font-size: var(--font-size-lg); color: var(--text-primary); line-height: 1.5; user-select: text; box-shadow: none; max-height: 90px; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none }
 .chat-message-user::-webkit-scrollbar { display: none }
 
 .chat-message-user-content { display: flex; flex-direction: column; gap: var(--space-xs) }
@@ -197,7 +197,7 @@
 .chat-error-container { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 8px; background-color: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); margin: 12px 0 }
 .chat-error-icon { color: var(--accent-red); margin-top: 3px; flex-shrink: 0 }
 .chat-error-message { font-size: var(--font-size-md); color: var(--text-primary); line-height: 1.5 }
-.input-bar-container { width: 100%; max-width: 720px; background-color: var(--bg-input) !important; border: none; border-radius: 10px; display: flex; flex-direction: column; box-shadow: none; transition: border-color 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); position: relative; color: var(--text-primary) }
+.input-bar-container { width: 100%; max-width: 720px; background-color: var(--bg-input); border: none; border-radius: 10px; display: flex; flex-direction: column; box-shadow: none; transition: border-color 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); position: relative; color: var(--text-primary) }
 .input-bar-text-area { width: 100%; background: transparent; border: none; outline: none; resize: none; font-family: var(--font-display); font-size: var(--font-size-md-plus); color: inherit; line-height: 1.5 }
 .input-bar-text-area::placeholder { color: var(--text-secondary); opacity: 0.4 }
 .input-bar-text-container-inner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); padding: var(--space-sm) var(--space-lg) var(--space-xxs) var(--space-lg); width: 100%; box-sizing: border-box; transition: padding var(--transition-speed-panel) var(--transition-curve-default) }
@@ -248,6 +248,7 @@
 .icon-pink { color: #f472b6; flex-shrink: 0 }
 .icon-lime { color: #4ade80; flex-shrink: 0 }
 .icon-secondary { color: var(--text-secondary); flex-shrink: 0 }
+.icon-purple { color: var(--accent-purple); flex-shrink: 0 }
 .muted-text { color: var(--text-muted); font-weight: 400; white-space: nowrap }
 .icon-wrapper { display: flex; align-items: center; flex-shrink: 0; opacity: 0.8 }
 .target-text { color: var(--text-secondary); font-weight: 500; font-family: var(--font-mono); font-size: 11.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none }
@@ -335,7 +336,7 @@
 .artifact-panel-content { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden }
 .artifact-panel-tab-content { height: 100%; width: 100%; overflow: hidden }
 .tab-content-hidden { display: none !important }
-.tab-content-visible { display: block }
+.tab-content-visible { display: flex; flex-direction: column; height: 100%; width: 100% }
 .editor-loading { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--text-secondary); background-color: var(--bg-app); font-size: var(--font-size-sm) }
 .media-preview-container { scrollbar-width: thin }
 .media-preview-container::-webkit-scrollbar { width: 6px; height: 6px }
@@ -389,6 +390,7 @@
 .overview-panel { padding: 16px; gap: 12px }
 .panel-header { display: flex; align-items: center; justify-content: space-between; font-size: var(--font-size-xs); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 8px }
 .panel-header-left { display: flex; align-items: center; gap: 6px }
+.panel-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
 .panel-content { display: flex; flex-direction: column; gap: 4px }
 .empty-text { color: var(--text-secondary); font-size: var(--font-size-sm); padding: 8px 4px }
 .overview-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: var(--font-size-sm); color: var(--text-primary); transition: background-color 0.15s ease }
@@ -517,6 +519,7 @@
 
 /* New theme helper classes and extracted inline styles */
 .model-badge { display: inline-flex; align-items: center; font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); background-color: var(--bg-chip); padding: 1px 5px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); }
+.terminal-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 6px; width: 100%; box-sizing: border-box; margin: 4px 0 }
 .codeblock-body { margin: 0; padding: 12px 16px; background-color: var(--bg-sidebar); overflow: hidden; }
 .codeblock-code { padding: 0; background: transparent; white-space: pre-wrap; word-break: break-all; display: block; }
 .terminal-card-title { font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
@@ -530,6 +533,7 @@
 .tool-call-target-text { font-weight: 500; font-size: 11px; display: flex; align-items: center; }
 .toolbar-voice-btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); }
 .toolbar-voice-btn.listening { color: var(--accent-red); animation: mic-pulse 1.5s infinite ease-in-out; }
+@keyframes mic-pulse { 0%, 100% { opacity: 1; transform: scale(1) } 50% { opacity: 0.7; transform: scale(1.1) } }
 
 /* Panel Error Fallback styles */
 .panel-error-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; padding: 24px; box-sizing: border-box; background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); text-align: center; }
@@ -574,10 +578,9 @@
 .dialog-btn-secondary:hover, .dialog-btn-secondary:focus-visible { background-color: rgba(255, 255, 255, 0.04) }
 .dialog-btn-danger { background-color: var(--accent-red); color: #fff }
 .dialog-btn-danger:hover, .dialog-btn-danger:focus-visible { background-color: #dc2626 }
-@keyframes orch-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.animate-spin { animation: orch-spin 1s linear infinite !important; transform-origin: center !important; display: inline-block !important }
+/* orch-spin and animate-spin are defined in global.css — removed duplicate */
 .dialog-input { width: 100%; padding: 6px 10px; background-color: var(--bg-input); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); outline: none; margin-top: 8px; font-family: var(--font-display); font-size: 13px; transition: border-color 0.15s ease } .dialog-input:focus { border-color: var(--accent-purple) } .dialog-btn-primary { background-color: var(--accent-purple); color: #fff } .dialog-btn-primary:hover, .dialog-btn-primary:focus-visible { background-color: #7c3aed }
-.app-tooltip-content { background-color: #1a1a1a; border: 1px solid var(--border-color); padding: 5px 9px; border-radius: 6px; color: var(--text-primary); font-family: var(--font-display); font-size: 11px; line-height: 1.4; box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.45); z-index: 9999; user-select: none; animation-duration: 0.15s; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1) } .app-tooltip-content[data-state="delayed-open"][data-side="top"] { animation-name: slideUpAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="bottom"] { animation-name: slideDownAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="left"] { animation-name: slideLeftAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="right"] { animation-name: slideRightAndFade } .app-tooltip-arrow { fill: var(--border-color) } @keyframes slideUpAndFade { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes slideDownAndFade { from { opacity: 0; transform: translateY(-2px) } to { opacity: 1; transform: translateY(0) } } @keyframes slideLeftAndFade { from { opacity: 0; transform: translateX(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes slideRightAndFade { from { opacity: 0; transform: translateX(-2px) } to { opacity: 1; transform: translateY(0) } }
+.app-tooltip-content { background-color: #1a1a1a; border: 1px solid var(--border-color); padding: 5px 9px; border-radius: 6px; color: var(--text-primary); font-family: var(--font-display); font-size: 11px; line-height: 1.4; box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.45); z-index: 9999; user-select: none; animation-duration: 0.15s; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1) } .app-tooltip-content[data-state="delayed-open"][data-side="top"] { animation-name: slideUpAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="bottom"] { animation-name: slideDownAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="left"] { animation-name: slideLeftAndFade } .app-tooltip-content[data-state="delayed-open"][data-side="right"] { animation-name: slideRightAndFade } .app-tooltip-arrow { fill: var(--border-color) } @keyframes slideUpAndFade { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes slideDownAndFade { from { opacity: 0; transform: translateY(-2px) } to { opacity: 1; transform: translateY(0) } } @keyframes slideLeftAndFade { from { opacity: 0; transform: translateX(2px) } to { opacity: 1; transform: translateX(0) } } @keyframes slideRightAndFade { from { opacity: 0; transform: translateX(-2px) } to { opacity: 1; transform: translateX(0) } }
 .project-pill-select { display: flex; align-items: center; gap: 6px; background-color: transparent; border: none; border-radius: 6px; color: var(--text-secondary); font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 500; padding: 4px 8px; cursor: pointer; outline: none; transition: all 0.15s ease; -webkit-app-region: no-drag }
 .project-pill-select:hover, .project-pill-select:focus-visible, .project-pill-select[data-state="open"] { color: var(--text-primary); background-color: rgba(255, 255, 255, 0.06) }
 .pill-chevron { opacity: 0.6; transition: transform 0.2s ease }
