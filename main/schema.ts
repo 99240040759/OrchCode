@@ -205,7 +205,7 @@ export async function buildMessagesFromHistory(
 
       let textVal = '', reasoningVal = ''
       const toolCalls: any[] = []
-      const toolResults: { tool_call_id: string; content: string }[] = []
+      const toolResults: { tool_call_id: string; name?: string; content: string }[] = []
       const stepImageParts: { imgBase64: string; imgMime: string }[] = []
 
       for (const block of blocks) {
@@ -227,10 +227,10 @@ export async function buildMessagesFromHistory(
             const textSummary = block.tool_name === 'browser_screenshot'
               ? `Screenshot captured: ${block.result?.filePath ?? ''}`
               : `Binary image read: ${block.result?.absolute_path ?? block.result?.absolutePath ?? ''}`
-            toolResults.push({ tool_call_id: block.tool_call_id, content: JSON.stringify({ success: true, message: textSummary }) })
+            toolResults.push({ tool_call_id: block.tool_call_id, name: block.tool_name, content: JSON.stringify({ success: true, message: textSummary }) })
             stepImageParts.push({ imgBase64: formatted.imgBase64, imgMime: formatted.imgMime })
           } else {
-            toolResults.push({ tool_call_id: block.tool_call_id, content: formatted.content })
+            toolResults.push({ tool_call_id: block.tool_call_id, name: block.tool_name, content: formatted.content })
           }
         }
       }
@@ -244,7 +244,7 @@ export async function buildMessagesFromHistory(
         assistantMsg.tool_calls = toolCalls
       }
       rawMessages.push(assistantMsg)
-      for (const tr of toolResults) rawMessages.push({ role: 'tool', tool_call_id: tr.tool_call_id, content: tr.content })
+      for (const tr of toolResults) rawMessages.push({ role: 'tool', tool_call_id: tr.tool_call_id, name: tr.name, content: tr.content } as any)
       if (stepImageParts.length > 0 && multimodal) {
         rawMessages.push({
           role: 'user',

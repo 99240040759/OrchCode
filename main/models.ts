@@ -1,9 +1,9 @@
 import log from 'electron-log'
 import OpenAI from 'openai'
 import { requireAuthToken } from './auth'
-import { getApiBaseUrl } from './utils'
+import { getApiBaseUrl, globalApiLimiter } from './utils'
 
-export interface ModelInfo { id: string; name: string; multimodal: boolean; contextWindow?: number }
+export interface ModelInfo { id: string; name: string; multimodal: boolean; contextWindow?: number; badge?: string | null }
 export type AvailableModels = Record<string, ModelInfo>
 
 
@@ -110,5 +110,5 @@ export async function streamLlmResponse(
   if (modelId === 'gemma-4-26b-a4b-it') payload.reasoning_effort = 'high'
   else if (modelId === 'nvidia/moonshotai/kimi-k2.6') payload.reasoning_effort = 'minimal'
   else if (modelId.startsWith('opencode/')) { payload.reasoning_effort = 'xhigh'; payload.reasoning = { effort: 'xhigh', enabled: true } }
-  return openai.chat.completions.create(payload, { signal: abortSignal })
+  return globalApiLimiter.schedule(() => openai.chat.completions.create(payload, { signal: abortSignal }))
 }

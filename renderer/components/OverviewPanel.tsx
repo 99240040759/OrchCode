@@ -6,9 +6,9 @@ import { sessionTokensAtom, lifetimeTokensAtom, selectedModelAtom, availableMode
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../preload/index.d'
 
-function formatTokens(n: number): string {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+export function formatTokens(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(0)}k`
   return String(n)
 }
 
@@ -51,7 +51,7 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
   const lifetimeTokens = useAtomValue(lifetimeTokensAtom)
   const selectedModelId = useAtomValue(selectedModelAtom)
   const availableModels = useAtomValue(availableModelsAtom)
-  const activeModel = Object.values(availableModels).find(m => m.id === selectedModelId)
+  const activeModel = availableModels[selectedModelId] || Object.values(availableModels).find(m => m.id === selectedModelId)
   const maxTokens = activeModel?.contextWindow || 200000
   const pct = Math.min(Math.round((sessionTokens / maxTokens) * 100), 100)
   const barColor = ringColor(sessionTokens / maxTokens)

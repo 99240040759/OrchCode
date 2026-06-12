@@ -7,7 +7,7 @@ export type { StreamBlock, EditorFile, ChatMessage, ToolCallEntry } from './type
 // 'streaming' removed — we never set it, the model is either thinking or calling tools
 type AgentRunState = 'idle' | 'thinking' | 'tool-calling' | 'error'
 export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
-interface ModelInfo { id: string; name: string; multimodal?: boolean; contextWindow?: number }
+interface ModelInfo { id: string; name: string; multimodal?: boolean; contextWindow?: number; badge?: string | null }
 
 export const activeThreadIdAtom = atom<string>('')
 export const threadListAtom = atom<ThreadEntry[]>([])

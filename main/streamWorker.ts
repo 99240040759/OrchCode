@@ -140,7 +140,7 @@ async function buildToolMessages(
     // Rich structured tool result message
     const statusLine = res.isError ? '❌ FAILED' : '✅ SUCCESS'
     const content = `${statusLine} — Tool: ${res.tool_name}\n${res.formatted.text || '(empty output)'}`
-    toolMessages.push({ role: 'tool', tool_call_id: res.tool_call_id, content })
+    toolMessages.push({ role: 'tool', tool_call_id: res.tool_call_id, name: res.tool_name, content })
     if (res.formatted.imageData && multimodal) {
       const { base64, mimeType } = res.formatted.imageData
       stepImageParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } })
@@ -505,9 +505,9 @@ export async function handleAgentStreamRequest(
       // but raw content still goes into LLM messages for model self-consistency
       const stripper = new ReasoningStripper()
       let hasToolCalls = false
-      const stepToolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = []
-      const toolCallAccumulators = new Map<number, { id: string; name: string; args: string; sentStart?: boolean }>()
-      let stepAssistantContent = ''
+      const stepToolCalls: Array<{ id: string; name: string; args: Record<string, unknown>; extra_content?: any }> = []
+      const toolCallAccumulators = new Map<number, { id: string; name: string; args: string; sentStart?: boolean; extra_content?: any }>()
+      let stepAssistantContent = '', stepReasoningContent = ''
 
       for await (const chunk of chunkStream) {
         if (controller.signal.aborted) break
@@ -535,6 +535,7 @@ export async function handleAgentStreamRequest(
         }
         const rDelta = delta?.reasoning_content || delta?.reasoning
         if (rDelta) {
+          stepReasoningContent += rDelta
           const last = orderedBlocks[orderedBlocks.length - 1]
           if (!last || last.type !== 'reasoning') orderedBlocks.push({ type: 'reasoning', content: rDelta })
           else (last as any).content += rDelta
@@ -542,15 +543,18 @@ export async function handleAgentStreamRequest(
         }
 
         if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index
+          for (let i = 0; i < delta.tool_calls.length; i++) {
+            const tc = delta.tool_calls[i]
+            const idx = tc.index !== undefined ? tc.index : i
             let acc = toolCallAccumulators.get(idx)
             if (!acc) {
-              acc = { id: tc.id || '', name: tc.function?.name || '', args: '' }
+              const tcId = tc.id || `call_${crypto.randomUUID().slice(0, 8)}`
+              acc = { id: tcId, name: tc.function?.name || '', args: '' }
               toolCallAccumulators.set(idx, acc)
             }
             if (tc.id && !acc.id) acc.id = tc.id
             if (tc.function?.name && !acc.name) acc.name = tc.function.name
+            if ((tc as any).extra_content) acc.extra_content = (tc as any).extra_content
             if (acc.id && acc.name && !acc.sentStart) {
               acc.sentStart = true
               send({ type: 'tool_call_start', payload: { tool_call_id: acc.id, tool_name: acc.name }, threadId })
@@ -571,7 +575,7 @@ export async function handleAgentStreamRequest(
             }
           }
           hasToolCalls = true
-          stepToolCalls.push({ id: acc.id, name: acc.name, args: parsedArgs })
+          stepToolCalls.push({ id: acc.id, name: acc.name, args: parsedArgs, extra_content: acc.extra_content })
           orderedBlocks.push({ type: 'tool_call', tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs, status: 'pending' })
           send({ type: 'tool_call', payload: { tool_call_id: acc.id, tool_name: acc.name, args: parsedArgs }, threadId })
         }
@@ -603,9 +607,11 @@ export async function handleAgentStreamRequest(
         tool_calls: stepToolCalls.map(tc => ({
           id: tc.id,
           type: 'function' as const,
-          function: { name: tc.name, arguments: JSON.stringify(tc.args) }
-        }))
-      })
+          function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+          ...(tc.extra_content ? { extra_content: tc.extra_content } : {})
+        })),
+        ...(stepReasoningContent ? { reasoning_content: stepReasoningContent } : {})
+      } as any)
 
       // ── 7. Execute tools in parallel ──────────────────────────────────────
       log.info(`[stream] Executing ${stepToolCalls.length} tools in step ${stepCount}`)

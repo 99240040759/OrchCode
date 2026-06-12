@@ -13,7 +13,6 @@ import { toast } from 'sonner'
 
 interface InputBarProps { onSubmit?: (val: string, attachments?: any[]) => void; onStop?: () => void }
 
-const MAX_TOKENS = 200_000
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -391,6 +390,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
               <div className="toolbar-selector" title={Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model'}>
                 <ChevronDown size={14} />
                 <span>{Object.keys(availableModels).length === 0 ? 'No models' : availableModels[selectedModel]?.name || selectedModel || 'Select model'}</span>
+                {Object.keys(availableModels).length > 0 && availableModels[selectedModel]?.badge && (
+                  <span className="model-badge" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--accent-brass)', background: 'rgba(226, 168, 86, 0.1)', padding: '1px 5px', borderRadius: '12px', border: '1px solid rgba(226, 168, 86, 0.2)', marginLeft: '6px' }}>
+                    {availableModels[selectedModel].badge}
+                  </span>
+                )}
               </div>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -399,6 +403,11 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
                   {Object.entries(availableModels).filter(([_, model]) => !isBrowserActive || model.multimodal).map(([key, model]) => (
                     <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
                       <span className="font-medium">{model.name}</span>
+                      {model.badge && (
+                        <span className="model-badge" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--accent-brass)', background: 'rgba(226, 168, 86, 0.1)', padding: '1px 5px', borderRadius: '12px', border: '1px solid rgba(226, 168, 86, 0.2)', marginLeft: '4px' }}>
+                          {model.badge}
+                        </span>
+                      )}
                     </DropdownMenu.Item>
                   ))}
                 </div>
@@ -407,7 +416,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           </DropdownMenu.Root>
         </div>
         <div className="input-bar-toolbar-right" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-          <TokenIndicator current={sessionTokens} max={MAX_TOKENS} />
+          <TokenIndicator current={sessionTokens} max={availableModels[selectedModel]?.contextWindow || 200000} />
           <button
             type="button"
             onClick={toggleListening}

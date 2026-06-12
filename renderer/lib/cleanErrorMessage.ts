@@ -27,32 +27,29 @@ export function cleanErrorMessage(rawErr: unknown): string {
     }
   }
 
-  if (
-    errorStr.includes('apikey') ||
-    errorStr.includes('Invalid API Key') ||
-    errorStr.includes('Unauthorized') ||
-    errorStr.includes('auth') ||
-    errorStr.includes('API key')
-  ) {
-    return 'Authentication failed. Please check your account settings or sign in again.'
+  if (errorStr.includes('apikey') || errorStr.includes('Invalid API Key') || errorStr.includes('Unauthorized') || errorStr.includes('auth') || errorStr.includes('API key') || errorStr.includes('401') || errorStr.includes('403')) {
+    return 'Authentication failed. Your session might have expired, or the API key is invalid. Please sign out and sign back in to refresh your access.'
   }
-  if (errorStr.includes('Failed to fetch') || errorStr.includes('fetch failed')) {
+  if (errorStr.includes('Failed to fetch') || errorStr.includes('fetch failed') || errorStr.includes('network') || errorStr.includes('connection')) {
     return 'Unable to connect to the server. Please check your network connection and try again.'
   }
   if (errorStr.includes('model_not_found') || errorStr.includes('does not exist')) {
     return 'The selected AI model is temporarily unavailable. Please select another model.'
   }
-  if (errorStr.includes('rate limit') || errorStr.includes('429')) {
-    return 'Request limit reached. Please wait a moment before trying again.'
+  if (errorStr.includes('rate limit') || errorStr.includes('429') || errorStr.includes('quota') || errorStr.includes('limit reached')) {
+    return 'The API rate limit or credit quota for this model has been exceeded. Please wait a minute before retrying, or switch to another model.'
   }
-  if (errorStr.includes('timeout') || errorStr.includes('504')) {
+  if (errorStr.includes('500') || errorStr.includes('internal error') || errorStr.includes('server error') || errorStr.includes('INTERNAL')) {
+    return 'The server encountered an internal error. Please try again in a few moments, or select a different model.'
+  }
+  if (errorStr.includes('400') || errorStr.includes('bad request') || errorStr.includes('invalid argument') || errorStr.includes('not supported')) {
+    return 'The request to the model was invalid or contains unsupported parameters. If this persists, please try resetting the conversation.'
+  }
+  if (errorStr.includes('timeout') || errorStr.includes('504') || errorStr.includes('abort')) {
     return 'The request took too long to respond. Please try again in a few moments.'
   }
-
-  // If it looks like a raw JSON blob, give a generic message
   if (errorStr.startsWith('{') && errorStr.endsWith('}')) {
     return 'An unexpected error occurred. Please try again.'
   }
-
   return errorStr
 }

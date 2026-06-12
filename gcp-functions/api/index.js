@@ -74,6 +74,65 @@ app.use(async (req, res, next) => {
   }
 });
 
+const KEY_POOL = {};
+function getApiKey(envName, triggerRotation = false) {
+  const envVal = process.env[envName] || '';
+  if (!envVal) return null;
+  if (!KEY_POOL[envName]) {
+    KEY_POOL[envName] = {
+      keys: envVal.split(',').map(k => k.trim()).filter(Boolean),
+      index: 0
+    };
+  }
+  const pool = KEY_POOL[envName];
+  if (pool.keys.length === 0) return null;
+  if (triggerRotation) pool.index = (pool.index + 1) % pool.keys.length;
+  return { value: pool.keys[pool.index], pool };
+}
+function getApiKeyVal(envName) {
+  const info = getApiKey(envName, false);
+  return info ? info.value : '';
+}
+
+async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, attempt = 1) {
+  const keyInfo = getApiKey(envName, false);
+  if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
+  const headers = new Headers();
+  if (isBearer) headers.set('Authorization', `Bearer ${keyInfo.value}`);
+  else headers.set('x-goog-api-key', keyInfo.value);
+  const forwardHeaders = ['content-type', 'accept', 'user-agent', 'origin', 'referer'];
+  for (const h of forwardHeaders) {
+    const val = req.headers[h];
+    if (val) headers.set(h, val);
+  }
+  let body = undefined;
+  if (req.method === 'POST' || req.method === 'PUT') {
+    body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  }
+  try {
+    const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body: body || undefined });
+    if (upstreamRes.status === 429 && attempt < keyInfo.pool.keys.length) {
+      console.warn(`[rotator] Rate limited (429) for ${envName}. Rotating key and retrying...`);
+      getApiKey(envName, true); // Shift key index
+      return proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, attempt + 1);
+    }
+    res.status(upstreamRes.status);
+    for (const [k, v] of upstreamRes.headers.entries()) {
+      if (k !== 'transfer-encoding' && k !== 'content-encoding') res.setHeader(k, v);
+    }
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', 'app://orch-code');
+    res.setHeader('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (upstreamRes.body) Readable.fromWeb(upstreamRes.body).pipe(res);
+    else res.end();
+  } catch (err) {
+    console.error(`Upstream proxy error: ${targetUrl}`, err);
+    res.status(502).json({ error: `Upstream Proxy Error: ${err.message}` });
+  }
+}
+
 // Proxy helper
 async function proxyRequest(req, res, targetUrl, authHeaders) {
   const headers = new Headers(authHeaders);
@@ -118,18 +177,19 @@ async function proxyRequest(req, res, targetUrl, authHeaders) {
 
 // Model definitions
 const MODEL_DEFINITIONS = [
-  ['GEMMA',            'gemma-4-26b-a4b-it',            'Orch General (Unlimited)', true, 256000],
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Orch Creative', true, 256000],
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free', 'Orch Ultra', false, 256000],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',             'Orch Think', false, 128000],
-  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'Orch Long (1M)', false, 1000000],
-  ['BIG_PICKLE',       'opencode/big-pickle',             'Orch Reason', false, 200000],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',             'Orch Preview', true, 1000000],
+  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',         'Gemini 3.1 Flash Lite', true, 1000000, 'Fast'],
+  ['GEMMA',            'gemma-4-26b-a4b-it',            'Gemma 4 26B', true, 256000, 'Unlimited'],
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6', true, 256000, 'Fast'],
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free', 'Nemotron 3 Ultra', false, 256000, 'Slow'],
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',             'GLM 4.5 Flash', false, 128000, 'Max'],
+  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Pro', false, 1000000, 'Fast'],
+  ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle', false, 200000, 'Max'],
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',             'MiMo V2.5', true, 1000000, 'Long'],
 ];
 
 async function handleModels(req, res) {
   const models = {};
-  for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow] of MODEL_DEFINITIONS) {
+  for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow, defaultBadge] of MODEL_DEFINITIONS) {
     const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
     let isAvailable = true;
     if (id.startsWith('zai/') && !process.env.Z_AI_API_KEY) isAvailable = false;
@@ -142,7 +202,8 @@ async function handleModels(req, res) {
       const name = process.env[`${prefix}_MODEL_NAME`] || defaultName;
       const multimodal = process.env[`${prefix}_MULTIMODAL`] ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
       const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
-      models[responseKey] = { id, name, multimodal, contextWindow };
+      const badge = process.env[`${prefix}_BADGE`] || defaultBadge || null;
+      models[responseKey] = { id, name, multimodal, contextWindow, badge };
     }
   }
   res.json(models);
@@ -150,9 +211,6 @@ async function handleModels(req, res) {
 
 // Gemini handler
 async function handleGemini(req, res) {
-  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Server Configuration Error: GOOGLE_GENERATIVE_AI_API_KEY is missing.' });
-  
   const subpath = req.normalizedPath.replace(/^\/gemini/, '');
   const allowedPatterns = [
     /^\/v1beta\/models$/,
@@ -162,37 +220,26 @@ async function handleGemini(req, res) {
     /^\/v1beta\/openai\/chat\/completions$/,
     /^\/v1beta\/openai\/models$/
   ];
-  
   if (!allowedPatterns.some(p => p.test(subpath))) {
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
   }
-
-  const headers = subpath.startsWith('/v1beta/openai') ? { Authorization: `Bearer ${apiKey}` } : { 'x-goog-api-key': apiKey };
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `https://generativelanguage.googleapis.com${subpath}${urlObj.search}`;
-  
-  return proxyRequest(req, res, targetUrl, headers);
+  return proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', subpath.startsWith('/v1beta/openai'));
 }
 
 // OpenAI Compat handlers
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
 
 async function handleOpenAICompat(req, res, config) {
-  const apiKey = process.env[config.envKey];
-  if (!apiKey) {
-    return res.status(500).json({ error: `Server Configuration Error: ${config.envKey} is missing.` });
-  }
-  
   const subpath = req.normalizedPath.replace(new RegExp(`^\/${config.functionName}`), '');
   if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath))) {
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
   }
-
   const targetPath = config.pathReplace ? subpath.replace(config.pathReplace.search, config.pathReplace.replace) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
-
-  return proxyRequest(req, res, targetUrl, { Authorization: `Bearer ${apiKey}` });
+  return proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
 }
 
 // Tavily handler
@@ -246,7 +293,7 @@ async function handleGenerateTitle(req, res) {
   if (!text || !text.trim()) {
     return res.json({ title: 'New Conversation' });
   }
-  const activeApiKey = process.env.NVIDIA_API_KEY;
+  const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
   
   const payload = {
@@ -284,7 +331,7 @@ async function handleGenerateImage(req, res) {
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ error: 'Missing or invalid prompt parameter' });
   }
-  const activeApiKey = process.env.NVIDIA_API_KEY;
+  const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
   
   const payload = {
