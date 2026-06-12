@@ -3,6 +3,7 @@ import { useAtomValue, useAtom } from 'jotai'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { isArtifactPanelOpenAtom, artifactPanelModeAtom, sidebarExpandedAtom, activeThreadIdAtom, threadBrowserUrlAtom } from '../store/agentStore'
 import debounce from 'lodash.debounce'
+import Tooltip from './Tooltip'
 
 const BrowserView: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -81,13 +82,13 @@ const BrowserView: React.FC = () => {
     <div className="browser-container">
       <div className="browser-header">
         <div className="browser-nav-group">
-          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:back').catch(()=>{})} title="Back"><ArrowLeft size={14} /></button>
-          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:forward').catch(()=>{})} title="Forward"><ArrowRight size={14} /></button>
-          <button className="browser-nav-btn" onClick={() => window.api.invoke('browser:reload').catch(()=>{})} title="Reload"><RotateCw size={13} /></button>
+          <Tooltip content="Back"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:back').catch(()=>{})}><ArrowLeft size={14} /></button></Tooltip>
+          <Tooltip content="Forward"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:forward').catch(()=>{})}><ArrowRight size={14} /></button></Tooltip>
+          <Tooltip content="Reload"><button className="browser-nav-btn" onClick={() => window.api.invoke('browser:reload').catch(()=>{})}><RotateCw size={13} /></button></Tooltip>
         </div>
         <input className="browser-url-bar" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(urlInput) }} spellCheck={false} placeholder="Enter URL or search..." />
-        <button className="browser-nav-btn browser-go-btn" onClick={() => navigate(urlInput)} title="Go"><ExternalLink size={13} /></button>
-        {title && <div className="browser-title" title={displayUrl || urlInput}>{title}</div>}
+        <Tooltip content="Go"><button className="browser-nav-btn browser-go-btn" onClick={() => navigate(urlInput)}><ExternalLink size={13} /></button></Tooltip>
+        {title && <Tooltip content={displayUrl || urlInput}><div className="browser-title">{title}</div></Tooltip>}
       </div>
       <div ref={containerRef} className="browser-content">
         {loadError ? (

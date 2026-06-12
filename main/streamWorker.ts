@@ -494,9 +494,7 @@ export async function handleAgentStreamRequest(
       const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + (systemInstructionSuffix || '')
       const sysTokens = countTokens(systemInstruction, modelType)
       const toolSchemaTokens = countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType)
-      currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens
-      lifetimeTokensAdded += stepInputTokens
-      send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
+      currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens; lifetimeTokensAdded += currentContextTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
 
       // ── 4. Stream LLM call ────────────────────────────────────────────────
       const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal)
@@ -591,8 +589,7 @@ export async function handleAgentStreamRequest(
         send({ type: 'text_delta', payload: trailing.content, threadId })
       }
 
-      saveProgress(true)
-      if (controller.signal.aborted) break
+      saveProgress(true); if (controller.signal.aborted) break; const stepOutputTokens = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType) + countTokens(JSON.stringify(stepToolCalls), modelType); lifetimeTokensAdded += stepOutputTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
 
       // ── 5. No tool calls → agent is done ─────────────────────────────────
       if (!hasToolCalls || stepToolCalls.length === 0) {

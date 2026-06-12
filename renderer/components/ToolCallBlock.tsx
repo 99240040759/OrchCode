@@ -7,6 +7,7 @@ import { parse as parsePartial } from 'partial-json'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom, isDiffModeAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
+import Tooltip from './Tooltip'
 
 const FILE_WRITE_TOOLS = ['write_to_file', 'multi_replace_file_content']
 
@@ -122,16 +123,16 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
 function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   if (toolName === 'generate_image') return <Camera size={15} className="icon-blue" />
   if (toolName === 'browser_screenshot') return <Camera size={15} className="icon-blue" />
-  if (toolName === 'list_dir') return <FolderOpen size={15} className="icon-accent-brass" />
+  if (toolName === 'list_dir') return <FolderOpen size={15} className="text-accent-brass flex-shrink-0" />
   if (isFile) {
     const cleanName = target.split(' ')[0]
-    if (cleanName === 'implementation_plan.md') return <ClipboardList size={15} className="icon-purple" />
-    if (cleanName === 'walkthrough.md') return <BookOpen size={15} className="icon-green" />
+    if (cleanName === 'implementation_plan.md') return <ClipboardList size={15} className="text-accent-purple flex-shrink-0" />
+    if (cleanName === 'walkthrough.md') return <BookOpen size={15} className="text-accent-green flex-shrink-0" />
     return <FileIcon fileName={cleanName} size={15} />
   }
   switch (toolName) {
     case 'browser_navigate': return <GlobeIcon />
-    case 'browser_get_page_content': return <GlobeCheck size={15} className="icon-purple" />
+    case 'browser_get_page_content': return <GlobeCheck size={15} className="text-accent-purple flex-shrink-0" />
     case 'browser_type': return <Keyboard size={15} className="icon-teal" />
     case 'browser_click': return <MousePointerClick size={15} className="icon-pink" />
     case 'browser_mouse_hover': return <MousePointerClick size={15} className="icon-pink" />
@@ -147,7 +148,7 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
 }
 
 const GlobeIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="icon-purple">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent-purple flex-shrink-0">
     <circle cx="12" cy="12" r="10" />
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
     <path d="M2 12h20" />
@@ -195,13 +196,13 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
     return (
       <div className="terminal-card">
         <div className="terminal-card-header">
-          <TerminalSquare size={14} className="icon-accent-green" />
+          <TerminalSquare size={14} className="text-accent-green flex-shrink-0" />
           <span className="terminal-card-title">
             <span>{isPending ? 'Running command:' : isErr ? 'Failed to run:' : 'Ran command:'}</span>
             <code className="tool-call-command-code">{command}</code>
           </span>
-          {isPending && <Loader className="animate-spin icon-accent-green" size={13} />}
-          {isErr && <AlertCircle size={13} className="icon-red" />}
+          {isPending && <Loader className="animate-spin text-accent-green flex-shrink-0" size={13} />}
+          {isErr && <AlertCircle size={13} className="text-accent-red flex-shrink-0" />}
         </div>
         {isPending && (
           <pre className="terminal-pre">
@@ -239,27 +240,30 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
   const Component = (isInteractive ? 'button' : 'div') as React.ElementType
   return (
     <div className="tool-call-block-container">
-      <Component
-        onClick={isInteractive ? handleClick : undefined}
-        className={`tool-call-wrapper ${isInteractive ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
-        title={isInteractive ? `Open ${fullPath}` : undefined}
-      >
-        <span className="muted-text">{operation}</span>
-        <span className="icon-wrapper tool-call-icon-wrapper">
-          {renderToolIcon(toolCall.tool_name, isFile, target)}
-        </span>
-        <span className="target-text tool-call-target-text">
-          {target}
-          {suffix}
-        </span>
-        {toolCall.status === 'pending' && !FILE_WRITE_TOOLS.includes(toolCall.tool_name) && <Loader className="animate-spin text-secondary" size={11} />}
-        {toolCall.status === 'error' && <AlertCircle size={12} className="icon-red" />}
-        {toolCall.status === 'complete' && toolCall.result && typeof toolCall.result === 'object' && Array.isArray((toolCall.result as any).syntaxErrors) && (toolCall.result as any).syntaxErrors.length > 0 && (
-          <span title={`File contains ${(toolCall.result as any).syntaxErrors.length} syntax warnings`} className="syntax-warning-badge">
-            <AlertCircle size={12} className="icon-accent-brass" />
+      <Tooltip content={isInteractive ? `Open ${fullPath}` : undefined}>
+        <Component
+          onClick={isInteractive ? handleClick : undefined}
+          className={`tool-call-wrapper ${isInteractive ? 'tool-call-interactive' : 'tool-call-non-interactive'}`}
+        >
+          <span className="muted-text">{operation}</span>
+          <span className="icon-wrapper tool-call-icon-wrapper">
+            {renderToolIcon(toolCall.tool_name, isFile, target)}
           </span>
-        )}
-      </Component>
+          <span className="target-text tool-call-target-text">
+            {target}
+            {suffix}
+          </span>
+          {toolCall.status === 'pending' && !FILE_WRITE_TOOLS.includes(toolCall.tool_name) && <Loader className="animate-spin text-secondary" size={11} />}
+          {toolCall.status === 'error' && <AlertCircle size={12} className="text-accent-red flex-shrink-0" />}
+          {toolCall.status === 'complete' && toolCall.result && typeof toolCall.result === 'object' && Array.isArray((toolCall.result as any).syntaxErrors) && (toolCall.result as any).syntaxErrors.length > 0 && (
+            <Tooltip content={`File contains ${(toolCall.result as any).syntaxErrors.length} syntax warnings`}>
+              <span className="syntax-warning-badge">
+                <AlertCircle size={12} className="text-accent-brass flex-shrink-0" />
+              </span>
+            </Tooltip>
+          )}
+        </Component>
+      </Tooltip>
     </div>
   )
 }

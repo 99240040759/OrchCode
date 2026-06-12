@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useHotkeys } from 'react-hotkeys-hook'
 import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import LeftSidebar from './components/LeftSidebar'
 import ArtifactPanel from './components/ArtifactPanel'
@@ -18,12 +19,15 @@ import { threadService } from './services/services'
 import { isMac } from './lib/sharedUtils'
 import { PanelLeft, PanelRight, ArrowLeft, ArrowRight } from 'lucide-react'
 import type { UpdateStatus } from '../preload/index.d'
+import Tooltip from './components/Tooltip'
 
 function AppInner(): React.JSX.Element {
   const setAvailableModels = useSetAtom(availableModelsAtom)
   const setAuthUser = useSetAtom(authUserAtom)
   const [sidebarExpanded, setSidebarExpanded] = useAtom(sidebarExpandedAtom)
   const [isArtifactPanelOpen, setArtifactPanelOpen] = useAtom(isArtifactPanelOpenAtom)
+  useHotkeys('ctrl+shift+b, cmd+shift+b', (e) => { e.preventDefault(); setSidebarExpanded(p => !p) }, { enableOnFormTags: true })
+  useHotkeys('ctrl+shift+e, cmd+shift+e', (e) => { e.preventDefault(); setArtifactPanelOpen(p => !p) }, { enableOnFormTags: true })
   const activeThread = useAtomValue(activeThreadAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
   const setSelectedModel = useSetAtom(selectedModelAtom)
@@ -159,24 +163,12 @@ function AppInner(): React.JSX.Element {
         </div>
       </div>
       <div className={`fixed-nav-container ${isMac ? 'fixed-nav-mac' : 'fixed-nav-win'}`}>
-        <button className="fixed-nav-btn" onClick={() => setSidebarExpanded(!sidebarExpanded)} title={sidebarExpanded ? 'Collapse Sidebar' : 'Expand Sidebar'}>
-          <PanelLeft size={16} />
-        </button>
-        <button className="fixed-nav-btn" onClick={() => window.history.back()} title="Back">
-          <ArrowLeft size={16} />
-        </button>
-        <button className="fixed-nav-btn" onClick={() => window.history.forward()} title="Forward">
-          <ArrowRight size={16} />
-        </button>
+        <Tooltip content={sidebarExpanded ? 'Collapse Sidebar (Ctrl+Shift+B)' : 'Expand Sidebar (Ctrl+Shift+B)'}><button className="fixed-nav-btn" onClick={() => setSidebarExpanded(!sidebarExpanded)}><PanelLeft size={16} /></button></Tooltip>
+        <Tooltip content="Back"><button className="fixed-nav-btn" onClick={() => window.history.back()}><ArrowLeft size={16} /></button></Tooltip>
+        <Tooltip content="Forward"><button className="fixed-nav-btn" onClick={() => window.history.forward()}><ArrowRight size={16} /></button></Tooltip>
       </div>
       <div className={`fixed-right-container ${isMac ? 'fixed-right-mac' : 'fixed-right-win'}`}>
-        <button
-          onClick={() => setArtifactPanelOpen(!isArtifactPanelOpen)}
-          title={isArtifactPanelOpen ? 'Collapse Panel' : 'Expand Panel'}
-          className="fixed-toggle-panel-btn"
-        >
-          <PanelRight size={16} strokeWidth={1.5} />
-        </button>
+        <Tooltip content={isArtifactPanelOpen ? 'Collapse Panel (Ctrl+Shift+E)' : 'Expand Panel (Ctrl+Shift+E)'}><button onClick={() => setArtifactPanelOpen(!isArtifactPanelOpen)} className="fixed-toggle-panel-btn"><PanelRight size={16} strokeWidth={1.5} /></button></Tooltip>
       </div>
     </div>
   )

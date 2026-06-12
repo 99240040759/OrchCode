@@ -12,6 +12,7 @@ export const threadService = {
   deleteThread: (threadId: string) => invoke<boolean>('thread:delete', { threadId }),
   getThreadWorkspace: (threadId: string) => invoke<string | null>('thread:workspace', { threadId }),
   generateTitle: (text: string, threadId: string) => invoke<string | null>('thread:generate-title', { text, threadId }),
+  updateThreadTitle: (threadId: string, title: string) => invoke<boolean>('thread:update-title', { threadId, title }),
   setActiveSession: (threadId: string) => invoke<boolean>('thread:set-active', { threadId })
 }
 

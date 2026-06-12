@@ -109,8 +109,9 @@ function createOnboardingWindow(): BrowserWindow {
     resizable: false,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
     backgroundColor: '#0d0d0d',
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -163,7 +164,7 @@ function createMainWindow(): BrowserWindow {
       symbolColor: '#c8ccd4',
       height: 38
     } : undefined,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,

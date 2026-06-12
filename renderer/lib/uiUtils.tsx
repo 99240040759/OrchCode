@@ -19,10 +19,10 @@ export function getDisplayName(fileName: string): string {
 /** Single source of truth for artifact icons — uses Lucide. */
 export function getArtifactIcon(name: string, size = 15): React.ReactNode {
   if (name === 'implementation_plan.md') {
-    return <ClipboardList size={size} className="icon-purple" />
+    return <ClipboardList size={size} className="text-accent-purple flex-shrink-0" />
   }
   if (name === 'walkthrough.md') {
-    return <BookOpen size={size} className="icon-green" />
+    return <BookOpen size={size} className="text-accent-green flex-shrink-0" />
   }
   return <FileText size={size} className="icon-secondary" />
 }

@@ -53,7 +53,7 @@ export const OnboardingView: React.FC = () => {
           </div>
           {loading ? (
             <div className="onboarding-loading">
-              <Loader className="animate-spin" size={28} />
+              <Loader className="animate-spin text-accent-blue" size={28} />
               <span className="onboarding-loading-text">Connecting to Google Auth...</span>
             </div>
           ) : (

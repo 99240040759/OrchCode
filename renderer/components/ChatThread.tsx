@@ -15,6 +15,7 @@ import type { ChatMessage, StreamBlock, ToolCallEntry } from '../store/agentStor
 import { AlertTriangle } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import Tooltip from './Tooltip'
 import { decodeBase64Utf8 } from '../lib/sharedUtils'
 import logoImg from '../assets/logo.png'
 
@@ -156,12 +157,14 @@ const UserMessage = ({ message }: { message: ChatMessage }) => {
               const openDoc = () => { setIsDiffMode(false); setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: false, mimeType: att.mimeType || 'text/plain', content: decodeBase64Utf8(att.base64) }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
               const openImg = () => { setIsDiffMode(false); setActiveEditorFile({ name: att.name || 'attachment', path: att.name || '', isBinary: true, mimeType: att.mimeType || 'image/png', base64: att.base64 }); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
               return (
-                <div key={idx} className="message-attachment-chip" onClick={att.type === 'image' ? openImg : openDoc} title={att.name || 'attachment'}>
-                  {att.type === 'image'
-                    ? <img src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`} alt={att.name || 'attachment'} className="message-attachment-chip-img" />
-                    : <SymbolsFileIcon fileName={att.name ? (att.name.split('/').pop() || att.name) : 'attachment'} autoAssign={true} width={14} height={14} className="chat-attachment-icon" />}
-                  <span className="chat-attachment-name">{att.name ? (att.name.split('/').pop() || att.name) : 'attachment'}</span>
-                </div>
+                <Tooltip key={idx} content={att.name || 'attachment'}>
+                  <div className="message-attachment-chip" onClick={att.type === 'image' ? openImg : openDoc}>
+                    {att.type === 'image'
+                      ? <img src={`data:${att.mimeType || 'image/png'};base64,${att.base64}`} alt={att.name || 'attachment'} className="message-attachment-chip-img" />
+                      : <SymbolsFileIcon fileName={att.name ? (att.name.split('/').pop() || att.name) : 'attachment'} autoAssign={true} width={14} height={14} className="chat-attachment-icon" />}
+                    <span className="chat-attachment-name">{att.name ? (att.name.split('/').pop() || att.name) : 'attachment'}</span>
+                  </div>
+                </Tooltip>
               )
             })}
           </div>

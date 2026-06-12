@@ -13,6 +13,7 @@ import { stripFileProtocol, normalizeMarkdownLinks } from '../lib/pathUtils'
 import type { FileReadResult } from '../../preload/index.d'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import hljs from 'highlight.js'
+import Tooltip from './Tooltip'
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', flowchart: { useMaxWidth: true, htmlLabels: true } })
 
@@ -45,12 +46,14 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
   }
   const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? children.split(/[/\\]/).pop() ?? children : children
   return (
-    <span className="file-link" onClick={handleClick} title={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`}>
-      <span className="file-icon-wrapper-native">
-        {isDir ? <Folder size={14} className="folder-icon-color" /> : <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />}
+    <Tooltip content={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`}>
+      <span className="file-link" onClick={handleClick}>
+        <span className="file-icon-wrapper-native">
+          {isDir ? <Folder size={14} className="text-accent-purple" /> : <SymbolsFileIcon fileName={fileName} autoAssign={true} width={14} height={14} />}
+        </span>
+        <span className="file-name-wrapper">{displayName}</span>
       </span>
-      <span className="file-name-wrapper">{displayName}</span>
-    </span>
+    </Tooltip>
   )
 }
 
@@ -75,9 +78,11 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
           <span className="codeblock-dot green" />
         </div>
         <span className="codeblock-header-title">{language || 'code'}</span>
-        <button className="code-block-copy-btn" title="Copy code" onClick={handleCopy}>
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-        </button>
+        <Tooltip content="Copy code">
+          <button className="code-block-copy-btn" onClick={handleCopy}>
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        </Tooltip>
       </div>
       <pre className="codeblock-body">
         <code className={`codeblock-code hljs language-${language}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
@@ -187,7 +192,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ displayFile, activeW
               <button className="proceed-btn" onClick={() => { setGlobalPrompt({ prompt: 'I approve the implementation plan. Please proceed with execution.' }); toast.success('Approved plan. Proceeding with execution.') }}>Proceed</button>
             </div>
           )}
-          <div title="Copy file content" onClick={() => { navigator.clipboard.writeText(displayFile.content ?? ''); toast.success('File content copied!') }} className="editor-toolbar-action"><Copy size={13} /></div>
+          <Tooltip content="Copy file content"><div onClick={() => { navigator.clipboard.writeText(displayFile.content ?? ''); toast.success('File content copied!') }} className="editor-toolbar-action"><Copy size={13} /></div></Tooltip>
         </div>
       </div>
       <div className="assistant-content content-container"><MarkdownRenderer isArtifact={true} content={displayFile.content ?? ''} /></div>

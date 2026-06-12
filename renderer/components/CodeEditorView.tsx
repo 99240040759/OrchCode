@@ -3,6 +3,7 @@ import { Editor, DiffEditor } from '@monaco-editor/react'
 import { FileDiff, Search, Copy, Loader } from 'lucide-react'
 import { toast } from 'sonner'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import Tooltip from './Tooltip'
 
 import type { editor } from 'monaco-editor'
 
@@ -48,11 +49,9 @@ const CodeEditorView: React.FC<CodeEditorViewProps> = ({ displayFile, activeWork
         </span>
       </div>
       <div className="fv-toolbar-group">
-        <div title={isDiffMode ? 'Show Code Editor' : 'Show File Diff (vs git HEAD)'} onClick={() => setIsDiffMode(!isDiffMode)} className={`editor-toolbar-action${isDiffMode ? ' editor-toolbar-action-active' : ''}`}>
-          <FileDiff size={13} />
-        </div>
-        <div title="Find in file (native)" onClick={handleSearchClick} className="editor-toolbar-action"><Search size={13} /></div>
-        <div title="Copy file content" onClick={() => { navigator.clipboard.writeText(displayFile.content ?? ''); toast.success('File content copied!') }} className="editor-toolbar-action"><Copy size={13} /></div>
+        <Tooltip content={isDiffMode ? 'Show Code Editor' : 'Show File Diff (vs git HEAD)'}><div onClick={() => setIsDiffMode(!isDiffMode)} className={`editor-toolbar-action${isDiffMode ? ' editor-toolbar-action-active' : ''}`}><FileDiff size={13} /></div></Tooltip>
+        <Tooltip content="Find in file (native)"><div onClick={handleSearchClick} className="editor-toolbar-action"><Search size={13} /></div></Tooltip>
+        <Tooltip content="Copy file content"><div onClick={() => { navigator.clipboard.writeText(displayFile.content ?? ''); toast.success('File content copied!') }} className="editor-toolbar-action"><Copy size={13} /></div></Tooltip>
       </div>
     </div>
     <div className="editor-container">

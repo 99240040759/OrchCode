@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect, useActionState } from 'react'
+import { useHotkeys } from 'react-hotkeys-hook'
 import { useFormStatus } from 'react-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Plus, ChevronUp, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import Dropdown, { DropdownItem } from './Dropdown'
 import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
+import Tooltip from './Tooltip'
 
 import { workspaceService } from '../services/services'
 import { toast } from 'sonner'
@@ -58,19 +60,15 @@ const SubmitButton: React.FC<{ isRunning: boolean; hasInput: boolean; handleStop
     return (
       <>
         {hasInput && (
-          <button className="toolbar-submit-btn inject" onClick={handleInject} title="Pause and inject message" type="button">
-            <MessageSquarePlus size={13} strokeWidth={2} />
-          </button>
+          <Tooltip content="Pause and inject message"><button className="toolbar-submit-btn inject" onClick={handleInject} type="button"><MessageSquarePlus size={13} strokeWidth={2} /></button></Tooltip>
         )}
-        <button className="toolbar-submit-btn stop" onClick={handleStop} title="Stop generation" type="button"><Square size={11} strokeWidth={3} /></button>
+        <Tooltip content="Stop generation"><button className="toolbar-submit-btn stop" onClick={handleStop} type="button"><Square size={11} strokeWidth={3} /></button></Tooltip>
       </>
     )
   }
   if (!hasInput) return null
   return (
-    <button className="toolbar-submit-btn" type="submit" title="Submit" disabled={pending}>
-      <ArrowRight size={14} strokeWidth={2.5} />
-    </button>
+    <Tooltip content="Submit"><button className="toolbar-submit-btn" type="submit" disabled={pending}><ArrowRight size={14} strokeWidth={2.5} /></button></Tooltip>
   )
 }
 
@@ -78,12 +76,16 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
   const editorRef = useRef<HTMLDivElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
+  const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false)
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
   const [_, submitAction] = useActionState(async () => { handleSend() }, null)
   const runState = useAtomValue(agentRunStateAtom)
   const availableModels = useAtomValue(availableModelsAtom)
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom)
   const [attachments, setAttachments] = useState<Array<{ type: 'image' | 'document'; name: string; mimeType: string; base64: string }>>([])
   const supportsVision = !!availableModels[selectedModel]?.multimodal
+  useHotkeys('ctrl+shift+u, cmd+shift+u', (e) => { e.preventDefault(); if (supportsVision) setIsUploadDropdownOpen(o => !o) }, { enableOnFormTags: true })
+  useHotkeys('ctrl+m, cmd+m', (e) => { e.preventDefault(); if (Object.keys(availableModels).length > 0) setIsModelDropdownOpen(o => !o) }, { enableOnFormTags: true })
   const isPanelOpen = useAtomValue(isArtifactPanelOpenAtom), panelMode = useAtomValue(artifactPanelModeAtom), isBrowserActive = isPanelOpen && panelMode === 'browser'
   useEffect(() => {
     if (isBrowserActive && Object.keys(availableModels).length > 0 && !availableModels[selectedModel]?.multimodal) {
@@ -329,13 +331,15 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       {attachments.length > 0 && (
         <div className="input-attachments-container">
           {attachments.map((att, idx) => (
-            <div key={`att-${idx}`} className="input-attachment-chip" title={att.name}>
-              {att.type === 'image' ? <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} className="input-attachment-chip-img" /> : (
-                <SymbolsFileIcon fileName={att.name.split('/').pop() || att.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
-              )}
-              <span className="input-attachment-name">{att.name.split('/').pop() || att.name}</span>
-              <button onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
-            </div>
+            <Tooltip key={`att-${idx}`} content={att.name}>
+              <div className="input-attachment-chip">
+                {att.type === 'image' ? <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} className="input-attachment-chip-img" /> : (
+                  <SymbolsFileIcon fileName={att.name.split('/').pop() || att.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
+                )}
+                <span className="input-attachment-name">{att.name.split('/').pop() || att.name}</span>
+                <button onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
+              </div>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -369,59 +373,40 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         `}</style>
         <div className="input-bar-toolbar-left">
           {supportsVision && (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <div className="toolbar-icon-btn" title="Add file or image"><Plus size={16} /></div>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content asChild sideOffset={6}>
-                  <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-sm">
-                    <DropdownMenu.Item onSelect={() => triggerFileSelect('image')} className="app-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => triggerFileSelect('document')} className="app-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownMenu.Item>
-                  </div>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+            <Dropdown open={isUploadDropdownOpen} onOpenChange={setIsUploadDropdownOpen} sideOffset={6} className="dropdown-menu-content-sm" trigger={
+              <Tooltip content="Add file or image (Ctrl+Shift+U)"><button type="button" className="toolbar-icon-btn"><Plus size={16} /></button></Tooltip>
+            }>
+              <DropdownItem onSelect={() => triggerFileSelect('image')} className="app-dropdown-item"><Image size={14} /><span>Upload Image</span></DropdownItem>
+              <DropdownItem onSelect={() => triggerFileSelect('document')} className="app-dropdown-item"><FileText size={14} /><span>Upload Document</span></DropdownItem>
+            </Dropdown>
           )}
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild disabled={Object.keys(availableModels).length === 0}>
-              <div className="toolbar-selector" title={Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model'}>
+          <Dropdown open={isModelDropdownOpen} onOpenChange={setIsModelDropdownOpen} sideOffset={6} className="dropdown-menu-content-md" trigger={
+            <Tooltip content={Object.keys(availableModels).length === 0 ? 'No models available' : 'Select model (Ctrl+M)'}>
+              <button type="button" className="toolbar-selector" disabled={Object.keys(availableModels).length === 0}>
                 <span>{Object.keys(availableModels).length === 0 ? 'No models' : availableModels[selectedModel]?.name || selectedModel || 'Select model'}</span>
-                {availableModels[selectedModel]?.badge && (
-                  <span className="model-badge">
-                    {availableModels[selectedModel].badge}
-                  </span>
-                )}
+                {availableModels[selectedModel]?.badge && <span className="model-badge">{availableModels[selectedModel].badge}</span>}
                 <ChevronUp size={14} />
-              </div>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content asChild sideOffset={6}>
-                <div className="app-dropdown-panel dropdown-menu-content dropdown-menu-content-md">
-                  {Object.entries(availableModels).filter(([_, model]) => !isBrowserActive || model.multimodal).map(([key, model]) => (
-                    <DropdownMenu.Item key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
-                      <span className="font-medium">{model.name}</span>
-                      {model.badge && (
-                        <span className="model-badge">
-                          {model.badge}
-                        </span>
-                      )}
-                    </DropdownMenu.Item>
-                  ))}
-                </div>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+              </button>
+            </Tooltip>
+          }>
+            {Object.entries(availableModels).filter(([_, model]) => !isBrowserActive || model.multimodal).map(([key, model]) => (
+              <DropdownItem key={key} onSelect={() => setSelectedModel(key)} className={`app-dropdown-item${selectedModel === key ? ' selected' : ''}`}>
+                <span className="font-medium">{model.name}</span>
+                {model.badge && <span className="model-badge">{model.badge}</span>}
+              </DropdownItem>
+            ))}
+          </Dropdown>
         </div>
         <div className="input-bar-toolbar-right">
-          <button
-            type="button"
-            onClick={toggleListening}
-            className={`toolbar-icon-btn toolbar-voice-btn ${isListening ? 'listening' : ''}`}
-            title={isListening ? "Stop voice input" : "Start voice input"}
-          >
-            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-          </button>
+          <Tooltip content={isListening ? "Stop voice input" : "Start voice input"}>
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`toolbar-icon-btn toolbar-voice-btn ${isListening ? 'listening' : ''}`}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+          </Tooltip>
           <SubmitButton isRunning={isRunning} hasInput={!!(inputValue.trim() || attachments.length > 0)} handleStop={handleStop} handleInject={handleInject} />
         </div>
       </div>

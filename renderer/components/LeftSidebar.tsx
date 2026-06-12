@@ -1,17 +1,21 @@
 import React from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useHotkeys } from 'react-hotkeys-hook'
 import { useAtomValue } from 'jotai'
+import Dropdown, { DropdownItem, DropdownSeparator } from './Dropdown'
 import { Plus } from 'lucide-react'
 import { authUserAtom, sidebarExpandedAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
 import { authService } from '../services/services'
 import ThreadList from './ThreadList'
 import { useChat } from '../hooks/useChat'
+import Tooltip from './Tooltip'
 
 const LeftSidebar: React.FC = () => {
   const authUser = useAtomValue(authUserAtom)
   const expanded = useAtomValue(sidebarExpandedAtom)
-  const { newConversation } = useChat()
+  const { newConversation, openWorkspace } = useChat()
+  useHotkeys('ctrl+n, cmd+n', (e) => { e.preventDefault(); newConversation().catch(console.error) }, { enableOnFormTags: true })
+  useHotkeys('ctrl+o, cmd+o', (e) => { e.preventDefault(); openWorkspace().catch(console.error) }, { enableOnFormTags: true })
   const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (e) { console.error(e) } }
   const handleLogout = async () => { try { await authService.logout() } catch (e) { console.error(e) } }
 
@@ -20,18 +24,18 @@ const LeftSidebar: React.FC = () => {
       <div className="sidebar-inner">
 
         <div className="sidebar-top-section">
-          <div className="sidebar-start-conv" onClick={() => newConversation()}>
-            <Plus size={16} strokeWidth={2} className="text-secondary" />
-            <span>New Conversation</span>
-          </div>
+          <Tooltip content="New Conversation (Ctrl+N)" side="right"><button type="button" className="sidebar-start-conv" onClick={() => newConversation()}><Plus size={16} strokeWidth={2} className="text-secondary" /><span>New Conversation</span></button></Tooltip>
         </div>
 
         <div className="sidebar-body"><ThreadList /></div>
 
         <div className="sidebar-footer app-region-no-drag">
           {authUser ? (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
+            <Dropdown
+              align="start"
+              side="right"
+              sideOffset={12}
+              trigger={
                 <button className="sidebar-footer-item">
                   {authUser.photoUrl ? (
                     <img src={authUser.photoUrl} alt={authUser.name} className="profile-avatar-img" referrerPolicy="no-referrer" />
@@ -42,25 +46,17 @@ const LeftSidebar: React.FC = () => {
                   )}
                   <span className="text-ellipsis flex-1 sidebar-username">{authUser.name || authUser.email}</span>
                 </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content asChild align="start" side="right" sideOffset={12}>
-                  <div className="app-dropdown-panel">
-                    <div className="profile-info">
-                      <div className="profile-name">{authUser.name || 'Google User'}</div>
-                      <div className="profile-email">{authUser.email}</div>
-                    </div>
-                    <DropdownMenu.Separator className="profile-separator" />
-                    <DropdownMenu.Item className="app-dropdown-item profile-item-logout" onSelect={handleLogout}>Log Out</DropdownMenu.Item>
-                  </div>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+              }
+            >
+              <div className="profile-info">
+                <div className="profile-name">{authUser.name || 'Google User'}</div>
+                <div className="profile-email">{authUser.email}</div>
+              </div>
+              <DropdownSeparator className="profile-separator" />
+              <DropdownItem className="app-dropdown-item profile-item-logout" onSelect={handleLogout}>Log Out</DropdownItem>
+            </Dropdown>
           ) : (
-            <button className="sidebar-footer-item google-btn" onClick={handleLogin}>
-              <GoogleIcon size={14} />
-              <span className="text-ellipsis">Sign In</span>
-            </button>
+            <Tooltip content="Sign In (Ctrl+O)" side="right"><button className="sidebar-footer-item google-btn" onClick={handleLogin}><GoogleIcon size={14} /><span className="text-ellipsis">Sign In</span></button></Tooltip>
           )}
         </div>
       </div>

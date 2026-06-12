@@ -171,6 +171,13 @@ export const ipcCommands = {
       } catch (err) { log.error('[commands] Title generation error:', err); throw err }
     }
   },
+  'thread:update-title': {
+    schema: z.object({ threadId: threadIdSchema, title: z.string().max(300) }),
+    execute: async ({ threadId, title }: any) => {
+      try { return await updateThreadTitle(threadId, title) }
+      catch (err) { log.error('[commands] updateThreadTitle error:', err); throw err }
+    }
+  },
   'thread:active-id': {
     schema: z.object({}),
     execute: async () => {

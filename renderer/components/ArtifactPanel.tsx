@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useHotkeys } from 'react-hotkeys-hook'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { X, Globe, TerminalSquare, ListTodo, Loader } from 'lucide-react'
@@ -19,37 +20,41 @@ import TerminalView from './TerminalView'
 import BrowserView from './BrowserView'
 import { MediaPreview } from './InputBar'
 import { MarkdownView } from './MarkdownRenderer'
-import { EmptyState } from '../lib/uiUtils'
 import { OfficePreview } from './OfficePreview'
+import Tooltip from './Tooltip'
 const CodeEditorView = React.lazy(() => import('./CodeEditorView'))
 interface HeaderProps {
   panelMode: string; openFiles: EditorFile[]; hoveredTabPath: string | null
   setHoveredTabPath: (p: string | null) => void; handleCloseFile: (file: EditorFile, e: React.MouseEvent) => void
 }
 const PanelHeader: React.FC<HeaderProps> = ({ openFiles, hoveredTabPath, setHoveredTabPath, handleCloseFile }) => {
-  const trigger = (val: string, label: string, icon: React.ReactNode) => (
-    <Tabs.Trigger value={val} className="artifact-tab-trigger">{icon}<span>{label}</span></Tabs.Trigger>
+  const trigger = (val: string, label: string, icon: React.ReactNode, titleText?: string) => (
+    <Tooltip content={titleText}><Tabs.Trigger value={val} className="artifact-tab-trigger">{icon}<span>{label}</span></Tabs.Trigger></Tooltip>
   )
   return (
     <div className="artifact-panel-header">
       <Tabs.List className="artifact-panel-tabs-list">
-        {trigger('overview', 'Overview', <ListTodo size={14} />)}
-        {trigger('terminal', 'Terminal', <TerminalSquare size={14} />)}
-        {trigger('browser', 'Browser', <Globe size={14} />)}
-        {openFiles.map((f) => {
+        {trigger('overview', 'Overview', <ListTodo size={14} />, 'Overview (Ctrl+Alt+1)')}
+        {trigger('terminal', 'Terminal', <TerminalSquare size={14} />, 'Terminal (Ctrl+Alt+2)')}
+        {trigger('browser', 'Browser', <Globe size={14} />, 'Browser (Ctrl+Alt+3)')}
+        {openFiles.map((f, index) => {
           const hovered = hoveredTabPath === f.path
           const baseName = f.name.split(/[/\\]/).pop() ?? f.name
+          const shortcutIdx = index + 4
+          const titleText = `${getDisplayName(f.name)}${shortcutIdx <= 9 ? ` (Ctrl+Alt+${shortcutIdx})` : ''}`
           return (
-            <Tabs.Trigger key={f.path} value={f.path} className="artifact-tab-trigger" onMouseEnter={() => setHoveredTabPath(f.path)} onMouseLeave={() => setHoveredTabPath(null)}>
-              <div className="tab-icon-wrapper">
-                {hovered ? (
-                  <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span>
-                ) : (
-                  isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={baseName} autoAssign width={16} height={16} className="flex-shrink-0" />
-                )}
-              </div>
-              <span>{getDisplayName(f.name)}</span>
-            </Tabs.Trigger>
+            <Tooltip key={f.path} content={titleText}>
+              <Tabs.Trigger value={f.path} className="artifact-tab-trigger" onMouseEnter={() => setHoveredTabPath(f.path)} onMouseLeave={() => setHoveredTabPath(null)}>
+                <div className="tab-icon-wrapper">
+                  {hovered ? (
+                    <span onClick={(e) => handleCloseFile(f, e)} className="tab-close-btn"><X size={10} /></span>
+                  ) : (
+                    isAgentArtifact(f.name) ? getArtifactIcon(f.name) : <SymbolsFileIcon fileName={baseName} autoAssign width={16} height={16} className="flex-shrink-0" />
+                  )}
+                </div>
+                <span>{getDisplayName(f.name)}</span>
+              </Tabs.Trigger>
+            </Tooltip>
           )
         })}
       </Tabs.List>
@@ -79,6 +84,16 @@ const ArtifactPanel: React.FC = () => {
   convIdRef.current = convId
   const [lastActiveFile, setLastActiveFile] = useState<EditorFile | null>(null)
   useEffect(() => { if (activeFile) setLastActiveFile(activeFile) }, [activeFile])
+
+  useHotkeys('ctrl+alt+1, cmd+alt+1', (e) => { e.preventDefault(); handleTabChange('overview') }, { enableOnFormTags: true })
+  useHotkeys('ctrl+alt+2, cmd+alt+2', (e) => { e.preventDefault(); handleTabChange('terminal') }, { enableOnFormTags: true })
+  useHotkeys('ctrl+alt+3, cmd+alt+3', (e) => { e.preventDefault(); handleTabChange('browser') }, { enableOnFormTags: true })
+  useHotkeys('ctrl+alt+4, cmd+alt+4', (e) => { e.preventDefault(); if (openFiles[0]) handleTabChange(openFiles[0].path) }, { enableOnFormTags: true }, [openFiles])
+  useHotkeys('ctrl+alt+5, cmd+alt+5', (e) => { e.preventDefault(); if (openFiles[1]) handleTabChange(openFiles[1].path) }, { enableOnFormTags: true }, [openFiles])
+  useHotkeys('ctrl+alt+6, cmd+alt+6', (e) => { e.preventDefault(); if (openFiles[2]) handleTabChange(openFiles[2].path) }, { enableOnFormTags: true }, [openFiles])
+  useHotkeys('ctrl+alt+7, cmd+alt+7', (e) => { e.preventDefault(); if (openFiles[3]) handleTabChange(openFiles[3].path) }, { enableOnFormTags: true }, [openFiles])
+  useHotkeys('ctrl+alt+8, cmd+alt+8', (e) => { e.preventDefault(); if (openFiles[4]) handleTabChange(openFiles[4].path) }, { enableOnFormTags: true }, [openFiles])
+  useHotkeys('ctrl+alt+9, cmd+alt+9', (e) => { e.preventDefault(); if (openFiles[5]) handleTabChange(openFiles[5].path) }, { enableOnFormTags: true }, [openFiles])
 
   const handleEditorMount = (editor: editor.IStandaloneCodeEditor) => { editorRef.current = editor }
   const handleDiffEditorMount = (editor: editor.IStandaloneDiffEditor) => { diffEditorRef.current = editor }
@@ -192,9 +207,6 @@ const ArtifactPanel: React.FC = () => {
               <span>Loading file...</span>
             </div>
           )}
-          <div className={`editor-panel-empty-state-wrapper ${(!fileLoading && !activeFile) ? '' : 'tab-content-hidden'}`}>
-            <EmptyState icon="📂" title="No File Open" description="Select a file from the sidebar or ask the agent to edit or create a code file." />
-          </div>
           <div className={`editor-panel-active-file-wrapper ${(!fileLoading && activeFile && lastActiveFile) ? '' : 'tab-content-hidden'}`}>
             {lastActiveFile && (
               (/\.(docx|xlsx|pptx|pdf)$/i).test(lastActiveFile.name) ? <OfficePreview displayFile={lastActiveFile} /> :

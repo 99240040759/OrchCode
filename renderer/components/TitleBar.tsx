@@ -1,15 +1,23 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
-import { updateStatusAtom } from '../store/agentStore'
+import { updateStatusAtom, activeWorkspaceAtom, activeThreadAtom } from '../store/agentStore'
 import { isMac } from '../lib/sharedUtils'
+import Tooltip from './Tooltip'
 
 const TitleBar: React.FC = () => {
   const updateStatus = useAtomValue(updateStatusAtom)
+  const activeWorkspace = useAtomValue(activeWorkspaceAtom)
+  const activeThread = useAtomValue(activeThreadAtom)
+
+  const activeThreadTitle = activeThread?.title || 'New Chat'
+  const titleText = activeWorkspace ? `${activeWorkspace.name} / ${activeThreadTitle}` : activeThreadTitle
+
   const handleUpdateClick = () => {
     if (updateStatus.status === 'downloaded') window.api.invoke('updater:install').catch(console.error)
     else if (updateStatus.status === 'available' && isMac) window.api.invoke('updater:open-mac-release').catch(console.error)
     else if (updateStatus.status === 'error') window.api.invoke('updater:check').catch(console.error)
   }
+
   const renderUpdateIndicator = () => {
     const { status, version, progress, error } = updateStatus
     if (status === 'idle') return null
@@ -23,16 +31,19 @@ const TitleBar: React.FC = () => {
       default: return null
     }
     return (
-      <div className={`titlebar-update-badge ${extraClass}`} onClick={handleUpdateClick} title={status === 'error' && error ? error : undefined}>
-        {status === 'downloading' && <div className="titlebar-update-progress-bar" style={{ transform: `scaleX(${(progress ?? 0) / 100})` }} />}
-        <span className="titlebar-update-text">{text}</span>
-      </div>
+      <Tooltip content={status === 'error' && error ? error : undefined}>
+        <div className={`titlebar-update-badge ${extraClass}`} onClick={handleUpdateClick}>
+          {status === 'downloading' && <div className="titlebar-update-progress-bar" style={{ transform: `scaleX(${(progress ?? 0) / 100})` }} />}
+          <span className="titlebar-update-text">{text}</span>
+        </div>
+      </Tooltip>
     )
   }
+
   return (
     <header className="custom-titlebar-wrapper">
       <div className="custom-titlebar-left">
-        {isMac && <div className="custom-titlebar-mac-spacer" />}
+        <span className="custom-titlebar-title">{titleText}</span>
       </div>
       <div className="custom-titlebar-right">
         {renderUpdateIndicator()}
@@ -41,4 +52,5 @@ const TitleBar: React.FC = () => {
     </header>
   )
 }
+
 export default TitleBar

@@ -314,12 +314,20 @@ export function useChat() {
           // Inject queued server-side — no restart needed, loop continues
           console.debug('[useChat] inject queued:', chunkText)
         } else if (chunkType === 'token_update') {
-          if (chunkData?.accumulatedTokens !== undefined) updateThreadTokens({ threadId: resolvedThreadId, session: Number(chunkData.accumulatedTokens) })
-          if (chunkData?.lifetimeTokens !== undefined) updateThreadTokens({ threadId: resolvedThreadId, lifetime: Number(chunkData.lifetimeTokens) })
+          if (chunkData?.accumulatedTokens !== undefined || chunkData?.lifetimeTokens !== undefined) {
+            updateThreadTokens({
+              threadId: resolvedThreadId,
+              session: chunkData.accumulatedTokens !== undefined ? Number(chunkData.accumulatedTokens) : undefined,
+              lifetime: chunkData.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
+            })
+          }
         } else if (chunkType === 'finish') {
           assistantIsStreaming = false
-          updateThreadTokens({ threadId: resolvedThreadId, session: Number(chunkData?.accumulatedTokens ?? 0) })
-          if (chunkData?.lifetimeTokens !== undefined) updateThreadTokens({ threadId: resolvedThreadId, lifetime: Number(chunkData.lifetimeTokens) })
+          updateThreadTokens({
+            threadId: resolvedThreadId,
+            session: Number(chunkData?.accumulatedTokens ?? 0),
+            lifetime: chunkData?.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
+          })
           const finalContent = chunkData?.content as string ?? fullContent
           const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
