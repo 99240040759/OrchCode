@@ -234,11 +234,13 @@ function buildBrowserInstruction(isBrowserActive: boolean, multimodal: boolean):
 You have active browser control. Use these tools:
 1. browser_navigate(url)
 2. browser_type(selector, text, frame_selector?)
-3. browser_scroll(direction, amount?)
-4. browser_click_selector(selector, frame_selector?)
+3. browser_click(selector?, x?, y?, click_type?, delay_ms?, frame_selector?) - Click elements via CSS/Playwright selector OR coordinate (x,y)
+4. browser_keyboard_press(key) - Press keys (e.g. Enter, Tab, PageDown)
+5. browser_mouse_hover(selector, frame_selector?) - Hover over elements
+6. browser_mouse_drag(x1, y1, x2, y2, steps?) - Drag-and-drop
 ${multimodal
-    ? `5. browser_screenshot(): ALWAYS screenshot after navigation/typing/clicking to verify state.`
-    : `5. browser_get_page_content(): Extract page text and interactive elements for non-vision models.`
+    ? `7. browser_screenshot(): ALWAYS screenshot after navigation/typing/clicking to verify state.`
+    : `7. browser_get_page_content(): Extract page text and interactive elements for non-vision models.`
   }`
 }
 
@@ -468,7 +470,8 @@ export async function handleAgentStreamRequest(
 
       // ── 1. Check context size, compact if needed ─────────────────────────
       const inputTokens = countMessagesTokens(messages, modelType)
-      if (inputTokens >= SUMMARISE_THRESHOLD) {
+      const threshold = rawModel.contextWindow ? Math.floor(rawModel.contextWindow * 0.8) : SUMMARISE_THRESHOLD
+      if (inputTokens >= threshold) {
         const { compacted, newMessages } = await runCompaction(messages, threadId, modelType, send)
         if (compacted) {
           messages = newMessages
@@ -619,7 +622,15 @@ export async function handleAgentStreamRequest(
 
           send({ type: 'tool_result_pending', payload: { tool_call_id: tc.id }, threadId })
           try {
-            const rawOutput = await toolObj.execute(tc.args, { tool_call_id: tc.id, signal: controller.signal })
+            const parsed = toolObj.inputSchema.safeParse(tc.args)
+            if (!parsed.success) {
+              const errVal = `Schema validation failed: ${parsed.error.message}`
+              const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
+              if (b && b.type === 'tool_call') { b.result = { success: false, error: errVal }; b.status = 'error' }
+              send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: errVal } }, threadId })
+              return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: errVal }, isError: true, formatted: { text: `Error: ${errVal}` } }
+            }
+            const rawOutput = await toolObj.execute(parsed.data, { tool_call_id: tc.id, signal: controller.signal })
             const isErr = !rawOutput || rawOutput.success === false || rawOutput.type === 'error-text' || rawOutput.type === 'error-json'
             const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
             if (b && b.type === 'tool_call') { b.result = rawOutput; b.status = isErr ? 'error' : 'complete' }

@@ -51,6 +51,7 @@ export function registerStreamIpc() {
           w.webContents.send('stream:worker-crashed', { threadId: request.threadId, code })
         }
       }
+      worker.removeAllListeners('exit')
       worker.on('exit', onExit)
 
       const onMsg = (msg: any) => {
@@ -84,6 +85,7 @@ export function registerStreamIpc() {
           }
         }
       }
+      worker.removeAllListeners('message')
       worker.on('message', onMsg)
       worker.postMessage(
         { type: 'start-stream', threadId: request.threadId, modelType: request.modelType, attachments: request.attachments, promptText: request.promptText, token: session.idToken, isBrowserActive: !!WindowManager.getBrowserView(), startTime: request.startTime },

@@ -374,10 +374,37 @@ export const ipcCommands = {
       WindowManager.getAllBrowserViews().forEach((view, key) => { if (key !== activeId) removeBrowserView(mainWindow, view) })
       let bv = WindowManager.getBrowserViewForConversation(activeId)
       const setupListeners = (view: any, sender: any) => {
-        view.webContents.removeAllListeners('page-title-updated'); view.webContents.removeAllListeners('did-navigate'); view.webContents.removeAllListeners('did-navigate-in-page')
+        view.webContents.removeAllListeners('page-title-updated'); view.webContents.removeAllListeners('did-navigate'); view.webContents.removeAllListeners('did-navigate-in-page'); view.webContents.removeAllListeners('dom-ready'); view.webContents.removeAllListeners('did-start-navigation')
         view.webContents.on('page-title-updated', (_e: any, title: string) => { try { sender.send('browser:title-updated', title) } catch (err) { console.debug('[browser] IPC send error:', err) } })
         const onNavigate = (_e: any, navUrl: string) => { try { sender.send('browser:url-changed', navUrl) } catch (err) { console.debug('[browser] IPC send error:', err) } }
         view.webContents.on('did-navigate', onNavigate); view.webContents.on('did-navigate-in-page', onNavigate)
+        const injectId = () => { view.webContents.executeJavaScript(`window.__orchConversationId = "${activeId}"`).catch(() => {}) }
+        const injectCursor = () => {
+          view.webContents.executeJavaScript(`
+            if (!document.getElementById('playwright-cursor')) {
+              const dot = document.createElement('div');
+              dot.id = 'playwright-cursor';
+              Object.assign(dot.style, {
+                position: 'absolute', width: '24px', height: '24px',
+                pointerEvents: 'none', zIndex: '2147483647'
+              });
+              dot.innerHTML = \`
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" style="position: absolute; top: 0; left: 0;">
+                  <path fill="black" stroke="white" stroke-width="1.5" d="M4,3 L15,14 L11,14 L15,21 L12.5,22 L8.5,15 L4,19 Z"/>
+                </svg>
+              \`;
+              const p = document.body || document.documentElement;
+              if (p) p.appendChild(dot);
+              document.addEventListener('mousemove', (e) => {
+                dot.style.left = e.pageX + 'px';
+                dot.style.top = e.pageY + 'px';
+              });
+            }
+          `).catch(() => {})
+        }
+        view.webContents.on('dom-ready', () => { injectId(); injectCursor() })
+        view.webContents.on('did-start-navigation', injectId)
+        injectId(); injectCursor()
       }
       if (bv) {
         bv.setBounds(normalizeBounds(bounds)); try { mainWindow.contentView.addChildView(bv) } catch (err) { console.debug('[browser] Add child view error:', err) }

@@ -1,6 +1,8 @@
 export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 import { z } from 'zod'
 import { promises as fs } from 'node:fs'
+import { chromium } from 'playwright-core'
+import type { Page, Browser } from 'playwright-core'
 import { join, relative, extname, dirname, basename } from 'node:path'
 import { execa } from 'execa'
 import { rgPath } from '@vscode/ripgrep'
@@ -459,6 +461,37 @@ export function createCoreTools(convId: string, multimodal = true) {
   }
 }
 
+let playwrightBrowser: Browser | null = null
+const activePages = new Map<string, Page>()
+
+async function getPlaywrightPage(convId: string): Promise<Page> {
+  const debugPort = process.env.REMOTE_DEBUGGING_PORT || '9888'
+  if (!playwrightBrowser) playwrightBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`)
+  for (const [id, p] of activePages.entries()) if (p.isClosed()) activePages.delete(id)
+  const bv = WindowManager.getBrowserViewForConversation(convId), bvUrl = bv ? bv.webContents.getURL() : ''
+  let page = activePages.get(convId)
+  if (page && page.url() === bvUrl) return page
+  for (let i = 0; i < 5; i++) {
+    const context = playwrightBrowser.contexts()[0], pages = context.pages()
+    for (const p of pages) {
+      try {
+        const id = await p.evaluate(() => (window as any).__orchConversationId)
+        if (id === convId) { activePages.set(convId, p); return p }
+      } catch {}
+    }
+    if (bvUrl) {
+      const matches = pages.filter(p => p.url() === bvUrl)
+      if (matches.length === 1) {
+        const p = matches[0]
+        await p.evaluate((cid) => { (window as any).__orchConversationId = cid }, convId).catch(() => {})
+        activePages.set(convId, p); return p
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  throw new Error(`Could not find Playwright page target for conversation ${convId}`)
+}
+
 export function browserTools(convId: string, multimodal = true) {
   const runOnMain = async (toolName: string, args: any, localFn: () => Promise<any>) => {
     const runner = (globalThis as any).callMainProcessTool
@@ -466,111 +499,54 @@ export function browserTools(convId: string, multimodal = true) {
     return localFn()
   }
 
-  const waitForPageLoad = (wc: any) => {
-    return new Promise((resolve) => {
-      if (!wc.isLoading()) return resolve(true)
-      const onLoad = () => {
-        wc.off('did-stop-loading', onLoad)
-        wc.off('did-fail-load', onLoad)
-        resolve(true)
-      }
-      wc.once('did-stop-loading', onLoad)
-      wc.once('did-fail-load', onLoad)
-    })
-  }
-
   const browser_navigate = tool({
     description: 'Navigates the active browser viewport to a specified URL and blocks until the page load completes.',
-    inputSchema: z.object({ url: z.string().describe('The URL to navigate to.') }),
-    execute: async ({ url }) => runOnMain('browser_navigate', { url }, async () => {
+    inputSchema: z.object({
+      url: z.string().describe('The URL to navigate to.'),
+      timeout: z.number().int().nonnegative().optional().describe('Maximum navigation time in milliseconds.')
+    }),
+    execute: async ({ url, timeout }) => runOnMain('browser_navigate', { url, timeout }, async () => {
       log.info(`[tool:browser_navigate] url="${url}"`)
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
       try {
+        const bv = WindowManager.getBrowserViewForConversation(convId)
+        if (!bv) throw new Error('Browser closed.')
         const target = (url.startsWith('http') || url.startsWith('file:')) ? url : (/^[a-zA-Z]:[/\\]/.test(url) ? `file:///${url.replace(/\\/g, '/')}` : (url.startsWith('/') ? `file://${url}` : `https://${url}`))
-        await wc.loadURL(target)
-        await waitForPageLoad(wc)
-        return { success: true, url: wc.getURL() }
-      } catch (e: unknown) { log.error('[tool:browser_navigate] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+        const timeoutMs = timeout !== undefined ? timeout : 30000
+        let timer: any
+        const timeoutPromise = new Promise<never>((_, rej) => { timer = setTimeout(() => { try { bv.webContents.stop() } catch {}; rej(new Error(`Navigation timeout of ${timeoutMs}ms exceeded`)) }, timeoutMs) })
+        await Promise.race([bv.webContents.loadURL(target), timeoutPromise])
+        clearTimeout(timer)
+        return { success: true, url: bv.webContents.getURL() }
+      } catch (e: any) { log.error('[tool:browser_navigate] error:', e.message); return { success: false, error: e.message } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully navigated to ${output.url}` }] })
   })
 
   const browser_type = tool({
-    description: 'Types text into an input field on the active webpage. Supports CSS selectors, agentId values, and piercing iframes.',
+    description: 'Types text into an input field on the active webpage. Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
     inputSchema: z.object({
-      selector: z.string().describe('CSS selector of the input field or the integer agentId value (e.g. "1").'),
+      selector: z.string().describe('The target element selector (e.g. CSS, text=, or role=).'),
       text: z.string().describe('The text to type.'),
-      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe containing the target input.')
+      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
+      delay_ms: z.number().int().nonnegative().optional().describe('Delay between key presses. If provided, types key by key instead of filling.'),
+      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
+      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
+      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
     }),
-    execute: async ({ selector, text, frame_selector }) => runOnMain('browser_type', { selector, text, frame_selector }, async () => {
+    execute: async ({ selector, text, frame_selector, delay_ms, timeout, force, no_wait_after }) => runOnMain('browser_type', { selector, text, frame_selector, delay_ms, timeout, force, no_wait_after }, async () => {
       log.info(`[tool:browser_type] selector="${selector}"`)
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
+      if (checkBrowserViewActive(convId)) return null
       try {
-        const result = await wc.executeJavaScript(`
-          (() => {
-            try {
-              const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
-              if (!doc) throw new Error('Frame not found');
-              let el = null;
-              if (/^[\\d]+$/.test(${JSON.stringify(selector)})) {
-                el = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
-              } else {
-                el = doc.querySelector(${JSON.stringify(selector)});
-              }
-              if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
-              el.focus();
-              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-                || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-              if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && nativeInputValueSetter) {
-                nativeInputValueSetter.call(el, ${JSON.stringify(text)});
-              } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-                el.value = ${JSON.stringify(text)};
-              } else {
-                el.textContent = ${JSON.stringify(text)};
-              }
-              el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true }));
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return { success: true };
-            } catch (err) {
-              return { success: false, error: err.message };
-            }
-          })()
-        `)
-        if (result && result.success === false) return { success: false, error: result.error }
-        await waitForPageLoad(wc)
+        const page = await getPlaywrightPage(convId)
+        const frame = frame_selector ? page.frameLocator(frame_selector) : page
+        const locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
+        const loc = frame.locator(locatorStr)
+        if (delay_ms !== undefined && delay_ms > 0) await loc.pressSequentially(text, { delay: delay_ms, timeout, noWaitAfter: no_wait_after })
+        else await loc.fill(text, { force, timeout, noWaitAfter: no_wait_after })
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browser_type] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: any) { log.error('[tool:browser_type] error:', e.message); return { success: false, error: e.message } }
     }),
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully typed text into element` }] })
-  })
-
-  const browser_scroll = tool({
-    description: 'Scrolls the active webpage viewport.',
-    inputSchema: z.object({ direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction.'), amount: z.number().int().positive().optional().describe('Pixels to scroll (default 400).') }),
-    execute: async ({ direction, amount }) => runOnMain('browser_scroll', { direction, amount }, async () => {
-      log.info(`[tool:browser_scroll] direction="${direction}" amount=${amount ?? 400}`)
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
-      try {
-        const dist = amount || 400
-        let x = 0, y = 0
-        if (direction === 'up') y = -dist
-        else if (direction === 'down') y = dist
-        else if (direction === 'left') x = -dist
-        else if (direction === 'right') x = dist
-        await wc.executeJavaScript(`window.scrollBy(${x}, ${y})`)
-        return { success: true }
-      } catch (e: unknown) { log.error('[tool:browser_scroll] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
-    }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully scrolled viewport` }] })
   })
 
   const browser_screenshot = tool({
@@ -578,138 +554,149 @@ export function browserTools(convId: string, multimodal = true) {
     inputSchema: z.object({}),
     execute: async () => runOnMain('browser_screenshot', {}, async () => {
       log.info('[tool:browser_screenshot] executing...')
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
       try {
+        const bv = WindowManager.getBrowserViewForConversation(convId)
+        if (!bv) throw new Error('Browser closed.')
         const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
         try {
-          const existing = await fs.readdir(screenshotDir)
-          const pngs = existing.filter((f) => f.endsWith('.png')).sort()
-          for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) { await fs.rm(join(screenshotDir, old), { force: true }).catch(() => {}) }
+          const pngs = (await fs.readdir(screenshotDir)).filter(f => f.endsWith('.png')).sort()
+          for (const old of pngs.slice(0, Math.max(0, pngs.length - 9))) await fs.rm(join(screenshotDir, old), { force: true }).catch(() => {})
         } catch {}
-        const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename), nativeImage = await wc.capturePage(), png = nativeImage.toPNG()
+        const filename = `screenshot_${Date.now()}.png`, screenshotPath = join(screenshotDir, filename)
+        const image = await bv.webContents.capturePage()
+        const png = image.toPNG()
         await fs.writeFile(screenshotPath, png)
         return { success: true, message: 'Screenshot captured.', filePath: `file://${screenshotPath}`, filename, buffer: png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer }
-      } catch (e: unknown) { log.error('[tool:browser_screenshot] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: any) { log.error('[tool:browser_screenshot] error:', e.message); return { success: false, error: e.message } }
     }),
     toModelOutput: async ({ output }: any) => {
       if (output.success && output.filePath) {
         try {
-          if (!multimodal) { return { type: 'content', value: [{ type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted from tool output because this model does not support vision. Note: Rely on DOM analysis or text feedback.` }] } }
+          if (!multimodal) return { type: 'content', value: [{ type: 'text', text: `Screenshot captured and saved to ${output.filePath}. Image content omitted because model does not support vision.` }] }
           const base64Image = output.buffer ? Buffer.from(output.buffer).toString('base64') : (await fs.readFile(output.filePath.replace('file://', ''))).toString('base64')
           return { type: 'content', value: [{ type: 'image-data', data: base64Image, mediaType: 'image/png' }, { type: 'text', text: `Screenshot captured: ${output.filePath}` }] }
-        } catch (e: unknown) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e instanceof Error ? e.message : String(e)}` }] } }
+        } catch (e: any) { return { type: 'content', value: [{ type: 'text', text: `Failed to read screenshot: ${e.message}` }] } }
       }
       return { type: 'content', value: [{ type: 'text', text: output.error || 'Failed to capture screenshot' }] }
     }
   })
 
-  const browser_click_selector = tool({
-    description: 'Clicks an element on the active webpage using a CSS selector or the integer agentId value returned from browserGetPageContent.',
+  const browser_click = tool({
+    description: 'Clicks an element on the webpage using a CSS/Playwright selector OR using native mouse coordinate click at (x, y). Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
     inputSchema: z.object({
-      selector: z.string().describe('CSS selector of the element to click, or the integer agentId value (e.g. "1").'),
-      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe containing the target element.')
+      selector: z.string().optional().describe('The target element selector (e.g. CSS, text=, or role=).'),
+      x: z.number().optional().describe('Horizontal pixel coordinate.'),
+      y: z.number().optional().describe('Vertical pixel coordinate.'),
+      click_type: z.enum(['click', 'dbclick', 'right-click']).default('click').describe('Click type.'),
+      delay_ms: z.number().int().nonnegative().optional().describe('Delay in milliseconds between mouse down and mouse up.'),
+      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
+      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
+      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
+      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
     }),
-    execute: async ({ selector, frame_selector }) => runOnMain('browser_click_selector', { selector, frame_selector }, async () => {
-      log.info(`[tool:browser_click_selector] selector="${selector}"`)
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
+    execute: async ({ selector, x, y, click_type, delay_ms, frame_selector, timeout, force, no_wait_after }) => runOnMain('browser_click', { selector, x, y, click_type, delay_ms, frame_selector, timeout, force, no_wait_after }, async () => {
+      log.info(`[tool:browser_click] selector="${selector}" x=${x} y=${y} type=${click_type}`)
+      if (checkBrowserViewActive(convId)) return null
       try {
-        const result = await wc.executeJavaScript(`
-          (() => {
-            try {
-              const doc = ${frame_selector ? `(() => { const f = document.querySelector(${JSON.stringify(frame_selector)}); return f ? f.contentDocument : document })()` : 'document'};
-              if (!doc) throw new Error('Frame not found');
-              let target = null;
-              if (/^[\\d]+$/.test(${JSON.stringify(selector)})) {
-                target = doc.querySelector('[data-agent-id="' + ${JSON.stringify(selector)} + '"]');
-              } else {
-                target = doc.querySelector(${JSON.stringify(selector)});
-              }
-              if (!target) throw new Error('Element not found for selector: ' + ${JSON.stringify(selector)});
-              target.click();
-              return { success: true };
-            } catch (err) {
-              return { success: false, error: err.message };
-            }
-          })()
-        `)
-        if (result && result.success === false) return { success: false, error: result.error }
-        await waitForPageLoad(wc)
+        const page = await getPlaywrightPage(convId), button = click_type === 'right-click' ? 'right' as const : 'left' as const, clickCount = click_type === 'dbclick' ? 2 : 1
+        if (selector) {
+          const frame = frame_selector ? page.frameLocator(frame_selector) : page, locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector, loc = frame.locator(locatorStr)
+          if (clickCount === 2) await loc.dblclick({ button, delay: delay_ms, force, timeout, noWaitAfter: no_wait_after })
+          else await loc.click({ button, delay: delay_ms, force, timeout, noWaitAfter: no_wait_after })
+        } else if (x !== undefined && y !== undefined) {
+          await page.mouse.click(x, y, { button, clickCount, delay: delay_ms })
+        } else {
+          throw new Error('Either selector or both x and y coordinates must be provided.')
+        }
         return { success: true }
-      } catch (e: unknown) { log.error('[tool:browser_click_selector] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+      } catch (e: any) { log.error('[tool:browser_click] error:', e.message); return { success: false, error: e.message } }
     }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked element` }] })
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully clicked` }] })
   })
 
   const browser_get_page_content = tool({
-    description: 'Extracts the page URL, title, visible text content, and interactive element definitions with agentId labels from the active browser viewport. Interactive elements will render numeric badges directly on screenshots matching these agentId labels.',
-    inputSchema: z.object({}),
-    execute: async () => runOnMain('browser_get_page_content', {}, async () => {
-      log.info('[tool:browser_get_page_content] executing...')
-      const check = checkBrowserViewActive(convId)
-      if (check) return check
-      const wc = getOrCreateBrowserWebContents(convId)!
-      try {
-        const result = await wc.executeJavaScript(`
-          (() => {
-            document.querySelectorAll('.agent-overlay-badge').forEach(el => el.remove());
-            const text = document.body.innerText || '';
-            const interactive = [];
-            const elements = document.querySelectorAll('button, input, select, textarea, a, [role="button"], [role="link"]');
-            let index = 1;
-            for (const el of elements) {
-              if (interactive.length >= 100) break;
-              const rect = el.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0) {
-                el.setAttribute('data-agent-id', String(index));
-                
-                const badge = document.createElement('div');
-                badge.className = 'agent-overlay-badge';
-                badge.innerText = String(index);
-                Object.assign(badge.style, {
-                  position: 'absolute',
-                  left: (window.scrollX + rect.left) + 'px',
-                  top: (window.scrollY + rect.top) + 'px',
-                  background: '#df9a44',
-                  color: '#ffffff',
-                  border: '1px solid #ffffff',
-                  borderRadius: '3px',
-                  padding: '1px 3px',
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  fontFamily: 'monospace',
-                  zIndex: '2147483647',
-                  pointerEvents: 'none',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
-                });
-                document.body.appendChild(badge);
-
-                interactive.push({
-                  agentId: index,
-                  tagName: el.tagName.toLowerCase(),
-                  id: el.id || undefined,
-                  className: el.className || undefined,
-                  text: (el.textContent || '').trim().slice(0, 80) || undefined,
-                  placeholder: el.placeholder || undefined,
-                  name: el.name || undefined,
-                  value: el.value || undefined
-                });
-                index++;
-              }
-            }
-            return { url: window.location.href, title: document.title, text: text.slice(0, 15000), interactiveElements: interactive };
-          })()
-        `)
-        const wrappedText = `[UNTRUSTED WEB PAGE CONTENT START]\nURL: ${result.url}\nTitle: ${result.title}\n\nVisible Page Text:\n${result.text}\n[UNTRUSTED WEB PAGE CONTENT END]`
-        return { success: true, url: result.url, title: result.title, text: wrappedText, interactiveElements: result.interactiveElements }
-      } catch (e: unknown) { log.error('[tool:browser_get_page_content] error:', e instanceof Error ? e.message : String(e)); return { success: false, error: e instanceof Error ? e.message : String(e) } }
+    description: 'Extracts the page URL, title, visible text content, and the native accessibility tree from the active browser viewport.',
+    inputSchema: z.object({
+      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds for DevTools operations.')
     }),
-    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}\nInteractive elements:\n${JSON.stringify(output.interactiveElements, null, 2)}` }] })
+    execute: async ({ timeout }) => runOnMain('browser_get_page_content', { timeout }, async () => {
+      log.info('[tool:browser_get_page_content] executing...')
+      if (checkBrowserViewActive(convId)) return null
+      try {
+        const page = await getPlaywrightPage(convId), url = page.url(), title = await page.title(), text = await page.evaluate(() => document.body.innerText || '')
+        let axTree: any = null
+        try {
+          const client = await page.context().newCDPSession(page)
+          axTree = await client.send('Accessibility.getFullAXTree')
+          await client.detach()
+        } catch (err: any) { log.warn('[browser_get_page_content] Failed to get AXTree via CDP:', err.message) }
+        const wrappedText = `[WEB PAGE CONTENT START]\nURL: ${url}\nTitle: ${title}\n\nVisible Page Text:\n${text.slice(0, 15000)}\n\nAccessibility Tree:\n${axTree ? JSON.stringify(axTree.nodes, null, 2).slice(0, 25000) : 'N/A'}\n[WEB PAGE CONTENT END]`
+        return { success: true, url, title, text: wrappedText, accessibilityTree: axTree }
+      } catch (e: any) { log.error('[tool:browser_get_page_content] error:', e.message); return { success: false, error: e.message } }
+    }),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `URL: ${output.url}\nTitle: ${output.title}\nContent:\n${output.text}` }] })
   })
 
-  return { browser_navigate, browser_type, browser_scroll, browser_screenshot, browser_click_selector, browser_get_page_content }
+  const browser_mouse_hover = tool({
+    description: 'Moves the mouse cursor over a matching element on the page to trigger hover actions or menus. Supports standard CSS selectors, Playwright text selectors, and Playwright role selectors.',
+    inputSchema: z.object({
+      selector: z.string().describe('The target element selector (e.g. CSS, text=, or role=).'),
+      frame_selector: z.string().optional().describe('Optional CSS selector of the iframe.'),
+      timeout: z.number().int().nonnegative().optional().describe('Maximum time in milliseconds.'),
+      force: z.boolean().optional().describe('Whether to bypass actionability checks.'),
+      no_wait_after: z.boolean().optional().describe('Whether to skip waiting for page navigation/loading after the action.')
+    }),
+    execute: async ({ selector, frame_selector, timeout, force, no_wait_after }) => runOnMain('browser_mouse_hover', { selector, frame_selector, timeout, force, no_wait_after }, async () => {
+      log.info(`[tool:browser_mouse_hover] selector="${selector}"`)
+      if (checkBrowserViewActive(convId)) return null
+      try {
+        const page = await getPlaywrightPage(convId), frame = frame_selector ? page.frameLocator(frame_selector) : page, locatorStr = /^\d+$/.test(selector) ? `[data-agent-id="${selector}"]` : selector
+        await frame.locator(locatorStr).hover({ force, timeout, noWaitAfter: no_wait_after })
+        return { success: true }
+      } catch (e: any) { log.error('[tool:browser_mouse_hover] error:', e.message); return { success: false, error: e.message } }
+    }),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully hovered element` }] })
+  })
+
+  const browser_mouse_drag = tool({
+    description: 'Performs a drag-and-drop gesture from a start coordinate to an end coordinate in the active viewport.',
+    inputSchema: z.object({
+      x1: z.number().describe('Starting horizontal coordinate.'),
+      y1: z.number().describe('Starting vertical coordinate.'),
+      x2: z.number().describe('Ending horizontal coordinate.'),
+      y2: z.number().describe('Ending vertical coordinate.'),
+      steps: z.number().int().positive().optional().describe('Number of steps for interpolation (defaults to 1).')
+    }),
+    execute: async ({ x1, y1, x2, y2, steps }) => runOnMain('browser_mouse_drag', { x1, y1, x2, y2, steps }, async () => {
+      log.info(`[tool:browser_mouse_drag] from (${x1},${y1}) to (${x2},${y2})`)
+      if (checkBrowserViewActive(convId)) return null
+      try {
+        const page = await getPlaywrightPage(convId)
+        await page.mouse.move(x1, y1); await page.mouse.down(); await page.mouse.move(x2, y2, { steps }); await page.mouse.up()
+        return { success: true }
+      } catch (e: any) { log.error('[tool:browser_mouse_drag] error:', e.message); return { success: false, error: e.message } }
+    }),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully performed drag and drop` }] })
+  })
+
+  const browser_keyboard_press = tool({
+    description: 'Presses a key or key sequence (e.g. "Enter", "Tab", "ArrowDown", "Control+A", "Control+C").',
+    inputSchema: z.object({
+      key: z.string().describe('The key or key sequence to press.'),
+      delay_ms: z.number().int().nonnegative().optional().describe('Optional delay in milliseconds between keydown and keyup.')
+    }),
+    execute: async ({ key, delay_ms }) => runOnMain('browser_keyboard_press', { key, delay_ms }, async () => {
+      log.info(`[tool:browser_keyboard_press] key="${key}"`)
+      if (checkBrowserViewActive(convId)) return null
+      try {
+        const page = await getPlaywrightPage(convId)
+        await page.keyboard.press(key, { delay: delay_ms })
+        return { success: true }
+      } catch (e: any) { log.error('[tool:browser_keyboard_press] error:', e.message); return { success: false, error: e.message } }
+    }),
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : `Successfully pressed key` }] })
+  })
+
+  return { browser_navigate, browser_type, browser_screenshot, browser_get_page_content, browser_mouse_hover, browser_mouse_drag, browser_keyboard_press, browser_click }
 }

@@ -16,6 +16,8 @@ import { pool } from './workerPool'
 import WindowManager, { APP_ID } from './utils'
 import { initializeSkills } from './skills'
 
+app.commandLine.appendSwitch('remote-debugging-port', '9888')
+process.env.REMOTE_DEBUGGING_PORT = '9888'
 app.setName('Orch Code')
 
 if (process.defaultApp) {

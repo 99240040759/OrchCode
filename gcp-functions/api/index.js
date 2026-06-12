@@ -118,18 +118,18 @@ async function proxyRequest(req, res, targetUrl, authHeaders) {
 
 // Model definitions
 const MODEL_DEFINITIONS = [
-  ['GEMMA',            'gemma-4-26b-a4b-it',            'Gemma 4 26B (Unlimited)', true],
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6 (Creative)', true],
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free', 'Nemotron 3 Ultra (Medium)', false],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',             'GLM 4.5 Flash (Thinking)', false],
-  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Pro (Thinking)', false],
-  ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle (Unlimited)', false],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',             'MiMo V2.5 (Fast)', true],
+  ['GEMMA',            'gemma-4-26b-a4b-it',            'Orch General (Unlimited)', true, 256000],
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Orch Creative', true, 256000],
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free', 'Orch Ultra', false, 256000],
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',             'Orch Think', false, 128000],
+  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'Orch Long (1M)', false, 1000000],
+  ['BIG_PICKLE',       'opencode/big-pickle',             'Orch Reason', false, 200000],
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',             'Orch Preview', true, 1000000],
 ];
 
 async function handleModels(req, res) {
   const models = {};
-  for (const [prefix, defaultId, defaultName, defaultMultimodal] of MODEL_DEFINITIONS) {
+  for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow] of MODEL_DEFINITIONS) {
     const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
     let isAvailable = true;
     if (id.startsWith('zai/') && !process.env.Z_AI_API_KEY) isAvailable = false;
@@ -141,7 +141,8 @@ async function handleModels(req, res) {
       const responseKey = prefix.toLowerCase();
       const name = process.env[`${prefix}_MODEL_NAME`] || defaultName;
       const multimodal = process.env[`${prefix}_MULTIMODAL`] ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
-      models[responseKey] = { id, name, multimodal };
+      const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
+      models[responseKey] = { id, name, multimodal, contextWindow };
     }
   }
   res.json(models);

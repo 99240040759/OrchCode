@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import { requireAuthToken } from './auth'
 import { getApiBaseUrl } from './utils'
 
-export interface ModelInfo { id: string; name: string; multimodal: boolean }
+export interface ModelInfo { id: string; name: string; multimodal: boolean; contextWindow?: number }
 export type AvailableModels = Record<string, ModelInfo>
 
 

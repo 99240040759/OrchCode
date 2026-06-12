@@ -1,8 +1,5 @@
 import React from 'react'
-import {
-  Terminal, FolderOpen, AlertCircle, ClipboardList, BookOpen,
-  MousePointerClick, Keyboard, Camera, ChevronsUpDown, Loader, Search, CheckCircle
-} from 'lucide-react'
+import { FolderOpen, AlertCircle, ClipboardList, BookOpen, MousePointerClick, Keyboard, Camera, Loader, Search, CheckCircle, TerminalSquare, GlobeCheck } from 'lucide-react'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { jsonrepair } from 'jsonrepair'
@@ -108,8 +105,11 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
   if (toolName === 'browser_navigate') return { operation: isComp ? 'Navigated' : isErr ? 'Failed to navigate' : 'Navigating', target: getStreamingVal(args, argsDelta, 'url').replace(/^https?:\/\//, '').slice(0, 40), fullPath: null, isFile: false }
   if (toolName === 'browser_screenshot') return { operation: isComp ? 'Captured' : isErr ? 'Failed to capture' : 'Capturing', target: 'screenshot', fullPath: null, isFile: false }
   if (toolName === 'browser_type') return { operation: isComp ? 'Typed' : isErr ? 'Failed to type' : 'Typing', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
-  if (toolName === 'browser_scroll') return { operation: isComp ? 'Scrolled' : isErr ? 'Failed to scroll' : 'Scrolling', target: getStreamingVal(args, argsDelta, 'direction'), fullPath: null, isFile: false }
-  if (toolName === 'browser_click_selector') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
+  if (toolName === 'browser_click') return { operation: isComp ? 'Clicked' : isErr ? 'Failed to click' : 'Clicking', target: (getStreamingVal(args, argsDelta, 'selector') || `${getStreamingVal(args, argsDelta, 'x')}, ${getStreamingVal(args, argsDelta, 'y')}`).slice(0, 30), fullPath: null, isFile: false }
+  if (toolName === 'browser_mouse_hover') return { operation: isComp ? 'Hovered' : isErr ? 'Failed to hover' : 'Hovering', target: getStreamingVal(args, argsDelta, 'selector').slice(0, 30), fullPath: null, isFile: false }
+  if (toolName === 'browser_mouse_drag') return { operation: isComp ? 'Dragged' : isErr ? 'Failed to drag' : 'Dragging', target: `(${getStreamingVal(args, argsDelta, 'x1')}, ${getStreamingVal(args, argsDelta, 'y1')}) to (${getStreamingVal(args, argsDelta, 'x2')}, ${getStreamingVal(args, argsDelta, 'y2')})`, fullPath: null, isFile: false }
+  if (toolName === 'browser_keyboard_press') return { operation: isComp ? 'Pressed key' : isErr ? 'Failed to press key' : 'Pressing key', target: getStreamingVal(args, argsDelta, 'key'), fullPath: null, isFile: false }
+
   if (toolName === 'generate_image') {
     const prompt = getStreamingVal(args, argsDelta, 'prompt')
     const imgResult = result as { success: boolean; filePath: string } | undefined
@@ -131,14 +131,18 @@ function renderToolIcon(toolName: string, isFile: boolean, target: string) {
   }
   switch (toolName) {
     case 'browser_navigate': return <GlobeIcon />
+    case 'browser_get_page_content': return <GlobeCheck size={15} className="icon-purple" />
     case 'browser_type': return <Keyboard size={15} className="icon-teal" />
-    case 'browser_scroll': return <ChevronsUpDown size={15} className="icon-slate" />
-    case 'browser_click_selector': return <MousePointerClick size={15} className="icon-pink" />
+    case 'browser_click': return <MousePointerClick size={15} className="icon-pink" />
+    case 'browser_mouse_hover': return <MousePointerClick size={15} className="icon-pink" />
+    case 'browser_mouse_drag': return <MousePointerClick size={15} className="icon-pink" />
+    case 'browser_keyboard_press': return <Keyboard size={15} className="icon-teal" />
+
     case 'list_dir': return <FolderOpen size={15} className="icon-secondary" />
     case 'search_workspace': return <Search size={15} className="icon-secondary" />
     case 'search_web': return <GlobeIcon />
     case 'generate_image': return <Camera size={15} className="icon-blue" />
-    default: return <Terminal size={15} className="icon-secondary" />
+    default: return <TerminalSquare size={15} className="icon-secondary" />
   }
 }
 
@@ -202,7 +206,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
         boxSizing: 'border-box'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', minWidth: 0 }}>
-          <Terminal size={14} style={{ color: '#4ade80', flexShrink: 0 }} />
+          <TerminalSquare size={14} style={{ color: '#4ade80', flexShrink: 0 }} />
           <span style={{ fontWeight: 600, color: 'var(--text-primary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
             <span>{isPending ? 'Running command:' : isErr ? 'Failed to run:' : 'Ran command:'}</span>
             <code style={{ fontFamily: 'var(--font-mono)', fontSize: '10.5px', color: '#e2b473', background: 'rgba(255,255,255,0.02)', padding: '2px 4px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>{command}</code>

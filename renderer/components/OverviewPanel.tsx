@@ -2,11 +2,9 @@ import React from 'react'
 import * as ScrollArea from '@radix-ui/react-scroll-area'
 import { Package, Coins, Loader } from 'lucide-react'
 import { useAtomValue } from 'jotai'
-import { sessionTokensAtom, lifetimeTokensAtom } from '../store/agentStore'
+import { sessionTokensAtom, lifetimeTokensAtom, selectedModelAtom, availableModelsAtom } from '../store/agentStore'
 import { getDisplayName, getArtifactIcon } from '../lib/uiUtils'
 import type { ArtifactEntry } from '../../preload/index.d'
-
-const MAX_TOKENS = 200_000
 
 function formatTokens(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
@@ -51,8 +49,12 @@ interface OverviewPanelProps {
 const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handleArtifactClick }) => {
   const sessionTokens = useAtomValue(sessionTokensAtom)
   const lifetimeTokens = useAtomValue(lifetimeTokensAtom)
-  const pct = Math.min(Math.round((sessionTokens / MAX_TOKENS) * 100), 100)
-  const barColor = ringColor(sessionTokens / MAX_TOKENS)
+  const selectedModelId = useAtomValue(selectedModelAtom)
+  const availableModels = useAtomValue(availableModelsAtom)
+  const activeModel = Object.values(availableModels).find(m => m.id === selectedModelId)
+  const maxTokens = activeModel?.contextWindow || 200000
+  const pct = Math.min(Math.round((sessionTokens / maxTokens) * 100), 100)
+  const barColor = ringColor(sessionTokens / maxTokens)
 
   return (
     <ScrollArea.Root className="ScrollAreaRoot">
@@ -62,20 +64,20 @@ const OverviewPanel: React.FC<OverviewPanelProps> = ({ artifacts, loading, handl
             <div className="panel-root overview-panel">
               <div className="panel-header">
                 <div className="panel-header-left"><Coins size={14} color="var(--text-secondary)" /><span>Context Usage</span></div>
-                <div className="panel-header-right" title="Tokens used in current active window session"><TokenIndicator current={sessionTokens} max={MAX_TOKENS} /></div>
+                <div className="panel-header-right" title="Tokens used in current active window session"><TokenIndicator current={sessionTokens} max={maxTokens} /></div>
               </div>
               <div className="panel-content overview-panel-content">
                 <div className="overview-bar-bg">
                   <div className="overview-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
                 </div>
                 <div className="overview-info-row">
-                  <span className="overview-info-text">Active Context: {formatTokens(sessionTokens)} / 200k ({pct}%)</span>
+                  <span className="overview-info-text">Active Context: {formatTokens(sessionTokens)} / {formatTokens(maxTokens)} ({pct}%)</span>
                   <span className="overview-info-text" title="Total tokens consumed across entire conversation history including compacted blocks">
                     Total Session: {formatTokens(lifetimeTokens)}
                   </span>
                 </div>
                 <div className="overview-compaction-note">
-                  To maintain performance and keep response times fast, conversation history is automatically compacted when active usage approaches 180k tokens.
+                  To maintain performance and keep response times fast, conversation history is automatically compacted when active usage approaches {formatTokens(Math.floor(maxTokens * 0.8))} tokens.
                 </div>
               </div>
             </div>
