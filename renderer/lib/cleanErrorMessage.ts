@@ -27,7 +27,7 @@ export function cleanErrorMessage(rawErr: unknown): string {
     }
   }
 
-  if (errorStr.includes('apikey') || errorStr.includes('Invalid API Key') || errorStr.includes('Unauthorized') || errorStr.includes('auth') || errorStr.includes('API key') || errorStr.includes('401') || errorStr.includes('403')) {
+  if (errorStr.includes('apikey') || errorStr.includes('Invalid API Key') || errorStr.includes('Unauthorized') || errorStr.includes('Unauthenticated') || errorStr.includes('authentication failed') || errorStr.includes('API key') || errorStr.includes('401') || errorStr.includes('403')) {
     return 'Authentication failed. Your session might have expired, or the API key is invalid. Please sign out and sign back in to refresh your access.'
   }
   if (errorStr.includes('Failed to fetch') || errorStr.includes('fetch failed') || errorStr.includes('network') || errorStr.includes('connection')) {

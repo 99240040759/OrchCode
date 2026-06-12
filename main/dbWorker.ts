@@ -140,8 +140,8 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
         const placeholders = toDelete.map(() => '?').join(',')
         db.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...toDelete)
       }
-      const keptDate = new Date(keptFirst.createdAt)
-      const summaryDate = new Date(keptDate.getTime() - 1).toISOString()
+      // Use fixed epoch timestamp so summary always sorts before any real message, even across multiple compactions
+      const summaryDate = '0001-01-01T00:00:00.000Z'
       const summaryId = crypto.randomUUID()
       prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(summaryId, threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, summaryDate)
       prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)

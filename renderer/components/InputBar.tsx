@@ -345,7 +345,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       )}
       <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()}>
         <div className="input-bar-editor-wrapper">
-          {inputValue.trim().length === 0 && (
+          {inputValue.trim().length === 0 && !editorRef.current?.querySelector('.file-mention-chip') && (
             <div className="input-bar-placeholder">
               Ask anything, @ to mention, / for actions
             </div>

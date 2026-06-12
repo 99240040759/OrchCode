@@ -1,5 +1,5 @@
-export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 import { z } from 'zod'
+export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 import { promises as fs } from 'node:fs'
 import { chromium } from 'playwright-core'
 import type { Page, Browser } from 'playwright-core'
@@ -92,7 +92,8 @@ const BLOCKED_EXECUTABLES = new Set([
   'mkfs', 'fdisk', 'format', 'dd',
   'passwd', 'chroot',
   'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
-  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh'
+  'bash', 'sh', 'zsh', 'ash', 'csh', 'tcsh',
+  'nslookup', 'dig', 'netstat', 'whoami', 'curl', 'wget'
 ])
 const WRAPPERS = new Set(['env', 'npx', 'pnpx', 'yarn', 'npm', 'pnpm', 'bun', 'sudo', 'su', 'runas', 'gksudo'])
 
@@ -471,9 +472,10 @@ async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
       if (p.isClosed()) continue
       try {
         const cdp = await p.context().newCDPSession(p)
-        const info = await cdp.send('Target.getTargetInfo', {}) as any
-        await cdp.detach()
-        if (info?.targetInfo?.targetId === targetId) { session.page = p; return p }
+        try {
+          const info = await cdp.send('Target.getTargetInfo', {}) as any
+          if (info?.targetInfo?.targetId === targetId) { await cdp.detach().catch(() => {}); session.page = p; return p }
+        } finally { await cdp.detach().catch(() => {}) }
       } catch { /* continue to next page */ }
     }
   }
@@ -548,7 +550,8 @@ export function browserTools(convId: string, multimodal = true) {
         })
         await Promise.race([navPromise, timeoutPromise])
         clearTimeout(timer)
-        // Invalidate cached Playwright page — a new DOM was loaded
+        // Close old Playwright page reference and invalidate cache — a new DOM was loaded
+        if (s.page && !s.page.isClosed()) { try { await s.page.close() } catch {} }
         s.page = undefined
         return { success: true, url: s.view.webContents.getURL() }
       })

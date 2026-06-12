@@ -59,7 +59,17 @@ class WorkerPool {
       const timer = this.idleTimers.get(child)
       if (timer) { clearTimeout(timer); this.idleTimers.delete(child) }
       this.workers = this.workers.filter(w => w !== child)
+      const hadJob = this.activeJobs.has(child)
       this.activeJobs.delete(child)
+      // If this worker had an active job, drain the queue to prevent orphaned promises
+      if (hadJob && this.waitQueue.length > 0) {
+        const next = this.waitQueue.shift()!
+        try {
+          const replacement = this.getIdleOrSpawn(next.token)
+          this.setJob(replacement, next.jobName)
+          next.resolve(replacement)
+        } catch (err) { next.reject(err instanceof Error ? err : new Error(String(err))) }
+      }
     })
     this.workers.push(child)
     return child

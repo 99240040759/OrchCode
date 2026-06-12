@@ -44,9 +44,20 @@ function checkWindowsUpdate() {
 }
 
 const isNewerVersion = (l: string, c: string): boolean => {
-  const parse = (v: string) => v.replace(/^v/, '').split('-')[0].split('.').map(Number)
-  const [lM, lm, lP] = parse(l), [cM, cm, cP] = parse(c)
-  return isNaN(lM) || isNaN(cM) ? l !== c : lM > cM || (lM === cM && (lm > cm || (lm === cm && lP > cP)))
+  const strip = (v: string) => v.replace(/^v/, '')
+  const semver = (v: string) => strip(v).split('-')[0].split('.').map(Number)
+  const preTag = (v: string) => { const parts = strip(v).split('-'); return parts.length > 1 ? parts.slice(1).join('-') : null }
+  const [lM, lm, lP] = semver(l), [cM, cm, cP] = semver(c)
+  if (isNaN(lM) || isNaN(cM)) return l !== c
+  if (lM !== cM) return lM > cM
+  if (lm !== cm) return lm > cm
+  if (lP !== cP) return lP > cP
+  // Same major.minor.patch — stable (no pre-release) > pre-release
+  const lPre = preTag(l), cPre = preTag(c)
+  if (!lPre && cPre) return true   // latest is stable, current is pre-release → newer
+  if (lPre && !cPre) return false  // latest is pre-release, current is stable → not newer
+  if (lPre && cPre) return lPre > cPre // both pre-release — lexicographic compare
+  return false // both stable, same version
 }
 
 async function checkMacUpdate() {

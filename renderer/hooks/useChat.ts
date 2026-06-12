@@ -11,6 +11,7 @@ import {
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
+import { toast } from 'sonner'
 
 const isToolResultError = (r: unknown): boolean => {
   if (!r || typeof r !== 'object') return false
@@ -47,8 +48,10 @@ export function useChat() {
   const isRunningMapRef = useRef<Record<string, boolean>>({})
   const threadsRef = useRef(threads)
   const selectLockRef = useRef(false)
+  const selectedModelRef = useRef(selectedModel)
 
   useEffect(() => { threadsRef.current = threads }, [threads])
+  useEffect(() => { selectedModelRef.current = selectedModel }, [selectedModel])
   useEffect(() => {
     isMountedRef.current = true
     return () => {
@@ -249,7 +252,6 @@ export function useChat() {
   const run = async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
     const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${window.crypto.randomUUID()}`
     if (isRunningMapRef.current[resolvedThreadId]) return
-    if (runningThreads.has(resolvedThreadId)) return
     isRunningMapRef.current[resolvedThreadId] = true
     try {
       const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
@@ -264,7 +266,8 @@ export function useChat() {
       updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: startTimeVal, isStreaming: true }] })
       if (isNewThread) {
         threadService.generateTitle(promptText.slice(0, 400), resolvedThreadId)
-          .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error(e) } }).catch(console.error)
+          .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error(e) } })
+          .catch((err) => { console.error('[useChat] Title generation failed:', err); toast.error('Failed to generate thread title') })
       }
 
       let fullContent = ''
@@ -366,7 +369,7 @@ export function useChat() {
       }
 
       try {
-        await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments, startTime: startTimeVal }, processChunk)
+        await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModelRef.current, attachments, startTime: startTimeVal }, processChunk)
       } catch (err: unknown) {
         if (!isMountedRef.current) return
         const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }

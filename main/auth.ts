@@ -1,5 +1,8 @@
-
 import { EventEmitter } from 'node:events'
+import crypto from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import log from 'electron-log'
+import { getSessionPath } from './utils'
 
 type AuthEventMap = {
   'open-main-and-close-onboarding': []
@@ -19,10 +22,6 @@ class AuthEventEmitter extends EventEmitter {
 }
 
 export const authEvents = new AuthEventEmitter()
-import crypto from 'node:crypto'
-import { promises as fs } from 'node:fs'
-import log from 'electron-log'
-import { getSessionPath } from './utils'
 
 export interface UserProfile {
   uid: string

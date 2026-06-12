@@ -19,9 +19,13 @@ const EXT_TO_WASM: Record<string, string> = {
   '.vue': 'tree-sitter-vue.wasm'
 }
 let isInitialized = false
+const parserCache = new Map<string, Parser>()
 export async function getParserForExtension(ext: string): Promise<Parser | null> {
-  const wasmFile = EXT_TO_WASM[ext.toLowerCase()]
+  const key = ext.toLowerCase()
+  const wasmFile = EXT_TO_WASM[key]
   if (!wasmFile) return null
+  const cached = parserCache.get(key)
+  if (cached) return cached
   if (!isInitialized) { await Parser.init(); isInitialized = true }
   const parser = new Parser()
   let electronApp: any
@@ -32,6 +36,7 @@ export async function getParserForExtension(ext: string): Promise<Parser | null>
   const wasmsDir = isPackaged ? join(resourcesPath, 'wasms') : join(appPath, 'resources', 'wasms')
   const Lang = await Parser.Language.load(join(wasmsDir, wasmFile))
   parser.setLanguage(Lang)
+  parserCache.set(key, parser)
   return parser
 }
 export function getTokens(node: Node): Node[] {

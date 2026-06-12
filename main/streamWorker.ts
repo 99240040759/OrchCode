@@ -27,6 +27,7 @@ const KEEP_LAST_N_MESSAGES = 20
 // text_delta events) but keep raw content.
 class ReasoningStripper {
   private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>', '</think>', '</thought>', '</reasoning>', '</thinking>']
+  private static CLOSING_TAGS = ['</think>', '</thought>', '</reasoning>', '</thinking>']
   private inBlock = false; private tagBuffer = ''
   process(delta: string): Array<{ type: 'text' | 'reasoning'; content: string }> {
     const res: Array<{ type: 'text' | 'reasoning'; content: string }> = []
@@ -50,12 +51,18 @@ class ReasoningStripper {
           currentVal += ch
         }
       } else {
+        // Inside a reasoning block — buffer chars that could form a closing tag
         this.tagBuffer += ch
         if (/<\/(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) {
+          // Closing tag found — emit buffered reasoning content (minus the tag), then switch to text
+          const tagMatch = this.tagBuffer.match(/<\/(think|thought|reasoning|thinking)>$/i)!
+          const beforeTag = this.tagBuffer.slice(0, this.tagBuffer.length - tagMatch[0].length)
+          if (beforeTag) { if (currentType !== 'reasoning') { push(); currentType = 'reasoning' }; currentVal += beforeTag }
           push(); this.inBlock = false; currentType = 'text'; this.tagBuffer = ''
-        } else {
+        } else if (!ReasoningStripper.CLOSING_TAGS.some(tag => tag.startsWith(this.tagBuffer.toLowerCase().slice(-Math.min(this.tagBuffer.length, tag.length))))) {
+          // Buffer can't be a closing tag prefix — flush buffer into reasoning content
           if (currentType !== 'reasoning') { push(); currentType = 'reasoning' }
-          currentVal += ch
+          currentVal += this.tagBuffer; this.tagBuffer = ''
         }
       }
     }
