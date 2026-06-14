@@ -11,6 +11,6 @@
   },
   "scripts": {
     "start": "npx @google-cloud/functions-framework --target=api",
-    "deploy": "gcloud functions deploy api --runtime=nodejs22 --trigger-http --allow-unauthenticated --env-vars-file=.env.yaml --region=us-central1 --concurrency=1 --timeout=500 --memory=256Mi"
+    "deploy": "gcloud functions deploy api --runtime=nodejs22 --trigger-http --allow-unauthenticated --env-vars-file=.env.yaml --region=us-central1 --concurrency=1 --timeout=540 --memory=256Mi"
   }
 }

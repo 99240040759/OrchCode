@@ -10,6 +10,10 @@ import {
   compactThreadHistory, updateThreadTokens
 } from './db'
 import { summariseContext } from './summarisation'
+import { buildMemoryContext } from './memory'
+import { getToolPermission, setPermission, type PermissionLevel, type ApprovalResponse } from './permissions'
+import { mcpManager } from './mcp'
+import { updateThreadIOTokens } from './db'
 import { buildMessagesFromHistory, sanitizeMessages, buildAttachmentParts, StreamBlock } from './schema'
 import type { ModelInfo } from './models'
 import { countTokens, countMessagesTokens } from './tokenizer'
@@ -189,7 +193,8 @@ async function setupStreamRequest(
   port: Electron.MessagePortMain,
   controller: AbortController,
   attachments: any[] | undefined,
-  onInject: (text: string) => void
+  onInject: (text: string) => void,
+  onApproval: (response: ApprovalResponse) => void
 ) {
   let resolveAttachments: ((bufs: Buffer[]) => void) | null = null
   const bufsPromise = attachments?.length
@@ -205,6 +210,8 @@ async function setupStreamRequest(
     } else if (e.data?.type === 'inject') {
       // Queue inject, do NOT abort — loop picks it up at next turn boundary
       onInject(e.data.text ?? '')
+    } else if (e.data?.type === 'approval_response') {
+      onApproval({ approved: e.data.approved, remember: e.data.remember })
     }
   })
   port.on('close', () => controller.abort())
@@ -371,9 +378,13 @@ export async function handleAgentStreamRequest(
   // Inject queue: text from inject events, consumed at next turn boundary
   let pendingInject: string | null = null
   const onInject = (text: string) => { pendingInject = text; log.info(`[stream] Inject queued for ${threadId}: "${text.slice(0, 60)}"`) }
+  let pendingApprovalResolve: ((res: ApprovalResponse) => void) | null = null
+  const onApproval = (response: ApprovalResponse) => {
+    if (pendingApprovalResolve) { pendingApprovalResolve(response); pendingApprovalResolve = null }
+  }
 
   try {
-    await setupStreamRequest(port, controller, attachments, onInject)
+    await setupStreamRequest(port, controller, attachments, onInject, onApproval)
   } catch (err) {
     log.error(`[stream] Setup failed for ${threadId}:`, err)
     markWorkspaceIdle(threadId)
@@ -461,10 +472,21 @@ export async function handleAgentStreamRequest(
     // Build tools
     const browserInstruction = buildBrowserInstruction(!!isBrowserActive, multimodal)
     const skillsSection = await buildSkillsSection()
+    const memorySection = await buildMemoryContext(ctx.rootPath)
     const coreTools = createCoreTools(threadId, multimodal)
     const activeTools: Record<string, any> = {
       ...coreTools,
       ...(isBrowserActive ? browserTools(threadId, multimodal) : {})
+    }
+    // Merge MCP tools into active tools
+    const mcpTools = mcpManager.getAllMcpTools()
+    for (const [name, mcpTool] of Object.entries(mcpTools)) {
+      activeTools[name] = {
+        description: mcpTool.description,
+        inputSchema: { safeParse: (data: any) => ({ success: true as const, data }) },
+        execute: mcpTool.execute,
+        _isMcp: true
+      }
     }
 
     // ─── AUTONOMOUS AGENTIC LOOP ──────────────────────────────────────────────
@@ -501,7 +523,7 @@ export async function handleAgentStreamRequest(
       }
       // ── 3. Compute tokens + build system prompt ───────────────────────────
       const stepInputTokens = countMessagesTokens(messages, modelType)
-      const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + (systemInstructionSuffix || '')
+      const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + memorySection + (systemInstructionSuffix || '')
       const sysTokens = countTokens(systemInstruction, modelType)
       const toolSchemaTokens = countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType)
       currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens; lifetimeTokensAdded += currentContextTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
@@ -601,8 +623,20 @@ export async function handleAgentStreamRequest(
 
       saveProgress(true); if (controller.signal.aborted) break; const stepOutputTokens = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType) + countTokens(JSON.stringify(stepToolCalls), modelType); lifetimeTokensAdded += stepOutputTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
 
-      // ── 5. No tool calls → agent is done ─────────────────────────────────
+      // ── 5. No tool calls → check for pending inject before exiting ──────
       if (!hasToolCalls || stepToolCalls.length === 0) {
+        if (pendingInject !== null) {
+          // Agent finished its turn but user injected a message — consume it and re-enter loop
+          const injText = pendingInject; pendingInject = null
+          messages.push({ role: 'assistant', content: stepAssistantContent || null })
+          messages.push({ role: 'user', content: injText })
+          const injMsgId = crypto.randomUUID()
+          await saveMessage(threadId, { id: injMsgId, role: 'user', content: injText })
+          send({ type: 'inject_queued', payload: injText, threadId })
+          log.info(`[stream] Inject consumed at turn boundary for thread ${threadId}`)
+          // Continue loop — agent will process the injected text next iteration
+          continue
+        }
         shouldContinue = false
         break
       }
@@ -620,8 +654,22 @@ export async function handleAgentStreamRequest(
         ...(stepReasoningContent ? { reasoning_content: stepReasoningContent } : {})
       } as any)
 
-      // ── 7. Execute tools in parallel ──────────────────────────────────────
+      // ── 7. Resolve permissions sequentially, then execute allowed tools ──
       log.info(`[stream] Executing ${stepToolCalls.length} tools in step ${stepCount}`)
+      // Phase 1: resolve all permissions one by one
+      const permMap = new Map<string, 'allow' | 'deny'>()
+      for (const tc of stepToolCalls) {
+        if (!activeTools[tc.name]) { permMap.set(tc.id, 'allow'); continue }
+        const perm = await getToolPermission(tc.name)
+        if (perm === 'always_deny') { permMap.set(tc.id, 'deny'); continue }
+        if (perm === 'always_ask') {
+          send({ type: 'approval_request', payload: { toolCallId: tc.id, toolName: tc.name, args: tc.args }, threadId })
+          const response = await new Promise<ApprovalResponse>(resolve => { pendingApprovalResolve = resolve })
+          if (response.remember) await setPermission(tc.name, response.approved ? 'always_allow' : 'always_deny')
+          permMap.set(tc.id, response.approved ? 'allow' : 'deny')
+        } else { permMap.set(tc.id, 'allow') }
+      }
+      // Phase 2: execute all tools in parallel (permissions already resolved)
       const toolResults = await Promise.all(
         stepToolCalls.map(async tc => {
           const toolObj = activeTools[tc.name]
@@ -632,7 +680,13 @@ export async function handleAgentStreamRequest(
             send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: errVal } }, threadId })
             return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: errVal }, isError: true, formatted: { text: `Error: ${errVal}` } }
           }
-
+          if (permMap.get(tc.id) === 'deny') {
+            const denyMsg = `Tool "${tc.name}" was denied.`
+            const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
+            if (b && b.type === 'tool_call') { b.result = { success: false, error: denyMsg }; b.status = 'error' }
+            send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: denyMsg } }, threadId })
+            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: denyMsg }, isError: true, formatted: { text: `Denied: ${denyMsg}` } }
+          }
           send({ type: 'tool_result_pending', payload: { tool_call_id: tc.id }, threadId })
           try {
             const parsed = toolObj.inputSchema.safeParse(tc.args)
@@ -728,6 +782,9 @@ export async function handleAgentStreamRequest(
         await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded)
       }
     } catch (err) { log.error('[stream] Final tokens save error:', err) }
+    try {
+      await updateThreadIOTokens(threadId, currentContextTokens, lifetimeTokensAdded)
+    } catch (err) { log.error('[stream] IO tokens save error:', err) }
     markWorkspaceIdle(threadId)
     const entry = activeAbortControllers.get(threadId)
     if (entry?.sessionId === streamSessionId) activeAbortControllers.delete(threadId)

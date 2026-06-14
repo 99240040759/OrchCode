@@ -5,7 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Plus, ChevronUp, ArrowRight, Square, Image, FileText, MessageSquarePlus, Mic, MicOff } from 'lucide-react'
 import { useAtomValue, useAtom, useSetAtom } from 'jotai'
 import Dropdown, { DropdownItem } from './Dropdown'
-import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom } from '../store/agentStore'
+import ApprovalCard from './ApprovalCard'
+import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom, pendingApprovalAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import Tooltip from './Tooltip'
 
@@ -133,6 +134,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
   const setIsDiffMode = useSetAtom(isDiffModeAtom)
+  const pendingApproval = useAtomValue(pendingApprovalAtom)
 
   const handleOpenFile = async (filePath: string) => {
     try {
@@ -324,6 +326,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); formRef.current?.requestSubmit() }
   }
 
+  if (pendingApproval) return <ApprovalCard />
   return (
     <form ref={formRef} action={submitAction} className="input-bar-container">
       <AutocompleteSuggestions showFileSuggestions={showFileSuggestions} filteredFiles={filteredFiles} suggestionIndex={suggestionIndex} setSuggestionIndex={setSuggestionIndex} selectFileSuggestion={selectFileSuggestion} />

@@ -140,3 +140,16 @@ export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_mode
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 export const authUserAtom = atom<UserProfile | null>(null)
 export const isDiffModeAtom = atom<boolean>(false)
+
+// Approval system
+const pendingApprovalMapAtom = atom<Record<string, { toolCallId: string; toolName: string; args: Record<string, any> } | null>>({})
+export const pendingApprovalAtom = atom(
+  (get) => { const id = get(activeThreadIdAtom); return id ? (get(pendingApprovalMapAtom)[id] ?? null) : null },
+  (get, set, update: { toolCallId: string; toolName: string; args: Record<string, any> } | null) => {
+    const id = get(activeThreadIdAtom); if (!id) return
+    set(pendingApprovalMapAtom, { ...get(pendingApprovalMapAtom), [id]: update })
+  }
+)
+export const updatePendingApprovalAtom = atom(null, (get, set, { threadId, approval }: { threadId: string; approval: { toolCallId: string; toolName: string; args: Record<string, any> } | null }) => {
+  set(pendingApprovalMapAtom, { ...get(pendingApprovalMapAtom), [threadId]: approval })
+})

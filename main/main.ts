@@ -15,6 +15,8 @@ import { registerStreamIpc } from './stream'
 import { pool } from './workerPool'
 import WindowManager, { APP_ID } from './utils'
 import { initializeSkills } from './skills'
+import { showSettingsWindow } from './settingsWindow'
+import { mcpManager } from './mcp'
 
 app.commandLine.appendSwitch('remote-debugging-port', '9888')
 process.env.REMOTE_DEBUGGING_PORT = '9888'
@@ -244,6 +246,7 @@ app.whenReady().then(async () => {
       submenu: [
         { label: 'New Conversation', accelerator: 'CmdOrCtrl+N', click: () => sendToMain('command:new-conversation') },
         { label: 'Open Project Folder...', accelerator: 'CmdOrCtrl+O', click: () => sendToMain('command:open-workspace') },
+        { label: 'Settings', accelerator: 'CmdOrCtrl+,', click: () => showSettingsWindow() },
         { type: 'separator' as const },
         process.platform === 'darwin' ? { role: 'close' as const } : { role: 'quit' as const }
       ]
@@ -281,6 +284,7 @@ app.whenReady().then(async () => {
   pool.preWarm()
 
   void initializeSkills().catch((err) => log.error('[main] Failed to initialize skills asynchronously:', err))
+  void mcpManager.refreshConnections().catch((err) => log.error('[main] Failed to initialize MCP connections:', err))
   initUpdater()
   await initAuth()
   const startupUrl = process.argv.find((arg) => arg.toLowerCase().includes('orch-code://'))
@@ -337,6 +341,7 @@ app.on('before-quit', async (e) => {
     cleanupAuth()
     cleanupAllPtys()
     try { await pool.shutdown() } catch (err) { log.debug('[main] Pool shutdown error:', err) }
+    try { await mcpManager.disconnectAll() } catch (err) { log.debug('[main] MCP cleanup error:', err) }
     try { await checkpointDB() } catch (err) { log.debug('[main] Checkpoint DB error:', err) }
     isQuitting = true
     app.quit()

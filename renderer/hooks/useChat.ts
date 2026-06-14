@@ -6,7 +6,7 @@ import {
   openFilesAtom, activeEditorFileAtom, artifactsAtom, artifactPanelModeAtom, runningThreadsAtom,
   updateThreadMessagesAtom, updateThreadRunStateAtom, updateThreadTokensAtom, updateThreadWorkspaceAtom,
   updateThreadArtifactsAtom, updateThreadOpenFilesAtom, updateThreadActiveEditorFileAtom,
-  type StreamBlock
+  updatePendingApprovalAtom, type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
@@ -39,6 +39,7 @@ export function useChat() {
   const updateThreadArtifacts = useSetAtom(updateThreadArtifactsAtom)
   const updateThreadOpenFiles = useSetAtom(updateThreadOpenFilesAtom)
   const updateThreadActiveEditorFile = useSetAtom(updateThreadActiveEditorFileAtom)
+  const updatePendingApproval = useSetAtom(updatePendingApprovalAtom)
 
   // Tracks the most recent selectThread request — used only for stale-request detection.
   // NOT used by stop() or run(). Renamed from activeStreamThreadIdRef to make purpose explicit.
@@ -353,6 +354,8 @@ export function useChat() {
               lifetime: chunkData.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
             })
           }
+        } else if (chunkType === 'approval_request') {
+          updatePendingApproval({ threadId: resolvedThreadId, approval: chunkData ? { toolCallId: chunkData.toolCallId as string, toolName: chunkData.toolName as string, args: (chunkData.args ?? {}) as Record<string, any> } : null })
         } else if (chunkType === 'finish') {
           assistantIsStreaming = false
           updateThreadTokens({

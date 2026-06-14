@@ -8,8 +8,13 @@ const { Readable } = require('stream');
 
 const app = express();
 
-app.use(cors({ origin: 'app://orch-code' }));
-app.use(express.json());
+// Universal CORS — desktop sends app://orch-code, Android sends no origin / OkHttp UA
+app.use(cors({
+  origin: (origin, cb) => cb(null, true),
+  allowedHeaders: ['authorization', 'x-client-info', 'apikey', 'content-type'],
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS']
+}));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ type: '*/*' }));
 
 function timingSafeEqual(a, b) {
@@ -18,45 +23,35 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-// Auth validation middleware
+// ─── Auth middleware ──────────────────────────────────────────────────────────
 app.use(async (req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    return next();
-  }
+  if (req.method === 'OPTIONS') return next();
 
   const expectedAnonKey = process.env.SUPABASE_ANON_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
-
-  if (!expectedAnonKey || !supabaseUrl) {
+  if (!expectedAnonKey || !supabaseUrl)
     return res.status(500).json({ error: 'Server Configuration Error: Missing Supabase credentials.' });
-  }
 
   const apiKeyHeader = req.headers['apikey'];
   const authHeader = req.headers['authorization'];
   let clientKey = '';
-  if (apiKeyHeader) {
-    clientKey = apiKeyHeader;
-  } else if (authHeader && authHeader.startsWith('Bearer ')) {
-    clientKey = authHeader.substring(7);
-  }
+  if (apiKeyHeader) clientKey = apiKeyHeader;
+  else if (authHeader && authHeader.startsWith('Bearer ')) clientKey = authHeader.substring(7);
 
-  if (!clientKey || !timingSafeEqual(clientKey.trim(), expectedAnonKey.trim())) {
+  if (!clientKey || !timingSafeEqual(clientKey.trim(), expectedAnonKey.trim()))
     return res.status(401).json({ error: 'Unauthorized API Client' });
-  }
 
-  // Normalize path by stripping '/functions/v1/api' or '/api' prefix
+  // Normalize path — strip /functions/v1/api or /api prefix for Supabase-compat calls
   let cleanPath = req.path.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '');
   if (!cleanPath.startsWith('/')) cleanPath = '/' + cleanPath;
   req.normalizedPath = cleanPath;
 
+  // Public endpoints (no JWT required)
   const isPublic = cleanPath.endsWith('/models');
-  if (isPublic) {
-    return next();
-  }
+  if (isPublic) return next();
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader || !authHeader.startsWith('Bearer '))
     return res.status(401).json({ error: 'Unauthorized User: Missing JWT' });
-  }
 
   try {
     const supabase = createClient(supabaseUrl, expectedAnonKey, {
@@ -64,9 +59,7 @@ app.use(async (req, res, next) => {
       global: { headers: { Authorization: authHeader } }
     });
     const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) {
-      return res.status(401).json({ error: 'Unauthorized User: Invalid JWT' });
-    }
+    if (error || !user) return res.status(401).json({ error: 'Unauthorized User: Invalid JWT' });
     req.user = user;
     next();
   } catch (err) {
@@ -74,15 +67,13 @@ app.use(async (req, res, next) => {
   }
 });
 
+// ─── Key pool with rotation ───────────────────────────────────────────────────
 const KEY_POOL = {};
 function getApiKey(envName, triggerRotation = false) {
   const envVal = process.env[envName] || '';
   if (!envVal) return null;
   if (!KEY_POOL[envName]) {
-    KEY_POOL[envName] = {
-      keys: envVal.split(',').map(k => k.trim()).filter(Boolean),
-      index: 0
-    };
+    KEY_POOL[envName] = { keys: envVal.split(',').map(k => k.trim()).filter(Boolean), index: 0 };
   }
   const pool = KEY_POOL[envName];
   if (pool.keys.length === 0) return null;
@@ -94,26 +85,23 @@ function getApiKeyVal(envName) {
   return info ? info.value : '';
 }
 
+// ─── Proxy with key rotation ──────────────────────────────────────────────────
 async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, attempt = 1) {
   const keyInfo = getApiKey(envName, false);
   if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
   const headers = new Headers();
   if (isBearer) headers.set('Authorization', `Bearer ${keyInfo.value}`);
   else headers.set('x-goog-api-key', keyInfo.value);
-  const forwardHeaders = ['content-type', 'accept', 'user-agent', 'origin', 'referer'];
-  for (const h of forwardHeaders) {
-    const val = req.headers[h];
-    if (val) headers.set(h, val);
-  }
+  const forwardHeaders = ['content-type', 'accept', 'user-agent'];
+  for (const h of forwardHeaders) { const val = req.headers[h]; if (val) headers.set(h, val); }
   let body = undefined;
-  if (req.method === 'POST' || req.method === 'PUT') {
+  if (req.method === 'POST' || req.method === 'PUT')
     body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-  }
   try {
     const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body: body || undefined });
     if (upstreamRes.status === 429 && attempt < keyInfo.pool.keys.length) {
-      console.warn(`[rotator] Rate limited (429) for ${envName}. Rotating key and retrying...`);
-      getApiKey(envName, true); // Shift key index
+      console.warn(`[rotator] 429 on ${envName}, rotating key`);
+      getApiKey(envName, true);
       return proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, attempt + 1);
     }
     res.status(upstreamRes.status);
@@ -122,9 +110,6 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
     }
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Access-Control-Allow-Origin', 'app://orch-code');
-    res.setHeader('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (upstreamRes.body) Readable.fromWeb(upstreamRes.body).pipe(res);
     else res.end();
   } catch (err) {
@@ -133,58 +118,16 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
   }
 }
 
-// Proxy helper
-async function proxyRequest(req, res, targetUrl, authHeaders) {
-  const headers = new Headers(authHeaders);
-  const forwardHeaders = ['content-type', 'accept', 'user-agent', 'origin', 'referer'];
-  for (const h of forwardHeaders) {
-    const val = req.headers[h];
-    if (val) headers.set(h, val);
-  }
-
-  let body = undefined;
-  if (req.method === 'POST' || req.method === 'PUT') {
-    body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-  }
-
-  try {
-    const upstreamRes = await fetch(targetUrl, {
-      method: req.method,
-      headers,
-      body: body || undefined
-    });
-
-    res.status(upstreamRes.status);
-    for (const [k, v] of upstreamRes.headers.entries()) {
-      if (k !== 'transfer-encoding' && k !== 'content-encoding') res.setHeader(k, v);
-    }
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Access-Control-Allow-Origin', 'app://orch-code');
-    res.setHeader('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-
-    if (upstreamRes.body) {
-      Readable.fromWeb(upstreamRes.body).pipe(res);
-    } else {
-      res.end();
-    }
-  } catch (err) {
-    console.error(`Upstream proxy error: ${targetUrl}`, err);
-    res.status(502).json({ error: `Upstream Proxy Error: ${err.message}` });
-  }
-}
-
-// Model definitions
+// ─── Model registry ───────────────────────────────────────────────────────────
 const MODEL_DEFINITIONS = [
-  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',         'Gemini 3.1 Flash Lite', true, 1000000, 'Fast'],
-  ['GEMMA',            'gemma-4-26b-a4b-it',            'Gemma 4 26B', true, 256000, 'Unlimited'],
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6', true, 256000, 'Fast'],
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free', 'Nemotron 3 Ultra', false, 256000, 'Slow'],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',             'GLM 4.5 Flash', false, 128000, 'Max'],
-  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Pro', false, 1000000, 'Fast'],
-  ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle', false, 200000, 'Max'],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',             'MiMo V2.5', true, 1000000, 'Long'],
+  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast'],
+  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',            true,  256000,  'Unlimited'],
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',      'Kimi K2.6',              true,  256000,  'Fast'],
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron 3 Ultra',       false, 256000,  'Slow'],
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',          false, 128000,  'Max'],
+  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Pro',        false, 1000000, 'Fast'],
+  ['BIG_PICKLE',       'opencode/big-pickle',              'Big Pickle',             false, 200000,  'Max'],
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',          'MiMo V2.5',              true,  1000000, 'Long'],
 ];
 
 async function handleModels(req, res) {
@@ -192,24 +135,21 @@ async function handleModels(req, res) {
   for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow, defaultBadge] of MODEL_DEFINITIONS) {
     const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
     let isAvailable = true;
-    if (id.startsWith('zai/') && !process.env.Z_AI_API_KEY) isAvailable = false;
-    if (id.startsWith('opencode/') && !process.env.OPENCODE_API_KEY) isAvailable = false;
-    if (id.startsWith('nvidia/') && !process.env.NVIDIA_API_KEY) isAvailable = false;
-    if (!id.includes('/') && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) isAvailable = false;
-
-    if (isAvailable) {
-      const responseKey = prefix.toLowerCase();
-      const name = process.env[`${prefix}_MODEL_NAME`] || defaultName;
-      const multimodal = process.env[`${prefix}_MULTIMODAL`] ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
-      const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
-      const badge = process.env[`${prefix}_BADGE`] || defaultBadge || null;
-      models[responseKey] = { id, name, multimodal, contextWindow, badge };
-    }
+    if (id.startsWith('zai/')      && !process.env.Z_AI_API_KEY)                 isAvailable = false;
+    if (id.startsWith('opencode/') && !process.env.OPENCODE_API_KEY)              isAvailable = false;
+    if (id.startsWith('nvidia/')   && !process.env.NVIDIA_API_KEY)                isAvailable = false;
+    if (!id.includes('/')          && !process.env.GOOGLE_GENERATIVE_AI_API_KEY)  isAvailable = false;
+    if (!isAvailable) continue;
+    const name          = process.env[`${prefix}_MODEL_NAME`]     || defaultName;
+    const multimodal    = process.env[`${prefix}_MULTIMODAL`]     ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
+    const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
+    const badge         = process.env[`${prefix}_BADGE`]          || defaultBadge || null;
+    models[prefix.toLowerCase()] = { id, name, multimodal, contextWindow, badge };
   }
   res.json(models);
 }
 
-// Gemini handler
+// ─── Gemini handler ───────────────────────────────────────────────────────────
 async function handleGemini(req, res) {
   const subpath = req.normalizedPath.replace(/^\/gemini/, '');
   const allowedPatterns = [
@@ -220,29 +160,26 @@ async function handleGemini(req, res) {
     /^\/v1beta\/openai\/chat\/completions$/,
     /^\/v1beta\/openai\/models$/
   ];
-  if (!allowedPatterns.some(p => p.test(subpath))) {
+  if (!allowedPatterns.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  }
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `https://generativelanguage.googleapis.com${subpath}${urlObj.search}`;
   return proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', subpath.startsWith('/v1beta/openai'));
 }
 
-// OpenAI Compat handlers
+// ─── OpenAI-compat handler (nvidia / opencode / z-ai) ────────────────────────
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
-
 async function handleOpenAICompat(req, res, config) {
-  const subpath = req.normalizedPath.replace(new RegExp(`^\/${config.functionName}`), '');
-  if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath))) {
+  const subpath = req.normalizedPath.replace(new RegExp(`^\\/${config.functionName}`), '');
+  if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  }
   const targetPath = config.pathReplace ? subpath.replace(config.pathReplace.search, config.pathReplace.replace) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
   return proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
 }
 
-// Tavily handler
+// ─── Tavily search ────────────────────────────────────────────────────────────
 const MAX_QUERY_LENGTH = 500;
 const MAX_RESULTS_LIMIT = 10;
 const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$/;
@@ -250,19 +187,14 @@ const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]
 async function handleTavily(req, res) {
   const tavilyKey = process.env.TAVILY_API_KEY;
   if (!tavilyKey) return res.status(500).json({ error: 'Server Configuration Error: TAVILY_API_KEY is missing.' });
-  
-  const body = req.body;
-  const { query, domain, maxResults, searchDepth, topic, includeImages } = body;
-  if (!query || typeof query !== 'string' || query.trim().length === 0) {
+  const { query, domain, maxResults, searchDepth, topic, includeImages } = req.body;
+  if (!query || typeof query !== 'string' || query.trim().length === 0)
     return res.status(400).json({ error: "'query' is required and must be a non-empty string." });
-  }
-  if (query.length > MAX_QUERY_LENGTH) {
+  if (query.length > MAX_QUERY_LENGTH)
     return res.status(400).json({ error: `'query' must not exceed ${MAX_QUERY_LENGTH} characters.` });
-  }
   if (domain !== undefined && domain !== null) {
-    if (typeof domain !== 'string' || !DOMAIN_PATTERN.test(domain)) {
+    if (typeof domain !== 'string' || !DOMAIN_PATTERN.test(domain))
       return res.status(400).json({ error: "'domain' must be a valid domain name (e.g. example.com)." });
-    }
   }
   const resolvedMaxResults = Math.min(Math.max(1, Number.isInteger(maxResults) ? maxResults : 5), MAX_RESULTS_LIMIT);
   try {
@@ -270,49 +202,33 @@ async function handleTavily(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: tavilyKey,
-        query: query.trim(),
+        api_key: tavilyKey, query: query.trim(),
         include_domains: domain ? [domain] : undefined,
-        include_answer: true,
-        max_results: resolvedMaxResults,
+        include_answer: true, max_results: resolvedMaxResults,
         search_depth: searchDepth || 'basic',
-        topic: topic || 'general',
-        include_images: !!includeImages
+        topic: topic || 'general', include_images: !!includeImages
       })
     });
     const data = await response.json();
     res.status(response.status).json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// Title generator
+// ─── Title generator ──────────────────────────────────────────────────────────
 async function handleGenerateTitle(req, res) {
   const { text } = req.body;
-  if (!text || !text.trim()) {
-    return res.json({ title: 'New Conversation' });
-  }
+  if (!text || !text.trim()) return res.json({ title: 'New Conversation' });
   const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
-  
   const payload = {
     model: 'openai/gpt-oss-20b',
     messages: [{ role: 'user', content: `Generate a short 3-6 word title for this conversation. No quotes, no punctuation at end. Just the title.\n\n${text.slice(0, 3000)}` }],
-    temperature: 0.2,
-    top_p: 0.7,
-    max_tokens: 1024,
-    stream: false
+    temperature: 0.2, top_p: 0.7, max_tokens: 1024, stream: false
   };
-
   try {
     const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${activeApiKey}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      headers: { 'Authorization': `Bearer ${activeApiKey}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload)
     });
     if (!response.ok) return res.json({ title: 'New Conversation' });
@@ -320,30 +236,30 @@ async function handleGenerateTitle(req, res) {
     let title = data.choices?.[0]?.message?.content?.trim() || 'New Conversation';
     title = title.replace(/^"|"$/g, '').replace(/\.$/, '');
     res.json({ title });
-  } catch (err) {
-    res.json({ title: 'New Conversation' });
-  }
+  } catch (err) { res.json({ title: 'New Conversation' }); }
 }
 
-// Image generator
+// ─── Image generator ──────────────────────────────────────────────────────────
+// Uses NVIDIA FLUX-schnell NIM. Response shape: { artifacts: [{ base64, finish_reason }] }
+// The mobile GenerateImageTool also handles { data: [{ b64_json }] } as a fallback.
 async function handleGenerateImage(req, res) {
-  const { prompt, width = 1024, height = 1024, seed = 0, steps = 4 } = req.body;
-  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-    return res.status(400).json({ error: 'Missing or invalid prompt parameter' });
-  }
+  // FIX: use getApiKeyVal() — getApiKey() returns { value, pool } not a string
   const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
-  
+  const { prompt, width = 1024, height = 1024, steps = 4, seed = 0 } = req.body || {};
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim())
+    return res.status(400).json({ error: 'Missing or invalid prompt parameter' });
+  // Snap dimensions to nearest multiple of 16, clamped to 512–1568
+  const snap = v => Math.min(Math.max(Math.round(Number(v) / 16) * 16, 512), 1568);
   const payload = {
     prompt: prompt.trim(),
-    width: Number(width),
-    height: Number(height),
+    width: snap(width), height: snap(height),
+    num_inference_steps: Math.min(Math.max(Number(steps), 1), 50),
     seed: Number(seed),
-    steps: Number(steps)
+    output_format: 'b64_json'
   };
-
   try {
-    const response = await fetch('https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b', {
+    const response = await fetch('https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux-schnell', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${activeApiKey}`,
@@ -354,55 +270,71 @@ async function handleGenerateImage(req, res) {
     });
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(502).json({ error: `Nvidia invocation failed with status ${response.status}: ${errText}` });
+      return res.status(502).json({ error: `NVIDIA invocation failed (${response.status}): ${errText}` });
     }
     const data = await response.json();
     res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message || 'Error communicating with Nvidia FLUX API' });
-  }
+  } catch (err) { res.status(500).json({ error: err.message || 'Error communicating with NVIDIA FLUX API' }); }
 }
 
-// Catch-all router
+// ─── E2B Sandbox proxy ────────────────────────────────────────────────────────
+// Shared by OrchCode desktop and OrchApp mobile — both route E2B calls here.
+async function handleE2BSandboxCreate(req, res) {
+  const e2bApiKey = process.env.E2B_API_KEY;
+  const e2bTemplateId = process.env.E2B_TEMPLATE_ID;
+  if (!e2bApiKey || !e2bTemplateId)
+    return res.status(500).json({ error: 'E2B configuration missing: E2B_API_KEY or E2B_TEMPLATE_ID not set.' });
+  const payload = {
+    templateID: e2bTemplateId,
+    timeout: 1200, // 20 min — E2B maximum
+    metadata: req.body?.metadata ?? { source: 'orch' }
+  };
+  try {
+    const response = await fetch('https://api.e2b.app/sandboxes', {
+      method: 'POST',
+      headers: { 'X-API-Key': e2bApiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const rawText = await response.text();
+    const isJson = (response.headers.get('content-type') ?? '').includes('application/json')
+      || rawText.trimStart().startsWith('{') || rawText.trimStart().startsWith('[');
+    const safeBody = isJson ? rawText : JSON.stringify({ error: `E2B HTTP ${response.status}: ${rawText.slice(0, 200)}` });
+    res.status(response.status).set('Content-Type', 'application/json').send(safeBody);
+  } catch (err) { res.status(502).json({ error: err.message }); }
+}
+
+async function handleE2BSandboxKill(req, res) {
+  const e2bApiKey = process.env.E2B_API_KEY;
+  if (!e2bApiKey) return res.status(500).json({ error: 'E2B_API_KEY missing.' });
+  const sandboxId = req.params.sandboxId;
+  if (!sandboxId) return res.status(400).json({ error: 'sandboxId is required.' });
+  try {
+    const response = await fetch(`https://api.e2b.app/sandboxes/${sandboxId}`, {
+      method: 'DELETE',
+      headers: { 'X-API-Key': e2bApiKey }
+    });
+    if (response.status === 204) return res.status(204).end();
+    const data = await response.text();
+    res.status(response.status).set('Content-Type', 'application/json').send(data || '{}');
+  } catch (err) { res.status(502).json({ error: err.message }); }
+}
+
+// ─── Router ───────────────────────────────────────────────────────────────────
 app.all('*', async (req, res) => {
   const path = req.normalizedPath;
-  
-  if (req.method === 'GET' && path === '/models') {
-    return handleModels(req, res);
-  }
-  if (path.startsWith('/gemini')) {
-    return handleGemini(req, res);
-  }
-  if (path.startsWith('/nvidia')) {
-    return handleOpenAICompat(req, res, {
-      functionName: 'nvidia',
-      envKey: 'NVIDIA_API_KEY',
-      baseUrl: 'https://integrate.api.nvidia.com'
-    });
-  }
-  if (path.startsWith('/opencode')) {
-    return handleOpenAICompat(req, res, {
-      functionName: 'opencode',
-      envKey: 'OPENCODE_API_KEY',
-      baseUrl: 'https://opencode.ai/zen'
-    });
-  }
-  if (path.startsWith('/z-ai')) {
-    return handleOpenAICompat(req, res, {
-      functionName: 'z-ai',
-      envKey: 'Z_AI_API_KEY',
-      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-      pathReplace: { search: /^\/v1/, replace: '' }
-    });
-  }
-  if (req.method === 'POST' && path === '/tavily') {
-    return handleTavily(req, res);
-  }
-  if (req.method === 'POST' && path === '/generate-title') {
-    return handleGenerateTitle(req, res);
-  }
-  if (req.method === 'POST' && path === '/generate-image') {
-    return handleGenerateImage(req, res);
+
+  if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
+  if (path.startsWith('/gemini'))                                     return handleGemini(req, res);
+  if (path.startsWith('/nvidia'))                                     return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com' });
+  if (path.startsWith('/opencode'))                                   return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' });
+  if (path.startsWith('/z-ai'))                                       return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', pathReplace: { search: /^\/v1/, replace: '' } });
+  if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
+  if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
+  if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);
+  if (req.method === 'POST'   && path === '/e2b/sandboxes')           return handleE2BSandboxCreate(req, res);
+  if (req.method === 'DELETE' && path.startsWith('/e2b/sandboxes/')) {
+    req.params = { sandboxId: path.replace('/e2b/sandboxes/', '') };
+    return handleE2BSandboxKill(req, res);
   }
 
   res.status(404).json({ error: `Not Found: ${req.path}` });

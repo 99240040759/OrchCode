@@ -20,6 +20,10 @@ function getDB(dbPath: string): Database.Database {
     CREATE TABLE IF NOT EXISTS thread_workspaces (threadId TEXT PRIMARY KEY, workspacePath TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
     CREATE TABLE IF NOT EXISTS opened_workspaces (path TEXT PRIMARY KEY, lastOpenedAt TEXT NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT) STRICT;
+    CREATE TABLE IF NOT EXISTS tool_permissions (tool_name TEXT PRIMARY KEY, permission TEXT NOT NULL CHECK(permission IN ('always_allow','always_ask','always_deny'))) STRICT;
+    CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', workspace_path TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_path);
+    CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport IN ('stdio','sse')), config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
   `)
   const cols = (table: string) => (dbInstance!.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name)
   if (!cols('threads').includes('accumulatedTokens')) {
@@ -27,6 +31,12 @@ function getDB(dbPath: string): Database.Database {
   }
   if (!cols('threads').includes('lifetimeTokens')) {
     dbInstance.exec(`ALTER TABLE threads ADD COLUMN lifetimeTokens INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!cols('threads').includes('input_tokens')) {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!cols('threads').includes('output_tokens')) {
+    dbInstance.exec(`ALTER TABLE threads ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`)
   }
   return dbInstance
 }
@@ -51,10 +61,10 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     getDB(dbPath).pragma('wal_checkpoint(TRUNCATE)')
   },
   getThreads(dbPath) {
-    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, t.input_tokens, t.output_tokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id ORDER BY t.updatedAt DESC`).all()
   },
   getThread(dbPath, threadId) {
-    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
+    return prepare(getDB(dbPath), `SELECT t.id, t.title, t.resourceId, t.createdAt, t.updatedAt, t.accumulatedTokens, t.lifetimeTokens, t.input_tokens, t.output_tokens, tw.workspacePath FROM threads t LEFT JOIN thread_workspaces tw ON tw.threadId = t.id WHERE t.id = ?`).get(threadId)
   },
   getThreadMessages(dbPath, threadId) {
     return prepare(getDB(dbPath), 'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId)
@@ -155,6 +165,50 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const db = getDB(dbPath)
     if (threadId) prepare(db, "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('activeThreadId', ?)").run(threadId)
     else prepare(db, "DELETE FROM app_settings WHERE key = 'activeThreadId'").run()
+  },
+  // Tool Permissions
+  getToolPermissions(dbPath) {
+    return prepare(getDB(dbPath), 'SELECT tool_name, permission FROM tool_permissions').all()
+  },
+  setToolPermission(dbPath, toolName, permission) {
+    prepare(getDB(dbPath), 'INSERT OR REPLACE INTO tool_permissions (tool_name, permission) VALUES (?, ?)').run(toolName, permission)
+  },
+  deleteToolPermission(dbPath, toolName) {
+    prepare(getDB(dbPath), 'DELETE FROM tool_permissions WHERE tool_name = ?').run(toolName)
+  },
+  // Memories
+  getMemories(dbPath, workspacePath) {
+    if (workspacePath) return prepare(getDB(dbPath), 'SELECT * FROM memories WHERE workspace_path = ? OR workspace_path IS NULL ORDER BY updated_at DESC').all(workspacePath)
+    return prepare(getDB(dbPath), 'SELECT * FROM memories ORDER BY updated_at DESC').all()
+  },
+  saveMemory(dbPath, id, content, category, workspacePath) {
+    prepare(getDB(dbPath), 'INSERT INTO memories (id, content, category, workspace_path, created_at, updated_at) VALUES (?, ?, ?, ?, datetime("now"), datetime("now"))').run(id, content, category, workspacePath || null)
+  },
+  updateMemory(dbPath, id, content, category) {
+    prepare(getDB(dbPath), 'UPDATE memories SET content = ?, category = COALESCE(?, category), updated_at = datetime("now") WHERE id = ?').run(content, category || null, id)
+  },
+  deleteMemory(dbPath, id) {
+    prepare(getDB(dbPath), 'DELETE FROM memories WHERE id = ?').run(id)
+  },
+  // MCP Servers
+  getMcpServers(dbPath) {
+    return prepare(getDB(dbPath), 'SELECT * FROM mcp_servers ORDER BY created_at DESC').all()
+  },
+  saveMcpServer(dbPath, id, name, transport, config, enabled) {
+    prepare(getDB(dbPath), 'INSERT INTO mcp_servers (id, name, transport, config, enabled, created_at) VALUES (?, ?, ?, ?, ?, datetime("now"))').run(id, name, transport, config, enabled ? 1 : 0)
+  },
+  updateMcpServer(dbPath, id, name, transport, config, enabled) {
+    prepare(getDB(dbPath), 'UPDATE mcp_servers SET name = ?, transport = ?, config = ?, enabled = ? WHERE id = ?').run(name, transport, config, enabled ? 1 : 0, id)
+  },
+  deleteMcpServer(dbPath, id) {
+    prepare(getDB(dbPath), 'DELETE FROM mcp_servers WHERE id = ?').run(id)
+  },
+  // Token tracking
+  updateThreadIOTokens(dbPath, threadId, inputTokens, outputTokens) {
+    prepare(getDB(dbPath), 'UPDATE threads SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, threadId)
+  },
+  getAppTotalTokens(dbPath) {
+    return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(input_tokens),0) as totalInput, COALESCE(SUM(output_tokens),0) as totalOutput, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
   }
 }
 

@@ -58,11 +58,47 @@ export type FileReadResult =
 
 export type { StreamChunk, StreamPayload } from './types'
 
+export interface ApprovalRequest {
+  toolCallId: string
+  toolName: string
+  args: Record<string, any>
+}
+
+export interface ApprovalResponse {
+  approved: boolean
+  remember?: boolean
+}
+
+export interface MemoryEntry {
+  id: string
+  content: string
+  category: string
+  workspace_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface McpServerEntry {
+  id: string
+  name: string
+  transport: 'stdio' | 'sse'
+  config: string
+  enabled: number
+  created_at: string
+}
+
+export interface UsageStats {
+  totalInput: number
+  totalOutput: number
+  totalLifetime: number
+}
+
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>
   stopStream(threadId: string): void
   injectToStream(threadId: string, text: string): void
+  respondToApproval(threadId: string, response: ApprovalResponse): void
   on(channel: string, cb: (data: unknown) => void): () => void
   onTerminalPort(id: string): void
   platform: 'darwin' | 'win32' | 'linux'

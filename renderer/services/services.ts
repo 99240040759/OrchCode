@@ -1,4 +1,4 @@
-import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile } from '../../preload/index.d'
+import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile, ApprovalResponse, MemoryEntry, McpServerEntry, UsageStats } from '../../preload/index.d'
 
 const invoke = <T>(command: string, payload?: unknown): Promise<T> =>
   window.api.invoke(command, payload) as Promise<T>
@@ -44,4 +44,37 @@ export const authService = {
       catch (err) { console.error('[authService] Error in auth status callback:', err); throw err }
     })
   }
+}
+
+export const permissionService = {
+  getAll: () => invoke<Record<string, string>>('permissions:get-all'),
+  getDefaults: () => invoke<Record<string, string>>('permissions:get-defaults'),
+  set: (toolName: string, permission: string) => invoke<boolean>('permissions:set', { toolName, permission }),
+  reset: () => invoke<boolean>('permissions:reset'),
+}
+
+export const memoryService = {
+  list: (workspacePath?: string | null) => invoke<MemoryEntry[]>('memory:list', { workspacePath }),
+  save: (content: string, category: string, workspacePath?: string | null) => invoke<string>('memory:save', { content, category, workspacePath }),
+  update: (id: string, content: string, category?: string) => invoke<boolean>('memory:update', { id, content, category }),
+  delete: (id: string) => invoke<boolean>('memory:delete', { id }),
+  stats: () => invoke<{total: number; byCategory: Record<string, number>}>('memory:stats'),
+}
+
+export const mcpService = {
+  listServers: () => invoke<(McpServerEntry & {status: string})[]>('mcp:list-servers'),
+  addServer: (name: string, transport: 'stdio' | 'sse', config: Record<string, unknown>) => invoke<string>('mcp:add-server', { name, transport, config }),
+  updateServer: (id: string, name: string, transport: 'stdio' | 'sse', config: string, enabled: boolean) => invoke<boolean>('mcp:update-server', { id, name, transport, config, enabled }),
+  deleteServer: (id: string) => invoke<boolean>('mcp:delete-server', { id }),
+  toggleServer: (id: string, enabled: boolean) => invoke<boolean>('mcp:toggle-server', { id, enabled }),
+  listTools: () => invoke<any[]>('mcp:list-tools'),
+  testConnection: (name: string, transport: 'stdio' | 'sse', config: Record<string, unknown>) => invoke<{success: boolean; toolCount: number; error?: string}>('mcp:test-connection', { name, transport, config }),
+}
+
+export const usageService = {
+  getTotals: () => invoke<UsageStats>('usage:get-totals'),
+}
+
+export const settingsService = {
+  open: () => invoke<boolean>('settings:open'),
 }

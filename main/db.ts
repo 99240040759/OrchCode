@@ -107,3 +107,16 @@ export function compactThreadHistory(threadId: string, summary: string, keepCoun
 export function getActiveThreadId(): Promise<string | null> { return runQuery('getActiveThreadId') }
 export function setActiveThreadId(threadId: string | null): Promise<void> { return runQuery('setActiveThreadId', threadId) }
 export function createThread(threadId: string, workspacePath?: string | null): Promise<void> { return runQuery('createThread', threadId, workspacePath) }
+export function getToolPermissions(): Promise<{tool_name: string; permission: string}[]> { return runQuery('getToolPermissions') }
+export function setToolPermission(toolName: string, permission: string): Promise<void> { return runQuery('setToolPermission', toolName, permission) }
+export function deleteToolPermission(toolName: string): Promise<void> { return runQuery('deleteToolPermission', toolName) }
+export function getMemories(workspacePath?: string | null): Promise<any[]> { return runQuery('getMemories', workspacePath) }
+export function saveMemory(id: string, content: string, category: string, workspacePath?: string | null): Promise<void> { return runQuery('saveMemory', id, content, category, workspacePath) }
+export function updateMemory(id: string, content: string, category?: string): Promise<void> { return runQuery('updateMemory', id, content, category) }
+export function deleteMemory(id: string): Promise<void> { return runQuery('deleteMemory', id) }
+export function getMcpServers(): Promise<any[]> { return runQuery('getMcpServers') }
+export function saveMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('saveMcpServer', id, name, transport, config, enabled) }
+export function updateMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('updateMcpServer', id, name, transport, config, enabled) }
+export function deleteMcpServer(id: string): Promise<void> { return runQuery('deleteMcpServer', id) }
+export function updateThreadIOTokens(threadId: string, inputTokens: number, outputTokens: number): Promise<void> { return runQuery('updateThreadIOTokens', threadId, inputTokens, outputTokens) }
+export function getAppTotalTokens(): Promise<{totalInput: number; totalOutput: number; totalLifetime: number}> { return runQuery('getAppTotalTokens') }

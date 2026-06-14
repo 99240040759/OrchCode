@@ -24,6 +24,11 @@ import {
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { MAX_FILE_READ_BYTES } from './tools'
+import { showSettingsWindow } from './settingsWindow'
+import { getAllPermissions, setPermission, getDefaultPermissions, invalidatePermissionCache } from './permissions'
+import { saveMemory, getRelevantMemories, updateMemory, deleteMemoryById, getMemoryStats } from './memory'
+import { mcpManager } from './mcp'
+import * as db from './db'
 
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 const convIdSchema = z.string().min(1).max(256)
@@ -487,6 +492,91 @@ export const ipcCommands = {
       if (!pool.hasActiveJob(`stream:${id}`)) WindowManager.destroySession(id)
       else WindowManager.hideSession(id)
     }
+  },
+  // ─── Settings ────────────────────────────────────────────────────
+  'settings:open': {
+    schema: z.object({}),
+    execute: async () => { showSettingsWindow(); return true }
+  },
+  // ─── Permissions ─────────────────────────────────────────────────
+  'permissions:get-all': {
+    schema: z.object({}),
+    execute: async () => getAllPermissions()
+  },
+  'permissions:get-defaults': {
+    schema: z.object({}),
+    execute: async () => getDefaultPermissions()
+  },
+  'permissions:set': {
+    schema: z.object({ toolName: z.string().min(1), permission: z.enum(['always_allow', 'always_ask', 'always_deny']) }),
+    execute: async ({ toolName, permission }) => { await setPermission(toolName, permission); return true }
+  },
+  'permissions:reset': {
+    schema: z.object({}),
+    execute: async () => {
+      const defaults = getDefaultPermissions()
+      for (const [tool, perm] of Object.entries(defaults)) await db.setToolPermission(tool, perm)
+      invalidatePermissionCache()
+      return true
+    }
+  },
+  // ─── Memory ──────────────────────────────────────────────────────
+  'memory:list': {
+    schema: z.object({ workspacePath: z.string().nullable().optional() }),
+    execute: async ({ workspacePath }) => getRelevantMemories(workspacePath)
+  },
+  'memory:save': {
+    schema: z.object({ content: z.string().min(1), category: z.string().min(1), workspacePath: z.string().nullable().optional() }),
+    execute: async ({ content, category, workspacePath }) => saveMemory(content, category, workspacePath)
+  },
+  'memory:update': {
+    schema: z.object({ id: z.string().min(1), content: z.string().min(1), category: z.string().optional() }),
+    execute: async ({ id, content, category }) => { await updateMemory(id, content, category); return true }
+  },
+  'memory:delete': {
+    schema: z.object({ id: z.string().min(1) }),
+    execute: async ({ id }) => { await deleteMemoryById(id); return true }
+  },
+  'memory:stats': {
+    schema: z.object({}),
+    execute: async () => getMemoryStats()
+  },
+  // ─── MCP ─────────────────────────────────────────────────────────
+  'mcp:list-servers': {
+    schema: z.object({}),
+    execute: async () => {
+      const rows = await db.getMcpServers()
+      return rows.map((r: any) => ({ ...r, status: mcpManager.getServerStatus(r.id) }))
+    }
+  },
+  'mcp:add-server': {
+    schema: z.object({ name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.record(z.unknown()) }),
+    execute: async ({ name, transport, config }) => mcpManager.addServer(name, transport, config)
+  },
+  'mcp:update-server': {
+    schema: z.object({ id: z.string().min(1), name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.string(), enabled: z.boolean() }),
+    execute: async ({ id, name, transport, config, enabled }) => { await db.updateMcpServer(id, name, transport, config, enabled); await mcpManager.refreshConnections(); return true }
+  },
+  'mcp:delete-server': {
+    schema: z.object({ id: z.string().min(1) }),
+    execute: async ({ id }) => { await mcpManager.removeServer(id); return true }
+  },
+  'mcp:toggle-server': {
+    schema: z.object({ id: z.string().min(1), enabled: z.boolean() }),
+    execute: async ({ id, enabled }) => { await mcpManager.toggleServer(id, enabled); return true }
+  },
+  'mcp:list-tools': {
+    schema: z.object({}),
+    execute: async () => mcpManager.getToolsList()
+  },
+  'mcp:test-connection': {
+    schema: z.object({ name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.record(z.unknown()) }),
+    execute: async ({ name, transport, config }) => mcpManager.testConnection({ name, transport, config })
+  },
+  // ─── Usage ───────────────────────────────────────────────────────
+  'usage:get-totals': {
+    schema: z.object({}),
+    execute: async () => db.getAppTotalTokens()
   }
 }
 

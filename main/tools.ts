@@ -15,6 +15,7 @@ import WindowManager, { getConversationScreenshotsPath, tavilyLimiter, getApiBas
 import { requireAuthToken } from './auth'
 import { getParserForExtension, getTokens, findSyntaxErrors } from './astParser'
 import { getUserSkillsPath } from './skills'
+import { saveMemory as saveMemoryFn } from './memory'
 
 export const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
 
@@ -421,10 +422,26 @@ export function createCoreTools(convId: string, multimodal = true) {
     toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.message }] })
   })
 
+  const save_memory = tool({
+    description: 'Save a piece of information to persistent memory. Use this to remember user preferences, project conventions, important decisions, or anything that should be recalled in future conversations.',
+    inputSchema: z.object({
+      content: z.string().describe('The information to remember.'),
+      category: z.enum(['general', 'preference', 'codebase', 'workflow']).describe('Category of the memory.')
+    }),
+    execute: async (args: any) => {
+      try {
+        const wsPath = resolve().rootPath
+        const id = await saveMemoryFn(args.content, args.category, wsPath)
+        return { success: true, id, message: `Memory saved: "${args.content.slice(0, 80)}..."` }
+      } catch (err: any) { return { success: false, error: err.message } }
+    },
+    toModelOutput: ({ output }: any) => ({ type: 'content', value: [{ type: 'text', text: output.success === false ? `Error: ${output.error}` : output.message }] })
+  })
+
   return {
     list_dir, view_file, write_to_file, multi_replace_file_content, search_workspace,
     run_command,
-    search_web, generate_image
+    search_web, generate_image, save_memory
   }
 }
 

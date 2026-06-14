@@ -4,6 +4,7 @@ import { Provider, useAtom, useSetAtom, useAtomValue } from 'jotai'
 import LeftSidebar from './components/LeftSidebar'
 import ArtifactPanel from './components/ArtifactPanel'
 import { OnboardingView } from './components/OnboardingView'
+import { SettingsView } from './components/SettingsView'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from './lib/uiUtils'
 import {
@@ -174,6 +175,13 @@ function AppInner(): React.JSX.Element {
 }
 function App(): React.JSX.Element {
   const [view] = useState(() => new URLSearchParams(window.location.search).get('view'))
+  if (view === 'settings') return (
+    <>
+      <title>Settings — Orch Code</title>
+      <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
+      <SettingsView />
+    </>
+  )
   return view === 'onboarding' ? (
     <>
       <title>Welcome to Orch Code</title>

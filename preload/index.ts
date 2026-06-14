@@ -77,6 +77,11 @@ contextBridge.exposeInMainWorld('api', {
     if (st) st.port.postMessage({ type: 'inject', text })
   },
 
+  respondToApproval: (threadId: string, response: { approved: boolean; remember?: boolean }): void => {
+    const st = activeStreams.get(threadId)
+    if (st) st.port.postMessage({ type: 'approval_response', ...response })
+  },
+
   /**
    * Subscribe to push events emitted from main (e.g. terminal:data, browser:title-updated).
    * Returns an unsubscribe function.
