@@ -106,9 +106,27 @@ export async function streamLlmResponse(
   const openAiMessages = [...messages]
   if (systemInstruction) { openAiMessages.unshift({ role: 'system', content: systemInstruction }) }
   const openAiTools = tools ? getOpenAiTools(tools) : undefined
-  const payload: any = { model: modelName, messages: openAiMessages as any, tools: openAiTools?.length ? openAiTools : undefined, stream: true }
-  if (modelId === 'gemma-4-26b-a4b-it') payload.reasoning_effort = 'high'
-  else if (modelId === 'nvidia/moonshotai/kimi-k2.6') payload.reasoning_effort = 'minimal'
-  else if (modelId.startsWith('opencode/')) { payload.reasoning_effort = 'xhigh'; payload.reasoning = { effort: 'xhigh', enabled: true } }
+  const payload: any = {
+    model: modelName,
+    messages: openAiMessages as any,
+    tools: openAiTools?.length ? openAiTools : undefined,
+    stream: true,
+    stream_options: { include_usage: true }
+  }
+  // ── Per-model reasoning/thinking params ──────────────────────────────────
+  // gemini-3.1-flash-lite: pure generation, no thinking params needed
+  // gemma-4-26b-a4b-it: Google OpenAI-compat supports thinking_config via extra_body
+  if (rawModel.id === 'gemma-4-26b-a4b-it') {
+    payload.extra_body = { thinking_config: { thinking_budget: -1 } }
+  // nvidia/moonshotai/kimi-k2.6: NVIDIA NIM enables thinking via chat_template_kwargs, not reasoning_effort
+  } else if (rawModel.id === 'nvidia/moonshotai/kimi-k2.6') {
+    payload.extra_body = { chat_template_kwargs: { thinking: true, enable_thinking: true } }
+  // zai/GLM-4.5-Flash: bigmodel.cn uses enable_thinking; clear_thinking=false preserves reasoning across tool turns
+  } else if (rawModel.id.startsWith('zai/')) {
+    payload.extra_body = { chat_template_kwargs: { enable_thinking: true, clear_thinking: false } }
+  // opencode/*: DeepSeek/Nemotron/MiMo/Big Pickle — reasoning_effort max; unsupported models ignore it
+  } else if (rawModel.id.startsWith('opencode/')) {
+    payload.reasoning_effort = 'max'
+  }
   return globalApiLimiter.schedule(() => openai.chat.completions.create(payload, { signal: abortSignal }))
 }

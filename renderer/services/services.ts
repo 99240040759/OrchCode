@@ -1,4 +1,4 @@
-import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile, MemoryEntry, McpServerEntry, UsageStats, QuotaInfo } from '../../preload/index.d'
+import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile, MemoryEntry, UsageStats, QuotaInfo } from '../../preload/index.d'
 
 const invoke = <T>(command: string, payload?: unknown): Promise<T> =>
   window.api.invoke(command, payload) as Promise<T>
@@ -49,15 +49,6 @@ export const memoryService = {
   stats: () => invoke<{total: number; byCategory: Record<string, number>}>('memory:stats'),
 }
 
-export const mcpService = {
-  listServers: () => invoke<(McpServerEntry & {status: string})[]>('mcp:list-servers'),
-  addServer: (name: string, transport: 'stdio' | 'sse', config: Record<string, unknown>) => invoke<string>('mcp:add-server', { name, transport, config }),
-  updateServer: (id: string, name: string, transport: 'stdio' | 'sse', config: string, enabled: boolean) => invoke<boolean>('mcp:update-server', { id, name, transport, config, enabled }),
-  deleteServer: (id: string) => invoke<boolean>('mcp:delete-server', { id }),
-  toggleServer: (id: string, enabled: boolean) => invoke<boolean>('mcp:toggle-server', { id, enabled }),
-  listTools: () => invoke<any[]>('mcp:list-tools'),
-  testConnection: (name: string, transport: 'stdio' | 'sse', config: Record<string, unknown>) => invoke<{success: boolean; toolCount: number; error?: string}>('mcp:test-connection', { name, transport, config }),
-}
 
 export const usageService = {
   getTotals: () => invoke<UsageStats>('usage:get-totals'),

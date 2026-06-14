@@ -12,7 +12,6 @@ import {
 import { summariseContext } from './summarisation'
 import { buildMemoryContext } from './memory'
 import { getToolPermission, setPermission, type ApprovalResponse } from './permissions'
-import { mcpManager } from './mcp'
 import { buildMessagesFromHistory, sanitizeMessages, buildAttachmentParts, StreamBlock } from './schema'
 import type { ModelInfo } from './models'
 import { countTokens, countMessagesTokens } from './tokenizer'
@@ -476,16 +475,6 @@ export async function handleAgentStreamRequest(
     const activeTools: Record<string, any> = {
       ...coreTools,
       ...(isBrowserActive ? browserTools(threadId, multimodal) : {})
-    }
-    // Merge MCP tools into active tools
-    const mcpTools = mcpManager.getAllMcpTools()
-    for (const [name, mcpTool] of Object.entries(mcpTools)) {
-      activeTools[name] = {
-        description: mcpTool.description,
-        inputSchema: { safeParse: (data: any) => ({ success: true as const, data }) },
-        execute: mcpTool.execute,
-        _isMcp: true
-      }
     }
 
     // ─── AUTONOMOUS AGENTIC LOOP ──────────────────────────────────────────────

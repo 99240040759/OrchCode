@@ -23,7 +23,6 @@ function getDB(dbPath: string): Database.Database {
     CREATE TABLE IF NOT EXISTS tool_permissions (tool_name TEXT PRIMARY KEY, permission TEXT NOT NULL CHECK(permission IN ('always_allow','always_ask','always_deny'))) STRICT;
     CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', workspace_path TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
     CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_path);
-    CREATE TABLE IF NOT EXISTS mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport IN ('stdio','sse')), config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
   `)
   const cols = (table: string) => (dbInstance!.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name)
   if (!cols('threads').includes('accumulatedTokens')) {
@@ -105,7 +104,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
   updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ?, input_tokens = ?, output_tokens = ? WHERE id = ?').run(accumulated, lifetimeAdded, accumulated, lifetimeAdded, threadId)
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, threadId)
   },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
     const db = getDB(dbPath)
@@ -189,22 +188,9 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   deleteMemory(dbPath, id) {
     prepare(getDB(dbPath), 'DELETE FROM memories WHERE id = ?').run(id)
   },
-  // MCP Servers
-  getMcpServers(dbPath) {
-    return prepare(getDB(dbPath), 'SELECT * FROM mcp_servers ORDER BY created_at DESC').all()
-  },
-  saveMcpServer(dbPath, id, name, transport, config, enabled) {
-    prepare(getDB(dbPath), 'INSERT INTO mcp_servers (id, name, transport, config, enabled, created_at) VALUES (?, ?, ?, ?, ?, datetime("now"))').run(id, name, transport, config, enabled ? 1 : 0)
-  },
-  updateMcpServer(dbPath, id, name, transport, config, enabled) {
-    prepare(getDB(dbPath), 'UPDATE mcp_servers SET name = ?, transport = ?, config = ?, enabled = ? WHERE id = ?').run(name, transport, config, enabled ? 1 : 0, id)
-  },
-  deleteMcpServer(dbPath, id) {
-    prepare(getDB(dbPath), 'DELETE FROM mcp_servers WHERE id = ?').run(id)
-  },
   // Token tracking
   getAppTotalTokens(dbPath) {
-    return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(input_tokens),0) as totalInput, COALESCE(SUM(output_tokens),0) as totalOutput, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
+    return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(accumulatedTokens),0) as totalContext, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
   }
 }
 

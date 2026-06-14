@@ -47,27 +47,4 @@ export function getDefaultPermissions(): Record<string, PermissionLevel> {
   return { ...DEFAULT_PERMISSIONS }
 }
 
-export interface ApprovalRequest {
-  toolCallId: string
-  toolName: string
-  args: Record<string, any>
-}
-
-export interface ApprovalResponse {
-  approved: boolean
-  remember?: boolean
-}
-
-// Request approval from user via MessagePort. Sends approval_request, waits for approval_response.
-export function requestApproval(
-  port: any,
-  toolCallId: string,
-  toolName: string,
-  args: Record<string, any>,
-  onResponse: (resolve: (res: ApprovalResponse) => void) => void
-): Promise<ApprovalResponse> {
-  return new Promise((resolve) => {
-    port.postMessage({ type: 'approval_request', payload: { toolCallId, toolName, args } })
-    onResponse(resolve)
-  })
-}
+export interface ApprovalResponse { approved: boolean; remember?: boolean }

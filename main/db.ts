@@ -114,8 +114,4 @@ export function getMemories(workspacePath?: string | null): Promise<any[]> { ret
 export function saveMemory(id: string, content: string, category: string, workspacePath?: string | null): Promise<void> { return runQuery('saveMemory', id, content, category, workspacePath) }
 export function updateMemory(id: string, content: string, category?: string): Promise<void> { return runQuery('updateMemory', id, content, category) }
 export function deleteMemory(id: string): Promise<void> { return runQuery('deleteMemory', id) }
-export function getMcpServers(): Promise<any[]> { return runQuery('getMcpServers') }
-export function saveMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('saveMcpServer', id, name, transport, config, enabled) }
-export function updateMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('updateMcpServer', id, name, transport, config, enabled) }
-export function deleteMcpServer(id: string): Promise<void> { return runQuery('deleteMcpServer', id) }
 export function getAppTotalTokens(): Promise<{totalInput: number; totalOutput: number; totalLifetime: number}> { return runQuery('getAppTotalTokens') }

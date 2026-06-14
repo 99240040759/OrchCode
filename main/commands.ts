@@ -20,15 +20,14 @@ import {
 import {
   updateThreadTitle, getActiveThreadId, getThread, getThreads, setActiveThreadId,
   getThreadMessages, deleteThread, getThreadWorkspace, createThread,
-  deleteOpenedWorkspace, deleteWorkspaceThreads, addOpenedWorkspace, setThreadWorkspace
+  deleteOpenedWorkspace, deleteWorkspaceThreads, addOpenedWorkspace, setThreadWorkspace,
+  setToolPermission, getAppTotalTokens
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { MAX_FILE_READ_BYTES } from './tools'
 import { showSettingsWindow } from './settingsWindow'
 import { getAllPermissions, setPermission, getDefaultPermissions, invalidatePermissionCache } from './permissions'
 import { saveMemory, getRelevantMemories, updateMemory, deleteMemoryById, getMemoryStats } from './memory'
-import { mcpManager } from './mcp'
-import * as db from './db'
 
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
 const convIdSchema = z.string().min(1).max(256)
@@ -509,14 +508,19 @@ export const ipcCommands = {
   },
   'permissions:set': {
     schema: z.object({ toolName: z.string().min(1), permission: z.enum(['always_allow', 'always_ask', 'always_deny']) }),
-    execute: async ({ toolName, permission }) => { await setPermission(toolName, permission); return true }
+    execute: async ({ toolName, permission }) => {
+      await setPermission(toolName, permission)
+      WindowManager.getMainWindow()?.webContents.send('permissions:changed', {})
+      return true
+    }
   },
   'permissions:reset': {
     schema: z.object({}),
     execute: async () => {
       const defaults = getDefaultPermissions()
-      for (const [tool, perm] of Object.entries(defaults)) await db.setToolPermission(tool, perm)
+      for (const [tool, perm] of Object.entries(defaults)) await setToolPermission(tool, perm)
       invalidatePermissionCache()
+      WindowManager.getMainWindow()?.webContents.send('permissions:changed', {})
       return true
     }
   },
@@ -541,42 +545,11 @@ export const ipcCommands = {
     schema: z.object({}),
     execute: async () => getMemoryStats()
   },
-  // ─── MCP ─────────────────────────────────────────────────────────
-  'mcp:list-servers': {
-    schema: z.object({}),
-    execute: async () => {
-      const rows = await db.getMcpServers()
-      return rows.map((r: any) => ({ ...r, status: mcpManager.getServerStatus(r.id) }))
-    }
-  },
-  'mcp:add-server': {
-    schema: z.object({ name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.record(z.unknown()) }),
-    execute: async ({ name, transport, config }) => mcpManager.addServer(name, transport, config)
-  },
-  'mcp:update-server': {
-    schema: z.object({ id: z.string().min(1), name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.string(), enabled: z.boolean() }),
-    execute: async ({ id, name, transport, config, enabled }) => { await db.updateMcpServer(id, name, transport, config, enabled); await mcpManager.refreshConnections(); return true }
-  },
-  'mcp:delete-server': {
-    schema: z.object({ id: z.string().min(1) }),
-    execute: async ({ id }) => { await mcpManager.removeServer(id); return true }
-  },
-  'mcp:toggle-server': {
-    schema: z.object({ id: z.string().min(1), enabled: z.boolean() }),
-    execute: async ({ id, enabled }) => { await mcpManager.toggleServer(id, enabled); return true }
-  },
-  'mcp:list-tools': {
-    schema: z.object({}),
-    execute: async () => mcpManager.getToolsList()
-  },
-  'mcp:test-connection': {
-    schema: z.object({ name: z.string().min(1), transport: z.enum(['stdio', 'sse']), config: z.record(z.unknown()) }),
-    execute: async ({ name, transport, config }) => mcpManager.testConnection({ name, transport, config })
-  },
+
   // ─── Usage ───────────────────────────────────────────────────────
   'usage:get-totals': {
     schema: z.object({}),
-    execute: async () => db.getAppTotalTokens()
+    execute: async () => getAppTotalTokens()
   },
   'quota:get': {
     schema: z.object({}),

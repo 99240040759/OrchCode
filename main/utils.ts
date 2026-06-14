@@ -127,7 +127,7 @@ export class WindowManager {
     this.activeConvId = null
   }
 
-  static clear() { this.mainWindow = null; this.clearAllSessions() }
+
 
   // --- Compat helpers for code paths that use "active" browser (nav bar, resize, back/forward/reload) ---
   /** Active session's view, or null. */

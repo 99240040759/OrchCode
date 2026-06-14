@@ -78,18 +78,9 @@ export interface MemoryEntry {
   updated_at: string
 }
 
-export interface McpServerEntry {
-  id: string
-  name: string
-  transport: 'stdio' | 'sse'
-  config: string
-  enabled: number
-  created_at: string
-}
 
 export interface UsageStats {
-  totalInput: number
-  totalOutput: number
+  totalContext: number
   totalLifetime: number
 }
 

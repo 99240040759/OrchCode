@@ -139,6 +139,20 @@ async function checkBudget(userId) {
   return callBudgetRpc('check_budget', { p_user_id: userId, p_limit_usd: BUDGET_LIMIT() });
 }
 
+// ─── GET /budget — on-demand usage fetch ──────────────────────────────────────
+async function handleGetBudget(req, res, userId) {
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const budget = await checkBudget(userId);
+  if (!budget) return res.status(503).json({ error: 'Budget service unavailable' });
+  res.json({
+    cost_usd:  budget.cost_usd,
+    limit_usd: budget.limit_usd,
+    remaining: budget.remaining,
+    period:    budget.period,
+    allowed:   budget.allowed
+  });
+}
+
 function recordUsage(userId, inputTokens, outputTokens) {
   if (!inputTokens && !outputTokens) return;
   callBudgetRpc('record_usage', { p_user_id: userId, p_input_tokens: inputTokens || 0, p_output_tokens: outputTokens || 0 })
@@ -183,8 +197,8 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           const j = JSON.parse(trim);
           const u = j.usage || j.usageMetadata;
           if (u) {
-            inputTok  += u.prompt_tokens     || u.promptTokenCount     || 0;
-            outputTok += u.completion_tokens || u.candidatesTokenCount || 0;
+            inputTok  += u.prompt_tokens     || u.promptTokenCount     || u.input_tokens  || 0;
+            outputTok += u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
           }
         } catch {}
       }
@@ -312,11 +326,11 @@ async function handleTavily(req, res) {
 }
 
 // ─── Title generator ──────────────────────────────────────────────────────────
-async function handleGenerateTitle(req, res) {
+async function handleGenerateTitle(req, res, attempt = 1) {
   const { text } = req.body;
   if (!text || !text.trim()) return res.json({ title: 'New Conversation' });
-  const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
-  if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
+  const keyInfo = getApiKey('NVIDIA_API_KEY', attempt > 1);
+  if (!keyInfo) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
   const payload = {
     model: 'openai/gpt-oss-20b',
     messages: [{ role: 'user', content: `Generate a short 3-6 word title for this conversation. No quotes, no punctuation at end. Just the title.\n\n${text.slice(0, 3000)}` }],
@@ -325,19 +339,20 @@ async function handleGenerateTitle(req, res) {
   try {
     const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${activeApiKey}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: { 'Authorization': `Bearer ${keyInfo.value}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(payload)
     });
+    if (response.status === 429 && attempt < keyInfo.pool.keys.length) return handleGenerateTitle(req, res, attempt + 1);
     if (!response.ok) return res.json({ title: 'New Conversation' });
     const data = await response.json();
     let title = data.choices?.[0]?.message?.content?.trim() || 'New Conversation';
-    title = title.replace(/^"|"$/g, '').replace(/\.$/, '');
+    title = title.replace(/^\"|\"$/g, '').replace(/\.$/, '');
     res.json({ title });
   } catch (err) { res.json({ title: 'New Conversation' }); }
 }
 
 // ─── Image generator ──────────────────────────────────────────────────────────
-// Uses NVIDIA FLUX-schnell NIM. Response shape: { artifacts: [{ base64, finish_reason }] }
+// Uses NVIDIA FLUX.2-klein-4b NIM. Response shape: { artifacts: [{ base64, finish_reason }] }
 // The mobile GenerateImageTool also handles { data: [{ b64_json }] } as a fallback.
 async function handleGenerateImage(req, res) {
   // FIX: use getApiKeyVal() — getApiKey() returns { value, pool } not a string
@@ -356,7 +371,7 @@ async function handleGenerateImage(req, res) {
     output_format: 'b64_json'
   };
   try {
-    const response = await fetch('https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux-schnell', {
+    const response = await fetch('https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${activeApiKey}`,
@@ -438,13 +453,8 @@ app.all('*', async (req, res) => {
     }
   }
 
-  if (req.method === 'GET'    && path === '/quota') {
-    if (!userId) return res.status(401).json({ error: 'Unauthorized: quota requires authentication.' });
-    const budget = await checkBudget(userId);
-    if (!budget) return res.json({ allowed: true, remaining: 0, cost_usd: 0, limit_usd: BUDGET_LIMIT(), period: 'unknown' });
-    return res.json(budget);
-  }
   if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
+  if (req.method === 'GET'    && path === '/budget')                  return handleGetBudget(req, res, userId);
   if (path.startsWith('/gemini'))                                     return handleGemini(req, res, userId);
   if (path.startsWith('/nvidia'))                                     return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com' }, userId);
   if (path.startsWith('/opencode'))                                   return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' }, userId);

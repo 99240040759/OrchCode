@@ -36,6 +36,9 @@ export function cleanErrorMessage(rawErr: unknown): string {
   if (errorStr.includes('model_not_found') || errorStr.includes('does not exist')) {
     return 'The selected AI model is temporarily unavailable. Please select another model.'
   }
+  if (errorStr.includes('BUDGET_EXCEEDED') || errorStr.includes('Monthly budget') || (errorStr.includes('budget') && errorStr.includes('reached'))) {
+    return 'Monthly usage budget exhausted. Your quota resets at the start of next month. Check Settings → Usage & Cost for details.'
+  }
   if (errorStr.includes('rate limit') || errorStr.includes('429') || errorStr.includes('quota') || errorStr.includes('limit reached')) {
     return 'The API rate limit or credit quota for this model has been exceeded. Please wait a minute before retrying, or switch to another model.'
   }
