@@ -3,10 +3,6 @@
 // BytePiece) within ~10%. Consistent across all models, no false precision.
 // This avoids tiktoken's OpenAI-specific BPE giving wildly wrong counts for Gemini/Claude.
 
-export function cleanModelId(modelId?: string): string {
-  if (!modelId) return 'unknown'
-  return modelId.replace(/^(zai|opencode|nvidia)\//, '')
-}
 
 function estimateTokens(text: string): number {
   if (!text) return 0

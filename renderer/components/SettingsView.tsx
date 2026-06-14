@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { User, Shield, Plug, BarChart3, RefreshCw, Plus, Trash2, ToggleLeft, ToggleRight, TestTube, Save, Brain, X, ChevronDown, Check } from 'lucide-react'
 import Dropdown, { DropdownItem } from './Dropdown'
 import Tooltip from './Tooltip'
-import { permissionService, memoryService, mcpService, usageService, authService } from '../services/services'
+import { permissionService, memoryService, mcpService, usageService, quotaService, authService } from '../services/services'
 import type { UserProfile } from '../../preload/index.d'
 
 type Tab = 'profile' | 'permissions' | 'mcp' | 'memory' | 'usage'
@@ -33,7 +33,6 @@ const TOOL_FRIENDLY: Record<string, { label: string; category: string }> = {
 const friendlyName = (t: string) => TOOL_FRIENDLY[t]?.label || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 const toolCategory = (t: string) => TOOL_FRIENDLY[t]?.category || (t.startsWith('mcp__') ? 'MCP' : 'Other')
 const PERM_LABELS: Record<string, string> = { always_allow: 'Always Allow', always_ask: 'Always Ask', always_deny: 'Always Deny' }
-const COST_IN = 5, COST_OUT = 15
 
 // ─── Permission Dropdown (Radix) ────────────────────
 const PermDropdown: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
@@ -237,29 +236,52 @@ const MemoryTab: React.FC = () => {
 // ─── Usage ───────────────────────────────────────────
 const UsageTab: React.FC = () => {
   const [stats, setStats] = useState<{totalInput: number; totalOutput: number; totalLifetime: number} | null>(null)
-  useEffect(() => { usageService.getTotals().then(setStats) }, [])
+  const [quota, setQuota] = useState<{allowed: boolean; remaining: number; cost_usd: number; limit_usd: number; period: string} | null>(null)
+  const [quotaError, setQuotaError] = useState<string | null>(null)
+  useEffect(() => {
+    usageService.getTotals().then(setStats)
+    quotaService.get().then(setQuota).catch(e => setQuotaError(e?.message || 'Failed to load quota'))
+  }, [])
   if (!stats) return <div className="settings-empty">Loading...</div>
-  const inCost = (stats.totalInput / 1e6) * COST_IN, outCost = (stats.totalOutput / 1e6) * COST_OUT
   const fmt = (n: number) => n.toLocaleString()
   const fmtC = (n: number) => `$${n.toFixed(4)}`
+  const pct = quota ? Math.min(100, (quota.cost_usd / Math.max(quota.limit_usd, 0.01)) * 100) : 0
   return (
     <div className="settings-section">
-      <div className="settings-section-header"><h3>Token Usage & Cost</h3></div>
+      <div className="settings-section-header"><h3>Server Quota</h3></div>
+      {quotaError ? (
+        <div className="settings-card" style={{ color: 'var(--text-muted)' }}>{quotaError}</div>
+      ) : quota ? (
+        <div className="settings-card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>Budget Period: <strong style={{ color: 'var(--text-primary)' }}>{quota.period}</strong></span>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: quota.allowed ? 'var(--accent-green)' : 'var(--accent-red, #f44)' }}>{quota.allowed ? '● Active' : '● Exhausted'}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
+            <span>Used: <strong style={{ color: 'var(--text-primary)' }}>{fmtC(quota.cost_usd)}</strong></span>
+            <span>Limit: <strong style={{ color: 'var(--text-primary)' }}>{fmtC(quota.limit_usd)}</strong></span>
+          </div>
+          <div style={{ width: '100%', height: 8, borderRadius: 4, background: 'var(--bg-input, #222)' }}>
+            <div style={{ width: `${pct}%`, height: '100%', borderRadius: 4, background: pct > 90 ? 'var(--accent-red, #f44)' : pct > 70 ? 'var(--accent-brass, #d4a)' : 'var(--accent-green, #4f4)', transition: 'width 0.3s ease' }} />
+          </div>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>Remaining: {fmtC(quota.remaining)}</span>
+        </div>
+      ) : (
+        <div className="settings-empty">Loading quota...</div>
+      )}
+      <div className="settings-section-header" style={{ marginTop: 16 }}><h3>Session Token Stats</h3></div>
       <div className="settings-usage-grid">
         <div className="settings-card settings-usage-card">
           <span className="settings-usage-label">Input Tokens</span>
           <span className="settings-usage-value">{fmt(stats.totalInput)}</span>
-          <span className="settings-usage-sublabel">{fmtC(inCost)} @ $5/1M</span>
         </div>
         <div className="settings-card settings-usage-card">
           <span className="settings-usage-label">Output Tokens</span>
           <span className="settings-usage-value">{fmt(stats.totalOutput)}</span>
-          <span className="settings-usage-sublabel">{fmtC(outCost)} @ $15/1M</span>
         </div>
         <div className="settings-card settings-usage-card" style={{ gridColumn: '1 / -1' }}>
-          <span className="settings-usage-label">Total Estimated Cost</span>
-          <span className="settings-usage-value" style={{ color: 'var(--accent-brass)' }}>{fmtC(inCost + outCost)}</span>
-          <span className="settings-usage-sublabel">{fmt(stats.totalLifetime)} lifetime tokens</span>
+          <span className="settings-usage-label">Lifetime Tokens</span>
+          <span className="settings-usage-value">{fmt(stats.totalLifetime)}</span>
         </div>
       </div>
     </div>

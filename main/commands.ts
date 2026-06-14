@@ -577,6 +577,20 @@ export const ipcCommands = {
   'usage:get-totals': {
     schema: z.object({}),
     execute: async () => db.getAppTotalTokens()
+  },
+  'quota:get': {
+    schema: z.object({}),
+    execute: async () => {
+      const token = requireAuthToken()
+      const anonKey = process.env.SUPABASE_ANON_KEY
+      if (!anonKey) throw new Error('SUPABASE_ANON_KEY missing')
+      const res = await fetch(`${getApiBaseUrl()}/quota`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}`, apikey: anonKey }
+      })
+      if (!res.ok) throw new Error(`Quota fetch failed: HTTP ${res.status}`)
+      return res.json()
+    }
   }
 }
 

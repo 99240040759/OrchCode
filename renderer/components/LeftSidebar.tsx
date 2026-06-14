@@ -1,7 +1,6 @@
 import React from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { useAtomValue } from 'jotai'
-import Dropdown, { DropdownItem, DropdownSeparator } from './Dropdown'
 import { Plus, Settings } from 'lucide-react'
 import { authUserAtom, sidebarExpandedAtom } from '../store/agentStore'
 import { GoogleIcon } from '../lib/uiUtils'
@@ -17,7 +16,6 @@ const LeftSidebar: React.FC = () => {
   useHotkeys('ctrl+n, cmd+n', (e) => { e.preventDefault(); newConversation().catch(console.error) }, { enableOnFormTags: true })
   useHotkeys('ctrl+o, cmd+o', (e) => { e.preventDefault(); openWorkspace().catch(console.error) }, { enableOnFormTags: true })
   const handleLogin = async () => { try { await authService.startGoogleAuth() } catch (e) { console.error(e) } }
-  const handleLogout = async () => { try { await authService.logout() } catch (e) { console.error(e) } }
 
   return (
     <aside className={`sidebar-root ${expanded ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>

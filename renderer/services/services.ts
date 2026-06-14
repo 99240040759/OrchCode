@@ -1,4 +1,4 @@
-import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile, ApprovalResponse, MemoryEntry, McpServerEntry, UsageStats } from '../../preload/index.d'
+import type { ThreadEntry, ThreadMessage, WorkspaceContext, FileReadResult, UserProfile, MemoryEntry, McpServerEntry, UsageStats, QuotaInfo } from '../../preload/index.d'
 
 const invoke = <T>(command: string, payload?: unknown): Promise<T> =>
   window.api.invoke(command, payload) as Promise<T>
@@ -26,23 +26,11 @@ export const workspaceService = {
 }
 
 export const authService = {
-  startGoogleAuth: async (): Promise<UserProfile | null> => {
-    try { return await invoke<UserProfile | null>('auth:login') }
-    catch (err) { console.error('[authService] startGoogleAuth failed:', err); throw err }
-  },
-  logout: async (): Promise<boolean> => {
-    try { return await invoke<boolean>('auth:logout') }
-    catch (err) { console.error('[authService] logout failed:', err); throw err }
-  },
-  getAuthUser: async (): Promise<UserProfile | null> => {
-    try { return await invoke<UserProfile | null>('auth:get-user') }
-    catch (err) { console.error('[authService] getAuthUser failed:', err); throw err }
-  },
+  startGoogleAuth: () => invoke<UserProfile | null>('auth:login'),
+  logout: () => invoke<boolean>('auth:logout'),
+  getAuthUser: () => invoke<UserProfile | null>('auth:get-user'),
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
-    return window.api.on('auth:status-changed', (user) => {
-      try { callback(user as UserProfile | null) }
-      catch (err) { console.error('[authService] Error in auth status callback:', err); throw err }
-    })
+    return window.api.on('auth:status-changed', (user) => callback(user as UserProfile | null))
   }
 }
 
@@ -73,6 +61,10 @@ export const mcpService = {
 
 export const usageService = {
   getTotals: () => invoke<UsageStats>('usage:get-totals'),
+}
+
+export const quotaService = {
+  get: () => invoke<QuotaInfo>('quota:get'),
 }
 
 export const settingsService = {

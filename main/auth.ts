@@ -73,12 +73,12 @@ export function requireAuthToken(): string {
 
 async function loadSession(): Promise<AuthSession | null> {
   try {
-    const exists = await fs.stat(sessionFilePath).then(() => true).catch(() => false)
-    if (!exists) return null
     const { safeStorage } = require('electron')
-    currentSession = JSON.parse(safeStorage.decryptString(await fs.readFile(sessionFilePath)))
+    const data = await fs.readFile(sessionFilePath)
+    currentSession = JSON.parse(safeStorage.decryptString(data))
     return currentSession
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return null
     log.error('[auth] Load session failed:', err)
     throw err
   }
@@ -100,9 +100,7 @@ function broadcastUserStatus(user: UserProfile | null) {
   })
 }
 
-export function getAuthUser(): UserProfile | null {
-  return currentSession ? currentSession.user : null
-}
+export function getAuthUser(): UserProfile | null { return currentSession?.user ?? null }
 
 export async function logoutUser(): Promise<boolean> {
   log.info('[auth] Logging user out...')
@@ -148,7 +146,7 @@ export async function handleAuthCallback(code: string, _state: string, errorMsg?
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': supabaseAnonKey!,
+        'apikey': supabaseAnonKey,
         'Authorization': `Bearer ${supabaseAnonKey}`
       },
       body: JSON.stringify({ code_verifier: activeVerifier, auth_code: code })

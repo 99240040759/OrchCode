@@ -118,7 +118,99 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
   }
 }
 
-// ─── Model registry ───────────────────────────────────────────────────────────
+// ─── Budget helpers ───────────────────────────────────────────────────────────
+const BUDGET_LIMIT = () => parseFloat(process.env.BUDGET_LIMIT_USD || '100');
+const BUDGET_PATHS = ['/gemini', '/nvidia', '/opencode', '/z-ai'];
+const SKIP_BUDGET  = ['/models', '/generate-title'];
+
+async function callBudgetRpc(rpcName, body) {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.SUPABASE_URL;
+  if (!key || !url) return null;
+  const r = await fetch(`${url}/rest/v1/rpc/${rpcName}`, {
+    method: 'POST',
+    headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.ok ? r.json() : null;
+}
+
+async function checkBudget(userId) {
+  return callBudgetRpc('check_budget', { p_user_id: userId, p_limit_usd: BUDGET_LIMIT() });
+}
+
+function recordUsage(userId, inputTokens, outputTokens) {
+  if (!inputTokens && !outputTokens) return;
+  callBudgetRpc('record_usage', { p_user_id: userId, p_input_tokens: inputTokens || 0, p_output_tokens: outputTokens || 0 })
+    .catch(e => console.error('[budget] record_usage failed:', e.message));
+}
+
+// Wraps proxyRequestWithRotation to intercept usage chunks from SSE stream
+async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
+  const keyInfo = getApiKey(envName, false);
+  if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
+  const headers = new Headers();
+  if (isBearer) headers.set('Authorization', `Bearer ${keyInfo.value}`);
+  else headers.set('x-goog-api-key', keyInfo.value);
+  const forwardHeaders = ['content-type', 'accept', 'user-agent'];
+  for (const h of forwardHeaders) { const val = req.headers[h]; if (val) headers.set(h, val); }
+  const body = (req.method === 'POST' || req.method === 'PUT')
+    ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : undefined;
+  try {
+    const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body });
+    if (upstreamRes.status === 429 && keyInfo.pool.keys.length > 1) {
+      getApiKey(envName, true);
+      return proxyWithBudget(req, res, targetUrl, envName, isBearer, userId);
+    }
+    res.status(upstreamRes.status);
+    for (const [k, v] of upstreamRes.headers.entries()) {
+      if (k !== 'transfer-encoding' && k !== 'content-encoding') res.setHeader(k, v);
+    }
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Cache-Control', 'no-cache');
+    if (!upstreamRes.body) return res.end();
+    // Intercept stream to catch usage chunk
+    let inputTok = 0, outputTok = 0;
+    const reader = upstreamRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    const flush = () => {
+      // Parse SSE lines looking for usage: {"usage":{"prompt_tokens":N,"completion_tokens":M}}
+      for (const line of buf.split('\n')) {
+        const trim = line.replace(/^data:\s*/, '');
+        if (!trim || trim === '[DONE]') continue;
+        try {
+          const j = JSON.parse(trim);
+          const u = j.usage || j.usageMetadata;
+          if (u) {
+            inputTok  += u.prompt_tokens     || u.promptTokenCount     || 0;
+            outputTok += u.completion_tokens || u.candidatesTokenCount || 0;
+          }
+        } catch {}
+      }
+      buf = '';
+    };
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          buf += chunk;
+          res.write(chunk);
+        }
+        flush();
+        recordUsage(userId, inputTok, outputTok);
+      } catch {}
+      res.end();
+    })();
+  } catch (err) {
+    console.error(`Upstream proxy error: ${targetUrl}`, err);
+    res.status(502).json({ error: `Upstream Proxy Error: ${err.message}` });
+  }
+}
+
+
 const MODEL_DEFINITIONS = [
   ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast'],
   ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',            true,  256000,  'Unlimited'],
@@ -150,7 +242,7 @@ async function handleModels(req, res) {
 }
 
 // ─── Gemini handler ───────────────────────────────────────────────────────────
-async function handleGemini(req, res) {
+async function handleGemini(req, res, userId) {
   const subpath = req.normalizedPath.replace(/^\/gemini/, '');
   const allowedPatterns = [
     /^\/v1beta\/models$/,
@@ -164,19 +256,24 @@ async function handleGemini(req, res) {
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `https://generativelanguage.googleapis.com${subpath}${urlObj.search}`;
-  return proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', subpath.startsWith('/v1beta/openai'));
+  const isOai = subpath.startsWith('/v1beta/openai');
+  return userId
+    ? proxyWithBudget(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', isOai, userId)
+    : proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', isOai);
 }
 
 // ─── OpenAI-compat handler (nvidia / opencode / z-ai) ────────────────────────
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
-async function handleOpenAICompat(req, res, config) {
+async function handleOpenAICompat(req, res, config, userId) {
   const subpath = req.normalizedPath.replace(new RegExp(`^\\/${config.functionName}`), '');
   if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
   const targetPath = config.pathReplace ? subpath.replace(config.pathReplace.search, config.pathReplace.replace) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
-  return proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
+  return userId
+    ? proxyWithBudget(req, res, targetUrl, config.envKey, true, userId)
+    : proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
 }
 
 // ─── Tavily search ────────────────────────────────────────────────────────────
@@ -319,15 +416,39 @@ async function handleE2BSandboxKill(req, res) {
   } catch (err) { res.status(502).json({ error: err.message }); }
 }
 
-// ─── Router ───────────────────────────────────────────────────────────────────
+// ─── Router ───────────────────────────────────────────────────────────
 app.all('*', async (req, res) => {
   const path = req.normalizedPath;
+  const userId = req.user?.id;
 
+  // Budget gate — runs before all metered LLM endpoints
+  if (userId && BUDGET_PATHS.some(p => path.startsWith(p))) {
+    const budget = await checkBudget(userId);
+    if (budget) {
+      res.setHeader('X-Budget-Remaining', budget.remaining);
+      res.setHeader('X-Budget-Used',      budget.cost_usd);
+      res.setHeader('X-Budget-Limit',     budget.limit_usd);
+      res.setHeader('X-Budget-Period',    budget.period);
+      if (!budget.allowed) {
+        return res.status(429).json({
+          error: `Monthly budget of $${budget.limit_usd} reached. Used: $${budget.cost_usd}. Resets ${budget.period}-01.`,
+          code: 'BUDGET_EXCEEDED', cost_usd: budget.cost_usd, limit_usd: budget.limit_usd, period: budget.period
+        });
+      }
+    }
+  }
+
+  if (req.method === 'GET'    && path === '/quota') {
+    if (!userId) return res.status(401).json({ error: 'Unauthorized: quota requires authentication.' });
+    const budget = await checkBudget(userId);
+    if (!budget) return res.json({ allowed: true, remaining: 0, cost_usd: 0, limit_usd: BUDGET_LIMIT(), period: 'unknown' });
+    return res.json(budget);
+  }
   if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
-  if (path.startsWith('/gemini'))                                     return handleGemini(req, res);
-  if (path.startsWith('/nvidia'))                                     return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com' });
-  if (path.startsWith('/opencode'))                                   return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' });
-  if (path.startsWith('/z-ai'))                                       return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', pathReplace: { search: /^\/v1/, replace: '' } });
+  if (path.startsWith('/gemini'))                                     return handleGemini(req, res, userId);
+  if (path.startsWith('/nvidia'))                                     return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com' }, userId);
+  if (path.startsWith('/opencode'))                                   return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' }, userId);
+  if (path.startsWith('/z-ai'))                                       return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', pathReplace: { search: /^\/v1/, replace: '' } }, userId);
   if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
   if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
   if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);

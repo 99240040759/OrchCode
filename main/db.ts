@@ -118,5 +118,4 @@ export function getMcpServers(): Promise<any[]> { return runQuery('getMcpServers
 export function saveMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('saveMcpServer', id, name, transport, config, enabled) }
 export function updateMcpServer(id: string, name: string, transport: string, config: string, enabled: boolean): Promise<void> { return runQuery('updateMcpServer', id, name, transport, config, enabled) }
 export function deleteMcpServer(id: string): Promise<void> { return runQuery('deleteMcpServer', id) }
-export function updateThreadIOTokens(threadId: string, inputTokens: number, outputTokens: number): Promise<void> { return runQuery('updateThreadIOTokens', threadId, inputTokens, outputTokens) }
 export function getAppTotalTokens(): Promise<{totalInput: number; totalOutput: number; totalLifetime: number}> { return runQuery('getAppTotalTokens') }

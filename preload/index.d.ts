@@ -93,6 +93,14 @@ export interface UsageStats {
   totalLifetime: number
 }
 
+export interface QuotaInfo {
+  allowed: boolean
+  remaining: number
+  cost_usd: number
+  limit_usd: number
+  period: string
+}
+
 export interface Api {
   invoke(command: string, payload?: unknown): Promise<unknown>
   stream(payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void>

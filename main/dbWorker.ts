@@ -105,7 +105,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
   updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, threadId)
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ?, input_tokens = ?, output_tokens = ? WHERE id = ?').run(accumulated, lifetimeAdded, accumulated, lifetimeAdded, threadId)
   },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
     const db = getDB(dbPath)
@@ -145,7 +145,6 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
       if (msgs.length <= keepCount) return
       const deleteCount = msgs.length - keepCount
       const toDelete = msgs.slice(0, deleteCount).map((m: any) => m.id)
-      const keptFirst = msgs[deleteCount]
       if (toDelete.length > 0) {
         const placeholders = toDelete.map(() => '?').join(',')
         db.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...toDelete)
@@ -204,9 +203,6 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     prepare(getDB(dbPath), 'DELETE FROM mcp_servers WHERE id = ?').run(id)
   },
   // Token tracking
-  updateThreadIOTokens(dbPath, threadId, inputTokens, outputTokens) {
-    prepare(getDB(dbPath), 'UPDATE threads SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, threadId)
-  },
   getAppTotalTokens(dbPath) {
     return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(input_tokens),0) as totalInput, COALESCE(SUM(output_tokens),0) as totalOutput, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
   }

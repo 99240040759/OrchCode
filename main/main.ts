@@ -15,7 +15,7 @@ import { registerStreamIpc } from './stream'
 import { pool } from './workerPool'
 import WindowManager, { APP_ID } from './utils'
 import { initializeSkills } from './skills'
-import { showSettingsWindow } from './settingsWindow'
+import { showSettingsWindow, closeSettingsWindow } from './settingsWindow'
 import { mcpManager } from './mcp'
 
 app.commandLine.appendSwitch('remote-debugging-port', '9888')
@@ -187,6 +187,7 @@ function createMainWindow(): BrowserWindow {
   mainWindow.on('closed', () => {
     WindowManager.clearAllSessions()
     cleanupAllPtys()
+    closeSettingsWindow()
     mainWindow = null
     WindowManager.setMainWindow(null)
   })
@@ -311,6 +312,7 @@ app.whenReady().then(async () => {
   })
   authEvents.on('logged-out', () => {
     log.info('[main] User logged out, showing onboarding window...')
+    closeSettingsWindow()
     createOnboardingWindow()
     if (mainWindow) {
       mainWindow.close()

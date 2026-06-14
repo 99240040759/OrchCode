@@ -11,9 +11,8 @@ import {
 } from './db'
 import { summariseContext } from './summarisation'
 import { buildMemoryContext } from './memory'
-import { getToolPermission, setPermission, type PermissionLevel, type ApprovalResponse } from './permissions'
+import { getToolPermission, setPermission, type ApprovalResponse } from './permissions'
 import { mcpManager } from './mcp'
-import { updateThreadIOTokens } from './db'
 import { buildMessagesFromHistory, sanitizeMessages, buildAttachmentParts, StreamBlock } from './schema'
 import type { ModelInfo } from './models'
 import { countTokens, countMessagesTokens } from './tokenizer'
@@ -782,9 +781,6 @@ export async function handleAgentStreamRequest(
         await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded)
       }
     } catch (err) { log.error('[stream] Final tokens save error:', err) }
-    try {
-      await updateThreadIOTokens(threadId, currentContextTokens, lifetimeTokensAdded)
-    } catch (err) { log.error('[stream] IO tokens save error:', err) }
     markWorkspaceIdle(threadId)
     const entry = activeAbortControllers.get(threadId)
     if (entry?.sessionId === streamSessionId) activeAbortControllers.delete(threadId)

@@ -14,8 +14,8 @@ const MODELS_TTL_MS = 5 * 60 * 1000
 function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers || {})
-    headers.set('Authorization', `Bearer ${useAnon ? (process.env.SUPABASE_ANON_KEY || '') : requireAuthToken()}`)
-    headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
+    headers.set('Authorization', `Bearer ${useAnon ? process.env.SUPABASE_ANON_KEY! : requireAuthToken()}`)
+    headers.set('apikey', process.env.SUPABASE_ANON_KEY!)
     if (extra) { for (const [k, v] of Object.entries(extra)) headers.set(k, v) }
     return fetch(url, { ...options, headers })
   }
@@ -100,7 +100,7 @@ export async function streamLlmResponse(
   const openai = new OpenAI({
     apiKey: requireAuthToken(),
     baseURL: baseUrl,
-    defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY || '' },
+    defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY! },
     timeout: 30 * 60 * 1000
   })
   const openAiMessages = [...messages]
