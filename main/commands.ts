@@ -557,7 +557,7 @@ export const ipcCommands = {
       const token = requireAuthToken()
       const anonKey = process.env.SUPABASE_ANON_KEY
       if (!anonKey) throw new Error('SUPABASE_ANON_KEY missing')
-      const res = await fetch(`${getApiBaseUrl()}/quota`, {
+      const res = await fetch(`${getApiBaseUrl()}/budget`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}`, apikey: anonKey }
       })

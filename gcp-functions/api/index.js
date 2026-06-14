@@ -366,9 +366,8 @@ async function handleGenerateImage(req, res) {
   const payload = {
     prompt: prompt.trim(),
     width: snap(width), height: snap(height),
-    num_inference_steps: Math.min(Math.max(Number(steps), 1), 50),
-    seed: Number(seed),
-    output_format: 'b64_json'
+    steps: Math.min(Math.max(Number(steps), 1), 50),
+    seed: Number(seed)
   };
   try {
     const response = await fetch('https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b', {

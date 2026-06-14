@@ -300,13 +300,15 @@ app.whenReady().then(async () => {
   authEvents.on('open-main-and-close-onboarding', () => {
     log.info('[main] Onboarding completed, transitioning to main window...')
     const main = createMainWindow()
-    main.once('ready-to-show', () => {
-      main.show()
-      if (onboardingWindow) {
-        onboardingWindow.close()
-        onboardingWindow = null
-      }
-    })
+    const closeOnboarding = () => {
+      if (onboardingWindow && !onboardingWindow.isDestroyed()) { onboardingWindow.close(); onboardingWindow = null }
+    }
+    if (main.isVisible()) {
+      main.focus()
+      closeOnboarding()
+    } else {
+      main.once('ready-to-show', () => { main.show(); closeOnboarding() })
+    }
   })
   authEvents.on('logged-out', () => {
     log.info('[main] User logged out, showing onboarding window...')

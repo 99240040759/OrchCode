@@ -129,15 +129,16 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
 }
 
 export async function handleAuthCallback(code: string, _state: string, errorMsg?: string | null): Promise<void> {
-  if (!pendingLoginResolve || !pendingLoginReject) return
+  // Capture pending callbacks — may be null if deep-link arrives without a pending login (e.g. app restarted)
   const resolve = pendingLoginResolve
   const reject = pendingLoginReject
   pendingLoginResolve = null
   pendingLoginReject = null
   if (errorMsg) {
-    reject(new Error(errorMsg))
+    reject?.(new Error(errorMsg))
     return
   }
+  if (!code) return
   try {
     log.info('[auth] Exchanging Supabase auth code for tokens...')
     const supabaseUrl = process.env.SUPABASE_URL!
@@ -153,22 +154,23 @@ export async function handleAuthCallback(code: string, _state: string, errorMsg?
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error_description || data.error || `HTTP ${res.status}`)
-
     const user: UserProfile = {
       uid: data.user.id,
       name: data.user.user_metadata?.full_name || data.user.email || 'User',
       email: data.user.email || '',
       photoUrl: data.user.user_metadata?.avatar_url || ''
     }
-
     currentSession = { idToken: data.access_token, refreshToken: data.refresh_token, user }
     await saveSession(currentSession)
     log.info('[auth] Login completed:', user.email)
     broadcastUserStatus(user)
-    resolve(user)
+    resolve?.(user)
+    // Always emit transition event as a guaranteed fallback — the renderer's auth:complete-onboarding
+    // IPC call can race or fail if the window is being destroyed; this ensures main window always opens.
+    authEvents.emit('open-main-and-close-onboarding')
   } catch (err: any) {
     log.error('[auth] Callback failed:', err)
-    reject(err)
+    reject?.(err)
   }
 }
 

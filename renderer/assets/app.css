@@ -619,6 +619,22 @@
 .settings-usage-label { font-size: var(--font-size-xxs); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em }
 .settings-usage-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono) }
 .settings-usage-sublabel { font-size: var(--font-size-xs); color: var(--text-secondary) }
+/* ─── Quota Card ──────────────────────────────────────────── */
+.quota-card { display: flex; flex-direction: column; gap: 14px; padding: var(--space-md); background: var(--bg-input); border-radius: 8px; border: 1px solid var(--border-color) }
+.quota-card-header { display: flex; align-items: center; justify-content: space-between }
+.quota-period { display: flex; flex-direction: column; gap: 2px }
+.quota-period-label { font-size: var(--font-size-xxs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600 }
+.quota-period-value { font-size: var(--font-size-md); font-weight: 600; color: var(--text-primary) }
+.quota-status-badge { font-size: var(--font-size-xs); font-weight: 600; color: var(--accent-green); background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.25); padding: 3px 10px; border-radius: 20px }
+.quota-status-badge.quota-status-exhausted { color: var(--accent-red,#f44); background: rgba(244,68,68,0.1); border-color: rgba(244,68,68,0.25) }
+.quota-bar-row { display: flex; align-items: center; gap: 10px }
+.quota-bar-track { flex: 1; height: 7px; border-radius: 4px; background: var(--bg-app); overflow: hidden }
+.quota-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease }
+.quota-bar-pct { font-size: var(--font-size-xxs); font-family: var(--font-mono); color: var(--text-muted); min-width: 30px; text-align: right }
+.quota-stats-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px }
+.quota-stat { display: flex; flex-direction: column; gap: 3px; background: var(--bg-app); border-radius: 6px; padding: 8px 10px }
+.quota-stat-label { font-size: var(--font-size-xxs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600 }
+.quota-stat-value { font-size: var(--font-size-md); font-weight: 700; font-family: var(--font-mono); color: var(--text-primary) }
 /* ─── Approval Card ───────────────────────────────────────── */
 .approval-card { display: flex; flex-direction: column; gap: 10px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px 16px; animation: slide-up-fade 0.2s var(--transition-curve-default) }
 .approval-header { display: flex; align-items: center; gap: var(--space-xs) }

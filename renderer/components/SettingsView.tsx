@@ -173,7 +173,7 @@ const UsageTab: React.FC = () => {
 
   if (!stats) return <div className="settings-empty">Loading...</div>
   const fmt = (n: number) => n.toLocaleString()
-  const fmtC = (n: number) => `$${n.toFixed(4)}`
+  const fmtC = (n: number) => `$${parseFloat(n.toFixed(2))}`
   const pct = quota ? Math.min(100, (quota.cost_usd / Math.max(quota.limit_usd, 0.01)) * 100) : 0
   return (
     <div className="settings-section">
@@ -187,21 +187,27 @@ const UsageTab: React.FC = () => {
         </Tooltip>
       </div>
       {quotaError ? (
-        <div className="settings-card" style={{ color: 'var(--text-muted)' }}>{quotaError}</div>
+        <div className="settings-card" style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>{quotaError}</div>
       ) : quota ? (
-        <div className="settings-card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>Budget Period: <strong style={{ color: 'var(--text-primary)' }}>{quota.period}</strong></span>
-            <span style={{ fontSize: 'var(--font-size-sm)', color: quota.allowed ? 'var(--accent-green)' : 'var(--accent-red, #f44)' }}>{quota.allowed ? 'â— Active' : 'â— Exhausted'}</span>
+        <div className="quota-card">
+          <div className="quota-card-header">
+            <div className="quota-period">
+              <span className="quota-period-label">Budget Period</span>
+              <span className="quota-period-value">{(() => { const [y,m] = quota.period.split('-'); return (m && y) ? new Date(+y, +m-1).toLocaleString('default',{month:'long',year:'numeric'}) : quota.period })()}</span>
+            </div>
+            <span className={`quota-status-badge${quota.allowed ? '' : ' quota-status-exhausted'}`}>● {quota.allowed ? 'Active' : 'Exhausted'}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-            <span>Used: <strong style={{ color: 'var(--text-primary)' }}>{fmtC(quota.cost_usd)}</strong></span>
-            <span>Limit: <strong style={{ color: 'var(--text-primary)' }}>{fmtC(quota.limit_usd)}</strong></span>
+          <div className="quota-bar-row">
+            <div className="quota-bar-track">
+              <div className="quota-bar-fill" style={{ width: `${pct}%`, background: pct > 90 ? 'var(--accent-red,#f44)' : pct > 70 ? '#d4a04a' : 'var(--accent-green,#4ade80)' }} />
+            </div>
+            <span className="quota-bar-pct">{Math.round(pct)}%</span>
           </div>
-          <div style={{ width: '100%', height: 8, borderRadius: 4, background: 'var(--bg-input, #222)' }}>
-            <div style={{ width: `${pct}%`, height: '100%', borderRadius: 4, background: pct > 90 ? 'var(--accent-red, #f44)' : pct > 70 ? 'var(--accent-brass, #d4a)' : 'var(--accent-green, #4f4)', transition: 'width 0.3s ease' }} />
+          <div className="quota-stats-row">
+            <div className="quota-stat"><span className="quota-stat-label">Used</span><span className="quota-stat-value">{fmtC(quota.cost_usd)}</span></div>
+            <div className="quota-stat"><span className="quota-stat-label">Limit</span><span className="quota-stat-value">{fmtC(quota.limit_usd)}</span></div>
+            <div className="quota-stat"><span className="quota-stat-label">Remaining</span><span className="quota-stat-value" style={{ color: quota.remaining < quota.limit_usd * 0.1 ? 'var(--accent-red,#f44)' : 'var(--accent-green,#4ade80)' }}>{fmtC(quota.remaining)}</span></div>
           </div>
-          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>Remaining: {fmtC(quota.remaining)}</span>
         </div>
       ) : (
         <div className="settings-empty">Loading quota...</div>
