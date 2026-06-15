@@ -45,14 +45,18 @@ function prepare(db: Database.Database, sql: string): Statement {
   if (!stmt) {
     if (stmtCache.size >= MAX_CACHED_STATEMENTS) {
       const firstKey = stmtCache.keys().next().value
-      if (firstKey !== undefined) {
-        stmtCache.delete(firstKey)
-      }
+      if (firstKey !== undefined) stmtCache.delete(firstKey)
     }
     stmt = db.prepare(sql)
     stmtCache.set(sql, stmt)
   }
   return stmt
+}
+
+/** Inserts a thread row only if it doesn't already exist. Single source of truth for the default INSERT. */
+function ensureThread(db: Database.Database, threadId: string, now: string) {
+  if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId))
+    prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
 }
 
 const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
@@ -69,12 +73,9 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     return prepare(getDB(dbPath), 'SELECT id, role, content, data, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId)
   },
   createThread(dbPath, threadId, workspacePath) {
-    const db = getDB(dbPath)
-    const now = new Date().toISOString()
+    const db = getDB(dbPath), now = new Date().toISOString()
     db.transaction(() => {
-      if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
-      }
+      ensureThread(db, threadId, now)
       if (workspacePath) {
         prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
         prepare(db, `INSERT OR REPLACE INTO opened_workspaces (path, lastOpenedAt) VALUES (?, ?)`).run(workspacePath, now)
@@ -86,11 +87,8 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const msg = { id: message.id, threadId, role: message.role, content: message.content, data: message.data || null, createdAt: message.createdAt || now }
     let saved: any
     db.transaction(() => {
-      if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-        prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
-      } else {
-        prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
-      }
+      ensureThread(db, threadId, now)
+      prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(now, threadId)
       saved = prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (@id, @threadId, @role, @content, @data, @createdAt) ON CONFLICT(id) DO UPDATE SET content = excluded.content, data = excluded.data RETURNING id, role, content, data, createdAt`).get(msg)
     })()
     if (!saved) throw new Error('[db] Failed to save message')
@@ -107,12 +105,11 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, inputAdded, outputAdded, threadId)
   },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
-    const db = getDB(dbPath)
-    if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId)) {
-      const now = new Date().toISOString()
-      prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
-    }
-    prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
+    const db = getDB(dbPath), now = new Date().toISOString()
+    db.transaction(() => {
+      ensureThread(db, threadId, now)
+      prepare(db, `INSERT OR REPLACE INTO thread_workspaces (threadId, workspacePath) VALUES (?, ?)`).run(threadId, workspacePath)
+    })()
   },
   getThreadWorkspace(dbPath, threadId) {
     const row = prepare(getDB(dbPath), 'SELECT workspacePath FROM thread_workspaces WHERE threadId = ?').get(threadId) as any
@@ -128,30 +125,22 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const db = getDB(dbPath)
     let threadIds: string[] = []
     db.transaction(() => {
-      const rows = prepare(db, 'SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as any[]
-      threadIds = rows.map(r => r.threadId)
-      if (threadIds.length > 0) {
-        const placeholders = threadIds.map(() => '?').join(',')
-        db.prepare(`DELETE FROM threads WHERE id IN (${placeholders})`).run(...threadIds)
-      }
+      threadIds = (prepare(db, 'SELECT threadId FROM thread_workspaces WHERE workspacePath = ?').all(workspacePath) as any[]).map(r => r.threadId)
+      const del = prepare(db, 'DELETE FROM threads WHERE id = ?')
+      for (const id of threadIds) del.run(id)
     })()
     return threadIds
   },
   compactThreadHistory(dbPath, threadId, summary, keepCount = 10) {
     const db = getDB(dbPath)
     db.transaction(() => {
-      const msgs = prepare(db, 'SELECT id, createdAt FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as any[]
+      const msgs = prepare(db, 'SELECT id FROM messages WHERE threadId = ? ORDER BY createdAt ASC').all(threadId) as any[]
       if (msgs.length <= keepCount) return
-      const deleteCount = msgs.length - keepCount
-      const toDelete = msgs.slice(0, deleteCount).map((m: any) => m.id)
-      if (toDelete.length > 0) {
-        const placeholders = toDelete.map(() => '?').join(',')
-        db.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`).run(...toDelete)
-      }
-      // Use fixed epoch timestamp so summary always sorts before any real message, even across multiple compactions
-      const summaryDate = '0001-01-01T00:00:00.000Z'
-      const summaryId = crypto.randomUUID()
-      prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(summaryId, threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, summaryDate)
+      const toDelete = msgs.slice(0, msgs.length - keepCount)
+      const delMsg = prepare(db, 'DELETE FROM messages WHERE id = ?')
+      for (const m of toDelete) delMsg.run(m.id)
+      // Fixed epoch ensures summary always sorts before any real message across compactions
+      prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(crypto.randomUUID(), threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, '0001-01-01T00:00:00.000Z')
       prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
     })()
   },

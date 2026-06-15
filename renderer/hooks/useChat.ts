@@ -297,7 +297,7 @@ export function useChat() {
           fullContent += chunkText
           const last = orderedBlocks[orderedBlocks.length - 1]
           if (!last || last.type !== 'text') { orderedBlocks.push({ type: 'text', content: chunkText }); flushNow() }
-          else { last.content += chunkText; scheduleFlush() }
+          else { orderedBlocks[orderedBlocks.length - 1] = { ...last, content: last.content + chunkText }; scheduleFlush() }
         } else if (chunkType === 'tool_call_start') {
           updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
           orderedBlocks.push({ type: 'tool_call', tool_call_id: chunkData?.tool_call_id as string ?? window.crypto.randomUUID(), tool_name: chunkData?.tool_name as string ?? 'unknown', args: {} as Record<string, unknown>, args_delta: '', status: 'pending' })
@@ -305,7 +305,7 @@ export function useChat() {
         } else if (chunkType === 'tool_call_delta') {
           const tcId = chunkData?.tool_call_id as string, delta = chunkData?.delta as string ?? ''
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
-          if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { old.args_delta = (old.args_delta || '') + delta; scheduleFlush() } }
+          if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { orderedBlocks[idx] = { ...old, args_delta: (old.args_delta || '') + delta }; scheduleFlush() } }
         } else if (chunkType === 'tool_call') {
           updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
           const tcId = chunkData?.tool_call_id as string ?? window.crypto.randomUUID()
@@ -328,8 +328,9 @@ export function useChat() {
         } else if (chunkType === 'error') {
           assistantIsStreaming = false
           const finalContent = chunkData?.content as string ?? fullContent
-          const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
-          for (let i = 0; i < finalBlocks.length; i++) { const b = finalBlocks[i]; if (b.type === 'tool_call' && b.status === 'pending') finalBlocks[i] = { ...b, status: 'error' } }
+          const finalBlocks = (chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks).map(
+            (b, i, arr) => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
+          )
           finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })

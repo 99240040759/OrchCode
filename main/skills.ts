@@ -1,16 +1,12 @@
 import { join } from 'node:path'
 import { promises as fs, existsSync } from 'node:fs'
 import log from 'electron-log'
-function getAppInfo() {
-  if (process.env.USER_DATA_PATH) return { isPackaged: process.env.IS_PACKAGED === 'true', resourcesPath: process.env.RESOURCES_PATH || '', appPath: process.env.APP_PATH || '', userData: process.env.USER_DATA_PATH }
-  const { app } = require('electron')
-  return { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(), userData: app.getPath('userData') }
-}
+import { getAppEnv } from './utils'
 function getSkillsPath(): string {
-  const info = getAppInfo()
+  const info = getAppEnv()
   return info.isPackaged ? join(info.resourcesPath, 'resources', 'skills') : join(info.appPath, 'resources', 'skills')
 }
-export function getUserSkillsPath(): string { return join(getAppInfo().userData, 'skills') }
+export function getUserSkillsPath(): string { return join(getAppEnv().userData, 'skills') }
 
 
 /**

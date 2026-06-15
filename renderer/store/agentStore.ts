@@ -1,6 +1,7 @@
 import { atom } from 'jotai'
-import { atomWithStorage, splitAtom } from 'jotai/utils'
+import { atomWithStorage } from 'jotai/utils'
 import type { ThreadEntry, ArtifactEntry, UpdateStatus, UserProfile } from '../../preload/index.d'
+import type { ChatMessage, EditorFile } from './types'
 
 export type { StreamBlock, EditorFile, ChatMessage, ToolCallEntry } from './types'
 
@@ -18,13 +19,13 @@ export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
 export const isThreadLoadingAtom = atom<boolean>(false)
 
 // Scoped maps — keyed by threadId
-const chatMessagesMapAtom = atom<Record<string, import('./types').ChatMessage[]>>({})
+const chatMessagesMapAtom = atom<Record<string, ChatMessage[]>>({})
 const agentRunStateMapAtom = atom<Record<string, AgentRunState>>({})
 const threadTokensMapAtom = atom<Record<string, { session: number; lifetime: number }>>({})
 const threadWorkspaceMapAtom = atom<Record<string, { name: string; path: string } | null>>({})
 const threadArtifactsMapAtom = atom<Record<string, ArtifactEntry[]>>({})
-const threadOpenFilesMapAtom = atom<Record<string, import('./types').EditorFile[]>>({})
-const threadActiveEditorFileMapAtom = atom<Record<string, import('./types').EditorFile | null>>({})
+const threadOpenFilesMapAtom = atom<Record<string, EditorFile[]>>({})
+const threadActiveEditorFileMapAtom = atom<Record<string, EditorFile | null>>({})
 const threadBrowserUrlMapAtom = atom<Record<string, string>>({})
 
 export const threadBrowserUrlAtom = atom(
@@ -39,7 +40,7 @@ export const threadBrowserUrlAtom = atom(
 // Active-thread-scoped derived atoms
 export const chatMessagesAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(chatMessagesMapAtom)[id] ?? []) : [] },
-  (get, set, update: import('./types').ChatMessage[] | ((prev: import('./types').ChatMessage[]) => import('./types').ChatMessage[])) => {
+  (get, set, update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     const id = get(activeThreadIdAtom); if (!id) return
     const m = get(chatMessagesMapAtom), v = m[id] ?? []
     set(chatMessagesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
@@ -87,7 +88,7 @@ export const artifactsAtom = atom(
 )
 export const openFilesAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadOpenFilesMapAtom)[id] ?? []) : [] },
-  (get, set, update: import('./types').EditorFile[] | ((prev: import('./types').EditorFile[]) => import('./types').EditorFile[])) => {
+  (get, set, update: EditorFile[] | ((prev: EditorFile[]) => EditorFile[])) => {
     const id = get(activeThreadIdAtom); if (!id) return
     const m = get(threadOpenFilesMapAtom), v = m[id] ?? []
     set(threadOpenFilesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
@@ -95,7 +96,7 @@ export const openFilesAtom = atom(
 )
 export const activeEditorFileAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadActiveEditorFileMapAtom)[id] ?? null) : null },
-  (get, set, file: import('./types').EditorFile | null) => {
+  (get, set, file: EditorFile | null) => {
     const id = get(activeThreadIdAtom); if (!id) return
     const m = get(threadActiveEditorFileMapAtom)
     set(threadActiveEditorFileMapAtom, { ...m, [id]: file })
@@ -104,7 +105,7 @@ export const activeEditorFileAtom = atom(
 )
 
 // Thread-targeted update atoms (for background events/IPC streams updating non-active threads)
-export const updateThreadMessagesAtom = atom(null, (get, set, { threadId, update }: { threadId: string; update: import('./types').ChatMessage[] | ((prev: import('./types').ChatMessage[]) => import('./types').ChatMessage[]) }) => {
+export const updateThreadMessagesAtom = atom(null, (get, set, { threadId, update }: { threadId: string; update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]) }) => {
   const m = get(chatMessagesMapAtom), v = m[threadId] ?? []
   set(chatMessagesMapAtom, { ...m, [threadId]: typeof update === 'function' ? update(v) : update })
 })
@@ -121,10 +122,10 @@ export const updateThreadWorkspaceAtom = atom(null, (get, set, { threadId, works
 export const updateThreadArtifactsAtom = atom(null, (get, set, { threadId, artifacts }: { threadId: string; artifacts: ArtifactEntry[] }) => {
   set(threadArtifactsMapAtom, { ...get(threadArtifactsMapAtom), [threadId]: artifacts })
 })
-export const updateThreadOpenFilesAtom = atom(null, (get, set, { threadId, openFiles }: { threadId: string; openFiles: import('./types').EditorFile[] }) => {
+export const updateThreadOpenFilesAtom = atom(null, (get, set, { threadId, openFiles }: { threadId: string; openFiles: EditorFile[] }) => {
   set(threadOpenFilesMapAtom, { ...get(threadOpenFilesMapAtom), [threadId]: openFiles })
 })
-export const updateThreadActiveEditorFileAtom = atom(null, (get, set, { threadId, file }: { threadId: string; file: import('./types').EditorFile | null }) => {
+export const updateThreadActiveEditorFileAtom = atom(null, (get, set, { threadId, file }: { threadId: string; file: EditorFile | null }) => {
   set(threadActiveEditorFileMapAtom, { ...get(threadActiveEditorFileMapAtom), [threadId]: file })
 })
 
@@ -133,8 +134,6 @@ export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_ex
 export const isArtifactPanelOpenAtom = atom<boolean>(false)
 export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
-export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
-export const isDiffModeAtom = atom<boolean>(false)
 export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string; threadId?: string } | null>(null)
 export const availableModelsAtom = atom<Record<string, ModelInfo>>({})
 export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_model', '')

@@ -1,5 +1,4 @@
 import { z } from 'zod'
-export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 import { promises as fs } from 'node:fs'
 import { chromium } from 'playwright-core'
 import type { Page, Browser } from 'playwright-core'
@@ -16,6 +15,8 @@ import { requireAuthToken } from './auth'
 import { getParserForExtension, getTokens, findSyntaxErrors } from './astParser'
 import { getUserSkillsPath } from './skills'
 import { saveMemory as saveMemoryFn } from './memory'
+
+export function tool<T extends z.ZodTypeAny, R>(spec: { description?: string; inputSchema: T; execute: (args: z.infer<T>, options?: any) => Promise<R>; toModelOutput?: (options: { output: R }) => any }) { return spec }
 
 export const MAX_FILE_READ_BYTES = 25 * 1024 * 1024
 
@@ -98,23 +99,27 @@ const BLOCKED_EXECUTABLES = new Set([
 ])
 const WRAPPERS = new Set(['env', 'npx', 'pnpx', 'yarn', 'npm', 'pnpm', 'bun', 'sudo', 'su', 'runas', 'gksudo'])
 
+const SHELL_OPERATORS = new Set(['&&', '||', ';', '|', '&', '>', '>>', '<', '$(', '`'])
+
 function checkBlocklist(tokens: string[]): string | null {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
+    // Block all shell chaining operators outright — chained commands bypass per-token checks
+    if (SHELL_OPERATORS.has(t)) return t
     if (t.startsWith('-') || t.includes('=')) continue
     const base = basename(t).toLowerCase()
     if (BLOCKED_EXECUTABLES.has(base) || BLOCKED_EXECUTABLES.has(t.toLowerCase())) return t
     if (WRAPPERS.has(base)) {
-      if ((base === 'npm' || base === 'yarn' || base === 'pnpm' || base === 'bun') && tokens[i+1] === 'run') i++
-      continue
+      if ((base === 'npm' || base === 'yarn' || base === 'pnpm' || base === 'bun') && tokens[i + 1] === 'run') i++
+      // Do NOT break — keep scanning remaining tokens after wrapper
     }
-    break
+    // Never break early — every token must be checked
   }
   return null
 }
 
 function tokenizeCommand(commandLine: string): string[] {
-  return parse(commandLine).map(t => typeof t === 'string' ? t : ('pattern' in t ? t.pattern : ('op' in t ? t.op : ''))).filter(Boolean)
+  return parse(commandLine).map(t => typeof t === 'string' ? t : ('op' in t ? t.op : ('pattern' in t ? t.pattern : ''))).filter(Boolean)
 }
 
 export function createCoreTools(convId: string, multimodal = true) {
@@ -328,8 +333,11 @@ export function createCoreTools(convId: string, multimodal = true) {
         // user tools (Homebrew, nvm, pyenv, conda, etc.) are reachable.
         const timeout = args.wait_ms_before_async ?? 60000
         const env = { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' }
+        // macOS: run through login shell for PATH (Homebrew, nvm, etc.) but reconstruct
+        // from tokenized + blocklist-cleared args to prevent shell injection via -c
+        const sanitizedCmd = [executable, ...runArgs].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
         const result = process.platform === 'darwin'
-          ? await execa(process.env.SHELL || '/bin/zsh', ['-l', '-c', command_line.trim()], { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
+          ? await execa(process.env.SHELL || '/bin/zsh', ['-l', '-c', sanitizedCmd], { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
           : await execa(executable, runArgs, { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
         return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, success: result.exitCode === 0, cwd: runDir }
       } catch (err: any) {

@@ -32,8 +32,7 @@ if (process.defaultApp) {
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   log.info('[main] Another instance is running. Quitting.')
-  app.quit()
-  process.exit(0)
+  app.exit(0)
 }
 
 function handleCommandLineArgs(argv: string[], win: BrowserWindow) {
@@ -319,6 +318,7 @@ app.whenReady().then(async () => {
     if (mainWindow) {
       mainWindow.close()
       mainWindow = null
+      WindowManager.setMainWindow(null)
     }
   })
 

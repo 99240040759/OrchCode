@@ -36,7 +36,11 @@ export interface AuthSession {
   user: UserProfile
 }
 
-const sessionFilePath = getSessionPath()
+let sessionFilePath: string | null = null
+function getSessionFilePath(): string {
+  if (!sessionFilePath) sessionFilePath = getSessionPath()
+  return sessionFilePath
+}
 let currentSession: AuthSession | null = null
 let loginInProgress = false
 let activeVerifier = ''
@@ -74,7 +78,7 @@ export function requireAuthToken(): string {
 async function loadSession(): Promise<AuthSession | null> {
   try {
     const { safeStorage } = require('electron')
-    const data = await fs.readFile(sessionFilePath)
+    const data = await fs.readFile(getSessionFilePath())
     currentSession = JSON.parse(safeStorage.decryptString(data))
     return currentSession
   } catch (err: any) {
@@ -85,12 +89,9 @@ async function loadSession(): Promise<AuthSession | null> {
 }
 
 async function saveSession(session: AuthSession | null) {
-  if (!session) {
-    await fs.rm(sessionFilePath, { force: true })
-    return
-  }
+  if (!session) { await fs.rm(getSessionFilePath(), { force: true }); return }
   const { safeStorage } = require('electron')
-  await fs.writeFile(sessionFilePath, safeStorage.encryptString(JSON.stringify(session)))
+  await fs.writeFile(getSessionFilePath(), safeStorage.encryptString(JSON.stringify(session)))
 }
 
 function broadcastUserStatus(user: UserProfile | null) {
@@ -209,7 +210,9 @@ export async function initAuth() {
     await refreshSessionIfNeeded()
   }
   if (refreshIntervalId) clearInterval(refreshIntervalId)
-  refreshIntervalId = setInterval(() => { if (currentSession) refreshSessionIfNeeded() }, 5 * 60 * 1000)
+  refreshIntervalId = setInterval(() => {
+    if (currentSession) refreshSessionIfNeeded().catch(err => log.warn('[auth] Background refresh error:', err))
+  }, 5 * 60 * 1000)
 }
 export function cleanupAuth() {
   if (refreshIntervalId) { clearInterval(refreshIntervalId); refreshIntervalId = null }

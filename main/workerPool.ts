@@ -1,8 +1,7 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
 import log from 'electron-log'
 import { dbEvents } from './db'
+import { resolveWorkerPath } from './utils'
 
 const IDLE_KILL_MS = 60_000
 
@@ -33,11 +32,7 @@ class WorkerPool {
     }
   }
 
-  private resolveWorkerPath(): string {
-    let p = join(__dirname, 'agentWorker.js')
-    if (!existsSync(p)) p = join(__dirname, '..', 'agentWorker.js')
-    return p
-  }
+  private resolveWorkerPath(): string { return resolveWorkerPath('agentWorker') }
 
   private spawnWorker(token?: string): UtilityProcess {
     const workerPath = this.resolveWorkerPath()

@@ -1,6 +1,6 @@
 import log from 'electron-log'
 import crypto from 'node:crypto'
-import { getDatabasePath } from './utils'
+import { getDatabasePath, resolveWorkerPath } from './utils'
 import { EventEmitter } from 'node:events'
 export const dbEvents = new EventEmitter()
 
@@ -40,10 +40,7 @@ function spawnWorker() {
     return
   }
   const { utilityProcess, app } = require('electron')
-  const { join } = require('node:path')
-  const { existsSync } = require('node:fs')
-  let workerPath = join(__dirname, 'dbWorker.js')
-  if (!existsSync(workerPath)) workerPath = join(__dirname, '..', 'dbWorker.js')
+  const workerPath = resolveWorkerPath('dbWorker')
   worker = utilityProcess.fork(workerPath, [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
   lifetimeRespawnAttempts++
   dbEvents.emit('restarted')
@@ -70,6 +67,7 @@ function spawnWorker() {
 function getWorker() {
   if (worker) return worker
   spawnWorker()
+  if (!worker) throw new Error('[db] Failed to spawn database worker')
   return worker
 }
 export function shareDBPort(clientPort: any) {

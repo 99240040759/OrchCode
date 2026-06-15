@@ -18,6 +18,22 @@ export function getApiBaseUrl(): string {
   return `${process.env.SUPABASE_URL}/functions/v1/api`
 }
 
+/** Resolves env-aware paths for packaged vs dev. Works in both main process and utility process. */
+export function getAppEnv(): { isPackaged: boolean; resourcesPath: string; appPath: string; userData: string } {
+  if (process.env.USER_DATA_PATH) {
+    return { isPackaged: process.env.IS_PACKAGED === 'true', resourcesPath: process.env.RESOURCES_PATH || '', appPath: process.env.APP_PATH || '', userData: process.env.USER_DATA_PATH }
+  }
+  const { app } = require('electron')
+  return { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(), userData: app.getPath('userData') }
+}
+
+/** Resolves the absolute path to a compiled worker JS file, handling dev vs packaged layouts. */
+export function resolveWorkerPath(name: string): string {
+  const { existsSync } = require('node:fs'), { join: j } = require('node:path')
+  const primary = j(__dirname, `${name}.js`)
+  return existsSync(primary) ? primary : j(__dirname, '..', `${name}.js`)
+}
+
 // --- Limiters ---
 export const tavilyLimiter = new Bottleneck({ maxConcurrent: 2, minTime: 200 })
 export const globalApiLimiter = new Bottleneck({ maxConcurrent: 10, minTime: 10000 })
@@ -129,11 +145,8 @@ export class WindowManager {
 
 
 
-  // --- Compat helpers for code paths that use "active" browser (nav bar, resize, back/forward/reload) ---
-  /** Active session's view, or null. */
   static getBrowserView(): WebContentsView | null { return this.getActiveSession()?.view ?? null }
   static getBrowserConversationId(): string | null { return this.activeConvId }
-  static getAllSessions(): Map<string, BrowserSession> { return this.sessions }
 }
 export default WindowManager
 

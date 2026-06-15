@@ -12,8 +12,10 @@ export type AvailableModels = Record<string, ModelInfo>
 let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
+// Secondary index: model.id → ModelInfo for O(1) lookup (avoids O(n) find() on every stream call)
+let modelIdIndex = new Map<string, ModelInfo>()
 
-function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
+export function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
   return (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers || {})
     headers.set('Authorization', `Bearer ${useAnon ? process.env.SUPABASE_ANON_KEY! : requireAuthToken()}`)
@@ -28,6 +30,7 @@ export async function getAvailableModels(force = false): Promise<AvailableModels
   const response = await createAuthFetch(true)(`${getApiBaseUrl()}/models`)
   if (!response.ok) throw new Error(`Failed to fetch models: HTTP ${response.status}`)
   cachedModels = await response.json(); cachedModelsAt = Date.now()
+  modelIdIndex = new Map(Object.values(cachedModels!).map(m => [m.id, m]))
   return cachedModels!
 }
 
@@ -48,6 +51,20 @@ const PROVIDER_BASE: Record<string, string> = {
   'z-ai':   'z-ai/v1',
 }
 
+// Cache OpenAI clients by baseUrl — avoids constructing a new instance on every LLM call
+const openaiClientCache = new Map<string, OpenAI>()
+function getOpenAiClient(baseUrl: string): OpenAI {
+  let client = openaiClientCache.get(baseUrl)
+  if (!client) {
+    client = new OpenAI({ apiKey: requireAuthToken(), baseURL: baseUrl, defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY! }, timeout: 30 * 60 * 1000, maxRetries: 1 })
+    openaiClientCache.set(baseUrl, client)
+  } else {
+    // Refresh apiKey in case token rotated since client was created
+    ;(client as any).apiKey = requireAuthToken()
+  }
+  return client
+}
+
 export async function streamLlmResponse(
   modelId: string,
   messages: OpenAI.ChatCompletionMessageParam[],
@@ -56,43 +73,26 @@ export async function streamLlmResponse(
   abortSignal?: AbortSignal
 ): Promise<Stream<OpenAI.Chat.ChatCompletionChunk>> {
   const models = await getAvailableModels()
-  const rawModel = Object.values(models).find(m => m.id === modelId) || models[modelId]
+  // O(1) indexed lookup — avoids O(n) Array.find() + fallback key scan on every call
+  const rawModel = modelIdIndex.get(modelId) ?? models[modelId]
   if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
-
   const apiBase = getApiBaseUrl()
   const providerPath = PROVIDER_BASE[rawModel.provider ?? 'gemini'] ?? PROVIDER_BASE.gemini
   const baseUrl = `${apiBase}/${providerPath}`
   const modelName = rawModel.provider === 'gemini' ? rawModel.id : rawModel.id.split('/').slice(1).join('/')
-
   log.info(`[models] ${modelId} → provider=${rawModel.provider} baseUrl=${baseUrl} modelName=${modelName}`)
-
-  const openai = new OpenAI({
-    apiKey: requireAuthToken(),
-    baseURL: baseUrl,
-    defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY! },
-    timeout: 30 * 60 * 1000,
-    maxRetries: 1,   // one auto-retry on transient 5xx before we surface the error
-  })
-
+  const openai = getOpenAiClient(baseUrl)
   const openAiMessages = [...messages]
   if (systemInstruction) openAiMessages.unshift({ role: 'system', content: systemInstruction })
   const openAiTools = tools ? getOpenAiTools(tools) : undefined
-
-  // Client sends a clean vanilla OpenAI payload — fully typed against the SDK.
-  // Server injects reasoning_effort before forwarding (MODEL_DEFINITIONS in index.js).
   const payload: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
-    model:             modelName,
-    messages:          openAiMessages,
-    tools:             openAiTools?.length ? openAiTools : undefined,
-    tool_choice:       openAiTools?.length ? 'auto' : undefined,
-    temperature:       0.35,
-    max_tokens:        32768,
-    frequency_penalty: 0,
-    presence_penalty:  0,
-    stream:            true,
-    stream_options:    { include_usage: true },
+    model: modelName, messages: openAiMessages,
+    tools: openAiTools?.length ? openAiTools : undefined,
+    tool_choice: openAiTools?.length ? 'auto' : undefined,
+    temperature: 0.35, max_tokens: 32768,
+    frequency_penalty: 0, presence_penalty: 0,
+    stream: true, stream_options: { include_usage: true },
   }
-
   return globalApiLimiter.schedule(() =>
     openai.chat.completions.create(payload, { signal: abortSignal })
   ) as Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>

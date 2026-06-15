@@ -225,19 +225,15 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
 }
 
 
-// [envPrefix, defaultId, name, multimodal, contextWindow, badge, provider, reasoningEffort]
-// provider: 'gemini' | 'nvidia' | 'opencode' | 'z-ai'
-// reasoningEffort: injected by proxy before forwarding. null = send nothing (model always thinks).
-// Verified by live curl tests against each provider's actual API.
 const MODEL_DEFINITIONS = [
-  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast',      'gemini',   'high'],   // tested: high works, max → 400; not a thinking model so no visible effect
-  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',           true,  256000,  'Unlimited', 'gemini',   'high'],   // tested: only high works (max/low/none → 400); thinks via <thought> tags, frontend strips them
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],   // tested: accepts all values
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'], // tested: 'max' → 400
+  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast',      'gemini',   'high'],   
+  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',           true,  256000,  'Unlimited', 'gemini',   'high'],   
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],   
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'], 
   ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash',     false, 1000000, 'Fast',      'opencode', 'max'],
   ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'], // tested: 'max' → 400
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],   // tested: accepts max, reasoning_content separate field
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'],
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],  
 ];
 
 // Provider → availability key mapping

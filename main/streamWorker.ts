@@ -180,7 +180,7 @@ async function buildToolMessages(
     `Provide a single, very brief one-sentence summary of your immediate next step in your normal text response before emitting any tool calls.`
   ].filter(Boolean).join('\n')
 
-  const continuationMessages: any[] = [{ role: 'system', content: continuationPrompt }]
+  const continuationMessages: any[] = [{ role: 'user', content: continuationPrompt }]
 
   return { toolMessages, imageUserMessages, continuationMessages }
 }
@@ -724,7 +724,10 @@ export async function handleAgentStreamRequest(
             const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
             if (b && b.type === 'tool_call') { b.result = rawOutput; b.status = isErr ? 'error' : 'complete' }
             send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: rawOutput }, threadId })
-            if (FILE_WRITE_TOOLS.includes(tc.name)) (process as any).parentPort.postMessage({ type: 'artifacts-changed', threadId })
+            if (FILE_WRITE_TOOLS.includes(tc.name)) {
+              const pp = (process as any).parentPort
+              if (pp) pp.postMessage({ type: 'artifacts-changed', threadId })
+            }
             const formatted = await formatToolOutputForModel(tc.name, rawOutput, toolObj, multimodal)
             return { tool_call_id: tc.id, tool_name: tc.name, result: rawOutput, isError: isErr, formatted }
           } catch (err: any) {
@@ -752,7 +755,7 @@ export async function handleAgentStreamRequest(
 
     // Append duration block and send finish
     if (!orderedBlocks.some(x => x.type === 'duration')) {
-      orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+      orderedBlocks.push({ type: 'duration', durationSeconds: Math.round((Date.now() - startTime) / 1000) })
     }
     // Final DB save \u2014 must await to ensure consistency before finish event
     if (assistantContent || orderedBlocks.length > 0) {
@@ -805,7 +808,7 @@ export async function handleAgentStreamRequest(
       log.error('[stream] error:', err)
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
       if (!orderedBlocks.some(x => x.type === 'duration')) {
-        orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+        orderedBlocks.push({ type: 'duration', durationSeconds: Math.round((Date.now() - startTime) / 1000) })
       }
       orderedBlocks.push({ type: 'error', message: userMessage })
       try {
@@ -817,7 +820,7 @@ export async function handleAgentStreamRequest(
       // Clean abort
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
       if (!orderedBlocks.some(x => x.type === 'duration')) {
-        orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
+        orderedBlocks.push({ type: 'duration', durationSeconds: Math.round((Date.now() - startTime) / 1000) })
       }
       if (assistantContent || orderedBlocks.length > 0) {
         try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Aborted]', data: JSON.stringify(orderedBlocks) }) }

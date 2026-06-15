@@ -117,15 +117,14 @@ export function isFileBinary(filePath: string, buf: Buffer): boolean {
 const DEFAULT_IGNORED_DIRS = ['.git', '.gemini', 'node_modules', 'dist', 'out', 'build', 'target', 'coverage', '.cache', '.idea', '.vscode', '.next', '.nuxt', '.venv', 'venv', 'env', '__pycache__']
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.mp4', '.zip', '.gz', '.tar', '.exe', '.dll', '.sqlite', '.db', '.bin', '.wasm'])
 
-const workspaceFilesCache = new Map<string, string[]>()
-const workspaceFilesCacheTime = new Map<string, number>()
+const workspaceFilesCache = new Map<string, { files: string[]; time: number }>()
 const CACHE_TTL_MS = 60_000
 function getCacheKey(p: string) {
   const res = resolve(p)
   return process.platform === 'win32' ? res.toLowerCase() : res
 }
-export function invalidateWorkspaceFilesCache(rootPath: string): void { const k = getCacheKey(rootPath); workspaceFilesCache.delete(k); workspaceFilesCacheTime.delete(k) }
-export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear(); workspaceFilesCacheTime.clear() }
+export function invalidateWorkspaceFilesCache(rootPath: string): void { workspaceFilesCache.delete(getCacheKey(rootPath)) }
+export function clearAllWorkspaceFilesCache(): void { workspaceFilesCache.clear() }
 
 function buildIgnore(rootPath: string): Ignore {
   const ig = ignore()
@@ -136,18 +135,13 @@ function buildIgnore(rootPath: string): Ignore {
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const resolved = resolve(rootPath), key = getCacheKey(rootPath)
-  const cacheTime = workspaceFilesCacheTime.get(key)
-  if (cacheTime && Date.now() - cacheTime < CACHE_TTL_MS) {
-    const cached = workspaceFilesCache.get(key)
-    if (cached) return cached
-  }
+  const entry = workspaceFilesCache.get(key)
+  if (entry && Date.now() - entry.time < CACHE_TTL_MS) return entry.files
   workspaceFilesCache.delete(key)
-  workspaceFilesCacheTime.delete(key)
   const ig = buildIgnore(rootPath)
   const rawFiles = await fg('**/*', { cwd: resolved, onlyFiles: true, dot: true, followSymbolicLinks: false, ignore: DEFAULT_IGNORED_DIRS.map(d => `**/${d}/**`) })
   const files = rawFiles.filter(f => !BINARY_EXTENSIONS.has(extname(f).toLowerCase()) && !ig.ignores(f)).map(f => f.replace(/\\/g, '/'))
   files.sort((a, b) => a.localeCompare(b))
-  workspaceFilesCache.set(key, files)
-  workspaceFilesCacheTime.set(key, Date.now())
+  workspaceFilesCache.set(key, { files, time: Date.now() })
   return files
 }

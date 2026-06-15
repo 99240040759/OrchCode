@@ -17,9 +17,11 @@ import { ChatPane } from './components/ChatPane'
 import TitleBar from './components/TitleBar'
 import { authService, threadService } from './services/services'
 import { isMac } from './lib/sharedUtils'
-import { PanelLeft, PanelRight, ArrowLeft, ArrowRight } from 'lucide-react'
+import { PanelLeft, PanelRight } from 'lucide-react'
 import type { UpdateStatus } from '../preload/index.d'
 import Tooltip from './components/Tooltip'
+
+const TOASTER_OPTS = { style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } } as const
 
 function AppInner(): React.JSX.Element {
   const setAvailableModels = useSetAtom(availableModelsAtom)
@@ -135,7 +137,7 @@ function AppInner(): React.JSX.Element {
     <div className={`app-root ${sidebarExpanded ? 'sidebar-is-expanded' : 'sidebar-is-collapsed'} ${isMac ? 'is-mac' : 'is-win'}`}>
       <title>{activeThreadTitle} — Orch Code</title>
       <meta name="description" content="AI pair programming assistant" />
-      <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
+      <Toaster position="bottom-right" theme="dark" toastOptions={TOASTER_OPTS} />
       <TitleBar />
       <div className="app-main-layout">
         <ErrorBoundary name="Sidebar">
@@ -164,8 +166,6 @@ function AppInner(): React.JSX.Element {
       </div>
       <div className={`fixed-nav-container ${isMac ? 'fixed-nav-mac' : 'fixed-nav-win'}`}>
         <Tooltip content={sidebarExpanded ? 'Collapse Sidebar (Ctrl+Shift+B)' : 'Expand Sidebar (Ctrl+Shift+B)'}><button className="fixed-nav-btn" onClick={() => setSidebarExpanded(!sidebarExpanded)}><PanelLeft size={16} /></button></Tooltip>
-        <Tooltip content="Back"><button className="fixed-nav-btn" onClick={() => window.history.back()}><ArrowLeft size={16} /></button></Tooltip>
-        <Tooltip content="Forward"><button className="fixed-nav-btn" onClick={() => window.history.forward()}><ArrowRight size={16} /></button></Tooltip>
       </div>
       <div className={`fixed-right-container ${isMac ? 'fixed-right-mac' : 'fixed-right-win'}`}>
         <Tooltip content={isArtifactPanelOpen ? 'Collapse Panel (Ctrl+Shift+E)' : 'Expand Panel (Ctrl+Shift+E)'}><button onClick={() => setArtifactPanelOpen(!isArtifactPanelOpen)} className="fixed-toggle-panel-btn"><PanelRight size={16} strokeWidth={1.5} /></button></Tooltip>
@@ -178,7 +178,7 @@ function App(): React.JSX.Element {
   if (view === 'settings') return (
     <>
       <title>Settings — Orch Code</title>
-      <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
+      <Toaster position="bottom-center" theme="dark" toastOptions={TOASTER_OPTS} />
       <SettingsView />
     </>
   )
@@ -186,7 +186,7 @@ function App(): React.JSX.Element {
     <>
       <title>Welcome to Orch Code</title>
       <meta name="description" content="AI onboarding setup" />
-      <Toaster position="bottom-center" theme="dark" toastOptions={{ style: { background: 'var(--bg-sidebar)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-display)' } }} />
+      <Toaster position="bottom-center" theme="dark" toastOptions={TOASTER_OPTS} />
       <OnboardingView />
     </>
   ) : <Provider><ErrorBoundary><React.Suspense fallback={<div className="editor-loading">Loading Orch Code...</div>}><AppInner /></React.Suspense></ErrorBoundary></Provider>

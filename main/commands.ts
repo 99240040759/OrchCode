@@ -6,10 +6,10 @@ import { execa } from 'execa'
 import log from 'electron-log'
 import { z } from 'zod'
 
-import { startGoogleAuth, getAuthUser, logoutUser, requireAuthToken, authEvents } from './auth'
+import { startGoogleAuth, getAuthUser, logoutUser, authEvents } from './auth'
 import WindowManager from './utils'
 import { getCurrentUpdateStatus, triggerUpdateCheck, triggerInstall } from './updater'
-import { getAvailableModels } from './models'
+import { getAvailableModels, createAuthFetch } from './models'
 import { listArtifacts, getConversationPath, getApiBaseUrl } from './utils'
 import { pool } from './workerPool'
 import {
@@ -48,31 +48,25 @@ function resolveCommandPath(ctx: any, filePath: string): string {
 }
 
 // --- Terminal (PTY) State & Helpers ---
-const activePtys = new Map<string, any>()
-const activePtyOwners = new Map<string, number>()
-const activePtyConversations = new Map<string, string>()
-const destroyListeners = new Map<string, () => void>()
+interface PtyEntry { proc: any; ownerId: number; conversationId?: string; destroyListener: () => void }
+const activePtys = new Map<string, PtyEntry>()
 
 export function cleanupAllPtys() {
-  activePtys.forEach((child) => {
-    try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
-    setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
-  })
-  activePtys.clear(); activePtyOwners.clear(); activePtyConversations.clear(); destroyListeners.clear()
+  for (const { proc } of activePtys.values()) {
+    try { proc.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+    setTimeout(() => { try { proc.kill('SIGKILL') } catch { } }, 1000)
+  }
+  activePtys.clear()
 }
 
-export function cleanupPtysForThread(threadId: string) {
-  activePtyConversations.forEach((convId, id) => {
-    if (convId === threadId) {
-      const child = activePtys.get(id)
-      if (child) {
-        try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
-        setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
-        activePtys.delete(id); activePtyOwners.delete(id)
-      }
-      activePtyConversations.delete(id)
+function cleanupPtysForThread(threadId: string) {
+  for (const [id, entry] of activePtys) {
+    if (entry.conversationId === threadId) {
+      try { entry.proc.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+      setTimeout(() => { try { entry.proc.kill('SIGKILL') } catch { } }, 1000)
+      activePtys.delete(id)
     }
-  })
+  }
 }
 
 // --- Workspace Helpers ---
@@ -90,11 +84,17 @@ export async function deleteThreadData(threadId: string): Promise<boolean> {
   if (await getActiveThreadId() === threadId) await setActiveThreadId(null)
   pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
   clearWorkspaceContext(threadId)
-  // Destroy the browser session for this thread (full cleanup — view, playwright page, cookies)
   WindowManager.destroySession(threadId)
   const deleted = await deleteThread(threadId)
   await fs.rm(getConversationPath(threadId), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   return deleted
+}
+
+// --- Shared workspace bind helper (used by workspace:select and workspace:set-active) ---
+async function bindWorkspace(conversationId: string, workspacePath: string) {
+  try { await addOpenedWorkspace(workspacePath); await setThreadWorkspace(conversationId, workspacePath); app.addRecentDocument(workspacePath) }
+  catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
+  return updateWorkspacePath(conversationId, workspacePath)
 }
 
 // --- Browser helpers ---
@@ -128,15 +128,15 @@ function setupBrowserViewListeners(view: WebContentsView, convId: string, sender
   wc.removeAllListeners('did-start-navigation')
 
   wc.on('page-title-updated', (_e: any, title: string) => {
-    try { sender.send('browser:title-updated', title) } catch {}
+    try { sender.send('browser:title-updated', title) } catch { }
   })
   const onNavigate = (_e: any, navUrl: string) => {
-    try { sender.send('browser:url-changed', navUrl) } catch {}
+    try { sender.send('browser:url-changed', navUrl) } catch { }
   }
   wc.on('did-navigate', onNavigate)
   wc.on('did-navigate-in-page', onNavigate)
 
-  const injectId = () => { wc.executeJavaScript(`window.__orchConversationId = "${convId}"`).catch(() => {}) }
+  const injectId = () => { wc.executeJavaScript(`window.__orchConversationId = "${convId}"`).catch(() => { }) }
   const injectCursor = () => {
     wc.executeJavaScript(`
       if (!document.getElementById('playwright-cursor')) {
@@ -148,7 +148,7 @@ function setupBrowserViewListeners(view: WebContentsView, convId: string, sender
         if (p) p.appendChild(dot);
         document.addEventListener('mousemove', (e) => { dot.style.left = e.pageX + 'px'; dot.style.top = e.pageY + 'px'; });
       }
-    `).catch(() => {})
+    `).catch(() => { })
   }
   wc.on('dom-ready', () => { injectId(); injectCursor() })
   wc.on('did-start-navigation', injectId)
@@ -184,7 +184,6 @@ export const ipcCommands = {
     schema: z.object({}),
     execute: async () => {
       if (process.platform === 'darwin') {
-        const { shell } = await import('electron')
         await shell.openExternal('https://github.com/sameer786ss/OrchCode/releases/latest')
         setTimeout(() => app.quit(), 500)
       }
@@ -200,14 +199,7 @@ export const ipcCommands = {
     schema: z.object({ text: z.string().max(5000), threadId: threadIdSchema }),
     execute: async ({ text, threadId }: any) => {
       try {
-        const token = requireAuthToken()
-        const anonKey = process.env.SUPABASE_ANON_KEY
-        if (!anonKey) throw new Error('SUPABASE_ANON_KEY configuration is missing.')
-        const response = await fetch(`${getApiBaseUrl()}/generate-title`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, apikey: anonKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
-        })
+        const response = await createAuthFetch()(`${getApiBaseUrl()}/generate-title`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
         if (!response.ok) throw new Error(`Failed to generate title: ${response.statusText}`)
         const data = await response.json(), title = data.title?.trim() ?? null
         if (title) await updateThreadTitle(threadId, title)
@@ -248,7 +240,7 @@ export const ipcCommands = {
     }
   },
   'thread:list': { schema: z.object({}), execute: async () => { try { return await getThreads() } catch (err) { log.error('[commands] getThreads:', err); throw err } } },
-  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => { try { return await getThread(threadId) } catch (err) { throw err } } },
+  'thread:get': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => getThread(threadId) },
   'thread:messages': {
     schema: z.object({ threadId: threadIdSchema }),
     execute: async ({ threadId }: any) => {
@@ -267,7 +259,7 @@ export const ipcCommands = {
       catch (err) { log.error('[commands] deleteThread:', err); throw err }
     }
   },
-  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: async ({ threadId }: any) => { try { return await getThreadWorkspace(threadId) } catch (err) { throw err } } },
+  'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }: any) => getThreadWorkspace(threadId) },
 
   // Workspace
   'workspace:select': {
@@ -277,19 +269,14 @@ export const ipcCommands = {
       const win = WindowManager.getMainWindow() || BrowserWindow.fromWebContents(event.sender)!
       const result = await dialog.showOpenDialog(win, { title: 'Select Workspace Folder', properties: ['openDirectory', 'createDirectory'] })
       if (result.canceled || !result.filePaths[0]) return null
-      const selectedPath = result.filePaths[0]
-      try { await addOpenedWorkspace(selectedPath); await setThreadWorkspace(conversationId, selectedPath); app.addRecentDocument(selectedPath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
-      const ctx = await updateWorkspacePath(conversationId, selectedPath)
-      return ctx
+      return bindWorkspace(conversationId, result.filePaths[0])
     }
   },
   'workspace:set-active': {
     schema: z.object({ conversationId: convIdSchema, workspacePath: z.string().min(1) }),
     execute: async ({ conversationId, workspacePath }: any) => {
       if (!conversationId) throw new Error('conversationId is required')
-      try { await addOpenedWorkspace(workspacePath); await setThreadWorkspace(conversationId, workspacePath); app.addRecentDocument(workspacePath) } catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
-      const ctx = await updateWorkspacePath(conversationId, workspacePath)
-      return ctx
+      return bindWorkspace(conversationId, workspacePath)
     }
   },
   'workspace:list-files': {
@@ -372,41 +359,37 @@ export const ipcCommands = {
         log.info(`[commands] Reconnecting PTY: ${id}`)
         const { port1, port2 } = new MessageChannelMain()
         event.sender.postMessage(`terminal:port:${id}`, null, [port2])
-        existing.postMessage({ type: 'reconnect-port' }, [port1])
-        activePtyOwners.set(id, event.sender.id)
-        const destroyListener = () => { try { existing.kill() } catch {}; activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) }
-        const old = destroyListeners.get(id); if (old) event.sender.off('destroyed', old)
-        destroyListeners.set(id, destroyListener); event.sender.once('destroyed', destroyListener)
+        existing.proc.postMessage({ type: 'reconnect-port' }, [port1])
+        const destroyListener = () => { try { existing.proc.kill() } catch { }; activePtys.delete(id) }
+        event.sender.off('destroyed', existing.destroyListener)
+        existing.ownerId = event.sender.id; existing.destroyListener = destroyListener
+        event.sender.once('destroyed', destroyListener)
         return { id }
       }
       const shellExec = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash')
       const convCtx = opts.conversationId ? getWorkspaceContext(opts.conversationId) : undefined
       const workingDir = convCtx ? (opts.cwd ? assertWithinWorkspace(convCtx.rootPath, opts.cwd) : convCtx.rootPath) : process.env.HOME || process.cwd()
-      const ptyWorkerPath = join(__dirname, 'ptyWorker.js')
-      const child = utilityProcess.fork(ptyWorkerPath, [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
+      const { resolveWorkerPath } = require('./utils')
+      const child = utilityProcess.fork(resolveWorkerPath('ptyWorker'), [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`terminal:port:${id}`, null, [port2])
       child.postMessage({ type: 'init-pty', cols: opts.cols, rows: opts.rows, cwd: workingDir, shell: shellExec }, [port1])
-      activePtys.set(id, child); activePtyOwners.set(id, event.sender.id)
-      if (opts.conversationId) activePtyConversations.set(id, opts.conversationId)
-      const destroyListener = () => { try { child.kill() } catch {}; activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) }
-      destroyListeners.set(id, destroyListener); event.sender.once('destroyed', destroyListener)
-      child.once('exit', () => { event.sender.off('destroyed', destroyListener); activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id); destroyListeners.delete(id) })
+      const destroyListener = () => { try { child.kill() } catch { }; activePtys.delete(id) }
+      activePtys.set(id, { proc: child, ownerId: event.sender.id, conversationId: opts.conversationId, destroyListener })
+      event.sender.once('destroyed', destroyListener)
+      child.once('exit', () => { event.sender.off('destroyed', destroyListener); activePtys.delete(id) })
       return { id }
     }
   },
   'terminal:close': {
     schema: z.object({ id: z.string().min(1) }),
     execute: ({ id }: any, event: any) => {
-      if (activePtyOwners.get(id) !== event.sender.id) return
-      const listener = destroyListeners.get(id)
-      if (listener) { event.sender.off('destroyed', listener); destroyListeners.delete(id) }
-      const child = activePtys.get(id)
-      if (child) {
-        try { child.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
-        setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 1000)
-        activePtys.delete(id); activePtyOwners.delete(id); activePtyConversations.delete(id)
-      }
+      const entry = activePtys.get(id)
+      if (!entry || entry.ownerId !== event.sender.id) return
+      event.sender.off('destroyed', entry.destroyListener)
+      try { entry.proc.kill('SIGTERM') } catch (err) { log.debug('[terminal] SIGTERM error:', err) }
+      setTimeout(() => { try { entry.proc.kill('SIGKILL') } catch { } }, 1000)
+      activePtys.delete(id)
     }
   },
 
@@ -526,13 +509,7 @@ export const ipcCommands = {
   'quota:get': {
     schema: z.object({}),
     execute: async () => {
-      const token = requireAuthToken()
-      const anonKey = process.env.SUPABASE_ANON_KEY
-      if (!anonKey) throw new Error('SUPABASE_ANON_KEY missing')
-      const res = await fetch(`${getApiBaseUrl()}/budget`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}`, apikey: anonKey }
-      })
+      const res = await createAuthFetch()(`${getApiBaseUrl()}/budget`)
       if (!res.ok) throw new Error(`Quota fetch failed: HTTP ${res.status}`)
       return res.json()
     }

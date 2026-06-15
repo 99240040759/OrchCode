@@ -1,5 +1,6 @@
 import Parser from 'web-tree-sitter'
 import { join } from 'node:path'
+import { getAppEnv } from './utils'
 
 export type Language = Parser.Language
 export type Node = Parser.SyntaxNode
@@ -28,11 +29,7 @@ export async function getParserForExtension(ext: string): Promise<Parser | null>
   if (cached) return cached
   if (!isInitialized) { await Parser.init(); isInitialized = true }
   const parser = new Parser()
-  let electronApp: any
-  try { electronApp = require('electron').app } catch {}
-  const isPackaged = process.env.IS_PACKAGED === 'true' || (electronApp && electronApp.isPackaged)
-  const resourcesPath = process.env.RESOURCES_PATH || process.resourcesPath
-  const appPath = process.env.APP_PATH || (electronApp && electronApp.getAppPath()) || process.cwd()
+  const { isPackaged, resourcesPath, appPath } = getAppEnv()
   const wasmsDir = isPackaged ? join(resourcesPath, 'wasms') : join(appPath, 'resources', 'wasms')
   const Lang = await Parser.Language.load(join(wasmsDir, wasmFile))
   parser.setLanguage(Lang)
