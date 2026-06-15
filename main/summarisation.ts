@@ -2,7 +2,7 @@ import log from 'electron-log'
 import { requireAuthToken } from './auth'
 import { getApiBaseUrl } from './utils'
 
-const SUMMARISE_MODEL = 'gemini-3.1-flash-lite'
+const SUMMARISE_MODEL = 'north-mini-code-free'
 
 const SUMMARISE_SYSTEM_PROMPT = `You are a conversation memory compactor for an AI coding agent. Your job is to produce a maximally detailed, lossless summary of the conversation so the agent can continue with full context.
 
@@ -50,7 +50,7 @@ function buildTranscript(messages: any[]): string {
 export async function summariseContext(messages: any[]): Promise<string | null> {
   try {
     const transcript = buildTranscript(messages)
-    const url = `${getApiBaseUrl()}/gemini/v1beta/models/${SUMMARISE_MODEL}:generateContent`
+    const url = `${getApiBaseUrl()}/opencode/v1/chat/completions`
     const headers = new Headers()
     headers.set('Authorization', `Bearer ${requireAuthToken()}`)
     headers.set('apikey', process.env.SUPABASE_ANON_KEY || '')
@@ -60,13 +60,19 @@ export async function summariseContext(messages: any[]): Promise<string | null> 
       headers,
       signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: SUMMARISE_SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ text: `Produce a complete, structured, maximally detailed summary of the following agent conversation history:\n\n${transcript}` }] }]
+        model: SUMMARISE_MODEL,
+        stream: false,
+        temperature: 0.2,
+        max_tokens: 8192,
+        messages: [
+          { role: 'system', content: SUMMARISE_SYSTEM_PROMPT },
+          { role: 'user', content: `Produce a complete, structured, maximally detailed summary of the following agent conversation history:\n\n${transcript}` }
+        ]
       })
     })
     if (!response.ok) throw new Error(`HTTP ${response.status} — ${await response.text()}`)
     const json = await response.json()
-    const result = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+    const result = json.choices?.[0]?.message?.content?.trim()
     if (!result) throw new Error('Empty summary response')
     log.info(`[summarise] Summary generated: ${result.length} chars`)
     return result

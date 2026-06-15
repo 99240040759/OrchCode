@@ -119,18 +119,49 @@ function checkBlocklist(tokens: string[]): string | null {
 }
 
 function tokenizeCommand(commandLine: string): string[] {
-  return parse(commandLine).map(t => typeof t === 'string' ? t : ('op' in t ? t.op : ('pattern' in t ? t.pattern : ''))).filter(Boolean)
+  return (parse(commandLine) as Array<string | { op: string }>)
+    .map(t => typeof t === 'string' ? t : t.op)
+    .filter(Boolean)
 }
 
 export function createCoreTools(convId: string, multimodal = true) {
   const resolve = () => wctx(convId)
   const resolveRelativePath = (p: string): string => {
-    const ctx = resolve(), norm = p.replace(/\\/g, '/'), absPath = isAbsolute(p) ? resolvePath(p) : resolvePath(ctx.rootPath, p), normAbs = absPath.replace(/\\/g, '/'), skillsPath = getUserSkillsPath().replace(/\\/g, '/'), artifactsPath = ctx.artifactsPath.replace(/\\/g, '/')
+    const ctx = resolve()
+    const norm = p.replace(/\\/g, '/')
+    // Resolve to absolute
+    const absPath = isAbsolute(p) ? resolvePath(p) : resolvePath(ctx.rootPath, p)
+    const normAbs = absPath.replace(/\\/g, '/')
+    const skillsPath = getUserSkillsPath().replace(/\\/g, '/')
+    const artifactsPath = ctx.artifactsPath.replace(/\\/g, '/')
+
     if (normAbs.startsWith(skillsPath)) return assertWithinWorkspace(getUserSkillsPath(), relative(getUserSkillsPath(), absPath))
     if (normAbs.startsWith(artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, relative(ctx.artifactsPath, absPath))
+
+    // If model passed an absolute path that is within the workspace root, use it directly
+    if (isAbsolute(p) && normAbs.startsWith(ctx.rootPath.replace(/\\/g, '/'))) {
+      return assertWithinWorkspace(ctx.rootPath, absPath)
+    }
+
+    // Handle virtual-absolute paths like "/src/file.ts" that start with "/" but have no drive letter
     const clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
     if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/?artifacts\//, ''))
     if (clean.startsWith('.gemini/skills/') || clean.startsWith('./.gemini/skills/')) return assertWithinWorkspace(getUserSkillsPath(), clean.replace(/^\.?\/?\..gemini\/skills\//, ''))
+
+    // If model passed an absolute path OUTSIDE the workspace (e.g. full system path), strip
+    // the drive/root and treat the relative portion as workspace-relative. This prevents
+    // "Path traversal blocked" errors when models confidently emit absolute paths.
+    if (isAbsolute(p)) {
+      // e.g. "C:\Users\foo\project\src\index.ts" → try to relativize from workspace first
+      const relFromRoot = relative(ctx.rootPath, absPath)
+      if (!relFromRoot.startsWith('..') && !isAbsolute(relFromRoot)) {
+        return assertWithinWorkspace(ctx.rootPath, relFromRoot)
+      }
+      // Last resort: strip the root/drive and use only the file name part
+      const stripped = norm.replace(/^\/[a-zA-Z]:\//, '').replace(/^[a-zA-Z]:\//, '').replace(/^\//, '')
+      return assertWithinWorkspace(ctx.rootPath, stripped)
+    }
+
     return assertWithinWorkspace(ctx.rootPath, p)
   }
 

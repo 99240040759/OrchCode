@@ -120,7 +120,7 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
 
 // ─── Budget helpers ───────────────────────────────────────────────────────────
 const BUDGET_LIMIT = () => parseFloat(process.env.BUDGET_LIMIT_USD || '100');
-const BUDGET_PATHS = ['/gemini', '/nvidia', '/opencode', '/z-ai'];
+const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai'];
 const SKIP_BUDGET  = ['/models', '/generate-title'];
 
 async function callBudgetRpc(rpcName, body) {
@@ -170,6 +170,9 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
   for (const h of forwardHeaders) { const val = req.headers[h]; if (val) headers.set(h, val); }
   const body = (req.method === 'POST' || req.method === 'PUT')
     ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : undefined;
+  // Client sends previous step's prompt_tokens so we can record only the incremental delta.
+  // Without this, a 10-step agent with 90k context would bill 10 × 90k = 900k input instead of ~90k.
+  const prevPromptTokens = parseInt(req.headers['x-prev-prompt-tokens'] || '0', 10) || 0;
   try {
     const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body });
     if (upstreamRes.status === 429 && keyInfo.pool.keys.length > 1) {
@@ -190,6 +193,8 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
     let buf = '';
     const flush = () => {
       // Parse SSE lines looking for usage: {"usage":{"prompt_tokens":N,"completion_tokens":M}}
+      // NOTE: prompt_tokens = full context size on every step. We only record the incremental
+      // growth (current - previous step) to avoid billing 10x the actual new tokens consumed.
       for (const line of buf.split('\n')) {
         const trim = line.replace(/^data:\s*/, '');
         if (!trim || trim === '[DONE]') continue;
@@ -197,8 +202,11 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           const j = JSON.parse(trim);
           const u = j.usage || j.usageMetadata;
           if (u) {
-            inputTok  += u.prompt_tokens     || u.promptTokenCount     || u.input_tokens  || 0;
-            outputTok += u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
+            // Take the max seen (final usage chunk wins — it is the authoritative count)
+            const rawInput  = u.prompt_tokens     || u.promptTokenCount     || u.input_tokens  || 0;
+            const rawOutput = u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
+            if (rawInput  > inputTok)  inputTok  = rawInput;
+            if (rawOutput > outputTok) outputTok = rawOutput;
           }
         } catch {}
       }
@@ -214,7 +222,9 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           res.write(chunk);
         }
         flush();
-        recordUsage(userId, inputTok, outputTok);
+        // Record only the incremental new input (context growth), not full prompt_tokens every step.
+        const incrementalInput = Math.max(0, inputTok - prevPromptTokens);
+        recordUsage(userId, incrementalInput, outputTok);
       } catch {}
       res.end();
     })();
@@ -226,18 +236,16 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
 
 
 const MODEL_DEFINITIONS = [
-  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast',      'gemini',   'high'],   
-  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',           true,  256000,  'Unlimited', 'gemini',   'high'],   
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],   
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'], 
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'],
   ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash',     false, 1000000, 'Fast',      'opencode', 'max'],
   ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
   ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],  
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],
 ];
 
 // Provider → availability key mapping
-const PROVIDER_KEY = { gemini: 'GOOGLE_GENERATIVE_AI_API_KEY', nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
+const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
 
 async function handleModels(req, res) {
   const models = {};
@@ -267,27 +275,6 @@ function getModelMeta() {
     meta[id] = { provider, reasoningEffort };
   }
   return meta;
-}
-
-// ─── Gemini handler ───────────────────────────────────────────────────────────
-async function handleGemini(req, res, userId) {
-  const subpath = req.normalizedPath.replace(/^\/gemini/, '');
-  const allowedPatterns = [
-    /^\/v1beta\/models$/,
-    /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]generateContent$/,
-    /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]streamGenerateContent$/,
-    /^\/v1beta\/models\/[a-zA-Z0-9_.:\-]+[/:]countTokens$/,
-    /^\/v1beta\/openai\/chat\/completions$/,
-    /^\/v1beta\/openai\/models$/
-  ];
-  if (!allowedPatterns.some(p => p.test(subpath)))
-    return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  const urlObj = new URL(req.url, 'http://localhost');
-  const targetUrl = `https://generativelanguage.googleapis.com${subpath}${urlObj.search}`;
-  const isOai = subpath.startsWith('/v1beta/openai');
-  return userId
-    ? proxyWithBudget(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', isOai, userId)
-    : proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', isOai);
 }
 
 // ─── reasoning_effort injection — server injects before forwarding ───────────
@@ -490,10 +477,9 @@ app.all('*', async (req, res) => {
   const modelMeta = getModelMeta();
   if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
   if (req.method === 'GET'    && path === '/budget')                  return handleGetBudget(req, res, userId);
-  if (path.startsWith('/gemini'))   { injectReasoningEffort(req, modelMeta); return handleGemini(req, res, userId); }
-  if (path.startsWith('/nvidia'))   return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com',       modelMeta }, userId);
-  if (path.startsWith('/opencode')) return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen',                modelMeta }, userId);
-  if (path.startsWith('/z-ai'))     return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId);
+  if (path.startsWith('/nvidia'))   { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com',       modelMeta }, userId); }
+  if (path.startsWith('/opencode')) { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen',                modelMeta }, userId); }
+  if (path.startsWith('/z-ai'))     { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
   if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
   if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
   if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);

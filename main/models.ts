@@ -45,7 +45,6 @@ export function getOpenAiTools(toolsRecord: Record<string, any>) {
 
 // Provider → base URL mapping. Server owns routing; client just reads model.provider.
 const PROVIDER_BASE: Record<string, string> = {
-  gemini:   'gemini/v1beta/openai',
   nvidia:   'nvidia/v1',
   opencode: 'opencode/v1',
   'z-ai':   'z-ai/v1',
@@ -70,16 +69,17 @@ export async function streamLlmResponse(
   messages: OpenAI.ChatCompletionMessageParam[],
   systemInstruction?: string,
   tools?: any,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  prevInputTokens = 0
 ): Promise<Stream<OpenAI.Chat.ChatCompletionChunk>> {
   const models = await getAvailableModels()
   // O(1) indexed lookup — avoids O(n) Array.find() + fallback key scan on every call
   const rawModel = modelIdIndex.get(modelId) ?? models[modelId]
   if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
   const apiBase = getApiBaseUrl()
-  const providerPath = PROVIDER_BASE[rawModel.provider ?? 'gemini'] ?? PROVIDER_BASE.gemini
+  const providerPath = PROVIDER_BASE[rawModel.provider ?? 'opencode'] ?? PROVIDER_BASE.opencode
   const baseUrl = `${apiBase}/${providerPath}`
-  const modelName = rawModel.provider === 'gemini' ? rawModel.id : rawModel.id.split('/').slice(1).join('/')
+  const modelName = rawModel.id.split('/').slice(1).join('/')
   log.info(`[models] ${modelId} → provider=${rawModel.provider} baseUrl=${baseUrl} modelName=${modelName}`)
   const openai = getOpenAiClient(baseUrl)
   const openAiMessages = [...messages]
@@ -93,7 +93,9 @@ export async function streamLlmResponse(
     frequency_penalty: 0, presence_penalty: 0,
     stream: true, stream_options: { include_usage: true },
   }
-  return globalApiLimiter.schedule(() =>
-    openai.chat.completions.create(payload, { signal: abortSignal })
-  ) as Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>
+  return globalApiLimiter.schedule(() => {
+    // Attach prev-prompt-tokens header so GCP proxyWithBudget records only the incremental delta
+    const extraHeaders = prevInputTokens > 0 ? { 'x-prev-prompt-tokens': String(prevInputTokens) } : {}
+    return openai.chat.completions.create(payload, { signal: abortSignal, headers: extraHeaders })
+  }) as Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>
 }

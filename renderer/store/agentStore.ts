@@ -1,5 +1,5 @@
 import { atom } from 'jotai'
-import { atomWithStorage } from 'jotai/utils'
+import { atomWithStorage, splitAtom } from 'jotai/utils'
 import type { ThreadEntry, ArtifactEntry, UpdateStatus, UserProfile } from '../../preload/index.d'
 import type { ChatMessage, EditorFile } from './types'
 
@@ -46,6 +46,7 @@ export const chatMessagesAtom = atom(
     set(chatMessagesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
   }
 )
+export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
 export const agentRunStateAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(agentRunStateMapAtom)[id] ?? 'idle') : 'idle' as AgentRunState },
   (get, set, update: AgentRunState | ((prev: AgentRunState) => AgentRunState)) => {
@@ -133,6 +134,7 @@ export const runningThreadsAtom = atom<Set<string>>(new Set<string>())
 export const sidebarExpandedAtom = atomWithStorage<boolean>('orchcode_sidebar_expanded', true)
 export const isArtifactPanelOpenAtom = atom<boolean>(false)
 export const artifactPanelModeAtom = atom<ArtifactPanelMode>('overview')
+export const isDiffModeAtom = atom<boolean>(false)
 export const hasMessagesAtom = atom<boolean>((get) => get(chatMessagesAtom).length > 0)
 export const globalPromptTriggerAtom = atom<{ prompt: string; mode?: string; threadId?: string } | null>(null)
 export const availableModelsAtom = atom<Record<string, ModelInfo>>({})

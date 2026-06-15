@@ -398,9 +398,10 @@ export async function handleAgentStreamRequest(
   const orderedBlocks: StreamBlock[] = []
   let lifetimeTokensAdded = 0
   let currentContextTokens = 0
-  let prevContextTokens = 0  // context size before current step — for incremental delta
-  let totalInputAdded = 0    // total input tokens this session (actual or estimated)
-  let totalOutputAdded = 0   // total output tokens this session (actual or estimated)
+  let prevContextTokens = 0    // context size before current step — for incremental delta
+  let prevStepInputTokens = 0  // prompt_tokens from the previous LLM step, used to compute incremental input
+  let totalInputAdded = 0      // incremental new input tokens this session (NOT full context per step)
+  let totalOutputAdded = 0     // total output tokens this session (actual or estimated)
 
   // Progressive save state
   let lastSaveMs = 0
@@ -524,7 +525,7 @@ export async function handleAgentStreamRequest(
       send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
       // ── 4. Stream LLM call ────────────────────────────────────────────────
-      const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal)
+      const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal, prevStepInputTokens)
 
       // Per-step reasoning stripper — strips <think>/<thought> from UI stream
       // but raw content still goes into LLM messages for model self-consistency
@@ -628,12 +629,16 @@ export async function handleAgentStreamRequest(
       if (controller.signal.aborted) break
       // Compute lifetime token additions for this step
       if (hasActualUsage) {
-        // Server-reported exact counts — most accurate path
-        currentContextTokens = stepActualInput  // prompt_tokens IS the actual context window size
-        const stepTotal = stepActualInput + stepActualOutput
-        lifetimeTokensAdded += stepTotal
-        totalInputAdded += stepActualInput
+        // Server-reported exact counts.
+        // prompt_tokens = ENTIRE context window size on every step — do NOT sum it raw across steps.
+        // Instead, only count the INCREMENTAL growth vs the previous step to avoid massive double-counting.
+        // e.g. step1=50k, step2=60k, step3=65k → incremental = 50k + 10k + 5k = 65k, not 175k.
+        const newInputThisStep = Math.max(0, stepActualInput - prevStepInputTokens)
+        currentContextTokens = stepActualInput
+        lifetimeTokensAdded += newInputThisStep + stepActualOutput
+        totalInputAdded += newInputThisStep
         totalOutputAdded += stepActualOutput
+        prevStepInputTokens = stepActualInput
       } else {
         // Fallback estimation — only count INCREMENTAL new tokens, not full re-accumulated context
         const stepOutputEst = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType)

@@ -79,8 +79,12 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
         if (groupStartIdx === -1) groupStartIdx = idx
         currentGroup.push({ id: b.tool_call_id, tool_name: b.tool_name, args: b.args, args_delta: b.args_delta, result: b.result, status: b.status })
       } else {
+        // reasoning and duration blocks are invisible to the chat renderer —
+        // reasoning is never shown (preserved only for model context),
+        // duration is rendered separately below. MUST return before flush()
+        // otherwise every reasoning block between tool calls shatters the group.
+        if (b.type === 'reasoning' || b.type === 'duration') return
         if (b.type === 'text' && !b.content.trim()) return
-        if (b.type === 'duration') return
         flush()
         if (b.type === 'summarize') { result.push({ type: 'summarize', block: b, blockIndex: idx }) }
         else if (b.type === 'text') { result.push({ type: 'text', block: b, blockIndex: idx }) }
