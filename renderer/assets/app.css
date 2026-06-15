@@ -133,7 +133,7 @@
 .custom-titlebar-title { font-size: 13px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 360px }
 .custom-titlebar-right { display: flex; align-items: center; gap: 12px }
 .fixed-nav-container { position: absolute; top: 0; height: var(--titlebar-height); display: flex; align-items: center; gap: 10px; z-index: 9999; -webkit-app-region: no-drag }
-.fixed-nav-container.fixed-nav-mac { left: 104px }
+.fixed-nav-container.fixed-nav-mac { left: 80px }
 .fixed-nav-container.fixed-nav-win { left: 20px }
 .fixed-nav-btn, .fixed-toggle-panel-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; background: transparent; border: none; color: var(--text-secondary); transition: background-color 0.15s ease, color 0.15s ease; padding: 0 }
 .fixed-nav-btn:hover, .fixed-nav-btn:focus-visible, .fixed-toggle-panel-btn:hover, .fixed-toggle-panel-btn:focus-visible { background-color: var(--bg-trans-active); color: var(--text-primary) }

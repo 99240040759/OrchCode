@@ -324,7 +324,13 @@ export function createCoreTools(convId: string, multimodal = true) {
         const blockedCmd = checkBlocklist(tokens)
         if (blockedCmd) return { success: false, stdout: '', stderr: `Command blocked: '${blockedCmd}' is not permitted.`, exitCode: 1 }
         log.info(`[tool:run_command] cwd=${runDir} exe=${executable} args=${JSON.stringify(runArgs)}`)
-        const result = await execa(executable, runArgs, { shell: false, cwd: runDir, timeout: args.wait_ms_before_async ?? 60000, reject: false, cancelSignal: options?.signal, env: { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' } })
+        // macOS: Electron utility processes inherit a stripped PATH — run through login shell so
+        // user tools (Homebrew, nvm, pyenv, conda, etc.) are reachable.
+        const timeout = args.wait_ms_before_async ?? 60000
+        const env = { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' }
+        const result = process.platform === 'darwin'
+          ? await execa(process.env.SHELL || '/bin/zsh', ['-l', '-c', command_line.trim()], { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
+          : await execa(executable, runArgs, { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
         return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, success: result.exitCode === 0, cwd: runDir }
       } catch (err: any) {
         log.error('[tool:run_command] error:', err.message)

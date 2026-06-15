@@ -225,34 +225,52 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
 }
 
 
+// [envPrefix, defaultId, name, multimodal, contextWindow, badge, provider, reasoningEffort]
+// provider: 'gemini' | 'nvidia' | 'opencode' | 'z-ai'
+// reasoningEffort: injected by proxy before forwarding. null = send nothing (model always thinks).
+// Verified by live curl tests against each provider's actual API.
 const MODEL_DEFINITIONS = [
-  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast'],
-  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',            true,  256000,  'Unlimited'],
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',      'Kimi K2.6',              true,  256000,  'Fast'],
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron 3 Ultra',       false, 256000,  'Slow'],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',          false, 128000,  'Max'],
-  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Pro',        false, 1000000, 'Fast'],
-  ['BIG_PICKLE',       'opencode/big-pickle',              'Big Pickle',             false, 200000,  'Max'],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',          'MiMo V2.5',              true,  1000000, 'Long'],
+  ['GEMINI_FLASH_LITE', 'gemini-3.1-flash-lite',          'Gemini 3.1 Flash Lite', true,  1000000, 'Fast',      'gemini',   'high'],   // tested: high works, max → 400; not a thinking model so no visible effect
+  ['GEMMA',            'gemma-4-26b-a4b-it',              'Gemma 4 26B',           true,  256000,  'Unlimited', 'gemini',   'high'],   // tested: only high works (max/low/none → 400); thinks via <thought> tags, frontend strips them
+  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],   // tested: accepts all values
+  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'], // tested: 'max' → 400
+  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash',     false, 1000000, 'Fast',      'opencode', 'max'],
+  ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'], // tested: 'max' → 400
+  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],   // tested: accepts max, reasoning_content separate field
 ];
+
+// Provider → availability key mapping
+const PROVIDER_KEY = { gemini: 'GOOGLE_GENERATIVE_AI_API_KEY', nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
 
 async function handleModels(req, res) {
   const models = {};
-  for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow, defaultBadge] of MODEL_DEFINITIONS) {
-    const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
-    let isAvailable = true;
-    if (id.startsWith('zai/')      && !process.env.Z_AI_API_KEY)                 isAvailable = false;
-    if (id.startsWith('opencode/') && !process.env.OPENCODE_API_KEY)              isAvailable = false;
-    if (id.startsWith('nvidia/')   && !process.env.NVIDIA_API_KEY)                isAvailable = false;
-    if (!id.includes('/')          && !process.env.GOOGLE_GENERATIVE_AI_API_KEY)  isAvailable = false;
-    if (!isAvailable) continue;
-    const name          = process.env[`${prefix}_MODEL_NAME`]     || defaultName;
-    const multimodal    = process.env[`${prefix}_MULTIMODAL`]     ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
-    const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
-    const badge         = process.env[`${prefix}_BADGE`]          || defaultBadge || null;
-    models[prefix.toLowerCase()] = { id, name, multimodal, contextWindow, badge };
+  for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow, defaultBadge, defaultProvider, defaultReasoningEffort] of MODEL_DEFINITIONS) {
+    const id       = process.env[`${prefix}_MODEL_ID`] || defaultId;
+    const provider = process.env[`${prefix}_PROVIDER`] || defaultProvider;
+    const envKey   = PROVIDER_KEY[provider];
+    if (envKey && !process.env[envKey]) continue; // skip if provider key not configured
+    const name            = process.env[`${prefix}_MODEL_NAME`]       || defaultName;
+    const multimodal      = process.env[`${prefix}_MULTIMODAL`]       ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
+    const contextWindow   = process.env[`${prefix}_CONTEXT_WINDOW`]   ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
+    const badge           = process.env[`${prefix}_BADGE`]            || defaultBadge || null;
+    const reasoningEffort = process.env[`${prefix}_REASONING_EFFORT`] !== undefined ? (process.env[`${prefix}_REASONING_EFFORT`] || null) : defaultReasoningEffort;
+    models[prefix.toLowerCase()] = { id, name, multimodal, contextWindow, badge, provider, reasoningEffort };
   }
   res.json(models);
+}
+
+// Build a lookup: modelId → reasoningEffort, for use in the proxy injection middleware.
+// Called once per request — models object is rebuilt each time (TTL handled client-side).
+function getModelMeta() {
+  const meta = {};
+  for (const [prefix, defaultId, , , , , defaultProvider, defaultReasoningEffort] of MODEL_DEFINITIONS) {
+    const id              = process.env[`${prefix}_MODEL_ID`] || defaultId;
+    const provider        = process.env[`${prefix}_PROVIDER`] || defaultProvider;
+    const reasoningEffort = process.env[`${prefix}_REASONING_EFFORT`] !== undefined ? (process.env[`${prefix}_REASONING_EFFORT`] || null) : defaultReasoningEffort;
+    meta[id] = { provider, reasoningEffort };
+  }
+  return meta;
 }
 
 // ─── Gemini handler ───────────────────────────────────────────────────────────
@@ -276,15 +294,36 @@ async function handleGemini(req, res, userId) {
     : proxyRequestWithRotation(req, res, targetUrl, 'GOOGLE_GENERATIVE_AI_API_KEY', isOai);
 }
 
-// ─── OpenAI-compat handler (nvidia / opencode / z-ai) ────────────────────────
+// ─── reasoning_effort injection — server injects before forwarding ───────────
+// Intercepts POST /chat/completions body, adds reasoning_effort if model metadata defines it.
+// This keeps ALL provider-specific knowledge server-side; clients send vanilla OpenAI payloads.
+function injectReasoningEffort(req, modelMeta) {
+  if (req.method !== 'POST') return;
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    if (!body || typeof body !== 'object') return;
+    const modelId = body.model;
+    if (!modelId) return;
+    const meta = modelMeta[modelId];
+    if (!meta?.reasoningEffort) return;
+    if (!body.reasoning_effort) body.reasoning_effort = meta.reasoningEffort;
+    req.body = JSON.stringify(body);
+    req.headers['content-length'] = Buffer.byteLength(req.body).toString();
+  } catch { /* malformed body — pass through unchanged */ }
+}
+
+// ─── OpenAI-compat handler (nvidia / opencode / z-ai) ───────────────────────
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
 async function handleOpenAICompat(req, res, config, userId) {
   const subpath = req.normalizedPath.replace(new RegExp(`^\\/${config.functionName}`), '');
   if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  const targetPath = config.pathReplace ? subpath.replace(config.pathReplace.search, config.pathReplace.replace) : subpath;
+  // subpathTransform: optional fn to rewrite the path before appending to baseUrl.
+  // Used for z-ai whose upstream is /api/paas/v4/... not /v1/...
+  const targetPath = config.subpathTransform ? config.subpathTransform(subpath) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
+  injectReasoningEffort(req, config.modelMeta);
   return userId
     ? proxyWithBudget(req, res, targetUrl, config.envKey, true, userId)
     : proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
@@ -452,12 +491,13 @@ app.all('*', async (req, res) => {
     }
   }
 
+  const modelMeta = getModelMeta();
   if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
   if (req.method === 'GET'    && path === '/budget')                  return handleGetBudget(req, res, userId);
-  if (path.startsWith('/gemini'))                                     return handleGemini(req, res, userId);
-  if (path.startsWith('/nvidia'))                                     return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com' }, userId);
-  if (path.startsWith('/opencode'))                                   return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen' }, userId);
-  if (path.startsWith('/z-ai'))                                       return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', pathReplace: { search: /^\/v1/, replace: '' } }, userId);
+  if (path.startsWith('/gemini'))   { injectReasoningEffort(req, modelMeta); return handleGemini(req, res, userId); }
+  if (path.startsWith('/nvidia'))   return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com',       modelMeta }, userId);
+  if (path.startsWith('/opencode')) return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen',                modelMeta }, userId);
+  if (path.startsWith('/z-ai'))     return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId);
   if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
   if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
   if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);

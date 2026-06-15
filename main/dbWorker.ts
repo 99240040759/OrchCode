@@ -103,8 +103,8 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     const db = getDB(dbPath), now = new Date().toISOString()
     return prepare(db, 'UPDATE threads SET title = ?, updatedAt = ? WHERE id = ?').run(title, now, threadId).changes > 0
   },
-  updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded) {
-    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, threadId)
+  updateThreadTokens(dbPath, threadId, accumulated, lifetimeAdded, inputAdded = 0, outputAdded = 0) {
+    prepare(getDB(dbPath), 'UPDATE threads SET accumulatedTokens = ?, lifetimeTokens = lifetimeTokens + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?').run(accumulated, lifetimeAdded, inputAdded, outputAdded, threadId)
   },
   setThreadWorkspace(dbPath, threadId, workspacePath) {
     const db = getDB(dbPath)
@@ -171,9 +171,6 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   setToolPermission(dbPath, toolName, permission) {
     prepare(getDB(dbPath), 'INSERT OR REPLACE INTO tool_permissions (tool_name, permission) VALUES (?, ?)').run(toolName, permission)
   },
-  deleteToolPermission(dbPath, toolName) {
-    prepare(getDB(dbPath), 'DELETE FROM tool_permissions WHERE tool_name = ?').run(toolName)
-  },
   // Memories
   getMemories(dbPath, workspacePath) {
     if (workspacePath) return prepare(getDB(dbPath), 'SELECT * FROM memories WHERE workspace_path = ? OR workspace_path IS NULL ORDER BY updated_at DESC').all(workspacePath)
@@ -190,7 +187,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   },
   // Token tracking
   getAppTotalTokens(dbPath) {
-    return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(accumulatedTokens),0) as totalContext, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
+    return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(input_tokens),0) as totalInput, COALESCE(SUM(output_tokens),0) as totalOutput, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
   }
 }
 

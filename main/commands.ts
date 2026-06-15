@@ -21,12 +21,11 @@ import {
   updateThreadTitle, getActiveThreadId, getThread, getThreads, setActiveThreadId,
   getThreadMessages, deleteThread, getThreadWorkspace, createThread,
   deleteOpenedWorkspace, deleteWorkspaceThreads, addOpenedWorkspace, setThreadWorkspace,
-  setToolPermission, getAppTotalTokens
+  getAppTotalTokens
 } from './db'
 import { parseAssistantMessageData, parseUserMessageData, serializeMessageData } from './schema'
 import { MAX_FILE_READ_BYTES } from './tools'
 import { showSettingsWindow } from './settingsWindow'
-import { getAllPermissions, setPermission, getDefaultPermissions, invalidatePermissionCache } from './permissions'
 import { saveMemory, getRelevantMemories, updateMemory, deleteMemoryById, getMemoryStats } from './memory'
 
 const threadIdSchema = z.string().min(1).max(256).regex(/^[a-zA-Z0-9-_]+$/, 'Invalid format')
@@ -496,33 +495,6 @@ export const ipcCommands = {
   'settings:open': {
     schema: z.object({}),
     execute: async () => { showSettingsWindow(); return true }
-  },
-  // ─── Permissions ─────────────────────────────────────────────────
-  'permissions:get-all': {
-    schema: z.object({}),
-    execute: async () => getAllPermissions()
-  },
-  'permissions:get-defaults': {
-    schema: z.object({}),
-    execute: async () => getDefaultPermissions()
-  },
-  'permissions:set': {
-    schema: z.object({ toolName: z.string().min(1), permission: z.enum(['always_allow', 'always_ask', 'always_deny']) }),
-    execute: async ({ toolName, permission }) => {
-      await setPermission(toolName, permission)
-      WindowManager.getMainWindow()?.webContents.send('permissions:changed', {})
-      return true
-    }
-  },
-  'permissions:reset': {
-    schema: z.object({}),
-    execute: async () => {
-      const defaults = getDefaultPermissions()
-      for (const [tool, perm] of Object.entries(defaults)) await setToolPermission(tool, perm)
-      invalidatePermissionCache()
-      WindowManager.getMainWindow()?.webContents.send('permissions:changed', {})
-      return true
-    }
   },
   // ─── Memory ──────────────────────────────────────────────────────
   'memory:list': {

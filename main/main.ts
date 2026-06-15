@@ -111,6 +111,7 @@ function createOnboardingWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 10, y: 13 },
     backgroundColor: '#0d0d0d',
     ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
     webPreferences: {
@@ -160,6 +161,7 @@ function createMainWindow(): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: '#0d0d0d',
     titleBarStyle: 'hidden',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 10, y: 13 } : undefined,
     titleBarOverlay: process.platform === 'win32' ? {
       color: '#161616',
       symbolColor: '#c8ccd4',

@@ -4,12 +4,7 @@ import { Check, X, Shield, ChevronDown, ChevronRight } from 'lucide-react'
 import { pendingApprovalAtom, activeThreadIdAtom } from '../store/agentStore'
 
 const TOOL_INFO: Record<string, { label: string; describe: (a: Record<string, any>) => string }> = {
-  write_to_file: { label: 'Write File', describe: a => a.file_path || a.filePath || 'unknown file' },
-  multi_replace_file_content: { label: 'Edit File', describe: a => a.file_path || a.filePath || 'unknown file' },
   run_command: { label: 'Run Command', describe: a => a.command_line || a.command || 'unknown command' },
-  generate_image: { label: 'Generate Image', describe: a => a.prompt?.slice(0, 80) || 'image' },
-  search_web: { label: 'Web Search', describe: a => a.query || 'search' },
-  save_memory: { label: 'Save Memory', describe: a => a.content?.slice(0, 60) || 'memory' },
 }
 const friendlyName = (tool: string) => TOOL_INFO[tool]?.label || tool.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 const friendlyDesc = (tool: string, args: Record<string, any>) => TOOL_INFO[tool]?.describe(args) || ''

@@ -19,6 +19,7 @@ export function showSettingsWindow(): void {
   settingsWindow = new BrowserWindow({
     width: 800, height: 600, minWidth: 640, minHeight: 480,
     show: false, autoHideMenuBar: true, titleBarStyle: 'hidden',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 10, y: 13 } : undefined,
     titleBarOverlay: process.platform === 'win32' ? { color: '#161616', symbolColor: '#c8ccd4', height: 38 } : undefined,
     backgroundColor: '#0d0d0d',
     webPreferences: {

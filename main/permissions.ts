@@ -3,28 +3,14 @@ import { getToolPermissions, setToolPermission as dbSetToolPermission } from './
 export type PermissionLevel = 'always_allow' | 'always_ask' | 'always_deny'
 
 const DEFAULT_PERMISSIONS: Record<string, PermissionLevel> = {
-  list_dir: 'always_allow',
-  view_file: 'always_allow',
-  search_workspace: 'always_allow',
-  search_web: 'always_allow',
-  write_to_file: 'always_ask',
-  multi_replace_file_content: 'always_ask',
-  run_command: 'always_ask',
-  generate_image: 'always_ask',
-  save_memory: 'always_allow',
-  browser_navigate: 'always_allow',
-  browser_screenshot: 'always_allow',
-  browser_click: 'always_allow',
-  browser_type: 'always_allow',
-  browser_keyboard_press: 'always_allow',
-  browser_get_page_content: 'always_allow',
+  run_command: 'always_ask',   // only tool requiring approval — all others are auto-allowed
 }
 
 let permissionCache: Record<string, PermissionLevel> | null = null
 
 export function invalidatePermissionCache() { permissionCache = null }
 
-export async function getAllPermissions(): Promise<Record<string, PermissionLevel>> {
+async function getAllPermissions(): Promise<Record<string, PermissionLevel>> {
   if (permissionCache) return { ...permissionCache }
   const overrides = await getToolPermissions()
   const merged = { ...DEFAULT_PERMISSIONS }
@@ -35,7 +21,7 @@ export async function getAllPermissions(): Promise<Record<string, PermissionLeve
 
 export async function getToolPermission(toolName: string): Promise<PermissionLevel> {
   const all = await getAllPermissions()
-  return all[toolName] ?? 'always_ask'
+  return all[toolName] ?? 'always_allow'  // unknown tools are auto-allowed; only run_command requires approval
 }
 
 export async function setPermission(toolName: string, permission: PermissionLevel): Promise<void> {
@@ -43,8 +29,5 @@ export async function setPermission(toolName: string, permission: PermissionLeve
   invalidatePermissionCache()
 }
 
-export function getDefaultPermissions(): Record<string, PermissionLevel> {
-  return { ...DEFAULT_PERMISSIONS }
-}
 
 export interface ApprovalResponse { approved: boolean; remember?: boolean }

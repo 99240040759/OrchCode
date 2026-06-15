@@ -4,7 +4,7 @@ import { getDatabasePath } from './utils'
 import { EventEmitter } from 'node:events'
 export const dbEvents = new EventEmitter()
 
-export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string; lifetimeTokens?: number }
+export interface ThreadEntry { id: string; title?: string; resourceId: string; createdAt: string; updatedAt: string; accumulatedTokens?: number; lifetimeTokens?: number; input_tokens?: number; output_tokens?: number }
 export interface ThreadMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; data?: string; createdAt: string }
 
 const pendingQueries = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>()
@@ -97,7 +97,7 @@ export function getThreadMessages(threadId: string): Promise<ThreadMessage[]> { 
 export function saveMessage(threadId: string, message: Omit<ThreadMessage, 'createdAt'> & { createdAt?: string }): Promise<ThreadMessage> { return runQuery('saveMessage', threadId, message) }
 export function deleteThread(threadId: string): Promise<boolean> { return runQuery('deleteThread', threadId) }
 export function updateThreadTitle(threadId: string, title: string): Promise<boolean> { return runQuery('updateThreadTitle', threadId, title) }
-export function updateThreadTokens(threadId: string, accumulated: number, lifetimeAdded: number): Promise<void> { return runQuery('updateThreadTokens', threadId, accumulated, lifetimeAdded) }
+export function updateThreadTokens(threadId: string, accumulated: number, lifetimeAdded: number, inputAdded = 0, outputAdded = 0): Promise<void> { return runQuery('updateThreadTokens', threadId, accumulated, lifetimeAdded, inputAdded, outputAdded) }
 export function setThreadWorkspace(threadId: string, workspacePath: string): Promise<void> { return runQuery('setThreadWorkspace', threadId, workspacePath) }
 export function getThreadWorkspace(threadId: string): Promise<string | null> { return runQuery('getThreadWorkspace', threadId) }
 export function addOpenedWorkspace(path: string): Promise<void> { return runQuery('addOpenedWorkspace', path) }
@@ -109,7 +109,6 @@ export function setActiveThreadId(threadId: string | null): Promise<void> { retu
 export function createThread(threadId: string, workspacePath?: string | null): Promise<void> { return runQuery('createThread', threadId, workspacePath) }
 export function getToolPermissions(): Promise<{tool_name: string; permission: string}[]> { return runQuery('getToolPermissions') }
 export function setToolPermission(toolName: string, permission: string): Promise<void> { return runQuery('setToolPermission', toolName, permission) }
-export function deleteToolPermission(toolName: string): Promise<void> { return runQuery('deleteToolPermission', toolName) }
 export function getMemories(workspacePath?: string | null): Promise<any[]> { return runQuery('getMemories', workspacePath) }
 export function saveMemory(id: string, content: string, category: string, workspacePath?: string | null): Promise<void> { return runQuery('saveMemory', id, content, category, workspacePath) }
 export function updateMemory(id: string, content: string, category?: string): Promise<void> { return runQuery('updateMemory', id, content, category) }

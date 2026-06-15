@@ -80,7 +80,8 @@ export interface MemoryEntry {
 
 
 export interface UsageStats {
-  totalContext: number
+  totalInput: number
+  totalOutput: number
   totalLifetime: number
 }
 

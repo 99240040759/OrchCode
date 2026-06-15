@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import log from 'electron-log'
+import OpenAI from 'openai'
 import { getAvailableModels, streamLlmResponse, getOpenAiTools } from './models'
 import { getOrCreateWorkspaceContext, getWorkspaceContext, updateWorkspacePath, markWorkspaceActive, markWorkspaceIdle } from './workspace'
 import { getUserSkillsPath, listInstalledSkills } from './skills'
@@ -179,7 +180,7 @@ async function buildToolMessages(
     `Provide a single, very brief one-sentence summary of your immediate next step in your normal text response before emitting any tool calls.`
   ].filter(Boolean).join('\n')
 
-  const continuationMessages: any[] = [{ role: 'user', content: continuationPrompt }]
+  const continuationMessages: any[] = [{ role: 'system', content: continuationPrompt }]
 
   return { toolMessages, imageUserMessages, continuationMessages }
 }
@@ -397,6 +398,9 @@ export async function handleAgentStreamRequest(
   const orderedBlocks: StreamBlock[] = []
   let lifetimeTokensAdded = 0
   let currentContextTokens = 0
+  let prevContextTokens = 0  // context size before current step — for incremental delta
+  let totalInputAdded = 0    // total input tokens this session (actual or estimated)
+  let totalOutputAdded = 0   // total output tokens this session (actual or estimated)
 
   // Progressive save state
   let lastSaveMs = 0
@@ -514,7 +518,10 @@ export async function handleAgentStreamRequest(
       const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + memorySection + (systemInstructionSuffix || '')
       const sysTokens = countTokens(systemInstruction, modelType)
       const toolSchemaTokens = countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType)
-      currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens; lifetimeTokensAdded += currentContextTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
+      prevContextTokens = currentContextTokens
+      currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens
+      // Optimistic display update — lifetime will be corrected after the LLM call
+      send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
       // ── 4. Stream LLM call ────────────────────────────────────────────────
       const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal)
@@ -527,8 +534,16 @@ export async function handleAgentStreamRequest(
       const toolCallAccumulators = new Map<number, { id: string; name: string; args: string; sentStart?: boolean; extra_content?: any }>()
       let stepAssistantContent = '', stepReasoningContent = ''
 
+      let stepActualInput = 0, stepActualOutput = 0, hasActualUsage = false
       for await (const chunk of chunkStream) {
         if (controller.signal.aborted) break
+        // Read actual usage from API final chunk (choices is empty [], usage is populated)
+        if ((chunk as any).usage) {
+          const u = (chunk as any).usage
+          stepActualInput = (u.prompt_tokens ?? 0) as number
+          stepActualOutput = (u.completion_tokens ?? 0) as number
+          if (stepActualInput > 0 || stepActualOutput > 0) hasActualUsage = true
+        }
         const choice = chunk.choices?.[0]
         if (!choice) continue
         const delta = choice.delta
@@ -551,7 +566,7 @@ export async function handleAgentStreamRequest(
           }
           if (segments.length > 0) void saveProgress(false)
         }
-        const rDelta = delta?.reasoning_content || delta?.reasoning
+        const rDelta = (delta as any)?.reasoning_content || (delta as any)?.reasoning
         if (rDelta) {
           stepReasoningContent += rDelta
           const last = orderedBlocks[orderedBlocks.length - 1]
@@ -609,14 +624,32 @@ export async function handleAgentStreamRequest(
         send({ type: 'text_delta', payload: trailing.content, threadId })
       }
 
-      saveProgress(true); if (controller.signal.aborted) break; const stepOutputTokens = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType) + countTokens(JSON.stringify(stepToolCalls), modelType); lifetimeTokensAdded += stepOutputTokens; send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId });
+      saveProgress(true)
+      if (controller.signal.aborted) break
+      // Compute lifetime token additions for this step
+      if (hasActualUsage) {
+        // Server-reported exact counts — most accurate path
+        currentContextTokens = stepActualInput  // prompt_tokens IS the actual context window size
+        const stepTotal = stepActualInput + stepActualOutput
+        lifetimeTokensAdded += stepTotal
+        totalInputAdded += stepActualInput
+        totalOutputAdded += stepActualOutput
+      } else {
+        // Fallback estimation — only count INCREMENTAL new tokens, not full re-accumulated context
+        const stepOutputEst = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType)
+        const newInputEst = Math.max(0, currentContextTokens - prevContextTokens)
+        lifetimeTokensAdded += newInputEst + stepOutputEst
+        totalInputAdded += newInputEst
+        totalOutputAdded += stepOutputEst
+      }
+      send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
       // ── 5. No tool calls → check for pending inject before exiting ──────
       if (!hasToolCalls || stepToolCalls.length === 0) {
         if (pendingInject !== null) {
           // Agent finished its turn but user injected a message — consume it and re-enter loop
           const injText = pendingInject; pendingInject = null
-          messages.push({ role: 'assistant', content: stepAssistantContent || null })
+          messages.push({ role: 'assistant', content: stepAssistantContent || ' ' })
           messages.push({ role: 'user', content: injText })
           const injMsgId = crypto.randomUUID()
           await saveMessage(threadId, { id: injMsgId, role: 'user', content: injText })
@@ -642,22 +675,23 @@ export async function handleAgentStreamRequest(
         ...(stepReasoningContent ? { reasoning_content: stepReasoningContent } : {})
       } as any)
 
-      // ── 7. Resolve permissions sequentially, then execute allowed tools ──
+      // ── 7. Execute tools ─────────────────────────────────────────────────────
       log.info(`[stream] Executing ${stepToolCalls.length} tools in step ${stepCount}`)
-      // Phase 1: resolve all permissions one by one
-      const permMap = new Map<string, 'allow' | 'deny'>()
+
+      // run_command is the only tool with an approval gate — resolve sequentially before parallel execution
+      const deniedCommandIds = new Set<string>()
       for (const tc of stepToolCalls) {
-        if (!activeTools[tc.name]) { permMap.set(tc.id, 'allow'); continue }
+        if (tc.name !== 'run_command' || !activeTools[tc.name]) continue
         const perm = await getToolPermission(tc.name)
-        if (perm === 'always_deny') { permMap.set(tc.id, 'deny'); continue }
+        if (perm === 'always_deny') { deniedCommandIds.add(tc.id); continue }
         if (perm === 'always_ask') {
           send({ type: 'approval_request', payload: { toolCallId: tc.id, toolName: tc.name, args: tc.args }, threadId })
           const response = await new Promise<ApprovalResponse>(resolve => { pendingApprovalResolve = resolve })
           if (response.remember) await setPermission(tc.name, response.approved ? 'always_allow' : 'always_deny')
-          permMap.set(tc.id, response.approved ? 'allow' : 'deny')
-        } else { permMap.set(tc.id, 'allow') }
+          if (!response.approved) deniedCommandIds.add(tc.id)
+        }
       }
-      // Phase 2: execute all tools in parallel (permissions already resolved)
+
       const toolResults = await Promise.all(
         stepToolCalls.map(async tc => {
           const toolObj = activeTools[tc.name]
@@ -668,12 +702,12 @@ export async function handleAgentStreamRequest(
             send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: errVal } }, threadId })
             return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: errVal }, isError: true, formatted: { text: `Error: ${errVal}` } }
           }
-          if (permMap.get(tc.id) === 'deny') {
-            const denyMsg = `Tool "${tc.name}" was denied.`
+          if (deniedCommandIds.has(tc.id)) {
+            const denyMsg = `Command was not approved.`
             const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
             if (b && b.type === 'tool_call') { b.result = { success: false, error: denyMsg }; b.status = 'error' }
             send({ type: 'tool_result', payload: { tool_call_id: tc.id, result: { success: false, error: denyMsg } }, threadId })
-            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: denyMsg }, isError: true, formatted: { text: `Denied: ${denyMsg}` } }
+            return { tool_call_id: tc.id, tool_name: tc.name, result: { success: false, error: denyMsg }, isError: true, formatted: { text: denyMsg } }
           }
           send({ type: 'tool_result_pending', payload: { tool_call_id: tc.id }, threadId })
           try {
@@ -738,20 +772,46 @@ export async function handleAgentStreamRequest(
     })
 
   } catch (err: any) {
-    const error = err as Error & { name?: string }
-    const isAbort = error.name === 'AbortError' || error.message === 'terminated' || controller.signal.aborted
+    // ── Typed OpenAI SDK error handling ───────────────────────────────────────
+    const isAbort = controller.signal.aborted ||
+      err?.name === 'AbortError' || err?.message === 'terminated'
+
+    let userMessage: string
+    if (err instanceof OpenAI.APIConnectionError || err instanceof OpenAI.APIConnectionTimeoutError) {
+      userMessage = "You're offline or the server can't be reached. Check your connection and try again."
+    } else if (err instanceof OpenAI.AuthenticationError) {
+      userMessage = "Your session has expired. Sign out and sign back in to continue."
+    } else if (err instanceof OpenAI.PermissionDeniedError) {
+      userMessage = "You don't have access to this model. Try selecting a different one."
+    } else if (err instanceof OpenAI.NotFoundError) {
+      userMessage = "This model isn't available right now. Try selecting a different one."
+    } else if (err instanceof OpenAI.RateLimitError) {
+      userMessage = "You've hit a usage limit. Wait a moment and try again, or switch to another model."
+    } else if (err instanceof OpenAI.BadRequestError) {
+      userMessage = "Something went wrong with that request. Try rephrasing or starting a new conversation."
+    } else if (err instanceof OpenAI.UnprocessableEntityError) {
+      userMessage = "We couldn't process that request. Try again or start a new conversation."
+    } else if (err instanceof OpenAI.InternalServerError) {
+      userMessage = "The AI service is having a moment. Please try again shortly."
+    } else if (err instanceof OpenAI.APIError) {
+      userMessage = "Something went wrong. Please try again."
+    } else if (err?.message?.includes('both be empty') || err?.message?.includes('model output must contain') || err?.message?.includes('output text or tool calls')) {
+      userMessage = "The model didn't produce a response. Please try again."
+    } else {
+      userMessage = err?.message ?? "Something went wrong. Please try again."
+    }
 
     if (!isAbort) {
-      log.error('[stream] error:', error)
+      log.error('[stream] error:', err)
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
       if (!orderedBlocks.some(x => x.type === 'duration')) {
         orderedBlocks.push({ type: 'duration' as any, durationSeconds: Math.round((Date.now() - startTime) / 1000) })
       }
-      orderedBlocks.push({ type: 'error', message: error.message })
+      orderedBlocks.push({ type: 'error', message: userMessage })
       try {
         await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent || '[Stream Error]', data: JSON.stringify(orderedBlocks) })
       } catch (saveErr) { log.error('[stream] Error save failed:', saveErr) }
-      send({ type: 'error', payload: error.message, threadId })
+      send({ type: 'error', payload: userMessage, threadId })
       throw err
     } else {
       // Clean abort
@@ -767,7 +827,7 @@ export async function handleAgentStreamRequest(
   } finally {
     try {
       if (lifetimeTokensAdded > 0 || currentContextTokens > 0) {
-        await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded)
+        await updateThreadTokens(threadId, currentContextTokens, lifetimeTokensAdded, totalInputAdded, totalOutputAdded)
       }
     } catch (err) { log.error('[stream] Final tokens save error:', err) }
     markWorkspaceIdle(threadId)

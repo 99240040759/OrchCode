@@ -200,7 +200,7 @@ export async function buildMessagesFromHistory(
         if (parsed) blocks = parsed
       }
       if (blocks.length === 0) {
-        rawMessages.push({ role: 'assistant', content: m.content || '' })
+        if (m.content) rawMessages.push({ role: 'assistant', content: m.content })
         continue
       }
 
@@ -236,7 +236,9 @@ export async function buildMessagesFromHistory(
         }
       }
 
-      const assistantMsg: any = { role: 'assistant', content: textVal || '' }
+      // Skip empty assistant turns — providers reject history with content='' and no tool_calls
+      if (!textVal && !toolCalls.length) continue
+      const assistantMsg: any = { role: 'assistant', content: textVal || null }
       if (reasoningVal) {
         assistantMsg.reasoning_content = reasoningVal
         assistantMsg.reasoning = reasoningVal

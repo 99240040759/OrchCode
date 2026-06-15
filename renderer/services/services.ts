@@ -34,12 +34,8 @@ export const authService = {
   }
 }
 
-export const permissionService = {
-  getAll: () => invoke<Record<string, string>>('permissions:get-all'),
-  getDefaults: () => invoke<Record<string, string>>('permissions:get-defaults'),
-  set: (toolName: string, permission: string) => invoke<boolean>('permissions:set', { toolName, permission }),
-  reset: () => invoke<boolean>('permissions:reset'),
-}
+
+
 
 export const memoryService = {
   list: (workspacePath?: string | null) => invoke<MemoryEntry[]>('memory:list', { workspacePath }),
