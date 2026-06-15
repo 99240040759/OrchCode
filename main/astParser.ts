@@ -1,7 +1,6 @@
 import Parser from 'web-tree-sitter'
 import { join } from 'node:path'
 import { getAppEnv } from './utils'
-
 export type Language = Parser.Language
 export type Node = Parser.SyntaxNode
 const EXT_TO_WASM: Record<string, string> = {
@@ -22,26 +21,35 @@ const EXT_TO_WASM: Record<string, string> = {
 let isInitialized = false
 const parserCache = new Map<string, Parser>()
 export async function getParserForExtension(ext: string): Promise<Parser | null> {
-  const key = ext.toLowerCase()
-  const wasmFile = EXT_TO_WASM[key]
+  const key = ext.toLowerCase(), wasmFile = EXT_TO_WASM[key]
   if (!wasmFile) return null
   const cached = parserCache.get(key)
   if (cached) return cached
-  if (!isInitialized) { await Parser.init(); isInitialized = true }
-  const parser = new Parser()
   const { isPackaged, resourcesPath, appPath } = getAppEnv()
   const wasmsDir = isPackaged ? join(resourcesPath, 'wasms') : join(appPath, 'resources', 'wasms')
-  const Lang = await Parser.Language.load(join(wasmsDir, wasmFile))
-  parser.setLanguage(Lang)
-  parserCache.set(key, parser)
+  if (!isInitialized) {
+    await Parser.init({ locateFile: (name) => name === 'tree-sitter.wasm' ? join(wasmsDir, 'tree-sitter.wasm') : name })
+    isInitialized = true
+  }
+  const parser = new Parser(), Lang = await Parser.Language.load(join(wasmsDir, wasmFile))
+  parser.setLanguage(Lang); parserCache.set(key, parser)
   return parser
 }
 export function getTokens(node: Node): Node[] {
-  if (node.childCount === 0) return [node]
-  const tokens: Node[] = []
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i)
-    if (child) tokens.push(...getTokens(child))
+  const tokens: Node[] = [], cursor = node.walk()
+  let depth = 0
+  while (true) {
+    const current = cursor.currentNode()
+    if (current.childCount === 0) tokens.push(current)
+    if (cursor.gotoFirstChild()) depth++
+    else {
+      let moved = false
+      while (depth > 0) {
+        if (cursor.gotoNextSibling()) { moved = true; break }
+        cursor.gotoParent(); depth--
+      }
+      if (!moved) break
+    }
   }
   return tokens
 }
@@ -54,7 +62,5 @@ export function findSyntaxErrors(node: Node): { line: number; column: number; te
       if (child) walk(child)
     }
   }
-  walk(node)
-  return errors
+  walk(node); return errors
 }
-

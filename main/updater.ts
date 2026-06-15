@@ -52,12 +52,12 @@ const isNewerVersion = (l: string, c: string): boolean => {
   if (lM !== cM) return lM > cM
   if (lm !== cm) return lm > cm
   if (lP !== cP) return lP > cP
-  // Same major.minor.patch — stable (no pre-release) > pre-release
+  
   const lPre = preTag(l), cPre = preTag(c)
-  if (!lPre && cPre) return true   // latest is stable, current is pre-release → newer
-  if (lPre && !cPre) return false  // latest is pre-release, current is stable → not newer
-  if (lPre && cPre) return lPre > cPre // both pre-release — lexicographic compare
-  return false // both stable, same version
+  if (!lPre && cPre) return true   
+  if (lPre && !cPre) return false  
+  if (lPre && cPre) return lPre > cPre 
+  return false 
 }
 
 async function checkMacUpdate() {

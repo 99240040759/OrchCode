@@ -20,6 +20,14 @@ import { showSettingsWindow, closeSettingsWindow } from './settingsWindow'
 app.commandLine.appendSwitch('remote-debugging-port', '9888')
 process.env.REMOTE_DEBUGGING_PORT = '9888'
 app.setName('Orch Code')
+if (process.platform === 'darwin') {
+  require('child_process').exec(`${process.env.SHELL || '/bin/zsh'} -l -c "echo \\$PATH"`, { encoding: 'utf8' }, (err, stdout) => {
+    if (err) { log.error('[main] Failed to load macOS PATH:', err); return }
+    const p = stdout.trim()
+    if (p) process.env.PATH = p
+  })
+}
+
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -235,7 +243,7 @@ app.whenReady().then(async () => {
 
   log.info('[main] App ready — initializing modules')
 
-  // Application menu with global keyboard shortcuts
+  
   const sendToMain = (channel: string) => {
     const win = WindowManager.getMainWindow()
     if (win && !win.isDestroyed()) win.webContents.send(channel)
@@ -279,7 +287,7 @@ app.whenReady().then(async () => {
   ])
   Menu.setApplicationMenu(appMenu)
 
-  // Single unified IPC surface: one invoke router + one stream handler
+  
   registerAllIpc()
   registerStreamIpc()
   pool.preWarm()

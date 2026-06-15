@@ -31,64 +31,76 @@ async function applyEditsToFile(filePath: string, edits: { targetContent: string
   const isCrlf = raw.includes('\r\n')
   if (isCrlf) raw = raw.replace(/\r\n/g, '\n')
   const ext = extname(filePath), parser = await getParserForExtension(ext)
-  for (const edit of edits) {
-    let replaced = false
-    if (parser) {
-      try {
-        const fileTree = parser.parse(raw), targetTree = parser.parse(edit.targetContent)
-        if (fileTree && targetTree) {
-          const fileTokens = getTokens(fileTree.rootNode).filter(t => t.text.trim().length > 0)
-          const targetTokens = getTokens(targetTree.rootNode).filter(t => t.text.trim().length > 0)
-          if (targetTokens.length > 0 && fileTokens.length >= targetTokens.length) {
-            const matches: { startIndex: number; endIndex: number; score: number }[] = []
-            const fuzzyThreshold = 0.85
-            for (let i = 0; i <= fileTokens.length - targetTokens.length; i++) {
-              let exactMatches = 0, tolerantMatches = 0
-              for (let j = 0; j < targetTokens.length; j++) {
-                const fToken = fileTokens[i + j].text, tToken = targetTokens[j].text
-                if (fToken === tToken) { exactMatches++; tolerantMatches++ }
-                else if (fToken.replace(/\s+/g, '') === tToken.replace(/\s+/g, '')) tolerantMatches++
-                else if (fToken.replace(/['"]/g, '') === tToken.replace(/['"]/g, '')) tolerantMatches++
-              }
-              const score = tolerantMatches / targetTokens.length
-              if (exactMatches === targetTokens.length) {
-                matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score: 1.0 })
-              } else if (score >= fuzzyThreshold) {
-                matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score })
-              }
-            }
-            matches.sort((a, b) => b.score - a.score)
-            if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score + 0.1)) {
-              const m = matches[0], lineStart = Math.max(0, raw.lastIndexOf('\n', m.startIndex) + 1), isAtLineStart = /^[ \t]*$/.test(raw.slice(lineStart, m.startIndex))
-              raw = raw.slice(0, isAtLineStart ? lineStart : m.startIndex) + edit.replacementContent + raw.slice(m.endIndex)
-              replaced = true
-            } else if (matches.length > 1) {
-              throw new Error(`AST Token matching found ${matches.length} similar blocks (scores: ${matches.slice(0, 3).map(m => m.score.toFixed(2)).join(', ')}). Provide more context to uniquely identify the section.`)
-            }
+  let tree: any = null, tokens: any[] = [], isTreeDirty = true
+  try {
+    for (const edit of edits) {
+      let replaced = false
+      if (parser) {
+        try {
+          if (isTreeDirty || !tree) {
+            if (tree) tree.delete()
+            tree = parser.parse(raw)
+            tokens = getTokens(tree.rootNode).filter(t => t.text.trim().length > 0)
+            isTreeDirty = false
           }
-        }
-      } catch (err) { log.warn(`[AST Patch] Failed for ${filePath}:`, err) }
-    }
-    if (!replaced) {
-      if (!raw.includes(edit.targetContent)) {
-        const normalized = edit.targetContent.replace(/\s+/g, ' ').trim()
-        const rawNormalized = raw.replace(/\s+/g, ' ')
-        if (rawNormalized.includes(normalized)) {
-          throw new Error(`Target content found with different whitespace. AST matching failed. Ensure exact whitespace/formatting matches file:\n${edit.targetContent.slice(0, 100)}...`)
-        }
-        throw new Error(`Target content not found in file. Ensure exact whitespace matching for:\n${edit.targetContent.slice(0, 100)}...`)
+          const targetTree = parser.parse(edit.targetContent)
+          if (tree && targetTree) {
+            try {
+              const fileTokens = tokens, targetTokens = getTokens(targetTree.rootNode).filter(t => t.text.trim().length > 0)
+              if (targetTokens.length > 0 && fileTokens.length >= targetTokens.length) {
+                const matches: { startIndex: number; endIndex: number; score: number }[] = []
+                const fuzzyThreshold = 0.85
+                for (let i = 0; i <= fileTokens.length - targetTokens.length; i++) {
+                  let exactMatches = 0, tolerantMatches = 0
+                  for (let j = 0; j < targetTokens.length; j++) {
+                    const fToken = fileTokens[i + j].text, tToken = targetTokens[j].text
+                    if (fToken === tToken) { exactMatches++; tolerantMatches++ }
+                    else if (fToken.replace(/\s+/g, '') === tToken.replace(/\s+/g, '')) tolerantMatches++
+                    else if (fToken.replace(/['"]/g, '') === tToken.replace(/['"]/g, '')) tolerantMatches++
+                  }
+                  const score = tolerantMatches / targetTokens.length
+                  if (exactMatches === targetTokens.length) {
+                    matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score: 1.0 })
+                  } else if (score >= fuzzyThreshold) {
+                    matches.push({ startIndex: fileTokens[i].startIndex, endIndex: fileTokens[i + targetTokens.length - 1].endIndex, score })
+                  }
+                }
+                matches.sort((a, b) => b.score - a.score)
+                if (matches.length === 1 || (matches.length > 1 && matches[0].score > matches[1].score + 0.1)) {
+                  const m = matches[0], lineStart = Math.max(0, raw.lastIndexOf('\n', m.startIndex) + 1), isAtLineStart = /^[ \t]*$/.test(raw.slice(lineStart, m.startIndex))
+                  raw = raw.slice(0, isAtLineStart ? lineStart : m.startIndex) + edit.replacementContent + raw.slice(m.endIndex)
+                  replaced = true; isTreeDirty = true
+                } else if (matches.length > 1) {
+                  throw new Error(`AST Token matching found ${matches.length} similar blocks (scores: ${matches.slice(0, 3).map(m => m.score.toFixed(2)).join(', ')}). Provide more context to uniquely identify the section.`)
+                }
+              }
+            } finally { targetTree.delete() }
+          }
+        } catch (err) { log.warn(`[AST Patch] Failed for ${filePath}:`, err) }
       }
-      const occurrences = raw.split(edit.targetContent).length - 1
-      if (occurrences > 1) {
-        throw new Error(`Target content occurs ${occurrences} times in the file. Please provide a larger block of code to uniquely identify the section to replace.`)
+      if (!replaced) {
+        if (!raw.includes(edit.targetContent)) {
+          const normalized = edit.targetContent.replace(/\s+/g, ' ').trim()
+          const rawNormalized = raw.replace(/\s+/g, ' ')
+          if (rawNormalized.includes(normalized)) {
+            throw new Error(`Target content found with different whitespace. AST matching failed. Ensure exact whitespace/formatting matches file:\n${edit.targetContent.slice(0, 100)}...`)
+          }
+          throw new Error(`Target content not found in file. Ensure exact whitespace matching for:\n${edit.targetContent.slice(0, 100)}...`)
+        }
+        const occurrences = raw.split(edit.targetContent).length - 1
+        if (occurrences > 1) {
+          throw new Error(`Target content occurs ${occurrences} times in the file. Please provide a larger block of code to uniquely identify the section to replace.`)
+        }
+        raw = raw.replace(edit.targetContent, edit.replacementContent)
+        isTreeDirty = true
       }
-      raw = raw.replace(edit.targetContent, edit.replacementContent)
     }
-  }
+  } finally { if (tree) tree.delete() }
   await fs.writeFile(filePath, isCrlf ? raw.replace(/\n/g, '\r\n') : raw, 'utf-8')
 }
 
-// --- Shell Tools Helpers ---
+
+// STRICT RULE: This is implemented as per the user's wish. Avoid modifying this.
 const BLOCKED_EXECUTABLES = new Set([
   'shutdown', 'reboot', 'init',
   'mkfs', 'fdisk', 'format', 'dd',
@@ -104,16 +116,16 @@ const SHELL_OPERATORS = new Set(['&&', '||', ';', '|', '&', '>', '>>', '<', '$('
 function checkBlocklist(tokens: string[]): string | null {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]
-    // Block all shell chaining operators outright — chained commands bypass per-token checks
+    
     if (SHELL_OPERATORS.has(t)) return t
     if (t.startsWith('-') || t.includes('=')) continue
     const base = basename(t).toLowerCase()
     if (BLOCKED_EXECUTABLES.has(base) || BLOCKED_EXECUTABLES.has(t.toLowerCase())) return t
     if (WRAPPERS.has(base)) {
       if ((base === 'npm' || base === 'yarn' || base === 'pnpm' || base === 'bun') && tokens[i + 1] === 'run') i++
-      // Do NOT break — keep scanning remaining tokens after wrapper
+      
     }
-    // Never break early — every token must be checked
+    
   }
   return null
 }
@@ -129,7 +141,7 @@ export function createCoreTools(convId: string, multimodal = true) {
   const resolveRelativePath = (p: string): string => {
     const ctx = resolve()
     const norm = p.replace(/\\/g, '/')
-    // Resolve to absolute
+    
     const absPath = isAbsolute(p) ? resolvePath(p) : resolvePath(ctx.rootPath, p)
     const normAbs = absPath.replace(/\\/g, '/')
     const skillsPath = getUserSkillsPath().replace(/\\/g, '/')
@@ -138,26 +150,26 @@ export function createCoreTools(convId: string, multimodal = true) {
     if (normAbs.startsWith(skillsPath)) return assertWithinWorkspace(getUserSkillsPath(), relative(getUserSkillsPath(), absPath))
     if (normAbs.startsWith(artifactsPath)) return assertWithinWorkspace(ctx.artifactsPath, relative(ctx.artifactsPath, absPath))
 
-    // If model passed an absolute path that is within the workspace root, use it directly
+    
     if (isAbsolute(p) && normAbs.startsWith(ctx.rootPath.replace(/\\/g, '/'))) {
       return assertWithinWorkspace(ctx.rootPath, absPath)
     }
 
-    // Handle virtual-absolute paths like "/src/file.ts" that start with "/" but have no drive letter
+    
     const clean = (norm.startsWith('/') && !norm.match(/^\/[a-zA-Z]:/)) ? norm.slice(1) : norm
     if (clean.startsWith('artifacts/') || clean.startsWith('./artifacts/')) return assertWithinWorkspace(ctx.artifactsPath, clean.replace(/^\.?\/?artifacts\//, ''))
     if (clean.startsWith('.gemini/skills/') || clean.startsWith('./.gemini/skills/')) return assertWithinWorkspace(getUserSkillsPath(), clean.replace(/^\.?\/?\..gemini\/skills\//, ''))
 
-    // If model passed an absolute path OUTSIDE the workspace (e.g. full system path), strip
-    // the drive/root and treat the relative portion as workspace-relative. This prevents
-    // "Path traversal blocked" errors when models confidently emit absolute paths.
+    
+    
+    
     if (isAbsolute(p)) {
-      // e.g. "C:\Users\foo\project\src\index.ts" → try to relativize from workspace first
+      
       const relFromRoot = relative(ctx.rootPath, absPath)
       if (!relFromRoot.startsWith('..') && !isAbsolute(relFromRoot)) {
         return assertWithinWorkspace(ctx.rootPath, relFromRoot)
       }
-      // Last resort: strip the root/drive and use only the file name part
+      
       const stripped = norm.replace(/^\/[a-zA-Z]:\//, '').replace(/^[a-zA-Z]:\//, '').replace(/^\//, '')
       return assertWithinWorkspace(ctx.rootPath, stripped)
     }
@@ -360,16 +372,13 @@ export function createCoreTools(convId: string, multimodal = true) {
         const blockedCmd = checkBlocklist(tokens)
         if (blockedCmd) return { success: false, stdout: '', stderr: `Command blocked: '${blockedCmd}' is not permitted.`, exitCode: 1 }
         log.info(`[tool:run_command] cwd=${runDir} exe=${executable} args=${JSON.stringify(runArgs)}`)
-        // macOS: Electron utility processes inherit a stripped PATH — run through login shell so
-        // user tools (Homebrew, nvm, pyenv, conda, etc.) are reachable.
+        
+        
         const timeout = args.wait_ms_before_async ?? 60000
         const env = { ...process.env, FORCE_COLOR: '1', PAGER: 'cat' }
-        // macOS: run through login shell for PATH (Homebrew, nvm, etc.) but reconstruct
-        // from tokenized + blocklist-cleared args to prevent shell injection via -c
-        const sanitizedCmd = [executable, ...runArgs].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
-        const result = process.platform === 'darwin'
-          ? await execa(process.env.SHELL || '/bin/zsh', ['-l', '-c', sanitizedCmd], { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
-          : await execa(executable, runArgs, { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
+        
+        
+        const result = await execa(executable, runArgs, { shell: false, cwd: runDir, timeout, reject: false, cancelSignal: options?.signal, env })
         return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, success: result.exitCode === 0, cwd: runDir }
       } catch (err: any) {
         log.error('[tool:run_command] error:', err.message)
@@ -490,27 +499,17 @@ export function createCoreTools(convId: string, multimodal = true) {
   }
 }
 
-// ─── Browser Tools ─────────────────────────────────────────────────────────────
-// Singleton Playwright browser connection (shared, reconnects on disconnect).
+
+
 let playwrightBrowser: Browser | null = null
 
-/**
- * Get or attach a stable Playwright Page for the given conversation's browser session.
- *
- * Correlation strategy (in order):
- * 1. Use Electron's debugger protocol to get the WebContents' CDP targetId, then find
- *    the matching Playwright Page by its own CDP targetId. This is the most reliable method.
- * 2. Fall back to evaluating window.__orchConversationId (set by browser:open listeners).
- * 3. Last resort: URL match if only one page has the same URL as the WebContents.
- *
- * The found page is cached in session.page and reused until it becomes closed.
- */
+ 
 async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
   const session = WindowManager.getSession(convId)
   if (!session) throw new Error(`No browser session for conversation ${convId}. Open the browser first.`)
   if (session.page && !session.page.isClosed()) return session.page
 
-  // Ensure Playwright CDP connection is alive
+  
   if (!playwrightBrowser || !playwrightBrowser.isConnected()) {
     playwrightBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${process.env.REMOTE_DEBUGGING_PORT || '9888'}`)
   }
@@ -520,14 +519,14 @@ async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
 
   const wc = session.view.webContents
 
-  // --- Strategy 1: Electron debugger → CDP targetId matching ---
+  
   let targetId: string | undefined
   try {
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
     const info = await wc.debugger.sendCommand('Target.getTargetInfo', {}) as any
     targetId = info?.targetInfo?.targetId
     try { wc.debugger.detach() } catch {}
-  } catch { /* debugger attach can fail when already in use or in restricted contexts */ }
+  } catch {   }
 
   if (targetId) {
     for (const p of pwCtx.pages()) {
@@ -538,20 +537,20 @@ async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
           const info = await cdp.send('Target.getTargetInfo', {}) as any
           if (info?.targetInfo?.targetId === targetId) { await cdp.detach().catch(() => {}); session.page = p; return p }
         } finally { await cdp.detach().catch(() => {}) }
-      } catch { /* continue to next page */ }
+      } catch {   }
     }
   }
 
-  // --- Strategy 2: Injected __orchConversationId ---
+  
   for (const p of pwCtx.pages()) {
     if (p.isClosed()) continue
     try {
       const id = await p.evaluate(() => (window as any).__orchConversationId).catch(() => null)
       if (id === convId) { session.page = p; return p }
-    } catch { /* continue */ }
+    } catch {   }
   }
 
-  // --- Strategy 3: URL match (last resort, only when unambiguous) ---
+  
   const wcUrl = wc.getURL()
   if (wcUrl && wcUrl !== 'about:blank') {
     const matches = pwCtx.pages().filter(p => !p.isClosed() && p.url() === wcUrl)
@@ -561,34 +560,24 @@ async function getOrAttachPlaywrightPage(convId: string): Promise<Page> {
   throw new Error(`Could not attach Playwright to browser session for ${convId}. No matching CDP target found.`)
 }
 
-/**
- * Serialise browser tool actions per conversation.
- * Prevents two concurrent tool calls from interleaving page state within the same session.
- */
+ 
 function enqueue<T>(convId: string, fn: () => Promise<T>): Promise<T> {
   const s = WindowManager.getSession(convId)
   if (!s) return fn()
   const next = s.queue.then(() => fn(), () => fn()) as Promise<T>
-  // Keep queue chain alive but don't leak rejection
+  
   s.queue = (next as Promise<any>).then(() => {}, () => {})
   return next
 }
 
-/**
- * In utility process: sends a tool-request IPC to main, returns the result.
- * In main process: `callMainProcessTool` is not set, so localFn() runs directly.
- */
+ 
 function runOnMain(toolName: string, args: any, convId: string, localFn: () => Promise<any>): Promise<any> {
   const runner = (globalThis as any).callMainProcessTool
   if (runner) return runner(toolName, args, convId)
   return localFn()
 }
 
-/**
- * The 6-tool browser suite.
- * Exported: browser_navigate, browser_screenshot, browser_click,
- * browser_type, browser_keyboard_press, browser_get_page_content.
- */
+ 
 export function browserTools(convId: string, multimodal = true) {
   const browser_navigate = tool({
     description: 'Navigates the active browser viewport to a specified URL and waits for the page to finish loading.',
@@ -612,7 +601,7 @@ export function browserTools(convId: string, multimodal = true) {
         })
         await Promise.race([navPromise, timeoutPromise])
         clearTimeout(timer)
-        // Close old Playwright page reference and invalidate cache — a new DOM was loaded
+        
         if (s.page && !s.page.isClosed()) { try { await s.page.close() } catch {} }
         s.page = undefined
         return { success: true, url: s.view.webContents.getURL() }
@@ -725,7 +714,7 @@ export function browserTools(convId: string, multimodal = true) {
         const page = await getOrAttachPlaywrightPage(convId)
         const url = page.url(), title = await page.title()
         const text = await page.evaluate(() => document.body.innerText || '').catch(() => '')
-        // Compact AX snapshot — top 100 nodes only to prevent massive IPC payloads
+        
         let axSnippet = 'N/A'
         try {
           const client = await page.context().newCDPSession(page)

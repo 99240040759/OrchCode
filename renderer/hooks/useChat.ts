@@ -41,8 +41,8 @@ export function useChat() {
   const updateThreadActiveEditorFile = useSetAtom(updateThreadActiveEditorFileAtom)
   const updatePendingApproval = useSetAtom(updatePendingApprovalAtom)
 
-  // Tracks the most recent selectThread request — used only for stale-request detection.
-  // NOT used by stop() or run(). Renamed from activeStreamThreadIdRef to make purpose explicit.
+  
+  
   const latestSelectRequestThreadIdRef = useRef('')
   const flushRafsRef = useRef<Record<string, number | null>>({})
   const isMountedRef = useRef(true)
@@ -65,13 +65,13 @@ export function useChat() {
     setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
   }
 
-  // Keep a stable ref to activeThreadId for use inside closures (unmount cleanup, etc.)
+  
   const activeThreadIdRef = useRef(activeThreadId)
   const messagesRef = useRef(messages)
   useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
   useEffect(() => { messagesRef.current = messages }, [messages])
 
-  // Worker crash handler — updates UI for the crashed thread regardless of which is active
+  
   useEffect(() => {
     const unsub = window.api.on('stream:worker-crashed', (payload: any) => {
       const crashedId = payload?.threadId; if (!crashedId) return
@@ -99,10 +99,7 @@ export function useChat() {
     catch (err) { console.error('[useChat] Failed to load threads:', err); throw err }
   }
 
-  /**
-   * Stop the stream for the given thread (or the currently displayed thread if not specified).
-   * Does NOT use any ref that selectThread sets — targets the display thread directly.
-   */
+   
   const stop = (threadId?: string) => {
     const tid = threadId ?? activeThreadId
     window.api.stopStream(tid)
@@ -115,8 +112,8 @@ export function useChat() {
     }) })
   }
 
-  // Only strip isStreaming on component unmount — NOT on thread switches.
-  // Background threads must keep their streaming state while we view other threads.
+  
+  
   useEffect(() => {
     return () => {
       const curId = activeThreadIdRef.current
@@ -128,7 +125,7 @@ export function useChat() {
         ))
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
   }, [])
 
   const selectThread = async (threadId: string) => {
@@ -136,7 +133,7 @@ export function useChat() {
     selectLockRef.current = true
     if (!runningThreads.has(threadId)) updateThreadRunState({ threadId, state: 'idle' })
 
-    // Stale-request tracking — isolated to selectThread, NOT shared with stop() or run()
+    
     latestSelectRequestThreadIdRef.current = threadId
     setIsThreadLoading(true)
 
@@ -162,16 +159,16 @@ export function useChat() {
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
         updateThreadWorkspace({ threadId, workspace })
-        // ── MERGE FIX: never overwrite a live-streaming message with a stale DB snapshot.
-        // If a background worker is actively streaming for this thread, the in-memory
-        // message is always more current than what's been flushed to SQLite. Preserve it.
+        
+        
+        
         updateThreadMessages({
           threadId,
           update: prev => {
             const liveStreaming = prev.filter(m => m.isStreaming)
             if (!liveStreaming.length) return loadedMsgs
             const liveIds = new Set(liveStreaming.map(m => m.id))
-            // Replace any stale DB copy of the live message with the live (newer) version
+            
             return [...loadedMsgs.filter(m => !liveIds.has(m.id)), ...liveStreaming]
           }
         })
@@ -329,16 +326,16 @@ export function useChat() {
           assistantIsStreaming = false
           const finalContent = chunkData?.content as string ?? fullContent
           const finalBlocks = (chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks).map(
-            (b, i, arr) => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
+            (b) => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
           )
           finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
         } else if (chunkType === 'inject_queued') {
           if (chunkText) {
-            // Flush current assistant snapshot first — visually closes the pre-inject content
+            
             flushNow()
-            // Insert the injected text as a proper user bubble in the chat thread
+            
             updateThreadMessages({
               threadId: resolvedThreadId,
               update: prev => [

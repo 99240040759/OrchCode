@@ -5,14 +5,14 @@ import { requireAuthToken } from './auth'
 import { getApiBaseUrl, globalApiLimiter } from './utils'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 
-// provider field added — now populated from /models response (set by server)
+
 export interface ModelInfo { id: string; name: string; multimodal: boolean; contextWindow?: number; badge?: string | null; provider?: string; reasoningEffort?: string | null }
 export type AvailableModels = Record<string, ModelInfo>
 
 let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
-// Secondary index: model.id → ModelInfo for O(1) lookup (avoids O(n) find() on every stream call)
+
 let modelIdIndex = new Map<string, ModelInfo>()
 
 export function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
@@ -43,24 +43,20 @@ export function getOpenAiTools(toolsRecord: Record<string, any>) {
   return list
 }
 
-// Provider → base URL mapping. Server owns routing; client just reads model.provider.
+
 const PROVIDER_BASE: Record<string, string> = {
   nvidia:   'nvidia/v1',
   opencode: 'opencode/v1',
   'z-ai':   'z-ai/v1',
 }
 
-// Cache OpenAI clients by baseUrl — avoids constructing a new instance on every LLM call
-const openaiClientCache = new Map<string, OpenAI>()
+
+const openaiClientCache = new Map<string, { client: OpenAI; token: string }>()
 function getOpenAiClient(baseUrl: string): OpenAI {
-  let client = openaiClientCache.get(baseUrl)
-  if (!client) {
-    client = new OpenAI({ apiKey: requireAuthToken(), baseURL: baseUrl, defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY! }, timeout: 30 * 60 * 1000, maxRetries: 1 })
-    openaiClientCache.set(baseUrl, client)
-  } else {
-    // Refresh apiKey in case token rotated since client was created
-    ;(client as any).apiKey = requireAuthToken()
-  }
+  const token = requireAuthToken(), cached = openaiClientCache.get(baseUrl)
+  if (cached && cached.token === token) return cached.client
+  const client = new OpenAI({ apiKey: token, baseURL: baseUrl, defaultHeaders: { 'apikey': process.env.SUPABASE_ANON_KEY! }, timeout: 30 * 60 * 1000, maxRetries: 1 })
+  openaiClientCache.set(baseUrl, { client, token })
   return client
 }
 
@@ -73,7 +69,7 @@ export async function streamLlmResponse(
   prevInputTokens = 0
 ): Promise<Stream<OpenAI.Chat.ChatCompletionChunk>> {
   const models = await getAvailableModels()
-  // O(1) indexed lookup — avoids O(n) Array.find() + fallback key scan on every call
+  
   const rawModel = modelIdIndex.get(modelId) ?? models[modelId]
   if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
   const apiBase = getApiBaseUrl()
@@ -94,7 +90,7 @@ export async function streamLlmResponse(
     stream: true, stream_options: { include_usage: true },
   }
   return globalApiLimiter.schedule(() => {
-    // Attach prev-prompt-tokens header so GCP proxyWithBudget records only the incremental delta
+    
     const extraHeaders = prevInputTokens > 0 ? { 'x-prev-prompt-tokens': String(prevInputTokens) } : {}
     return openai.chat.completions.create(payload, { signal: abortSignal, headers: extraHeaders })
   }) as Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>

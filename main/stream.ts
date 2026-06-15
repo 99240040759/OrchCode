@@ -32,10 +32,10 @@ export function registerStreamIpc() {
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`stream:port:${request.threadId}`, { threadId: request.threadId }, [port2])
 
-      // Async allocation — waits for a free slot instead of throwing at capacity
+      
       const worker = await pool.allocateWorker(session.idToken, `stream:${request.threadId}`)
 
-      // Fresh DB port for this job
+      
       const { port1: dbPort1, port2: dbPort2 } = new MessageChannelMain()
       db.shareDBPort(dbPort1)
       worker.postMessage({ type: 'db-port' }, [dbPort2])
@@ -43,11 +43,11 @@ export function registerStreamIpc() {
       const win = WindowManager.getMainWindow()
       if (win && !win.isDestroyed()) win.setProgressBar(2)
 
-      // Cached browser tools for this job — lazily created on first tool-request, cleared on finish.
+      
       let cachedBrowserTools: Record<string, any> | null = null
 
-      // Named scoped listeners — safe across concurrent jobs on the same worker instance.
-      // We use named function refs so off() is precise and doesn't disturb other jobs.
+      
+      
       const onExit = (code: number | null) => {
         cachedBrowserTools = null
         pool.clearJob(worker)
@@ -110,7 +110,7 @@ export function registerStreamIpc() {
           attachments: request.attachments,
           promptText: request.promptText,
           token: session.idToken,
-          // Scoped: does THIS thread have an active browser session?
+          
           isBrowserActive: !!WindowManager.getSession(request.threadId),
           startTime: request.startTime
         },

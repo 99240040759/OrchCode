@@ -24,10 +24,10 @@ const SUMMARISE_THRESHOLD = 180_000
 const KEEP_LAST_N_MESSAGES = 20
 
 
-// ─── Reasoning tag stripper ───────────────────────────────────────────────────
-// Models like DeepSeek-R1, QwQ, o1, Gemma emit <think>...</think> / <thought>...</thought>
-// blocks in delta.content. We strip these from UI-facing stream (orderedBlocks +
-// text_delta events) but keep raw content.
+
+
+
+
 class ReasoningStripper {
   private static TAGS = ['<think>', '<thought>', '<reasoning>', '<thinking>', '</think>', '</thought>', '</reasoning>', '</thinking>']
   private static CLOSING_TAGS = ['</think>', '</thought>', '</reasoning>', '</thinking>']
@@ -54,16 +54,16 @@ class ReasoningStripper {
           currentVal += ch
         }
       } else {
-        // Inside a reasoning block — buffer chars that could form a closing tag
+        
         this.tagBuffer += ch
         if (/<\/(think|thought|reasoning|thinking)>$/i.test(this.tagBuffer)) {
-          // Closing tag found — emit buffered reasoning content (minus the tag), then switch to text
+          
           const tagMatch = this.tagBuffer.match(/<\/(think|thought|reasoning|thinking)>$/i)!
           const beforeTag = this.tagBuffer.slice(0, this.tagBuffer.length - tagMatch[0].length)
           if (beforeTag) { if (currentType !== 'reasoning') { push(); currentType = 'reasoning' }; currentVal += beforeTag }
           push(); this.inBlock = false; currentType = 'text'; this.tagBuffer = ''
         } else if (!ReasoningStripper.CLOSING_TAGS.some(tag => tag.startsWith(this.tagBuffer.toLowerCase().slice(-Math.min(this.tagBuffer.length, tag.length))))) {
-          // Buffer can't be a closing tag prefix — flush buffer into reasoning content
+          
           if (currentType !== 'reasoning') { push(); currentType = 'reasoning' }
           currentVal += this.tagBuffer; this.tagBuffer = ''
         }
@@ -89,10 +89,10 @@ class ReasoningStripper {
 
 const FILE_WRITE_TOOLS = ['write_to_file', 'multi_replace_file_content', 'generate_image']
 
-// ─── Format a raw tool output into model-facing content ───────────────────────
-// The formatted text is what goes into the tool role message the model reads.
-// Structured, unambiguous, with explicit success/error markers so any model
-// can immediately understand what happened without guessing JSON shapes.
+
+
+
+
 async function formatToolOutputForModel(
   toolName: string, rawOutput: any, toolObj: any, multimodal: boolean
 ): Promise<{ text: string; imageData?: { base64: string; mimeType: string } }> {
@@ -133,11 +133,11 @@ async function formatToolOutputForModel(
   }
 }
 
-// ─── Build tool role messages + post-step feedback injection ─────────────────
-// Each tool result becomes a `role: tool` message (OpenAI protocol requires this).
-// After all tool results, we inject a `role: user` continuation prompt that
-// explicitly tells the model to: evaluate what it got, decide what's next,
-// and act — this is the "agentic reinforcement" that makes dumb models loop correctly.
+
+
+
+
+
 async function buildToolMessages(
   toolResults: Array<{ tool_call_id: string; tool_name: string; result: any; isError: boolean; formatted: { text: string; imageData?: { base64: string; mimeType: string } } }>,
   multimodal: boolean,
@@ -147,7 +147,7 @@ async function buildToolMessages(
   const stepImageParts: any[] = []
 
   for (const res of toolResults) {
-    // Rich structured tool result message
+    
     const statusLine = res.isError ? '❌ FAILED' : '✅ SUCCESS'
     const content = `${statusLine} — Tool: ${res.tool_name}\n${res.formatted.text || '(empty output)'}`
     toolMessages.push({ role: 'tool', tool_call_id: res.tool_call_id, name: res.tool_name, content })
@@ -161,9 +161,9 @@ async function buildToolMessages(
     ? [{ role: 'user', content: [{ type: 'text', text: `[browser_screenshot] Visual state of the browser after the above tool calls:` }, ...stepImageParts] }]
     : []
 
-  // Build continuation directive — structured assessment + next-action prompt.
-  // This is what makes the feedback loop agentic: the model is explicitly told
-  // to re-assess its plan after every step, not just dump the next tool call blindly.
+  
+  
+  
   const errorResults = toolResults.filter(r => r.isError)
   const successResults = toolResults.filter(r => !r.isError)
   const summaryLines: string[] = []
@@ -187,7 +187,7 @@ async function buildToolMessages(
 
 
 
-// ─── Port setup (abort + inject + buf transfer) ───────────────────────────────
+
 async function setupStreamRequest(
   port: Electron.MessagePortMain,
   controller: AbortController,
@@ -207,7 +207,7 @@ async function setupStreamRequest(
     } else if (e.data?.type === 'bufs') {
       resolveAttachments?.(e.data.bufs.map((b: ArrayBuffer) => Buffer.from(b)))
     } else if (e.data?.type === 'inject') {
-      // Queue inject, do NOT abort — loop picks it up at next turn boundary
+      
       onInject(e.data.text ?? '')
     } else if (e.data?.type === 'approval_response') {
       onApproval({ approved: e.data.approved, remember: e.data.remember })
@@ -222,7 +222,7 @@ async function setupStreamRequest(
   }
 }
 
-// ─── System prompt ────────────────────────────────────────────────────────────
+
 async function buildSkillsSection(): Promise<string> {
   const installedSkills = await listInstalledSkills()
   const skillsRootPath = getUserSkillsPath().replace(/\\/g, '/')
@@ -310,7 +310,7 @@ ${browserInstruction}
 ${skillsSection}`
 }
 
-// ─── Context compaction: summarise and trim messages array ────────────────────
+
 async function runCompaction(
   messages: any[],
   threadId: string,
@@ -325,7 +325,7 @@ async function runCompaction(
       return { compacted: false, newMessages: messages, savedTokens: 0 }
     }
     const savedTokens = countMessagesTokens(messages, modelType)
-    // Keep last KEEP_LAST_N_MESSAGES raw messages after compaction
+    
     const keepFrom = Math.max(0, messages.length - KEEP_LAST_N_MESSAGES)
     const recentMessages = messages.slice(keepFrom)
     const summarySystemMsg = {
@@ -333,7 +333,7 @@ async function runCompaction(
       content: `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`
     }
     const newMessages = [summarySystemMsg, ...recentMessages]
-    // Persist compaction to DB
+    
     await compactThreadHistory(threadId, summary, KEEP_LAST_N_MESSAGES)
     send({ type: 'summarize', payload: { savedTokens, totalTokens: countMessagesTokens(newMessages, modelType) }, threadId })
     return { compacted: true, newMessages, savedTokens }
@@ -342,8 +342,35 @@ async function runCompaction(
     return { compacted: false, newMessages: messages, savedTokens: 0 }
   }
 }
-
-// ─── Main export ──────────────────────────────────────────────────────────────
+function getPrimitiveType(type: any): string | null {
+  if (!type) return null
+  const name = type._def?.typeName
+  if (name === 'ZodBoolean') return 'boolean'
+  if (name === 'ZodNumber') return 'number'
+  if (type._def?.innerType) return getPrimitiveType(type._def.innerType)
+  if (type._def?.schema) return getPrimitiveType(type._def.schema)
+  return null
+}
+function coerceArgs(args: any, schema: any): any {
+  if (!args || typeof args !== 'object' || Array.isArray(args) || !schema?.shape) return args
+  const coerced = { ...args }
+  for (const k of Object.keys(schema.shape)) {
+    const v = coerced[k]
+    if (v === undefined) continue
+    const exp = getPrimitiveType(schema.shape[k])
+    if (exp === 'boolean') {
+      if (typeof v === 'string') {
+        const s = v.trim().toLowerCase()
+        if (s === 'true' || s === '1') coerced[k] = true
+        else if (s === 'false' || s === '0') coerced[k] = false
+      } else if (typeof v === 'number') coerced[k] = v !== 0
+    } else if (exp === 'number' && typeof v === 'string') {
+      const n = Number(v.trim())
+      if (!isNaN(n)) coerced[k] = n
+    }
+  }
+  return coerced
+}
 export async function handleAgentStreamRequest(
   port: Electron.MessagePortMain,
   threadId: string,
@@ -361,7 +388,7 @@ export async function handleAgentStreamRequest(
     try { port.postMessage(msg) } catch (err) { log.debug('[stream] Port send error:', err) }
   }
 
-  // Kill any duplicate stream for this thread
+  
   const existingEntry = activeAbortControllers.get(threadId)
   if (existingEntry) {
     log.warn(`[stream] Duplicate stream attempt for ${threadId}, aborting previous`)
@@ -374,7 +401,7 @@ export async function handleAgentStreamRequest(
   activeAbortControllers.set(threadId, { controller, sessionId: streamSessionId })
   markWorkspaceActive(threadId)
 
-  // Inject queue: text from inject events, consumed at next turn boundary
+  
   let pendingInject: string | null = null
   const onInject = (text: string) => { pendingInject = text; log.info(`[stream] Inject queued for ${threadId}: "${text.slice(0, 60)}"`) }
   let pendingApprovalResolve: ((res: ApprovalResponse) => void) | null = null
@@ -398,12 +425,12 @@ export async function handleAgentStreamRequest(
   const orderedBlocks: StreamBlock[] = []
   let lifetimeTokensAdded = 0
   let currentContextTokens = 0
-  let prevContextTokens = 0    // context size before current step — for incremental delta
-  let prevStepInputTokens = 0  // prompt_tokens from the previous LLM step, used to compute incremental input
-  let totalInputAdded = 0      // incremental new input tokens this session (NOT full context per step)
-  let totalOutputAdded = 0     // total output tokens this session (actual or estimated)
+  let prevContextTokens = 0    
+  let prevStepInputTokens = 0  
+  let totalInputAdded = 0      
+  let totalOutputAdded = 0     
 
-  // Progressive save state
+  
   let lastSaveMs = 0
   let saveInFlight = false
   let saveQueued = false
@@ -430,7 +457,7 @@ export async function handleAgentStreamRequest(
     const threadData = await getThread(threadId)
     currentContextTokens = threadData?.accumulatedTokens ?? 0
 
-    // Persist user message
+    
     const userMsgId = crypto.randomUUID()
     await saveMessage(threadId, {
       id: userMsgId,
@@ -439,7 +466,7 @@ export async function handleAgentStreamRequest(
       data: attachments?.length ? JSON.stringify({ attachments }) : undefined
     })
 
-    // Workspace binding
+    
     const ctx = getWorkspaceContext(threadId) || (await getOrCreateWorkspaceContext(threadId))
     if (ctx.isUserWorkspace && !(await getThreadWorkspace(threadId))) {
       try {
@@ -450,7 +477,7 @@ export async function handleAgentStreamRequest(
     const wsPath = await getThreadWorkspace(threadId)
     if (wsPath) await updateWorkspacePath(threadId, wsPath)
 
-    // Model resolution
+    
     const models = await getAvailableModels()
     const availableList = Object.values(models)
     if (!availableList.length) throw new Error('No models configured.')
@@ -461,10 +488,10 @@ export async function handleAgentStreamRequest(
 
     const multimodal = !!rawModel.multimodal
 
-    // Build message history
+    
     const { messages: historyMessages, systemInstructionSuffix } = await buildMessagesFromHistory(history, multimodal)
     let messages: any[] = sanitizeMessages(historyMessages)
-    // Push current user message (with attachments if any)
+    
     messages.push({
       role: 'user',
       content: attachments?.length
@@ -472,7 +499,7 @@ export async function handleAgentStreamRequest(
         : text
     })
 
-    // Build tools
+    
     const browserInstruction = buildBrowserInstruction(!!isBrowserActive, multimodal)
     const skillsSection = await buildSkillsSection()
     const memorySection = await buildMemoryContext(ctx.rootPath)
@@ -482,7 +509,7 @@ export async function handleAgentStreamRequest(
       ...(isBrowserActive ? browserTools(threadId, multimodal) : {})
     }
 
-    // ─── AUTONOMOUS AGENTIC LOOP ──────────────────────────────────────────────
+    
     let shouldContinue = true
     let stepCount = 0
 
@@ -491,44 +518,44 @@ export async function handleAgentStreamRequest(
       stepCount++
       log.info(`[stream] Step ${stepCount} — thread ${threadId}`)
 
-      // ── 1. Check context size, compact if needed ─────────────────────────
+      
       const inputTokens = countMessagesTokens(messages, modelType)
       const threshold = rawModel.contextWindow ? Math.floor(rawModel.contextWindow * 0.8) : SUMMARISE_THRESHOLD
       if (inputTokens >= threshold) {
         const { compacted, newMessages } = await runCompaction(messages, threadId, modelType, send)
         if (compacted) {
           messages = newMessages
-          // Persist the blocks so far
+          
           saveProgress(true)
         }
       }
 
-      // ── 2. Consume any pending inject (user message injection) ─────────────
+      
       if (pendingInject !== null) {
         const injText = pendingInject
         pendingInject = null
         messages.push({ role: 'user', content: injText })
-        // Persist inject as a proper user message so it survives thread reload
+        
         const injMsgId = crypto.randomUUID()
         await saveMessage(threadId, { id: injMsgId, role: 'user', content: injText })
         send({ type: 'inject_queued', payload: injText, threadId })
         log.info(`[stream] Inject consumed and saved for thread ${threadId}`)
       }
-      // ── 3. Compute tokens + build system prompt ───────────────────────────
+      
       const stepInputTokens = countMessagesTokens(messages, modelType)
       const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + memorySection + (systemInstructionSuffix || '')
       const sysTokens = countTokens(systemInstruction, modelType)
       const toolSchemaTokens = countTokens(JSON.stringify(getOpenAiTools(activeTools)), modelType)
       prevContextTokens = currentContextTokens
       currentContextTokens = stepInputTokens + sysTokens + toolSchemaTokens
-      // Optimistic display update — lifetime will be corrected after the LLM call
+      
       send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
-      // ── 4. Stream LLM call ────────────────────────────────────────────────
+      
       const chunkStream = await streamLlmResponse(rawModel.id, messages, systemInstruction, activeTools, controller.signal, prevStepInputTokens)
 
-      // Per-step reasoning stripper — strips <think>/<thought> from UI stream
-      // but raw content still goes into LLM messages for model self-consistency
+      
+      
       const stripper = new ReasoningStripper()
       let hasToolCalls = false
       const stepToolCalls: Array<{ id: string; name: string; args: Record<string, unknown>; extra_content?: any }> = []
@@ -538,7 +565,7 @@ export async function handleAgentStreamRequest(
       let stepActualInput = 0, stepActualOutput = 0, hasActualUsage = false
       for await (const chunk of chunkStream) {
         if (controller.signal.aborted) break
-        // Read actual usage from API final chunk (choices is empty [], usage is populated)
+        
         if ((chunk as any).usage) {
           const u = (chunk as any).usage
           stepActualInput = (u.prompt_tokens ?? 0) as number
@@ -616,7 +643,7 @@ export async function handleAgentStreamRequest(
         toolCallAccumulators.clear()
       }
 
-      // Flush stripper — emit any buffered text that wasn't inside a reasoning block
+      
       const trailing = stripper.flush()
       if (trailing.content) {
         const last = orderedBlocks[orderedBlocks.length - 1]
@@ -627,12 +654,12 @@ export async function handleAgentStreamRequest(
 
       saveProgress(true)
       if (controller.signal.aborted) break
-      // Compute lifetime token additions for this step
+      
       if (hasActualUsage) {
-        // Server-reported exact counts.
-        // prompt_tokens = ENTIRE context window size on every step — do NOT sum it raw across steps.
-        // Instead, only count the INCREMENTAL growth vs the previous step to avoid massive double-counting.
-        // e.g. step1=50k, step2=60k, step3=65k → incremental = 50k + 10k + 5k = 65k, not 175k.
+        
+        
+        
+        
         const newInputThisStep = Math.max(0, stepActualInput - prevStepInputTokens)
         currentContextTokens = stepActualInput
         lifetimeTokensAdded += newInputThisStep + stepActualOutput
@@ -640,7 +667,7 @@ export async function handleAgentStreamRequest(
         totalOutputAdded += stepActualOutput
         prevStepInputTokens = stepActualInput
       } else {
-        // Fallback estimation — only count INCREMENTAL new tokens, not full re-accumulated context
+        
         const stepOutputEst = countTokens(stepAssistantContent, modelType) + countTokens(stepReasoningContent, modelType)
         const newInputEst = Math.max(0, currentContextTokens - prevContextTokens)
         lifetimeTokensAdded += newInputEst + stepOutputEst
@@ -649,10 +676,10 @@ export async function handleAgentStreamRequest(
       }
       send({ type: 'token_update', payload: { accumulatedTokens: currentContextTokens, lifetimeTokens: (threadData?.lifetimeTokens ?? 0) + lifetimeTokensAdded }, threadId })
 
-      // ── 5. No tool calls → check for pending inject before exiting ──────
+      
       if (!hasToolCalls || stepToolCalls.length === 0) {
         if (pendingInject !== null) {
-          // Agent finished its turn but user injected a message — consume it and re-enter loop
+          
           const injText = pendingInject; pendingInject = null
           messages.push({ role: 'assistant', content: stepAssistantContent || ' ' })
           messages.push({ role: 'user', content: injText })
@@ -660,14 +687,14 @@ export async function handleAgentStreamRequest(
           await saveMessage(threadId, { id: injMsgId, role: 'user', content: injText })
           send({ type: 'inject_queued', payload: injText, threadId })
           log.info(`[stream] Inject consumed at turn boundary for thread ${threadId}`)
-          // Continue loop — agent will process the injected text next iteration
+          
           continue
         }
         shouldContinue = false
         break
       }
 
-      // ── 6. Push assistant message with tool_calls ─────────────────────────
+      
       messages.push({
         role: 'assistant',
         content: stepAssistantContent || null,
@@ -680,10 +707,10 @@ export async function handleAgentStreamRequest(
         ...(stepReasoningContent ? { reasoning_content: stepReasoningContent } : {})
       } as any)
 
-      // ── 7. Execute tools ─────────────────────────────────────────────────────
+      
       log.info(`[stream] Executing ${stepToolCalls.length} tools in step ${stepCount}`)
 
-      // run_command is the only tool with an approval gate — resolve sequentially before parallel execution
+      
       const deniedCommandIds = new Set<string>()
       for (const tc of stepToolCalls) {
         if (tc.name !== 'run_command' || !activeTools[tc.name]) continue
@@ -716,7 +743,7 @@ export async function handleAgentStreamRequest(
           }
           send({ type: 'tool_result_pending', payload: { tool_call_id: tc.id }, threadId })
           try {
-            const parsed = toolObj.inputSchema.safeParse(tc.args)
+            const parsed = toolObj.inputSchema.safeParse(coerceArgs(tc.args, toolObj.inputSchema))
             if (!parsed.success) {
               const errVal = `Schema validation failed: ${parsed.error.message}`
               const b = orderedBlocks.find(x => x.type === 'tool_call' && x.tool_call_id === tc.id)
@@ -745,24 +772,24 @@ export async function handleAgentStreamRequest(
         })
       )
 
-      // ── 8. Push tool role messages + agentic continuation directive ──────────
+      
 
       const { toolMessages, imageUserMessages, continuationMessages } = await buildToolMessages(toolResults, multimodal, stepCount)
       for (const tm of toolMessages) messages.push(tm)
       for (const im of imageUserMessages) messages.push(im)
       for (const cm of continuationMessages) messages.push(cm)
 
-      // Reset per-step assistant content; orderedBlocks accumulates across all steps
+      
       stepAssistantContent = ''
       saveProgress(true)
     }
-    // ─────────────────────────────────────────────────────────────────────────
+    
 
-    // Append duration block and send finish
+    
     if (!orderedBlocks.some(x => x.type === 'duration')) {
       orderedBlocks.push({ type: 'duration', durationSeconds: Math.round((Date.now() - startTime) / 1000) })
     }
-    // Final DB save \u2014 must await to ensure consistency before finish event
+    
     if (assistantContent || orderedBlocks.length > 0) {
       try { await saveMessage(threadId, { id: assistantMsgId, role: 'assistant', content: assistantContent, data: JSON.stringify(orderedBlocks) }) }
       catch (saveErr) { log.error('[stream] Final save error:', saveErr) }
@@ -780,7 +807,7 @@ export async function handleAgentStreamRequest(
     })
 
   } catch (err: any) {
-    // ── Typed OpenAI SDK error handling ───────────────────────────────────────
+    
     const isAbort = controller.signal.aborted ||
       err?.name === 'AbortError' || err?.message === 'terminated'
 
@@ -822,7 +849,7 @@ export async function handleAgentStreamRequest(
       send({ type: 'error', payload: userMessage, threadId })
       throw err
     } else {
-      // Clean abort
+      
       for (const x of orderedBlocks) { if (x.type === 'tool_call' && x.status === 'pending') x.status = 'error' }
       if (!orderedBlocks.some(x => x.type === 'duration')) {
         orderedBlocks.push({ type: 'duration', durationSeconds: Math.round((Date.now() - startTime) / 1000) })

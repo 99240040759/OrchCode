@@ -48,7 +48,7 @@ function AppInner(): React.JSX.Element {
     return () => { unsubscribe() }
   }, [setUpdateStatus])
 
-  // Renderer-side keyboard shortcuts not covered by Electron menu accelerators
+  
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
@@ -99,7 +99,7 @@ function AppInner(): React.JSX.Element {
       const models = m as Record<string, { id: string; name: string }> | undefined
       if (models) {
         setAvailableModels(models)
-        // Only set default once — use functional update to read current value without adding to deps
+        
         setSelectedModel(prev => (!prev && Object.keys(models).length > 0) ? Object.keys(models)[0] : prev)
       }
     }).catch(console.error)

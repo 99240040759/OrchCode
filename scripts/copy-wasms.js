@@ -19,4 +19,8 @@ for (const file of files) {
     fs.copyFileSync(path.join(src, file), path.join(dest, file));
   }
 }
-console.log(`Successfully copied ${files.length} WASM files to resources/wasms`);
+const coreWasmSrc = path.join(__dirname, '../node_modules/web-tree-sitter/tree-sitter.wasm');
+if (fs.existsSync(coreWasmSrc)) {
+  fs.copyFileSync(coreWasmSrc, path.join(dest, 'tree-sitter.wasm'));
+}
+console.log(`Successfully copied WASM files to resources/wasms`);

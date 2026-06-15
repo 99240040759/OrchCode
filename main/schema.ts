@@ -4,7 +4,7 @@ import log from 'electron-log'
 import OpenAI from 'openai'
 export type ModelMessage = OpenAI.ChatCompletionMessageParam
 
-// ─── Block Schemas ────────────────────────────────────────────────────────────
+
 
 const TextBlockSchema = z.object({ type: z.literal('text'), content: z.string() })
 const ReasoningBlockSchema = z.object({ type: z.literal('reasoning'), content: z.string(), durationMs: z.number().optional(), isStreaming: z.boolean().optional() })
@@ -77,7 +77,7 @@ export async function extractTextFromBinaryAttachment(name: string, mime: string
   return `[Binary File: ${name} (${mime}) - Binary file text extraction not supported]`
 }
 
-// ─── Attachment builder ───────────────────────────────────────────────────────
+
 export async function buildAttachmentParts(
   text: string,
   attachments: Array<{ type: string; name: string; mimeType?: string; base64: string }>,
@@ -101,9 +101,9 @@ export async function buildAttachmentParts(
   return parts
 }
 
-// ─── Format a stored tool result into a model-facing string ──────────────────
-// Same logic as streamWorker's formatToolOutputForModel but for history reconstruction.
-// If the screenshot file no longer exists we use a text placeholder — no crash.
+
+
+
 async function formatStoredToolResult(
   toolName: string,
   outputVal: any,
@@ -113,11 +113,11 @@ async function formatStoredToolResult(
   if (status === 'pending') {
     return { content: 'Tool execution was interrupted or cancelled.', isImage: false }
   }
-  // view_file binary image
+  
   if (toolName === 'view_file' && outputVal?.isBinary && outputVal?.mimeType?.startsWith('image/') && outputVal?.base64Content && multimodal) {
     return { content: '', isImage: true, imgBase64: outputVal.base64Content, imgMime: outputVal.mimeType }
   }
-  // browser_screenshot — try to read from disk, fall back gracefully
+  
   if (toolName === 'browser_screenshot' && outputVal?.success) {
     const rawPath = (outputVal.screenshotPath || outputVal.filePath) as string | undefined
     if (rawPath) {
@@ -126,34 +126,34 @@ async function formatStoredToolResult(
           const cleanPath = rawPath.startsWith('file://') ? rawPath.slice(7) : rawPath
           const base64Image = (await fs.readFile(cleanPath)).toString('base64')
           return { content: '', isImage: true, imgBase64: base64Image, imgMime: 'image/png' }
-        } catch { /* file no longer exists — fall through to text */ }
+        } catch {   }
       }
       return { content: `Screenshot captured at: ${rawPath} (image data unavailable)`, isImage: false }
     }
   }
-  // view_file text — produce the METADATA + content format
+  
   if (toolName === 'view_file' && outputVal && typeof outputVal === 'object' && 'content' in outputVal && !outputVal.isBinary) {
     const metaLine = `[METADATA: readStart=${outputVal.readStart ?? 1}, readEnd=${outputVal.readEnd ?? '?'}]`
     const contentStr = outputVal.content ?? outputVal.error ?? 'No content'
     return { content: `${metaLine}\n${contentStr}`, isImage: false }
   }
-  // list_dir — produce clean text list
+  
   if (toolName === 'list_dir' && outputVal?.entries && Array.isArray(outputVal.entries)) {
     const text = outputVal.entries.map((e: any) =>
       e.isDirectory ? `[DIR] ${e.name}/ (${e.numChildren ?? '?'} items)` : `[FILE] ${e.name} (${e.sizeBytes ?? '?'} bytes)`
     ).join('\n') || 'Empty directory'
     return { content: text, isImage: false }
   }
-  // Error case
+  
   if (outputVal?.success === false) {
     return { content: `Error: ${outputVal.error ?? 'Unknown error'}`, isImage: false }
   }
-  // Generic
+  
   const str = typeof outputVal === 'string' ? outputVal : JSON.stringify(outputVal ?? '')
   return { content: str, isImage: false }
 }
 
-// ─── History → ModelMessage[] ─────────────────────────────────────────────────
+
 type RawMessage = { role: string; content: string; data?: string | null }
 
 export function sanitizeMessages(messages: ModelMessage[]): ModelMessage[] {
@@ -236,7 +236,7 @@ export async function buildMessagesFromHistory(
         }
       }
 
-      // Skip empty assistant turns — providers reject history with content='' and no tool_calls
+      
       if (!textVal && !toolCalls.length) continue
       const assistantMsg: any = { role: 'assistant', content: textVal || null }
       if (reasoningVal) {

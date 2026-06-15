@@ -2,58 +2,57 @@ import Database, { type Statement } from 'better-sqlite3'
 import crypto from 'node:crypto'
 
 const proc = process as any
-let dbInstance: Database.Database | null = null
-const stmtCache = new Map<string, Statement>()
+const dbInstanceMap = new Map<string, Database.Database>()
+const dbCache = new WeakMap<Database.Database, Map<string, Statement>>()
 const MAX_CACHED_STATEMENTS = 100
 
 function getDB(dbPath: string): Database.Database {
-  if (dbInstance) return dbInstance
-  dbInstance = new Database(dbPath, { timeout: 5000 })
-  dbInstance.pragma('journal_mode = WAL')
-  dbInstance.pragma('synchronous = NORMAL')
-  dbInstance.pragma('temp_store = MEMORY')
-  dbInstance.pragma('foreign_keys = ON')
-  dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, resourceId TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, accumulatedTokens INTEGER NOT NULL DEFAULT 0, lifetimeTokens INTEGER NOT NULL DEFAULT 0) STRICT;
-    CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, data TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
-    CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(threadId, createdAt);
-    CREATE TABLE IF NOT EXISTS thread_workspaces (threadId TEXT PRIMARY KEY, workspacePath TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
-    CREATE TABLE IF NOT EXISTS opened_workspaces (path TEXT PRIMARY KEY, lastOpenedAt TEXT NOT NULL) STRICT;
-    CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT) STRICT;
-    CREATE TABLE IF NOT EXISTS tool_permissions (tool_name TEXT PRIMARY KEY, permission TEXT NOT NULL CHECK(permission IN ('always_allow','always_ask','always_deny'))) STRICT;
-    CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', workspace_path TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
-    CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_path);
-  `)
-  const cols = (table: string) => (dbInstance!.pragma(`table_info(${table})`) as { name: string }[]).map(c => c.name)
-  if (!cols('threads').includes('accumulatedTokens')) {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN accumulatedTokens INTEGER NOT NULL DEFAULT 0`)
+  let db = dbInstanceMap.get(dbPath)
+  if (!db) {
+    db = new Database(dbPath, { timeout: 5000 })
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('temp_store = MEMORY')
+    db.pragma('foreign_keys = ON')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, title TEXT, resourceId TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, accumulatedTokens INTEGER NOT NULL DEFAULT 0, lifetimeTokens INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0) STRICT;
+      CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, data TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_messages_thread_created ON messages(threadId, createdAt);
+      CREATE TABLE IF NOT EXISTS thread_workspaces (threadId TEXT PRIMARY KEY, workspacePath TEXT NOT NULL, FOREIGN KEY(threadId) REFERENCES threads(id) ON DELETE CASCADE) STRICT;
+      CREATE TABLE IF NOT EXISTS opened_workspaces (path TEXT PRIMARY KEY, lastOpenedAt TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT) STRICT;
+      CREATE TABLE IF NOT EXISTS tool_permissions (tool_name TEXT PRIMARY KEY, permission TEXT NOT NULL CHECK(permission IN ('always_allow','always_ask','always_deny'))) STRICT;
+      CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', workspace_path TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_path);
+    `)
+    const cols = (db.pragma('table_info(threads)') as { name: string }[]).map(c => c.name)
+    if (!cols.includes('input_tokens')) db.exec(`ALTER TABLE threads ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`)
+    if (!cols.includes('output_tokens')) db.exec(`ALTER TABLE threads ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`)
+    dbInstanceMap.set(dbPath, db)
+    dbCache.set(db, new Map())
   }
-  if (!cols('threads').includes('lifetimeTokens')) {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN lifetimeTokens INTEGER NOT NULL DEFAULT 0`)
-  }
-  if (!cols('threads').includes('input_tokens')) {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`)
-  }
-  if (!cols('threads').includes('output_tokens')) {
-    dbInstance.exec(`ALTER TABLE threads ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`)
-  }
-  return dbInstance
+  return db
 }
 
 function prepare(db: Database.Database, sql: string): Statement {
-  let stmt = stmtCache.get(sql)
+  let cache = dbCache.get(db)
+  if (!cache) {
+    cache = new Map()
+    dbCache.set(db, cache)
+  }
+  let stmt = cache.get(sql)
   if (!stmt) {
-    if (stmtCache.size >= MAX_CACHED_STATEMENTS) {
-      const firstKey = stmtCache.keys().next().value
-      if (firstKey !== undefined) stmtCache.delete(firstKey)
+    if (cache.size >= MAX_CACHED_STATEMENTS) {
+      const firstKey = cache.keys().next().value
+      if (firstKey !== undefined) cache.delete(firstKey)
     }
     stmt = db.prepare(sql)
-    stmtCache.set(sql, stmt)
+    cache.set(sql, stmt)
   }
   return stmt
 }
 
-/** Inserts a thread row only if it doesn't already exist. Single source of truth for the default INSERT. */
+ 
 function ensureThread(db: Database.Database, threadId: string, now: string) {
   if (!prepare(db, 'SELECT 1 FROM threads WHERE id = ?').get(threadId))
     prepare(db, `INSERT INTO threads (id, title, resourceId, createdAt, updatedAt, accumulatedTokens, lifetimeTokens) VALUES (?, 'New Chat', 'local-user', ?, ?, 0, 0)`).run(threadId, now, now)
@@ -139,7 +138,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
       const toDelete = msgs.slice(0, msgs.length - keepCount)
       const delMsg = prepare(db, 'DELETE FROM messages WHERE id = ?')
       for (const m of toDelete) delMsg.run(m.id)
-      // Fixed epoch ensures summary always sorts before any real message across compactions
+      
       prepare(db, `INSERT INTO messages (id, threadId, role, content, data, createdAt) VALUES (?, ?, 'system', ?, NULL, ?)`).run(crypto.randomUUID(), threadId, `[CONTEXT COMPACTED]\nPrior conversation summarised to preserve context window. Summary:\n\n${summary}`, '0001-01-01T00:00:00.000Z')
       prepare(db, 'UPDATE threads SET updatedAt = ? WHERE id = ?').run(new Date().toISOString(), threadId)
     })()
@@ -153,14 +152,14 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
     if (threadId) prepare(db, "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('activeThreadId', ?)").run(threadId)
     else prepare(db, "DELETE FROM app_settings WHERE key = 'activeThreadId'").run()
   },
-  // Tool Permissions
+  
   getToolPermissions(dbPath) {
     return prepare(getDB(dbPath), 'SELECT tool_name, permission FROM tool_permissions').all()
   },
   setToolPermission(dbPath, toolName, permission) {
     prepare(getDB(dbPath), 'INSERT OR REPLACE INTO tool_permissions (tool_name, permission) VALUES (?, ?)').run(toolName, permission)
   },
-  // Memories
+  
   getMemories(dbPath, workspacePath) {
     if (workspacePath) return prepare(getDB(dbPath), 'SELECT * FROM memories WHERE workspace_path = ? OR workspace_path IS NULL ORDER BY updated_at DESC').all(workspacePath)
     return prepare(getDB(dbPath), 'SELECT * FROM memories ORDER BY updated_at DESC').all()
@@ -174,7 +173,7 @@ const methods: Record<string, (dbPath: string, ...args: any[]) => any> = {
   deleteMemory(dbPath, id) {
     prepare(getDB(dbPath), 'DELETE FROM memories WHERE id = ?').run(id)
   },
-  // Token tracking
+  
   getAppTotalTokens(dbPath) {
     return prepare(getDB(dbPath), 'SELECT COALESCE(SUM(input_tokens),0) as totalInput, COALESCE(SUM(output_tokens),0) as totalOutput, COALESCE(SUM(lifetimeTokens),0) as totalLifetime FROM threads').get()
   }

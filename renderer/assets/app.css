@@ -128,8 +128,8 @@
 .custom-titlebar-wrapper { display: flex; align-items: center; justify-content: space-between; height: var(--titlebar-height); background-color: var(--bg-sidebar); border-bottom: none; padding: 0 16px; -webkit-app-region: drag; flex-shrink: 0; user-select: none; position: relative }
 .custom-titlebar-left { display: flex; align-items: center; gap: 12px; transition: padding-left var(--transition-speed-panel) var(--transition-curve-default) }
 .sidebar-is-expanded .custom-titlebar-left { padding-left: 276px }
-.sidebar-is-collapsed.is-mac .custom-titlebar-left { padding-left: 210px }
-.sidebar-is-collapsed.is-win .custom-titlebar-left { padding-left: 130px }
+.sidebar-is-collapsed.is-mac .custom-titlebar-left { padding-left: 124px }
+.sidebar-is-collapsed.is-win .custom-titlebar-left { padding-left: 64px }
 .custom-titlebar-title { font-size: 13px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 360px }
 .custom-titlebar-right { display: flex; align-items: center; gap: 12px }
 .fixed-nav-container { position: absolute; top: 0; height: var(--titlebar-height); display: flex; align-items: center; gap: 10px; z-index: 9999; -webkit-app-region: no-drag }
@@ -285,9 +285,9 @@
 .codeblock-dot.green { background-color: #27c93f }
 .codeblock-header-title { font-family: var(--font-display); font-size: 11px; color: var(--text-breadcrumb); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px }
 
-.markdown-content pre { background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 34px 16px 14px 16px; margin: 18px 0; overflow-x: auto; position: relative }
-.markdown-content pre code { background: transparent; padding: 0; border-radius: 0; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word }
-.markdown-content pre code.hljs { background: transparent !important; padding: 0 !important; border: none !important; border-radius: 0 !important }
+.markdown-content pre:not(.codeblock-body) { background-color: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: 8px; padding: 34px 16px 14px 16px; margin: 18px 0; overflow-x: auto; position: relative }
+.markdown-content pre:not(.codeblock-body) code { background: transparent; padding: 0; border-radius: 0; font-family: var(--font-mono); font-size: var(--font-size-xs-plus); line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word }
+.markdown-content pre:not(.codeblock-body) code.hljs { background: transparent !important; padding: 0 !important; border: none !important; border-radius: 0 !important }
 .markdown-content hr { display: none }
 .code-block-lang { position: absolute; top: 8px; left: 16px; font-size: var(--font-size-xxs); font-family: var(--font-mono); color: var(--text-secondary); opacity: 0.5; text-transform: lowercase }
 .code-block-copy-btn { position: absolute; top: 8px; right: 16px; background: transparent; border: none; color: var(--text-secondary); opacity: 0.5; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 4px; transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease }

@@ -130,7 +130,7 @@ export function startGoogleAuth(): Promise<UserProfile | null> {
 }
 
 export async function handleAuthCallback(code: string, _state: string, errorMsg?: string | null): Promise<void> {
-  // Capture pending callbacks — may be null if deep-link arrives without a pending login (e.g. app restarted)
+  
   const resolve = pendingLoginResolve
   const reject = pendingLoginReject
   pendingLoginResolve = null
@@ -166,8 +166,8 @@ export async function handleAuthCallback(code: string, _state: string, errorMsg?
     log.info('[auth] Login completed:', user.email)
     broadcastUserStatus(user)
     resolve?.(user)
-    // Always emit transition event as a guaranteed fallback — the renderer's auth:complete-onboarding
-    // IPC call can race or fail if the window is being destroyed; this ensures main window always opens.
+    
+    
     authEvents.emit('open-main-and-close-onboarding')
   } catch (err: any) {
     log.error('[auth] Callback failed:', err)

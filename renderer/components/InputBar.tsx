@@ -9,12 +9,44 @@ import ApprovalCard from './ApprovalCard'
 import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThreadIdAtom, activeWorkspaceAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, isDiffModeAtom, pendingApprovalAtom } from '../store/agentStore'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import Tooltip from './Tooltip'
-
 import { workspaceService } from '../services/services'
 import { toast } from 'sonner'
+import { LexicalComposer } from '@lexical/react/LexicalComposer'
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
+import { ContentEditable } from '@lexical/react/LexicalContentEditable'
+import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
+import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
+import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
+import {
+  $getRoot, $createTextNode, $createParagraphNode, TextNode, NodeKey,
+  $getSelection, $isRangeSelection, COMMAND_PRIORITY_CRITICAL, KEY_DOWN_COMMAND
+} from 'lexical'
+
+export class FileMentionNode extends TextNode {
+  __path: string
+  static getType(): string { return 'file-mention' }
+  static clone(node: FileMentionNode): FileMentionNode { return new FileMentionNode(node.__text, node.__path, node.__key) }
+  constructor(text: string, path: string, key?: NodeKey) { super(text, key); this.__path = path }
+  createDOM(_config: any): HTMLElement {
+    const dom = document.createElement('span')
+    dom.className = 'file-mention-chip'
+    dom.setAttribute('data-path', this.__path)
+    dom.setAttribute('data-name', this.__text)
+    const iconHtml = renderToStaticMarkup(<SymbolsFileIcon fileName={this.__text} autoAssign={true} width={13} height={13} />)
+    dom.innerHTML = `<span style="display: inline-flex; align-items: center; vertical-align: middle; margin-right: 3px;">${iconHtml}</span><span style="font-size: 13px;">${this.__text}</span>`
+    return dom
+  }
+  updateDOM(_prevNode: FileMentionNode, _dom: HTMLElement, _config: any): boolean { return false }
+  static importJSON(serializedNode: any): FileMentionNode {
+    const node = new FileMentionNode(serializedNode.text, serializedNode.path)
+    node.setFormat(serializedNode.format); node.setDetail(serializedNode.detail); node.setMode(serializedNode.mode); node.setStyle(serializedNode.style)
+    return node
+  }
+  exportJSON(): any { return { ...super.exportJSON(), path: this.__path, type: 'file-mention', version: 1 } }
+}
 
 interface InputBarProps { onSubmit?: (val: string, attachments?: any[]) => void; onStop?: () => void }
-
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -25,9 +57,8 @@ export const AutocompleteSuggestions: React.FC<{ showFileSuggestions: boolean, f
     <div className="input-file-suggestions">
       {filteredFiles.map((file, idx) => {
         const isSelected = idx === suggestionIndex
-        const parts = file.split(/[/\\]/)
-        const name = parts[parts.length - 1]
-        const dir = parts.slice(0, -1).join('/')
+        const name = file.split(/[/\\]/).pop() || file
+        const dir = file.split(/[/\\]/).slice(0, -1).join('/')
         return (
           <div key={file} onClick={() => selectFileSuggestion(file)} onMouseEnter={() => setSuggestionIndex(idx)} className={`input-file-suggestion-item${isSelected ? ' input-file-suggestion-item-selected' : ''}`}>
             <SymbolsFileIcon fileName={name} autoAssign={true} width={14} height={14} className="input-file-icon" />
@@ -73,9 +104,78 @@ const SubmitButton: React.FC<{ isRunning: boolean; hasInput: boolean; handleStop
   )
 }
 
+function getMarkdownText(editor: any): string {
+  let text = ''
+  editor.getEditorState().read(() => {
+    const children = $getRoot().getChildren()
+    children.forEach((child: any, idx: number) => {
+      if (idx > 0) text += '\n'
+      const processNode = (node: any) => {
+        if (node.getType() === 'file-mention') text += `[${node.getTextContent()}](file://${node.__path})`
+        else if (node.getType() === 'linebreak') text += '\n'
+        else if (node.getChildren) node.getChildren().forEach(processNode)
+        else text += node.getTextContent()
+      }
+      processNode(child)
+    })
+  })
+  return text.trim()
+}
+
+const EditorListenerPlugin: React.FC<{
+  showFileSuggestions: boolean
+  filteredFiles: string[]
+  suggestionIndex: number
+  setSuggestionIndex: React.Dispatch<React.SetStateAction<number>>
+  selectFileSuggestion: (file: string) => void
+  setShowFileSuggestions: React.Dispatch<React.SetStateAction<boolean>>
+  setSearchQuery: React.Dispatch<React.SetStateAction<string>>
+  formRef: React.RefObject<HTMLFormElement | null>
+}> = ({
+  showFileSuggestions, filteredFiles, suggestionIndex, setSuggestionIndex,
+  selectFileSuggestion, setShowFileSuggestions, setSearchQuery, formRef
+}) => {
+  const [editor] = useLexicalComposerContext()
+  useEffect(() => {
+    return editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(() => {
+        const selection = $getSelection()
+        if ($isRangeSelection(selection) && selection.isCollapsed()) {
+          const anchor = selection.anchor, node = anchor.getNode()
+          if (node.getType() === 'text') {
+            const text = node.getTextContent(), offset = anchor.offset, before = text.slice(0, offset), idx = before.lastIndexOf('@')
+            if (idx !== -1 && !before.slice(idx + 1).includes(' ') && !before.slice(idx + 1).includes('\n')) {
+              setSearchQuery(before.slice(idx + 1)); setShowFileSuggestions(true); setSuggestionIndex(0); return
+            }
+          }
+        }
+        setShowFileSuggestions(false)
+      })
+    })
+  }, [editor])
+  useEffect(() => {
+    return editor.registerCommand<KeyboardEvent>(
+      KEY_DOWN_COMMAND,
+      (event) => {
+        if (showFileSuggestions && filteredFiles.length > 0) {
+          const len = filteredFiles.length
+          if (event.key === 'ArrowDown') { event.preventDefault(); setSuggestionIndex((prev) => (prev + 1) % len); return true }
+          if (event.key === 'ArrowUp') { event.preventDefault(); setSuggestionIndex((prev) => (prev - 1 + len) % len); return true }
+          if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); selectFileSuggestion(filteredFiles[suggestionIndex]); return true }
+          if (event.key === 'Escape') { event.preventDefault(); setShowFileSuggestions(false); return true }
+        }
+        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); formRef.current?.requestSubmit(); return true }
+        return false
+      },
+      COMMAND_PRIORITY_CRITICAL
+    )
+  }, [editor, showFileSuggestions, filteredFiles, suggestionIndex])
+  return null
+}
+
 const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   const [inputValue, setInputValue] = useState('')
-  const editorRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<any>(null)
   const formRef = useRef<HTMLFormElement>(null)
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false)
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
@@ -96,9 +196,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   useEffect(() => { if (!supportsVision && attachments.length > 0) setAttachments([]) }, [supportsVision])
   const [isListening, setIsListening] = useState(false)
   const recognitionRef = useRef<any>(null)
-  useEffect(() => {
-    return () => { recognitionRef.current?.stop() }
-  }, [])
+  useEffect(() => { return () => { recognitionRef.current?.stop() } }, [])
   const toggleListening = () => {
     if (isListening) { recognitionRef.current?.stop(); return }
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -108,14 +206,19 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
     let finalTranscript = ''
     rec.onstart = () => setIsListening(true)
     rec.onresult = (e: any) => {
-      let interimTranscript = ''
+      let interim = ''
       for (let i = e.resultIndex; i < e.results.length; ++i) {
         if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript
-        else interimTranscript += e.results[i][0].transcript
+        else interim += e.results[i][0].transcript
       }
-      if (editorRef.current) {
-        const text = finalTranscript + interimTranscript
-        editorRef.current.innerText = text; setInputValue(text)
+      const ed = editorRef.current
+      if (ed) {
+        const text = finalTranscript + interim
+        ed.update(() => {
+          const root = $getRoot(); root.clear()
+          const p = $createParagraphNode(); p.append($createTextNode(text)); root.append(p)
+        })
+        setInputValue(text)
       }
     }
     rec.onerror = () => setIsListening(false)
@@ -142,88 +245,44 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
       if (fileData) { setIsDiffMode(false); setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
   }
-
   const handleEditorClick = (e: React.MouseEvent) => {
     const chip = (e.target as HTMLElement).closest('.file-mention-chip')
     if (chip) { e.preventDefault(); e.stopPropagation(); const path = chip.getAttribute('data-path'); if (path) handleOpenFile(path) }
   }
-
   const fetchWorkspaceFiles = async () => {
     if (!conversationId) return
     try { const files = await workspaceService.listWorkspaceFiles(conversationId); setWorkspaceFiles(files) }
     catch (err) { console.error('Failed to load workspace files:', err) }
   }
-
   useEffect(() => { fetchWorkspaceFiles() }, [activeWorkspace, conversationId])
-
   const filteredFiles = workspaceFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 15)
 
-  const checkSuggestions = () => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return setShowFileSuggestions(false)
-    const range = selection.getRangeAt(0)
-    if (!editorRef.current || !editorRef.current.contains(range.startContainer)) return setShowFileSuggestions(false)
-    const container = range.startContainer
-    if (container.nodeType !== Node.TEXT_NODE) return setShowFileSuggestions(false)
-    const text = container.textContent || ''
-    const offset = range.startOffset
-    const textBeforeCursor = text.slice(0, offset)
-    const lastAtIdx = textBeforeCursor.lastIndexOf('@')
-    if (lastAtIdx !== -1) {
-      const textAfterAt = textBeforeCursor.slice(lastAtIdx + 1)
-      if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        setSearchQuery(textAfterAt); setShowFileSuggestions(true); setSuggestionIndex(0)
-        return
-      }
-    }
-    setShowFileSuggestions(false)
-  }
-
   const selectFileSuggestion = (selectedFile: string) => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return
-    const range = selection.getRangeAt(0)
-    if (!editorRef.current || !editorRef.current.contains(range.startContainer)) return
-    const container = range.startContainer
-    if (container.nodeType !== Node.TEXT_NODE) return
-    const name = selectedFile.split(/[/\\]/).pop() || selectedFile
-    const text = container.textContent || ''
-    const offset = range.startOffset
-    const atIdx = text.slice(0, offset).lastIndexOf('@')
-    if (atIdx === -1) return
-    range.setStart(container, atIdx)
-    range.setEnd(container, offset)
-    range.deleteContents()
-    const wsPath = activeWorkspace?.path ?? ''; const sep = wsPath.includes('\\') ? '\\' : '/'
-    const normalizedSelectedFile = selectedFile.replace(/[/\\]/g, sep)
-    const absolutePath = wsPath ? `${wsPath}${sep}${normalizedSelectedFile}` : `/${normalizedSelectedFile.replace(/[/\\]/g, '/')}`
-    const iconHtml = renderToStaticMarkup(<SymbolsFileIcon fileName={name} autoAssign={true} width={13} height={13} />)
-    const chip = document.createElement('span')
-    chip.className = 'file-mention-chip'
-    chip.setAttribute('contenteditable', 'false')
-    chip.setAttribute('data-path', absolutePath)
-    chip.setAttribute('data-name', name)
-    chip.innerHTML = `<span style="display: inline-flex; align-items: center; vertical-align: middle; margin-right: 3px;">${iconHtml}</span><span style="font-size: 13px;">${name}</span>`
-    range.insertNode(chip)
-    const spaceNode = document.createTextNode('\u00A0')
-    chip.parentNode?.insertBefore(spaceNode, chip.nextSibling)
-    const newRange = document.createRange()
-    newRange.setStartAfter(spaceNode)
-    newRange.collapse(true)
-    selection.removeAllRanges()
-    selection.addRange(newRange)
+    const ed = editorRef.current
+    if (!ed) return
+    ed.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) {
+        const anchor = selection.anchor, node = anchor.getNode()
+        if (node.getType() === 'text') {
+          const text = node.getTextContent(), offset = anchor.offset, idx = text.slice(0, offset).lastIndexOf('@')
+          if (idx !== -1) {
+            selection.anchor.set(node.getKey(), idx, 'text')
+            selection.focus.set(node.getKey(), offset, 'text')
+            selection.insertNodes([new FileMentionNode(selectedFile.split(/[/\\]/).pop() || selectedFile, selectedFile), $createTextNode(' ')])
+          }
+        }
+      }
+    })
     setShowFileSuggestions(false)
-    if (editorRef.current) setInputValue(editorRef.current.innerText || '')
   }
 
   const triggerFileSelect = (type: 'image' | 'document') => {
     if (fileInputRef.current) {
       fileInputRef.current.accept = type === 'image' ? 'image/*' : '.txt,.pdf,.json,.ts,.js,.tsx,.jsx,.html,.css,.md,.py,.rs,.go'
-      fileInputRef.current.setAttribute('data-upload-type', type)
-      fileInputRef.current.click()
+      fileInputRef.current.setAttribute('data-upload-type', type); fileInputRef.current.click()
     }
   }
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
@@ -250,80 +309,36 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
   }
 
   const handleSend = () => {
-    if (!editorRef.current) return
-    let val = ''
-    const traverse = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) { val += node.textContent }
-      else if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement
-        if (el.classList.contains('file-mention-chip')) {
-          const path = el.getAttribute('data-path') || ''
-          const name = el.getAttribute('data-name') || el.textContent || ''
-          val += `[${name}](file://${path})`
-        } else if (el.tagName === 'BR') { val += '\n' }
-        else if (el.tagName === 'DIV' || el.tagName === 'P') {
-          if (val && !val.endsWith('\n')) val += '\n'
-          Array.from(el.childNodes).forEach(traverse)
-          if (!val.endsWith('\n')) val += '\n'
-        } else { Array.from(el.childNodes).forEach(traverse) }
-      }
-    }
-    Array.from(editorRef.current.childNodes).forEach(traverse)
-    val = val.trim()
+    const ed = editorRef.current
+    if (!ed) return
+    const val = getMarkdownText(ed)
     if ((!val && attachments.length === 0) || isRunning) return
     onSubmit?.(val, attachments)
-    editorRef.current.innerHTML = ''
-    setInputValue('')
-    setAttachments([])
+    ed.update(() => { $getRoot().clear() })
+    setInputValue(''); setAttachments([])
   }
-
   const handleStop = () => onStop?.()
-
   const handleInject = () => {
-    if (!editorRef.current || !conversationId) return
-    let val = ''
-    const traverse = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) { val += node.textContent }
-      else if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement
-        if (el.classList.contains('file-mention-chip')) {
-          val += `[${el.getAttribute('data-name') || el.textContent || ''}](file://${el.getAttribute('data-path') || ''})`
-        } else if (el.tagName === 'BR') { val += '\n' }
-        else { Array.from(el.childNodes).forEach(traverse) }
-      }
-    }
-    Array.from(editorRef.current.childNodes).forEach(traverse)
-    val = val.trim()
+    const ed = editorRef.current
+    if (!ed || !conversationId) return
+    const val = getMarkdownText(ed)
     if (!val) return
     window.api.injectToStream(conversationId, val)
-    editorRef.current.innerHTML = ''
-    setInputValue('')
-    setAttachments([])
+    ed.update(() => { $getRoot().clear() })
+    setInputValue(''); setAttachments([])
   }
 
-  const handlePaste = (e: React.ClipboardEvent) => {
-    e.preventDefault()
-    const text = e.clipboardData.getData('text/plain')
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return
-    const range = selection.getRangeAt(0)
-    range.deleteContents()
-    range.insertNode(document.createTextNode(text))
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
-    if (editorRef.current) setInputValue(editorRef.current.innerText || '')
+  const EditorRefPlugin = () => {
+    const [editor] = useLexicalComposerContext()
+    useEffect(() => { editorRef.current = editor; return () => { editorRef.current = null } }, [editor])
+    return null
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (showFileSuggestions && filteredFiles.length > 0) {
-      const len = filteredFiles.length
-      if (e.key === 'ArrowDown') { e.preventDefault(); return setSuggestionIndex((prev) => (prev + 1) % len) }
-      if (e.key === 'ArrowUp') { e.preventDefault(); return setSuggestionIndex((prev) => (prev - 1 + len) % len) }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); return selectFileSuggestion(filteredFiles[suggestionIndex]) }
-      if (e.key === 'Escape') { e.preventDefault(); return setShowFileSuggestions(false) }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); formRef.current?.requestSubmit() }
+  const initialConfig = {
+    namespace: 'InputBarEditor',
+    theme: { paragraph: 'input-bar-paragraph' },
+    nodes: [FileMentionNode],
+    onError: (err: Error) => console.error(err)
   }
 
   if (pendingApproval) return <ApprovalCard />
@@ -346,34 +361,36 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           ))}
         </div>
       )}
-      <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()}>
-        <div className="input-bar-editor-wrapper">
-          {inputValue.trim().length === 0 && !editorRef.current?.querySelector('.file-mention-chip') && (
-            <div className="input-bar-placeholder">
-              Ask anything, @ to mention, / for actions
-            </div>
-          )}
-          <div
-            ref={editorRef}
-            contentEditable
-            className="input-bar-text-area input-bar-text-area-override"
-            onInput={() => { if (editorRef.current) { setInputValue(editorRef.current.innerText || ''); checkSuggestions() } }}
-            onKeyDown={handleKeyDown}
-            onKeyUp={checkSuggestions}
-            onMouseUp={checkSuggestions}
-            onPaste={handlePaste}
-            onClick={handleEditorClick}
-          />
+      <LexicalComposer initialConfig={initialConfig}>
+        <EditorRefPlugin />
+        <EditorListenerPlugin
+          showFileSuggestions={showFileSuggestions}
+          filteredFiles={filteredFiles}
+          suggestionIndex={suggestionIndex}
+          setSuggestionIndex={setSuggestionIndex}
+          selectFileSuggestion={selectFileSuggestion}
+          setShowFileSuggestions={setShowFileSuggestions}
+          setSearchQuery={setSearchQuery}
+          formRef={formRef}
+        />
+        <div className="input-bar-text-container-inner" onClick={() => editorRef.current?.focus()}>
+          <div className="input-bar-editor-wrapper" onClick={handleEditorClick}>
+            <RichTextPlugin
+              contentEditable={<ContentEditable className="input-bar-text-area input-bar-text-area-override" />}
+              placeholder={<div className="input-bar-placeholder">Ask anything, @ to mention, / for actions</div>}
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+            <HistoryPlugin />
+            <OnChangePlugin onChange={(editorState) => {
+              editorState.read(() => {
+                const root = $getRoot()
+                setInputValue(root.isEmpty() ? '' : root.getTextContent())
+              })
+            }} />
+          </div>
         </div>
-      </div>
+      </LexicalComposer>
       <div className="input-bar-toolbar">
-        <style>{`
-          @keyframes mic-pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.08); }
-            100% { transform: scale(1); }
-          }
-        `}</style>
         <div className="input-bar-toolbar-left">
           {supportsVision && (
             <Dropdown open={isUploadDropdownOpen} onOpenChange={setIsUploadDropdownOpen} sideOffset={6} className="dropdown-menu-content-sm" trigger={
@@ -402,11 +419,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
         </div>
         <div className="input-bar-toolbar-right">
           <Tooltip content={isListening ? "Stop voice input" : "Start voice input"}>
-            <button
-              type="button"
-              onClick={toggleListening}
-              className={`toolbar-icon-btn toolbar-voice-btn ${isListening ? 'listening' : ''}`}
-            >
+            <button type="button" onClick={toggleListening} className={`toolbar-icon-btn toolbar-voice-btn ${isListening ? 'listening' : ''}`}>
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
           </Tooltip>

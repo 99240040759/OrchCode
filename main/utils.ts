@@ -5,7 +5,7 @@ import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Page } from 'playwright-core'
 import { getWorkspaceContext } from './workspace'
 
-// --- Paths ---
+
 export const APP_ID = 'com.orchcode.app'
 export function getUserData(): string { return process.env.USER_DATA_PATH || require('electron').app.getPath('userData') }
 export function getDatabasePath(): string { return join(getUserData(), 'orch_db.sqlite') }
@@ -18,7 +18,7 @@ export function getApiBaseUrl(): string {
   return `${process.env.SUPABASE_URL}/functions/v1/api`
 }
 
-/** Resolves env-aware paths for packaged vs dev. Works in both main process and utility process. */
+ 
 export function getAppEnv(): { isPackaged: boolean; resourcesPath: string; appPath: string; userData: string } {
   if (process.env.USER_DATA_PATH) {
     return { isPackaged: process.env.IS_PACKAGED === 'true', resourcesPath: process.env.RESOURCES_PATH || '', appPath: process.env.APP_PATH || '', userData: process.env.USER_DATA_PATH }
@@ -27,48 +27,46 @@ export function getAppEnv(): { isPackaged: boolean; resourcesPath: string; appPa
   return { isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath(), userData: app.getPath('userData') }
 }
 
-/** Resolves the absolute path to a compiled worker JS file, handling dev vs packaged layouts. */
+ 
 export function resolveWorkerPath(name: string): string {
   const { existsSync } = require('node:fs'), { join: j } = require('node:path')
   const primary = j(__dirname, `${name}.js`)
   return existsSync(primary) ? primary : j(__dirname, '..', `${name}.js`)
 }
 
-// --- Limiters ---
+
 export const tavilyLimiter = new Bottleneck({ maxConcurrent: 2, minTime: 200 })
+// STRICT RULE: This is implemented as per the user's wish. Avoid modifying this.
 export const globalApiLimiter = new Bottleneck({ maxConcurrent: 10, minTime: 10000 })
 
-// --- Browser Session ---
+
 export interface BrowserSession {
   view: WebContentsView
   partition: string
-  /** Cached Playwright Page — invalidated on navigation, re-attached on next tool call. */
+   
   page?: Page
-  /** Serialises browser tool actions per conversation — prevents interleaving. */
+   
   queue: Promise<any>
 }
 
-// --- Window Manager ---
+
 export class WindowManager {
   private static mainWindow: BrowserWindow | null = null
-  /** Keyed by conversationId. Each entry owns the view, playwright page, and action queue. */
+   
   private static sessions = new Map<string, BrowserSession>()
-  /** ConvId of the session currently added to contentView (visible). */
+   
   private static activeConvId: string | null = null
 
   static setMainWindow(win: BrowserWindow | null) { this.mainWindow = win }
   static getMainWindow(): BrowserWindow | null { return this.mainWindow }
 
-  /** Get an existing session without creating one. */
+   
   static getSession(convId: string): BrowserSession | undefined { return this.sessions.get(convId) }
 
-  /** Currently visible conversation ID. */
+   
   static getActiveConvId(): string | null { return this.activeConvId }
 
-  /**
-   * Get existing session or create a new WebContentsView for the conversation.
-   * The view is NOT added to contentView here — call showSession to do that.
-   */
+   
   static getOrCreateSession(convId: string, partition?: string): BrowserSession {
     let s = this.sessions.get(convId)
     if (!s) {
@@ -84,11 +82,7 @@ export class WindowManager {
     return s
   }
 
-  /**
-   * Make convId's view visible at the given bounds.
-   * Removes all other sessions from contentView without destroying them
-   * so their state (URL, cookies, Playwright page) is preserved.
-   */
+   
   static showSession(convId: string, bounds: { x: number; y: number; width: number; height: number }) {
     const win = this.mainWindow
     if (!win || win.isDestroyed()) return
@@ -102,7 +96,7 @@ export class WindowManager {
     this.activeConvId = convId
   }
 
-  /** Remove convId's view from contentView (hide) without destroying state. */
+   
   static hideSession(convId: string) {
     const win = this.mainWindow
     const s = this.sessions.get(convId)
@@ -111,10 +105,7 @@ export class WindowManager {
     if (this.activeConvId === convId) this.activeConvId = null
   }
 
-  /**
-   * Full teardown of a conversation's browser session.
-   * Call on thread delete. Closes view + playwright page.
-   */
+   
   static destroySession(convId: string) {
     const win = this.mainWindow
     const s = this.sessions.get(convId)
@@ -126,12 +117,12 @@ export class WindowManager {
     if (this.activeConvId === convId) this.activeConvId = null
   }
 
-  /** Currently visible session, or null. */
+   
   static getActiveSession(): BrowserSession | null {
     return this.activeConvId ? (this.sessions.get(this.activeConvId) ?? null) : null
   }
 
-  /** Teardown all sessions (called on main window close). */
+   
   static clearAllSessions() {
     const win = this.mainWindow
     for (const [, s] of this.sessions) {
@@ -150,7 +141,7 @@ export class WindowManager {
 }
 export default WindowManager
 
-// --- Artifacts ---
+
 export interface ArtifactEntry { name: string; path: string; size: number; modified: string }
 
 async function readArtifacts(dir: string): Promise<ArtifactEntry[]> {

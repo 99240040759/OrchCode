@@ -1,12 +1,12 @@
-// Universal token estimator — model-agnostic, consistent, no BPE dependency.
-// Uses UTF-8 byte length / 4 which approximates most LLM tokenizers (BPE, SentencePiece,
-// BytePiece) within ~10%. Consistent across all models, no false precision.
-// This avoids tiktoken's OpenAI-specific BPE giving wildly wrong counts for Gemini/Claude.
+
+
+
+
 
 
 function estimateTokens(text: string): number {
   if (!text) return 0
-  // UTF-8 byte length / 4 ≈ tokens for mixed English/code content
+  
   return Math.ceil(Buffer.byteLength(text, 'utf8') / 4)
 }
 
@@ -17,13 +17,13 @@ export function countTokens(text: string, _modelId?: string): number {
 export function countMessagesTokens(messages: any[], _modelId?: string): number {
   let total = 0
   for (const msg of messages) {
-    total += 4 // per-message overhead (role + framing)
+    total += 4 
     if (typeof msg.content === 'string') {
       total += estimateTokens(msg.content)
     } else if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
         if (part.type === 'text' && part.text) total += estimateTokens(part.text)
-        else if (part.type === 'image_url') total += 800 // high-res browser screenshot estimate (~1280×800+)
+        else if (part.type === 'image_url') total += 800 
       }
     }
     if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
@@ -34,6 +34,6 @@ export function countMessagesTokens(messages: any[], _modelId?: string): number 
     }
     if (msg.name) total += estimateTokens(msg.name)
   }
-  total += 3 // reply priming
+  total += 3 
   return total
 }

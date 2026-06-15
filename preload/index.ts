@@ -3,30 +3,21 @@ import { PUSH_CHANNELS } from '../shared/ipcChannels'
 
 const activeStreams = new Map<string, { port: MessagePort; cleanup: () => void; abort: () => void }>()
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-// Shared with renderer via window.api
+
+
 
 import type { StreamChunk, StreamPayload } from './types'
 export type { StreamChunk, StreamPayload }
 
-// ─── Bridge ───────────────────────────────────────────────────────────────────
+
 
 contextBridge.exposeInMainWorld('api', {
-  /**
-   * Send a named command to the main process with a validated payload.
-   * All IPC is funneled through a single ipcMain.handle('api:invoke') router.
-   */
+   
   invoke: (command: string, payload?: unknown): Promise<unknown> =>
     ipcRenderer.invoke('api:invoke', { command, payload }),
 
 
-  /**
-   * Start an agent stream. Main will:
-   *   1. Create a MessageChannelMain
-   *   2. postMessage port2 back to us on 'stream:port'
-   *   3. Begin streaming chunks through port1
-   * We capture port2, attach onChunk, and return when the port closes.
-   */
+   
   stream: (payload: StreamPayload, onChunk: (chunk: StreamChunk) => void): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ch = `stream:port:${payload.threadId}`, chCrashed = 'stream:worker-crashed'
@@ -65,13 +56,13 @@ contextBridge.exposeInMainWorld('api', {
     })
   },
 
-  /** Send abort signal on MessagePort to halt the stream session. */
+   
   stopStream: (threadId: string): void => {
     const st = activeStreams.get(threadId)
     if (st) { st.port.postMessage('abort'); activeStreams.delete(threadId); st.abort() }
   },
 
-  /** Inject a mid-turn message into the active stream — pauses current generation and resumes with the injected text appended. */
+   
   injectToStream: (threadId: string, text: string): void => {
     const st = activeStreams.get(threadId)
     if (st) st.port.postMessage({ type: 'inject', text })
@@ -82,10 +73,7 @@ contextBridge.exposeInMainWorld('api', {
     if (st) st.port.postMessage({ type: 'approval_response', ...response })
   },
 
-  /**
-   * Subscribe to push events emitted from main (e.g. terminal:data, browser:title-updated).
-   * Returns an unsubscribe function.
-   */
+   
   on: (channel: string, cb: (data: unknown) => void): (() => void) => {
     if (!(PUSH_CHANNELS as readonly string[]).includes(channel)) throw new Error(`IPC subscription denied for channel: ${channel}`)
     const listener = (_: Electron.IpcRendererEvent, data: unknown) => cb(data)
@@ -100,6 +88,6 @@ contextBridge.exposeInMainWorld('api', {
     })
   },
 
-  /** The platform string — exposed synchronously at bridge creation time. */
+   
   platform: process.platform as 'darwin' | 'win32' | 'linux'
 })

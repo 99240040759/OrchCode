@@ -8,7 +8,7 @@ const { Readable } = require('stream');
 
 const app = express();
 
-// Universal CORS — desktop sends app://orch-code, Android sends no origin / OkHttp UA
+
 app.use(cors({
   origin: (origin, cb) => cb(null, true),
   allowedHeaders: ['authorization', 'x-client-info', 'apikey', 'content-type'],
@@ -23,7 +23,7 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-// ─── Auth middleware ──────────────────────────────────────────────────────────
+
 app.use(async (req, res, next) => {
   if (req.method === 'OPTIONS') return next();
 
@@ -41,12 +41,12 @@ app.use(async (req, res, next) => {
   if (!clientKey || !timingSafeEqual(clientKey.trim(), expectedAnonKey.trim()))
     return res.status(401).json({ error: 'Unauthorized API Client' });
 
-  // Normalize path — strip /functions/v1/api or /api prefix for Supabase-compat calls
+  
   let cleanPath = req.path.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '');
   if (!cleanPath.startsWith('/')) cleanPath = '/' + cleanPath;
   req.normalizedPath = cleanPath;
 
-  // Public endpoints (no JWT required)
+  
   const isPublic = cleanPath.endsWith('/models');
   if (isPublic) return next();
 
@@ -67,7 +67,7 @@ app.use(async (req, res, next) => {
   }
 });
 
-// ─── Key pool with rotation ───────────────────────────────────────────────────
+
 const KEY_POOL = {};
 function getApiKey(envName, triggerRotation = false) {
   const envVal = process.env[envName] || '';
@@ -85,7 +85,7 @@ function getApiKeyVal(envName) {
   return info ? info.value : '';
 }
 
-// ─── Proxy with key rotation ──────────────────────────────────────────────────
+
 async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, attempt = 1) {
   const keyInfo = getApiKey(envName, false);
   if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
@@ -118,7 +118,7 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
   }
 }
 
-// ─── Budget helpers ───────────────────────────────────────────────────────────
+
 const BUDGET_LIMIT = () => parseFloat(process.env.BUDGET_LIMIT_USD || '100');
 const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai'];
 const SKIP_BUDGET  = ['/models', '/generate-title'];
@@ -139,7 +139,7 @@ async function checkBudget(userId) {
   return callBudgetRpc('check_budget', { p_user_id: userId, p_limit_usd: BUDGET_LIMIT() });
 }
 
-// ─── GET /budget — on-demand usage fetch ──────────────────────────────────────
+
 async function handleGetBudget(req, res, userId) {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const budget = await checkBudget(userId);
@@ -159,7 +159,7 @@ function recordUsage(userId, inputTokens, outputTokens) {
     .catch(e => console.error('[budget] record_usage failed:', e.message));
 }
 
-// Wraps proxyRequestWithRotation to intercept usage chunks from SSE stream
+
 async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
   const keyInfo = getApiKey(envName, false);
   if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
@@ -170,8 +170,8 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
   for (const h of forwardHeaders) { const val = req.headers[h]; if (val) headers.set(h, val); }
   const body = (req.method === 'POST' || req.method === 'PUT')
     ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : undefined;
-  // Client sends previous step's prompt_tokens so we can record only the incremental delta.
-  // Without this, a 10-step agent with 90k context would bill 10 × 90k = 900k input instead of ~90k.
+  
+  
   const prevPromptTokens = parseInt(req.headers['x-prev-prompt-tokens'] || '0', 10) || 0;
   try {
     const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body });
@@ -186,15 +186,15 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Cache-Control', 'no-cache');
     if (!upstreamRes.body) return res.end();
-    // Intercept stream to catch usage chunk
+    
     let inputTok = 0, outputTok = 0;
     const reader = upstreamRes.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
     const flush = () => {
-      // Parse SSE lines looking for usage: {"usage":{"prompt_tokens":N,"completion_tokens":M}}
-      // NOTE: prompt_tokens = full context size on every step. We only record the incremental
-      // growth (current - previous step) to avoid billing 10x the actual new tokens consumed.
+      
+      
+      
       for (const line of buf.split('\n')) {
         const trim = line.replace(/^data:\s*/, '');
         if (!trim || trim === '[DONE]') continue;
@@ -202,7 +202,7 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           const j = JSON.parse(trim);
           const u = j.usage || j.usageMetadata;
           if (u) {
-            // Take the max seen (final usage chunk wins — it is the authoritative count)
+            
             const rawInput  = u.prompt_tokens     || u.promptTokenCount     || u.input_tokens  || 0;
             const rawOutput = u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
             if (rawInput  > inputTok)  inputTok  = rawInput;
@@ -222,7 +222,7 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           res.write(chunk);
         }
         flush();
-        // Record only the incremental new input (context growth), not full prompt_tokens every step.
+        
         const incrementalInput = Math.max(0, inputTok - prevPromptTokens);
         recordUsage(userId, incrementalInput, outputTok);
       } catch {}
@@ -244,7 +244,7 @@ const MODEL_DEFINITIONS = [
   ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],
 ];
 
-// Provider → availability key mapping
+
 const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
 
 async function handleModels(req, res) {
@@ -253,7 +253,7 @@ async function handleModels(req, res) {
     const id       = process.env[`${prefix}_MODEL_ID`] || defaultId;
     const provider = process.env[`${prefix}_PROVIDER`] || defaultProvider;
     const envKey   = PROVIDER_KEY[provider];
-    if (envKey && !process.env[envKey]) continue; // skip if provider key not configured
+    if (envKey && !process.env[envKey]) continue; 
     const name            = process.env[`${prefix}_MODEL_NAME`]       || defaultName;
     const multimodal      = process.env[`${prefix}_MULTIMODAL`]       ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
     const contextWindow   = process.env[`${prefix}_CONTEXT_WINDOW`]   ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
@@ -264,8 +264,8 @@ async function handleModels(req, res) {
   res.json(models);
 }
 
-// Build a lookup: modelId → reasoningEffort, for use in the proxy injection middleware.
-// Called once per request — models object is rebuilt each time (TTL handled client-side).
+
+
 function getModelMeta() {
   const meta = {};
   for (const [prefix, defaultId, , , , , defaultProvider, defaultReasoningEffort] of MODEL_DEFINITIONS) {
@@ -277,9 +277,9 @@ function getModelMeta() {
   return meta;
 }
 
-// ─── reasoning_effort injection — server injects before forwarding ───────────
-// Intercepts POST /chat/completions body, adds reasoning_effort if model metadata defines it.
-// This keeps ALL provider-specific knowledge server-side; clients send vanilla OpenAI payloads.
+
+
+
 function injectReasoningEffort(req, modelMeta) {
   if (req.method !== 'POST') return;
   try {
@@ -292,17 +292,17 @@ function injectReasoningEffort(req, modelMeta) {
     if (!body.reasoning_effort) body.reasoning_effort = meta.reasoningEffort;
     req.body = JSON.stringify(body);
     req.headers['content-length'] = Buffer.byteLength(req.body).toString();
-  } catch { /* malformed body — pass through unchanged */ }
+  } catch {   }
 }
 
-// ─── OpenAI-compat handler (nvidia / opencode / z-ai) ───────────────────────
+
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
 async function handleOpenAICompat(req, res, config, userId) {
   const subpath = req.normalizedPath.replace(new RegExp(`^\\/${config.functionName}`), '');
   if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  // subpathTransform: optional fn to rewrite the path before appending to baseUrl.
-  // Used for z-ai whose upstream is /api/paas/v4/... not /v1/...
+  
+  
   const targetPath = config.subpathTransform ? config.subpathTransform(subpath) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
@@ -312,7 +312,7 @@ async function handleOpenAICompat(req, res, config, userId) {
     : proxyRequestWithRotation(req, res, targetUrl, config.envKey, true);
 }
 
-// ─── Tavily search ────────────────────────────────────────────────────────────
+
 const MAX_QUERY_LENGTH = 500;
 const MAX_RESULTS_LIMIT = 10;
 const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$/;
@@ -347,7 +347,7 @@ async function handleTavily(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
-// ─── Title generator ──────────────────────────────────────────────────────────
+
 async function handleGenerateTitle(req, res, attempt = 1) {
   const { text } = req.body;
   if (!text || !text.trim()) return res.json({ title: 'New Conversation' });
@@ -373,17 +373,17 @@ async function handleGenerateTitle(req, res, attempt = 1) {
   } catch (err) { res.json({ title: 'New Conversation' }); }
 }
 
-// ─── Image generator ──────────────────────────────────────────────────────────
-// Uses NVIDIA FLUX.2-klein-4b NIM. Response shape: { artifacts: [{ base64, finish_reason }] }
-// The mobile GenerateImageTool also handles { data: [{ b64_json }] } as a fallback.
+
+
+
 async function handleGenerateImage(req, res) {
-  // FIX: use getApiKeyVal() — getApiKey() returns { value, pool } not a string
+  
   const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
   const { prompt, width = 1024, height = 1024, steps = 4, seed = 0 } = req.body || {};
   if (!prompt || typeof prompt !== 'string' || !prompt.trim())
     return res.status(400).json({ error: 'Missing or invalid prompt parameter' });
-  // Snap dimensions to nearest multiple of 16, clamped to 512–1568
+  
   const snap = v => Math.min(Math.max(Math.round(Number(v) / 16) * 16, 512), 1568);
   const payload = {
     prompt: prompt.trim(),
@@ -410,8 +410,8 @@ async function handleGenerateImage(req, res) {
   } catch (err) { res.status(500).json({ error: err.message || 'Error communicating with NVIDIA FLUX API' }); }
 }
 
-// ─── E2B Sandbox proxy ────────────────────────────────────────────────────────
-// Shared by OrchCode desktop and OrchApp mobile — both route E2B calls here.
+
+
 async function handleE2BSandboxCreate(req, res) {
   const e2bApiKey = process.env.E2B_API_KEY;
   const e2bTemplateId = process.env.E2B_TEMPLATE_ID;
@@ -419,7 +419,7 @@ async function handleE2BSandboxCreate(req, res) {
     return res.status(500).json({ error: 'E2B configuration missing: E2B_API_KEY or E2B_TEMPLATE_ID not set.' });
   const payload = {
     templateID: e2bTemplateId,
-    timeout: 1200, // 20 min — E2B maximum
+    timeout: 1200, 
     metadata: req.body?.metadata ?? { source: 'orch' }
   };
   try {
@@ -452,12 +452,12 @@ async function handleE2BSandboxKill(req, res) {
   } catch (err) { res.status(502).json({ error: err.message }); }
 }
 
-// ─── Router ───────────────────────────────────────────────────────────
+
 app.all('*', async (req, res) => {
   const path = req.normalizedPath;
   const userId = req.user?.id;
 
-  // Budget gate — runs before all metered LLM endpoints
+  
   if (userId && BUDGET_PATHS.some(p => path.startsWith(p))) {
     const budget = await checkBudget(userId);
     if (budget) {

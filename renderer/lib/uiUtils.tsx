@@ -1,7 +1,7 @@
 import React from 'react'
 import { ClipboardList, BookOpen, FileText } from 'lucide-react'
 
-// ─── Artifact Helpers ─────────────────────────────────────────────────────────
+
 
 export function isAgentArtifact(fileName: string): boolean {
   return (
@@ -16,7 +16,7 @@ export function getDisplayName(fileName: string): string {
   return fileName.split(/[/\\]/).pop() ?? fileName
 }
 
-/** Single source of truth for artifact icons — uses Lucide. */
+ 
 export function getArtifactIcon(name: string, size = 15): React.ReactNode {
   if (name === 'implementation_plan.md') {
     return <ClipboardList size={size} className="text-accent-purple flex-shrink-0" />
@@ -27,12 +27,9 @@ export function getArtifactIcon(name: string, size = 15): React.ReactNode {
   return <FileText size={size} className="icon-secondary" />
 }
 
-// ─── Path Utilities ───────────────────────────────────────────────────────────
 
-/**
- * Returns the relative directory path of a file within a workspace.
- * e.g. getRelativeDirPath('/proj/src/foo.ts', '/proj') => 'src'
- */
+
+ 
 export function getRelativeDirPath(filePath: string, workspacePath?: string): string {
   let path = filePath
   if (workspacePath && path.startsWith(workspacePath)) {
@@ -48,7 +45,7 @@ export function getRelativeDirPath(filePath: string, workspacePath?: string): st
   return ''
 }
 
-// ─── Google Icon ──────────────────────────────────────────────────────────────
+
 
 export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
   <svg
@@ -104,7 +101,7 @@ export function sanitizeHtml(html: string): string {
   clean(doc.body); return doc.body.innerHTML
 }
 
-// ─── Primitives ───────────────────────────────────────────────────────────────
+
 
 interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
   icon?: string | React.ReactNode
@@ -126,7 +123,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   </div>
 )
 
-// ─── Error Boundary ───────────────────────────────────────────────────────────
+
 
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import Lottie from 'lottie-react'

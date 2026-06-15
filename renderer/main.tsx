@@ -1,8 +1,8 @@
 import { init as initSentry } from '@sentry/electron/renderer'
 initSentry()
 
-// --- Native Desktop Refinements ---
-// 1. Prevent zoom shortcut keys and pinch-to-zoom gestures
+
+
 document.addEventListener('keydown', (e) => {
   if (
     e.ctrlKey &&
@@ -24,7 +24,7 @@ document.addEventListener('wheel', (e) => {
   }
 }, { passive: false })
 
-// 2. Restrict right-click context menu to editable elements and editor views only
+
 document.addEventListener('contextmenu', (e) => {
   const target = e.target as HTMLElement
   const isEditable =
@@ -38,7 +38,7 @@ document.addEventListener('contextmenu', (e) => {
   }
 })
 
-// Google Fonts (must stay as CSS — no VE equivalent for @import url)
+
 import './assets/main.css'
 import 'katex/dist/katex.min.css'
 import './assets/styles'

@@ -7,10 +7,9 @@ import log from 'electron-log'
 import { z } from 'zod'
 
 import { startGoogleAuth, getAuthUser, logoutUser, authEvents } from './auth'
-import WindowManager from './utils'
+import WindowManager, { listArtifacts, getConversationPath, getApiBaseUrl, resolveWorkerPath } from './utils'
 import { getCurrentUpdateStatus, triggerUpdateCheck, triggerInstall } from './updater'
 import { getAvailableModels, createAuthFetch } from './models'
-import { listArtifacts, getConversationPath, getApiBaseUrl } from './utils'
 import { pool } from './workerPool'
 import {
   getOrCreateWorkspaceContext, updateWorkspacePath, getWorkspaceContext,
@@ -47,7 +46,7 @@ function resolveCommandPath(ctx: any, filePath: string): string {
   return assertWithinWorkspace(ctx.rootPath, clean)
 }
 
-// --- Terminal (PTY) State & Helpers ---
+
 interface PtyEntry { proc: any; ownerId: number; conversationId?: string; destroyListener: () => void }
 const activePtys = new Map<string, PtyEntry>()
 
@@ -69,17 +68,21 @@ function cleanupPtysForThread(threadId: string) {
   }
 }
 
-// --- Workspace Helpers ---
+
 const EXT_TO_LANGUAGE: Record<string, string> = {
   '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
   '.json': 'json', '.css': 'css', '.html': 'html', '.md': 'markdown', '.py': 'python',
   '.rs': 'rust', '.go': 'go', '.sh': 'shell', '.yaml': 'yaml', '.yml': 'yaml',
   '.toml': 'toml', '.swift': 'swift', '.kt': 'kotlin', '.kts': 'kotlin',
   '.gradle': 'groovy', '.properties': 'properties', '.java': 'java',
-  '.c': 'c', '.cpp': 'cpp', '.cs': 'csharp', '.rb': 'ruby', '.php': 'php'
+  '.c': 'c', '.cpp': 'cpp', '.cs': 'csharp', '.rb': 'ruby', '.php': 'php',
+  '.dart': 'dart', '.sql': 'sql', '.xml': 'xml', '.svg': 'xml', '.lua': 'lua',
+  '.dockerfile': 'dockerfile', '.bat': 'bat', '.cmd': 'bat', '.ps1': 'powershell',
+  '.r': 'r', '.scala': 'scala', '.pl': 'perl', '.pm': 'perl', '.less': 'less',
+  '.scss': 'scss', '.sass': 'sass', '.vue': 'html', '.svelte': 'html', '.ini': 'ini'
 }
 
-// --- Thread Helpers ---
+
 export async function deleteThreadData(threadId: string): Promise<boolean> {
   if (await getActiveThreadId() === threadId) await setActiveThreadId(null)
   pool.killJob(`stream:${threadId}`); cleanupPtysForThread(threadId)
@@ -90,14 +93,14 @@ export async function deleteThreadData(threadId: string): Promise<boolean> {
   return deleted
 }
 
-// --- Shared workspace bind helper (used by workspace:select and workspace:set-active) ---
+
 async function bindWorkspace(conversationId: string, workspacePath: string) {
   try { await addOpenedWorkspace(workspacePath); await setThreadWorkspace(conversationId, workspacePath); app.addRecentDocument(workspacePath) }
   catch (err) { log.error('[commands] Could not bind workspace:', err); throw err }
   return updateWorkspacePath(conversationId, workspacePath)
 }
 
-// --- Browser helpers ---
+
 function normalizeBrowserUrl(val: string): string {
   const c = val.trim()
   if (!c || c === 'about:blank') return 'about:blank'
@@ -115,10 +118,7 @@ function normalizeBounds(b: { x: number; y: number; width: number; height: numbe
   return { x: Math.max(0, Math.round(b.x)), y: Math.max(0, Math.round(b.y)), width: Math.max(0, Math.round(b.width)), height: Math.max(0, Math.round(b.height)) }
 }
 
-/**
- * Attach title/URL listeners and inject __orchConversationId + cursor into a view.
- * Called once per session creation and on reconnect.
- */
+ 
 function setupBrowserViewListeners(view: WebContentsView, convId: string, sender: Electron.WebContents) {
   const wc = view.webContents
   wc.removeAllListeners('page-title-updated')
@@ -156,10 +156,10 @@ function setupBrowserViewListeners(view: WebContentsView, convId: string, sender
 }
 
 export const ipcCommands = {
-  // Theme
+  
   'theme:get': { schema: z.object({}), execute: () => ({ dark: nativeTheme.shouldUseDarkColors, systemUI: nativeTheme.shouldUseDarkColorsForSystemIntegratedUI }) },
 
-  // Auth
+  
   'auth:get-user': { schema: z.object({}), execute: () => getAuthUser() },
   'auth:login': { schema: z.object({}), execute: () => startGoogleAuth() },
   'auth:logout': { schema: z.object({}), execute: () => logoutUser() },
@@ -175,7 +175,7 @@ export const ipcCommands = {
     }
   },
 
-  // Updater
+  
   'updater:get-status': { schema: z.object({}), execute: () => getCurrentUpdateStatus() },
   'app:get-version': { schema: z.object({}), execute: () => app.getVersion() },
   'updater:check': { schema: z.object({}), execute: () => { triggerUpdateCheck() } },
@@ -190,11 +190,11 @@ export const ipcCommands = {
     }
   },
 
-  // Models
+  
   'models:list': { schema: z.object({}), execute: () => getAvailableModels() },
   'artifacts:list': { schema: z.object({ conversationId: convIdSchema }), execute: ({ conversationId }: any) => listArtifacts(conversationId) },
 
-  // Threads
+  
   'thread:generate-title': {
     schema: z.object({ text: z.string().max(5000), threadId: threadIdSchema }),
     execute: async ({ text, threadId }: any) => {
@@ -261,7 +261,7 @@ export const ipcCommands = {
   },
   'thread:workspace': { schema: z.object({ threadId: threadIdSchema }), execute: ({ threadId }: any) => getThreadWorkspace(threadId) },
 
-  // Workspace
+  
   'workspace:select': {
     schema: z.object({ conversationId: convIdSchema }),
     execute: async ({ conversationId }: any, event: any) => {
@@ -349,7 +349,7 @@ export const ipcCommands = {
     }
   },
 
-  // Terminal
+  
   'terminal:create': {
     schema: z.object({ id: z.string().optional(), cols: z.number().int().min(10).max(500), rows: z.number().int().min(3).max(200), cwd: z.string().optional(), conversationId: z.string().optional() }),
     execute: (opts: any, event: any) => {
@@ -369,7 +369,6 @@ export const ipcCommands = {
       const shellExec = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash')
       const convCtx = opts.conversationId ? getWorkspaceContext(opts.conversationId) : undefined
       const workingDir = convCtx ? (opts.cwd ? assertWithinWorkspace(convCtx.rootPath, opts.cwd) : convCtx.rootPath) : process.env.HOME || process.cwd()
-      const { resolveWorkerPath } = require('./utils')
       const child = utilityProcess.fork(resolveWorkerPath('ptyWorker'), [], { stdio: 'inherit', env: { ...process.env, USER_DATA_PATH: app.getPath('userData'), RESOURCES_PATH: process.resourcesPath } })
       const { port1, port2 } = new MessageChannelMain()
       event.sender.postMessage(`terminal:port:${id}`, null, [port2])
@@ -393,20 +392,20 @@ export const ipcCommands = {
     }
   },
 
-  // Browser
+  
   'browser:open': {
     schema: z.object({ url: z.string().min(1), bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }), conversationId: z.string() }),
     execute: async ({ url, bounds, conversationId }: any, event: any) => {
       const mainWindow = WindowManager.getMainWindow()
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Main window not available.')
       const nb = normalizeBounds(bounds)
-      // Get or create the session — does NOT add to contentView yet
+      
       const s = WindowManager.getOrCreateSession(conversationId)
-      // Attach/refresh push listeners so title/URL updates go to the current renderer sender
+      
       setupBrowserViewListeners(s.view, conversationId, event.sender)
-      // Show this session (hides all others without destroying them)
+      
       WindowManager.showSession(conversationId, nb)
-      // Only navigate if the view has no real page yet (avoids re-navigating a live session on panel re-open)
+      
       const currentUrl = s.view.webContents.getURL()
       if (!currentUrl || currentUrl === 'about:blank') {
         await s.view.webContents.loadURL(normalizeBrowserUrl(url || 'https://google.com'))
@@ -469,17 +468,17 @@ export const ipcCommands = {
     execute: ({ conversationId }: any) => {
       const id = conversationId ?? WindowManager.getBrowserConversationId()
       if (!id) return
-      // Only destroy if no active stream for this thread — preserve during agent runs
+      
       if (!pool.hasActiveJob(`stream:${id}`)) WindowManager.destroySession(id)
       else WindowManager.hideSession(id)
     }
   },
-  // ─── Settings ────────────────────────────────────────────────────
+  
   'settings:open': {
     schema: z.object({}),
     execute: async () => { showSettingsWindow(); return true }
   },
-  // ─── Memory ──────────────────────────────────────────────────────
+  
   'memory:list': {
     schema: z.object({ workspacePath: z.string().nullable().optional() }),
     execute: async ({ workspacePath }) => getRelevantMemories(workspacePath)
@@ -501,7 +500,7 @@ export const ipcCommands = {
     execute: async () => getMemoryStats()
   },
 
-  // ─── Usage ───────────────────────────────────────────────────────
+  
   'usage:get-totals': {
     schema: z.object({}),
     execute: async () => getAppTotalTokens()

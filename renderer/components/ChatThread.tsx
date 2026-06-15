@@ -20,7 +20,7 @@ import { decodeBase64Utf8 } from '../lib/sharedUtils'
 import logoImg from '../assets/logo.png'
 
 
-// ─── ToolGroupBlock ──────────────────────────────────────────────────────────
+
 
 const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
   if (tools.length === 1) {
@@ -37,12 +37,12 @@ const ToolGroupBlock = ({ tools }: { tools: ToolCallEntry[] }) => {
   )
 }
 
-// ─── ActiveGeneratingSpinner ──────────────────────────────────────────────────
+
 
 const ActiveGeneratingSpinner = ({ startTime }: { startTime?: number }) => {
   const [elapsed, setElapsed] = React.useState(0)
   const startRef = React.useRef(startTime || Date.now())
-  // Sync ref when startTime prop changes (e.g. thread switch reusing the component)
+  
   React.useLayoutEffect(() => { startRef.current = startTime || Date.now(); setElapsed(0) }, [startTime])
   React.useEffect(() => {
     const timer = setInterval(() => setElapsed((Date.now() - startRef.current) / 1000), 100)
@@ -56,7 +56,7 @@ const ActiveGeneratingSpinner = ({ startTime }: { startTime?: number }) => {
   )
 }
 
-// ─── AssistantMessage ─────────────────────────────────────────────────────────
+
 
 const AssistantMessage = ({ message }: { message: ChatMessage }) => {
   const segments = (() => {
@@ -79,10 +79,10 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
         if (groupStartIdx === -1) groupStartIdx = idx
         currentGroup.push({ id: b.tool_call_id, tool_name: b.tool_name, args: b.args, args_delta: b.args_delta, result: b.result, status: b.status })
       } else {
-        // reasoning and duration blocks are invisible to the chat renderer —
-        // reasoning is never shown (preserved only for model context),
-        // duration is rendered separately below. MUST return before flush()
-        // otherwise every reasoning block between tool calls shatters the group.
+        
+        
+        
+        
         if (b.type === 'reasoning' || b.type === 'duration') return
         if (b.type === 'text' && !b.content.trim()) return
         flush()
@@ -134,7 +134,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
   )
 }
 
-// ─── UserMessage ─────────────────────────────────────────────────────────────
+
 
 const UserMessage = ({ message }: { message: ChatMessage }) => {
   let attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64: string }> = []
@@ -198,13 +198,13 @@ const ChatThread: React.FC = () => {
     }
   }, [messageAtoms.length, lastMsgContent, lastMsgBlocksLength, lastMsgIsStreaming])
 
-  // Read roles by traversing atoms via the same splitAtom store — avoids index drift
-  // between chatMessagesAtom snapshot and chatMessageAtomsAtom (splitAtom can lag one render)
+  
+  
   const messageGroups = (() => {
     const groups: Array<{ key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> }> = []
     let currentGroup: { key: string; userAtom: any; assistantAtoms: Array<{ atom: any; id: string }> } | null = null
-    // Use messages[] for role/id but messageAtoms[] for the actual atom reference
-    // Both derive from same base atom so length is always equal within the same render
+    
+    
     messages.forEach((msg, idx) => {
       const atom = messageAtoms[idx]
       if (!atom || !msg) return
@@ -239,7 +239,7 @@ const ChatThread: React.FC = () => {
   )
 }
 
-// ─── MessageWrapper ───────────────────────────────────────────────────────────
+
 
 const MessageWrapper = ({ messageAtom }: { messageAtom: PrimitiveAtom<ChatMessage> }) => {
   const [message] = useAtom(messageAtom)

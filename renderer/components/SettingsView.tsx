@@ -12,7 +12,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'usage', label: 'Usage & Cost', icon: <BarChart3 size={15} /> },
 ]
 
-// ─── Profile ─────────────────────────────────────────────────────────────────
+
 const ProfileTab: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(null)
   useEffect(() => { authService.getAuthUser().then(u => setUser(u)) }, [])
@@ -34,7 +34,7 @@ const ProfileTab: React.FC = () => {
   )
 }
 
-// ─── Memory ───────────────────────────────────────────────────────────────────
+
 const MemoryTab: React.FC = () => {
   const [memories, setMemories] = useState<any[]>([])
   const [newContent, setNewContent] = useState('')
@@ -74,7 +74,7 @@ const MemoryTab: React.FC = () => {
   )
 }
 
-// ─── Usage ────────────────────────────────────────────────────────────────────
+
 const UsageTab: React.FC = () => {
   const [stats, setStats] = useState<{ totalInput: number; totalOutput: number; totalLifetime: number } | null>(null)
   const [quota, setQuota] = useState<{ allowed: boolean; remaining: number; cost_usd: number; limit_usd: number; period: string } | null>(null)
@@ -153,7 +153,7 @@ const UsageTab: React.FC = () => {
   )
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+
 export const SettingsView: React.FC = () => {
   const [tab, setTab] = useState<Tab>('profile')
   return (

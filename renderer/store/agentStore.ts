@@ -5,7 +5,7 @@ import type { ChatMessage, EditorFile } from './types'
 
 export type { StreamBlock, EditorFile, ChatMessage, ToolCallEntry } from './types'
 
-// 'streaming' removed — we never set it, the model is either thinking or calling tools
+
 type AgentRunState = 'idle' | 'thinking' | 'tool-calling' | 'error'
 export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
 interface ModelInfo { id: string; name: string; multimodal?: boolean; contextWindow?: number; badge?: string | null }
@@ -18,7 +18,7 @@ export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
 })
 export const isThreadLoadingAtom = atom<boolean>(false)
 
-// Scoped maps — keyed by threadId
+
 const chatMessagesMapAtom = atom<Record<string, ChatMessage[]>>({})
 const agentRunStateMapAtom = atom<Record<string, AgentRunState>>({})
 const threadTokensMapAtom = atom<Record<string, { session: number; lifetime: number }>>({})
@@ -37,7 +37,7 @@ export const threadBrowserUrlAtom = atom(
   }
 )
 
-// Active-thread-scoped derived atoms
+
 export const chatMessagesAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(chatMessagesMapAtom)[id] ?? []) : [] },
   (get, set, update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
@@ -105,7 +105,7 @@ export const activeEditorFileAtom = atom(
   }
 )
 
-// Thread-targeted update atoms (for background events/IPC streams updating non-active threads)
+
 export const updateThreadMessagesAtom = atom(null, (get, set, { threadId, update }: { threadId: string; update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]) }) => {
   const m = get(chatMessagesMapAtom), v = m[threadId] ?? []
   set(chatMessagesMapAtom, { ...m, [threadId]: typeof update === 'function' ? update(v) : update })
@@ -142,7 +142,7 @@ export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_mode
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 export const authUserAtom = atom<UserProfile | null>(null)
 
-// Approval system
+
 const pendingApprovalMapAtom = atom<Record<string, { toolCallId: string; toolName: string; args: Record<string, any> } | null>>({})
 export const pendingApprovalAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(pendingApprovalMapAtom)[id] ?? null) : null },

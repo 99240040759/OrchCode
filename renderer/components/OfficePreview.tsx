@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-// @ts-ignore
+
 import { renderAsync } from 'docx-preview'
-// @ts-ignore
+
 import { PptxRenderer } from 'pptx-browser'
 import * as XLSX from 'xlsx'
 import { Loader } from 'lucide-react'

@@ -9,10 +9,7 @@ function getSkillsPath(): string {
 export function getUserSkillsPath(): string { return join(getAppEnv().userData, 'skills') }
 
 
-/**
- * Scans the installed skills directory and returns metadata for each skill:
- * the folder name and the first-line description from its SKILL.md (if any).
- */
+ 
 export async function listInstalledSkills(): Promise<{ name: string; description: string }[]> {
   const skillsDir = getUserSkillsPath()
   if (!existsSync(skillsDir)) return []
@@ -26,7 +23,7 @@ export async function listInstalledSkills(): Promise<{ name: string; description
           try {
             const skillMd = join(skillsDir, e.name, 'SKILL.md')
             const content = await fs.readFile(skillMd, 'utf-8')
-            // Extract the first non-empty, non-heading line as a one-line description
+            
             const lines = content.split('\n')
             for (const line of lines) {
               const trimmed = line.trim()
@@ -36,7 +33,7 @@ export async function listInstalledSkills(): Promise<{ name: string; description
               }
             }
           } catch {
-            // No SKILL.md — just use the folder name
+            
           }
           return { name: e.name, description }
         })

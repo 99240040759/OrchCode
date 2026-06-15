@@ -56,7 +56,7 @@ class WorkerPool {
       this.workers = this.workers.filter(w => w !== child)
       const hadJob = this.activeJobs.has(child)
       this.activeJobs.delete(child)
-      // If this worker had an active job, drain the queue to prevent orphaned promises
+      
       if (hadJob && this.waitQueue.length > 0) {
         const next = this.waitQueue.shift()!
         try {
@@ -70,7 +70,7 @@ class WorkerPool {
     return child
   }
 
-  /** Get an idle worker or spawn one up to maxWorkers. Throws only if called internally when queue logic is already satisfied. */
+   
   private getIdleOrSpawn(token?: string): UtilityProcess {
     const idle = this.workers.find(w => !this.activeJobs.has(w))
     if (idle) {
@@ -86,16 +86,16 @@ class WorkerPool {
 
   public clearJob(worker: UtilityProcess) {
     this.activeJobs.delete(worker)
-    // Drain queue — give this freed worker to the next waiting caller immediately.
+    
     if (this.waitQueue.length > 0) {
       const next = this.waitQueue.shift()!
       log.info(`[workerPool] Draining queue — assigning worker pid ${worker.pid} to job "${next.jobName}"`)
       if (next.token) worker.postMessage({ type: 'update-token', token: next.token })
       this.setJob(worker, next.jobName)
       next.resolve(worker)
-      return // skip idle timer — worker immediately goes to next job
+      return 
     }
-    // Schedule idle kill if above min worker count
+    
     if (this.workers.length > this.minWorkers) {
       const timer = setTimeout(() => {
         this.idleTimers.delete(worker)
@@ -112,17 +112,13 @@ class WorkerPool {
     }
   }
 
-  /** Returns true if any active job name matches the given jobName. */
+   
   public hasActiveJob(jobName: string): boolean {
     for (const name of this.activeJobs.values()) { if (name === jobName) return true }
     return false
   }
 
-  /**
-   * Async allocation — returns a worker immediately if a slot is available (idle worker or pool
-   * not yet at capacity), otherwise queues the request and resolves when a slot opens.
-   * Never throws on capacity — callers wait gracefully.
-   */
+   
   public allocateWorker(token: string, jobName: string): Promise<UtilityProcess> {
     const hasIdle = this.workers.some(w => !this.activeJobs.has(w))
     const canSpawn = this.workers.length < this.maxWorkers
