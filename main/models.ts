@@ -5,14 +5,12 @@ import { requireAuthToken } from './auth'
 import { getApiBaseUrl, globalApiLimiter } from './utils'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 
-
 export interface ModelInfo { id: string; name: string; multimodal: boolean; contextWindow?: number; badge?: string | null; provider?: string; reasoningEffort?: string | null }
 export type AvailableModels = Record<string, ModelInfo>
 
 let cachedModels: AvailableModels | null = null
 let cachedModelsAt = 0
 const MODELS_TTL_MS = 5 * 60 * 1000
-
 let modelIdIndex = new Map<string, ModelInfo>()
 
 export function createAuthFetch(useAnon = false, extra?: Record<string, string>) {
@@ -37,19 +35,18 @@ export async function getAvailableModels(force = false): Promise<AvailableModels
 export function getOpenAiTools(toolsRecord: Record<string, any>) {
   const list: any[] = []
   for (const [name, toolObj] of Object.entries(toolsRecord)) {
-    const jsonSchema = zodToJsonSchema(toolObj.parameters || toolObj.inputSchema, { target: 'openAi' })
+    const jsonSchema = zodToJsonSchema(toolObj.parameters || toolObj.inputSchema, { target: 'openApi3', $refStrategy: 'none' })
     list.push({ type: 'function', function: { name, description: toolObj.description || '', parameters: jsonSchema } })
   }
   return list
 }
 
-
 const PROVIDER_BASE: Record<string, string> = {
   nvidia:   'nvidia/v1',
   opencode: 'opencode/v1',
   'z-ai':   'z-ai/v1',
+  kilo:     'kilo/v1',
 }
-
 
 const openaiClientCache = new Map<string, { client: OpenAI; token: string }>()
 function getOpenAiClient(baseUrl: string): OpenAI {
@@ -69,7 +66,6 @@ export async function streamLlmResponse(
   prevInputTokens = 0
 ): Promise<Stream<OpenAI.Chat.ChatCompletionChunk>> {
   const models = await getAvailableModels()
-  
   const rawModel = modelIdIndex.get(modelId) ?? models[modelId]
   if (!rawModel) throw new Error(`Requested model "${modelId}" is not available.`)
   const apiBase = getApiBaseUrl()
@@ -85,12 +81,12 @@ export async function streamLlmResponse(
     model: modelName, messages: openAiMessages,
     tools: openAiTools?.length ? openAiTools : undefined,
     tool_choice: openAiTools?.length ? 'auto' : undefined,
+    parallel_tool_calls: openAiTools?.length ? false : undefined,
     temperature: 0.35, max_tokens: 32768,
     frequency_penalty: 0, presence_penalty: 0,
     stream: true, stream_options: { include_usage: true },
   }
   return globalApiLimiter.schedule(() => {
-    
     const extraHeaders = prevInputTokens > 0 ? { 'x-prev-prompt-tokens': String(prevInputTokens) } : {}
     return openai.chat.completions.create(payload, { signal: abortSignal, headers: extraHeaders })
   }) as Promise<Stream<OpenAI.Chat.ChatCompletionChunk>>

@@ -120,7 +120,7 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
 
 
 const BUDGET_LIMIT = () => parseFloat(process.env.BUDGET_LIMIT_USD || '100');
-const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai'];
+const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai', '/kilo'];
 const SKIP_BUDGET  = ['/models', '/generate-title'];
 
 async function callBudgetRpc(rpcName, body) {
@@ -242,10 +242,11 @@ const MODEL_DEFINITIONS = [
   ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
   ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'],
   ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],
+  ['KILO_FREE',        'kilo/nvidia/nemotron-3-super-120b-a12b:free', 'Unlimited',  false, 1000000, 'More Usage',      'kilo',     null],
 ];
 
 
-const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
+const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY', kilo: 'KILO_API_KEY' };
 
 async function handleModels(req, res) {
   const models = {};
@@ -295,14 +296,11 @@ function injectReasoningEffort(req, modelMeta) {
   } catch {   }
 }
 
-
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
 async function handleOpenAICompat(req, res, config, userId) {
   const subpath = req.normalizedPath.replace(new RegExp(`^\\/${config.functionName}`), '');
   if (!OPENAI_COMPAT_PATHS.some(p => p.test(subpath)))
     return res.status(403).json({ error: `Path not allowed: ${subpath}` });
-  
-  
   const targetPath = config.subpathTransform ? config.subpathTransform(subpath) : subpath;
   const urlObj = new URL(req.url, 'http://localhost');
   const targetUrl = `${config.baseUrl}${targetPath}${urlObj.search}`;
@@ -480,6 +478,7 @@ app.all('*', async (req, res) => {
   if (path.startsWith('/nvidia'))   { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com',       modelMeta }, userId); }
   if (path.startsWith('/opencode')) { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen',                modelMeta }, userId); }
   if (path.startsWith('/z-ai'))     { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
+  if (path.startsWith('/kilo'))     { return handleOpenAICompat(req, res, { functionName: 'kilo',     envKey: 'KILO_API_KEY',     baseUrl: 'https://api.kilo.ai/api/gateway',        modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
   if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
   if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
   if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);

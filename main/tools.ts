@@ -588,8 +588,11 @@ export function browserTools(convId: string, multimodal = true) {
     execute: ({ url, timeout }) => runOnMain('browser_navigate', { url, timeout }, convId, () =>
       enqueue(convId, async () => {
         log.info(`[tool:browser_navigate] convId=${convId} url="${url}"`)
-        const s = WindowManager.getSession(convId)
-        if (!s) throw new Error('Browser session not found. Open browser first.')
+        let s = WindowManager.getSession(convId)
+        if (!s || !s.view?.webContents || s.view.webContents.isDestroyed()) {
+          WindowManager.destroySession(convId)
+          s = WindowManager.getOrCreateSession(convId)
+        }
         const target = url.startsWith('http') || url.startsWith('file:') ? url
           : /^[a-zA-Z]:[/\\]/.test(url) ? `file:///${url.replace(/\\/g, '/')}`
           : url.startsWith('/') ? `file://${url}` : `https://${url}`
@@ -597,11 +600,10 @@ export function browserTools(convId: string, multimodal = true) {
         let timer: any
         const navPromise = s.view.webContents.loadURL(target)
         const timeoutPromise = new Promise<never>((_, rej) => {
-          timer = setTimeout(() => { try { s.view.webContents.stop() } catch {}; rej(new Error(`Navigation timeout of ${timeoutMs}ms exceeded`)) }, timeoutMs)
+          timer = setTimeout(() => { try { s!.view.webContents.stop() } catch {}; rej(new Error(`Navigation timeout of ${timeoutMs}ms exceeded`)) }, timeoutMs)
         })
         await Promise.race([navPromise, timeoutPromise])
         clearTimeout(timer)
-        
         if (s.page && !s.page.isClosed()) { try { await s.page.close() } catch {} }
         s.page = undefined
         return { success: true, url: s.view.webContents.getURL() }
@@ -616,8 +618,11 @@ export function browserTools(convId: string, multimodal = true) {
     execute: () => runOnMain('browser_screenshot', {}, convId, () =>
       enqueue(convId, async () => {
         log.info(`[tool:browser_screenshot] convId=${convId}`)
-        const s = WindowManager.getSession(convId)
-        if (!s) throw new Error('Browser session not found.')
+        let s = WindowManager.getSession(convId)
+        if (!s || !s.view?.webContents || s.view.webContents.isDestroyed()) {
+          WindowManager.destroySession(convId)
+          s = WindowManager.getOrCreateSession(convId)
+        }
         const screenshotDir = getConversationScreenshotsPath(convId)
         await fs.mkdir(screenshotDir, { recursive: true })
         try {

@@ -13,7 +13,6 @@ export type StreamBlock =
   | { type: 'error'; message: string }
   | { type: 'summarize'; savedTokens: number; totalTokens: number }
   | { type: 'duration'; durationSeconds: number }
-
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -23,11 +22,7 @@ export interface ChatMessage {
   timestamp: number
   isStreaming?: boolean
 }
-
-export type ToolStreamBlock = Extract<StreamBlock, { type: 'tool_call' }>
-export type ToolCallEntry = Omit<ToolStreamBlock, 'type' | 'tool_call_id'> & { id: string }
-
-
+export type ToolCallEntry = Omit<Extract<StreamBlock, { type: 'tool_call' }>, 'type' | 'tool_call_id'> & { id: string }
 export interface EditorFile {
   name: string
   path: string

@@ -16,7 +16,23 @@ const EXT_TO_WASM: Record<string, string> = {
   '.html': 'tree-sitter-html.wasm', '.css': 'tree-sitter-css.wasm',
   '.json': 'tree-sitter-json.wasm', '.yaml': 'tree-sitter-yaml.wasm',
   '.yml': 'tree-sitter-yaml.wasm', '.toml': 'tree-sitter-toml.wasm',
-  '.vue': 'tree-sitter-vue.wasm'
+  '.vue': 'tree-sitter-vue.wasm',
+  '.sh': 'tree-sitter-bash.wasm', '.bash': 'tree-sitter-bash.wasm', '.zsh': 'tree-sitter-bash.wasm',
+  '.dart': 'tree-sitter-dart.wasm',
+  '.ex': 'tree-sitter-elixir.wasm', '.exs': 'tree-sitter-elixir.wasm',
+  '.elm': 'tree-sitter-elm.wasm',
+  '.lua': 'tree-sitter-lua.wasm',
+  '.m': 'tree-sitter-objc.wasm',
+  '.ml': 'tree-sitter-ocaml.wasm', '.mli': 'tree-sitter-ocaml.wasm',
+  '.scala': 'tree-sitter-scala.wasm', '.sc': 'tree-sitter-scala.wasm',
+  '.sol': 'tree-sitter-solidity.wasm',
+  '.zig': 'tree-sitter-zig.wasm',
+  '.res': 'tree-sitter-rescript.wasm', '.resi': 'tree-sitter-rescript.wasm',
+  '.ejs': 'tree-sitter-embedded_template.wasm', '.erb': 'tree-sitter-embedded_template.wasm',
+  '.el': 'tree-sitter-elisp.wasm',
+  '.ql': 'tree-sitter-ql.wasm',
+  '.rdl': 'tree-sitter-systemrdl.wasm',
+  '.tla': 'tree-sitter-tlaplus.wasm',
 }
 let isInitialized = false
 const parserCache = new Map<string, Parser>()

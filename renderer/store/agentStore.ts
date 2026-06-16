@@ -1,10 +1,9 @@
-import { atom } from 'jotai'
+import { atom, type WritableAtom, type Getter, type Setter } from 'jotai'
 import { atomWithStorage, splitAtom } from 'jotai/utils'
 import type { ThreadEntry, ArtifactEntry, UpdateStatus, UserProfile } from '../../preload/index.d'
 import type { ChatMessage, EditorFile } from './types'
 
 export type { StreamBlock, EditorFile, ChatMessage, ToolCallEntry } from './types'
-
 
 type AgentRunState = 'idle' | 'thinking' | 'tool-calling' | 'error'
 export type ArtifactPanelMode = 'editor' | 'terminal' | 'browser' | 'overview'
@@ -18,6 +17,17 @@ export const activeThreadAtom = atom<ThreadEntry | undefined>((get) => {
 })
 export const isThreadLoadingAtom = atom<boolean>(false)
 
+function threadScopedAtom<T>(mapAtom: WritableAtom<Record<string, T>, [Record<string, T>], void>, defaultValue: T) {
+  return atom(
+    (get: Getter) => { const id = get(activeThreadIdAtom); return id ? (get(mapAtom)[id] ?? defaultValue) : defaultValue },
+    (get: Getter, set: Setter, update: T | ((prev: T) => T)) => {
+      const id = get(activeThreadIdAtom); if (!id) return
+      const m = get(mapAtom), v = m[id] ?? defaultValue
+      set(mapAtom, { ...m, [id]: typeof update === 'function' ? (update as (prev: T) => T)(v) : update })
+    }
+  )
+}
+
 
 const chatMessagesMapAtom = atom<Record<string, ChatMessage[]>>({})
 const agentRunStateMapAtom = atom<Record<string, AgentRunState>>({})
@@ -28,33 +38,10 @@ const threadOpenFilesMapAtom = atom<Record<string, EditorFile[]>>({})
 const threadActiveEditorFileMapAtom = atom<Record<string, EditorFile | null>>({})
 const threadBrowserUrlMapAtom = atom<Record<string, string>>({})
 
-export const threadBrowserUrlAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadBrowserUrlMapAtom)[id] ?? 'https://google.com') : 'https://google.com' },
-  (get, set, update: string | ((prev: string) => string)) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(threadBrowserUrlMapAtom), v = m[id] ?? 'https://google.com'
-    set(threadBrowserUrlMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
-
-
-export const chatMessagesAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(chatMessagesMapAtom)[id] ?? []) : [] },
-  (get, set, update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(chatMessagesMapAtom), v = m[id] ?? []
-    set(chatMessagesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
+export const threadBrowserUrlAtom = threadScopedAtom(threadBrowserUrlMapAtom, 'https://google.com')
+export const chatMessagesAtom = threadScopedAtom(chatMessagesMapAtom, [] as ChatMessage[])
 export const chatMessageAtomsAtom = splitAtom(chatMessagesAtom)
-export const agentRunStateAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(agentRunStateMapAtom)[id] ?? 'idle') : 'idle' as AgentRunState },
-  (get, set, update: AgentRunState | ((prev: AgentRunState) => AgentRunState)) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(agentRunStateMapAtom), v = m[id] ?? 'idle' as AgentRunState
-    set(agentRunStateMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
+export const agentRunStateAtom = threadScopedAtom(agentRunStateMapAtom, 'idle' as AgentRunState)
 export const sessionTokensAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadTokensMapAtom)[id]?.session ?? 0) : 0 },
   (get, set, update: number | ((prev: number) => number)) => {
@@ -71,30 +58,9 @@ export const lifetimeTokensAtom = atom(
     set(threadTokensMapAtom, { ...m, [id]: { ...v, lifetime: typeof update === 'function' ? update(v.lifetime) : update } })
   }
 )
-export const activeWorkspaceAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadWorkspaceMapAtom)[id] ?? null) : null },
-  (get, set, update: { name: string; path: string } | null | ((prev: { name: string; path: string } | null) => { name: string; path: string } | null)) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(threadWorkspaceMapAtom), v = m[id] ?? null
-    set(threadWorkspaceMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
-export const artifactsAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadArtifactsMapAtom)[id] ?? []) : [] },
-  (get, set, update: ArtifactEntry[] | ((prev: ArtifactEntry[]) => ArtifactEntry[])) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(threadArtifactsMapAtom), v = m[id] ?? []
-    set(threadArtifactsMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
-export const openFilesAtom = atom(
-  (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadOpenFilesMapAtom)[id] ?? []) : [] },
-  (get, set, update: EditorFile[] | ((prev: EditorFile[]) => EditorFile[])) => {
-    const id = get(activeThreadIdAtom); if (!id) return
-    const m = get(threadOpenFilesMapAtom), v = m[id] ?? []
-    set(threadOpenFilesMapAtom, { ...m, [id]: typeof update === 'function' ? update(v) : update })
-  }
-)
+export const activeWorkspaceAtom = threadScopedAtom(threadWorkspaceMapAtom, null as { name: string; path: string } | null)
+export const artifactsAtom = threadScopedAtom(threadArtifactsMapAtom, [] as ArtifactEntry[])
+export const openFilesAtom = threadScopedAtom(threadOpenFilesMapAtom, [] as EditorFile[])
 export const activeEditorFileAtom = atom(
   (get) => { const id = get(activeThreadIdAtom); return id ? (get(threadActiveEditorFileMapAtom)[id] ?? null) : null },
   (get, set, file: EditorFile | null) => {
@@ -104,7 +70,6 @@ export const activeEditorFileAtom = atom(
     if (file) { const open = get(openFilesAtom); set(openFilesAtom, open.some(f => f.path === file.path) ? open.map(f => f.path === file.path ? file : f) : [...open, file]) }
   }
 )
-
 
 export const updateThreadMessagesAtom = atom(null, (get, set, { threadId, update }: { threadId: string; update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]) }) => {
   const m = get(chatMessagesMapAtom), v = m[threadId] ?? []
@@ -141,7 +106,6 @@ export const availableModelsAtom = atom<Record<string, ModelInfo>>({})
 export const selectedModelAtom = atomWithStorage<string>('orchcode_selected_model', '')
 export const updateStatusAtom = atom<UpdateStatus>({ status: 'idle' })
 export const authUserAtom = atom<UserProfile | null>(null)
-
 
 const pendingApprovalMapAtom = atom<Record<string, { toolCallId: string; toolName: string; args: Record<string, any> } | null>>({})
 export const pendingApprovalAtom = atom(

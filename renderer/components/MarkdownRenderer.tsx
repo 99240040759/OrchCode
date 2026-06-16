@@ -6,11 +6,12 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { globalPromptTriggerAtom, isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom, isDiffModeAtom } from '../store/agentStore'
-import { isAgentArtifact, getArtifactIcon, getDisplayName, getRelativeDirPath } from '../lib/uiUtils'
+import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
 import { toast } from 'sonner'
 import mermaid from 'mermaid'
-import { stripFileProtocol, normalizeMarkdownLinks } from '../lib/pathUtils'
+import { stripFileProtocol, normalizeMarkdownLinks, getBasename, getRelativeDirPath } from '../lib/pathUtils'
 import type { FileReadResult } from '../../preload/index.d'
+import { workspaceService } from '../services/services'
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import hljs from 'highlight.js'
 import Tooltip from './Tooltip'
@@ -26,10 +27,10 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
   const setIsDiffMode = useSetAtom(isDiffModeAtom)
   const conversationId = useAtomValue(activeThreadIdAtom)
   const filePath = stripFileProtocol(href)
-  const fileName = filePath.split(/[/\\]/).pop() ?? ''
+  const fileName = getBasename(filePath)
   const [isDir, setIsDir] = React.useState(false)
   React.useEffect(() => {
-    window.api.invoke('file:is-directory', { filePath, conversationId })
+    workspaceService.isDirectory(filePath, conversationId)
       .then((res: any) => { if (res) setIsDir(true) })
       .catch(() => {})
   }, [filePath, conversationId])
@@ -37,14 +38,14 @@ const FileLink: React.FC<{ href: string; children: React.ReactNode }> = ({ href,
     e.preventDefault()
     try {
       if (isDir) {
-        await window.api.invoke('file:open-path', { filePath, conversationId })
+        await workspaceService.openPath(filePath, conversationId)
         return
       }
-      const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as FileReadResult | undefined
+      const fileData = await workspaceService.readFile(filePath, conversationId) as FileReadResult | undefined
       if (fileData) { setIsDiffMode(false); setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error(err) }
   }
-  const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? children.split(/[/\\]/).pop() ?? children : children
+  const displayName = typeof children === 'string' && (children.includes('/') || children.includes('\\') || children.match(/^[a-zA-Z]:/)) ? getBasename(children) : children
   return (
     <Tooltip content={isDir ? `Reveal folder ${filePath}` : `Open file ${filePath}`}>
       <span className="file-link" onClick={handleClick}>
@@ -118,7 +119,7 @@ const LocalImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ s
     if (!isLocal) { setDataUrl(src); setStatus('loaded'); return }
     let active = true
     const filePath = src.startsWith('file://') ? stripFileProtocol(src) : src
-    window.api.invoke('file:read', { filePath, conversationId }).then((fileData: any) => {
+    workspaceService.readFile(filePath, conversationId).then((fileData: any) => {
       if (active && fileData?.isBinary && fileData.base64) {
         setDataUrl(`data:${fileData.mimeType || 'image/png'};base64,${fileData.base64}`)
         setStatus('loaded')

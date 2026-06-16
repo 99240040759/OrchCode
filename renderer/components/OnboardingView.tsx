@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { GoogleIcon } from '../lib/uiUtils'
+import { authService } from '../services/services'
 import { toast } from 'sonner'
 import Lottie from 'lottie-react'
 import onboardingAnimation from '../assets/onboarding.json'
@@ -7,7 +8,7 @@ import onboardingEntryAnimation from '../assets/onboarding-entry.json'
 import onboardingCompleteAnimation from '../assets/onboarding-complete.json'
 import { Loader } from 'lucide-react'
 
-import type { UserProfile } from '../../preload/index.d'
+
 
 export const OnboardingView: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true)
@@ -19,13 +20,13 @@ export const OnboardingView: React.FC = () => {
   React.useEffect(() => {
     if (!user || hasCalledRef.current) return
     hasCalledRef.current = true
-    window.api.invoke('auth:complete-onboarding').catch(console.error)
+    authService.completeOnboarding().catch(console.error)
   }, [user])
 
   const handleSignIn = async () => {
     setLoading(true); setAuthError(null)
     try {
-      const profile = await window.api.invoke('auth:login') as UserProfile | null
+      const profile = await authService.startGoogleAuth()
       if (profile) { setUser(profile); setLoading(false) }
       else { setLoading(false); setAuthError('Sign-in was cancelled or no profile returned.'); toast.error('Sign-in cancelled. Please try again.') }
     } catch (err: unknown) {

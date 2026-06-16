@@ -65,7 +65,7 @@ const CodeEditorView: React.FC<CodeEditorViewProps> = ({ displayFile, activeWork
           )
         ) : (
           <Editor height="100%" language={displayFile.language} theme="orch-dark" path={displayFile.path} value={displayFile.content ?? ''} onMount={handleEditorMount}
-            options={{ minimap: { enabled: false }, renderValidationDecorations: 'off', fontSize: 13, fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace', lineHeight: 1.6, padding: { top: 16 }, scrollBeyondLastLine: false, wordWrap: 'on', readOnly: true, lineNumbersMinChars: 3, lineDecorationsWidth: 6, folding: false, automaticLayout: true, cursorBlinking: 'blink', cursorSmoothCaretAnimation: 'off', smoothScrolling: false, contextmenu: true, overviewRulerBorder: false, overviewRulerLanes: 0, scrollbar: { vertical: 'visible', horizontal: 'visible', useShadows: false, verticalScrollbarSize: 8, horizontalScrollbarSize: 8 } }} />
+            options={{ minimap: { enabled: false }, fontSize: 13, fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace', lineHeight: 1.6, padding: { top: 16 }, scrollBeyondLastLine: false, wordWrap: 'on', readOnly: true, lineNumbersMinChars: 3, lineDecorationsWidth: 6, folding: false, automaticLayout: true, cursorBlinking: 'blink', cursorSmoothCaretAnimation: 'off', smoothScrolling: false, contextmenu: true, overviewRulerBorder: false, overviewRulerLanes: 0, scrollbar: { vertical: 'visible', horizontal: 'visible', useShadows: false, verticalScrollbarSize: 8, horizontalScrollbarSize: 8 } }} />
         )
       ) : (
         <div className="empty-theme-placeholder" />

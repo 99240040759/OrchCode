@@ -7,6 +7,8 @@ import { parse as parsePartial } from 'partial-json'
 import { isArtifactPanelOpenAtom, activeEditorFileAtom, artifactPanelModeAtom, activeThreadIdAtom, isDiffModeAtom } from '../store/agentStore'
 import type { ToolCallEntry } from '../store/types'
 import type { FileReadResult } from '../../preload/index.d'
+import { getBasename } from '../lib/pathUtils'
+import { workspaceService } from '../services/services'
 import Tooltip from './Tooltip'
 import { formatTokens } from '../lib/sharedUtils'
 
@@ -55,7 +57,7 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
   if (FILE_WRITE_TOOLS.includes(toolName)) {
     const path = getStreamingVal(args, argsDelta, 'target_file') || getStreamingVal(args, argsDelta, 'path') || getStreamingVal(args, argsDelta, 'file_path') || getStreamingVal(args, argsDelta, 'absolute_path')
     const { added, removed } = getDiffStats(toolName, args, argsDelta)
-    const targetName = path.split(/[/\\]/).pop() ?? path
+    const targetName = getBasename(path)
     const op = toolName === 'write_to_file' ? (isComp ? 'Created' : isErr ? 'Failed to create' : 'Creating') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
     const suffix = (added || removed) ? (
       <span className="diff-stats">
@@ -94,12 +96,12 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
     const end = endArg || extractedEnd
     const lineSuffix = !isBinary && (start || end) ? `#L${start || '1'}${end ? `-${end}` : ''}` : ''
     const suffix = lineSuffix ? <span className="tool-call-suffix">{lineSuffix}</span> : undefined
-    const targetName = path.split(/[/\\]/).pop() ?? path
+    const targetName = getBasename(path)
     return { operation: isComp ? 'Viewed' : isErr ? 'Failed to view' : 'Viewing', target: targetName, suffix, fullPath: path || null, isFile: true }
   }
   if (toolName === 'list_dir') {
     const path = getStreamingVal(args, argsDelta, 'directory_path') || getStreamingVal(args, argsDelta, 'path')
-    return { operation: isComp ? 'Listed' : isErr ? 'Failed to list' : 'Listing', target: path.split(/[/\\]/).pop() ?? path, fullPath: null, isFile: false }
+    return { operation: isComp ? 'Listed' : isErr ? 'Failed to list' : 'Listing', target: getBasename(path), fullPath: null, isFile: false }
   }
 
   if (toolName === 'search_workspace') return { operation: isComp ? 'Searched' : isErr ? 'Failed to search' : 'Searching', target: getStreamingVal(args, argsDelta, 'query').slice(0, 40), fullPath: null, isFile: false }
@@ -216,7 +218,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
     if (!isInteractive || !fullPath) return
     const clickThreadId = activeThreadId
     try {
-      const fileData = await window.api.invoke('file:read', { filePath: fullPath, conversationId: clickThreadId }) as FileReadResult
+      const fileData = await workspaceService.readFile(fullPath, clickThreadId) as FileReadResult
       if (fileData && clickThreadId === activeThreadId) {
         setIsDiffMode(FILE_WRITE_TOOLS.includes(toolCall.tool_name))
         setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true)

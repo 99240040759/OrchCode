@@ -9,6 +9,7 @@ import {
   updatePendingApprovalAtom, type StreamBlock
 } from '../store/agentStore'
 import { cleanErrorMessage } from '../lib/cleanErrorMessage'
+import { getWorkspaceName, normalizeSeparators } from '../lib/pathUtils'
 import type { StreamChunk, ThreadMessage, StreamPayload } from '../../preload/index.d'
 import { threadService, workspaceService } from '../services/services'
 import { toast } from 'sonner'
@@ -18,6 +19,9 @@ const isToolResultError = (r: unknown): boolean => {
   const obj = r as Record<string, unknown>
   return obj.success === false || (typeof obj.type === 'string' && (obj.type === 'error-text' || obj.type === 'error-json'))
 }
+const markPendingToolCallsAsError = (blocks: StreamBlock[]): StreamBlock[] =>
+  blocks.map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
+const makeWorkspace = (path: string) => ({ name: getWorkspaceName(path), path })
 
 export function useChat() {
   const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
@@ -31,7 +35,6 @@ export function useChat() {
   const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
   const setArtifacts = useSetAtom(artifactsAtom)
   const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
-
   const updateThreadMessages = useSetAtom(updateThreadMessagesAtom)
   const updateThreadRunState = useSetAtom(updateThreadRunStateAtom)
   const updateThreadTokens = useSetAtom(updateThreadTokensAtom)
@@ -41,8 +44,6 @@ export function useChat() {
   const updateThreadActiveEditorFile = useSetAtom(updateThreadActiveEditorFileAtom)
   const updatePendingApproval = useSetAtom(updatePendingApprovalAtom)
 
-  
-  
   const latestSelectRequestThreadIdRef = useRef('')
   const flushRafsRef = useRef<Record<string, number | null>>({})
   const isMountedRef = useRef(true)
@@ -50,9 +51,13 @@ export function useChat() {
   const threadsRef = useRef(threads)
   const selectLockRef = useRef(false)
   const selectedModelRef = useRef(selectedModel)
+  const activeThreadIdRef = useRef(activeThreadId)
+  const messagesRef = useRef(messages)
 
   useEffect(() => { threadsRef.current = threads }, [threads])
   useEffect(() => { selectedModelRef.current = selectedModel }, [selectedModel])
+  useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
+  useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => {
     isMountedRef.current = true
     return () => {
@@ -64,18 +69,17 @@ export function useChat() {
   const resetThreadScopedPanels = () => {
     setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
   }
+  const cancelFlush = (tid: string) => {
+    const rafId = flushRafsRef.current[tid]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[tid] = null }
+  }
+  const removeFromRunning = (tid: string) => {
+    setRunningThreads(prev => { const n = new Set(prev); n.delete(tid); return n })
+  }
 
-  
-  const activeThreadIdRef = useRef(activeThreadId)
-  const messagesRef = useRef(messages)
-  useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
-  useEffect(() => { messagesRef.current = messages }, [messages])
-
-  
   useEffect(() => {
     const unsub = window.api.on('stream:worker-crashed', (payload: any) => {
       const crashedId = payload?.threadId; if (!crashedId) return
-      const rafId = flushRafsRef.current[crashedId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[crashedId] = null }
+      cancelFlush(crashedId)
       updateThreadRunState({ threadId: crashedId, state: 'error' })
       updateThreadMessages({
         threadId: crashedId,
@@ -84,7 +88,7 @@ export function useChat() {
           return prev.map(m => m.id !== lastMsg.id ? m : {
             ...m, isStreaming: false,
             orderedBlocks: [
-              ...(m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b),
+              ...markPendingToolCallsAsError(m.orderedBlocks ?? []),
               { type: 'error', message: `Utility worker crashed (Exit code: ${payload.code ?? 'unknown'})` }
             ]
           })
@@ -99,49 +103,38 @@ export function useChat() {
     catch (err) { console.error('[useChat] Failed to load threads:', err); throw err }
   }
 
-   
   const stop = (threadId?: string) => {
     const tid = threadId ?? activeThreadId
     window.api.stopStream(tid)
     updateThreadRunState({ threadId: tid, state: 'idle' })
-    setRunningThreads(prev => { const n = new Set(prev); n.delete(tid); return n })
-    const rafId = flushRafsRef.current[tid]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[tid] = null }
+    removeFromRunning(tid)
+    cancelFlush(tid)
     updateThreadMessages({ threadId: tid, update: prev => prev.map(m => !m.isStreaming ? m : {
-      ...m, isStreaming: false,
-      orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b)
+      ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? [])
     }) })
   }
 
-  
-  
   useEffect(() => {
     return () => {
       const curId = activeThreadIdRef.current
       if (curId) {
         setMessages(prev => prev.map(m =>
-          m.isStreaming
-            ? { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }
-            : m
+          m.isStreaming ? { ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? []) } : m
         ))
       }
     }
-  
   }, [])
 
   const selectThread = async (threadId: string) => {
     if (!threadId || selectLockRef.current) return
     selectLockRef.current = true
     if (!runningThreads.has(threadId)) updateThreadRunState({ threadId, state: 'idle' })
-
-    
     latestSelectRequestThreadIdRef.current = threadId
     setIsThreadLoading(true)
-
     const checkStale = () => {
       if (latestSelectRequestThreadIdRef.current !== threadId) { if (isMountedRef.current) setIsThreadLoading(false); return true }
       return false
     }
-
     try {
       await threadService.setActiveSession(threadId)
       if (checkStale()) return
@@ -152,23 +145,19 @@ export function useChat() {
       ])
       if (checkStale()) return
       if (isMountedRef.current) {
-        const workspace = workspacePath ? { name: workspacePath.split(/[/\\]/).pop() ?? 'Workspace', path: workspacePath } : null
+        const workspace = workspacePath ? makeWorkspace(workspacePath) : null
         const loadedMsgs = (rawMessages || []).filter((m): m is ThreadMessage & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m, idx) => {
           let blocks: StreamBlock[] | undefined
           try { blocks = m.data ? JSON.parse(m.data) : undefined } catch (e) { console.error('Failed to parse message blocks:', e) }
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
         updateThreadWorkspace({ threadId, workspace })
-        
-        
-        
         updateThreadMessages({
           threadId,
           update: prev => {
             const liveStreaming = prev.filter(m => m.isStreaming)
             if (!liveStreaming.length) return loadedMsgs
             const liveIds = new Set(liveStreaming.map(m => m.id))
-            
             return [...loadedMsgs.filter(m => !liveIds.has(m.id)), ...liveStreaming]
           }
         })
@@ -187,7 +176,7 @@ export function useChat() {
     try {
       const targetWsPath = workspacePath !== undefined ? workspacePath : (activeWorkspace?.path || null)
       const { conversationId: newId } = await threadService.newConversation(targetWsPath)
-      const workspace = targetWsPath ? { name: targetWsPath.split(/[/\\]/).pop() ?? 'Workspace', path: targetWsPath } : null
+      const workspace = targetWsPath ? makeWorkspace(targetWsPath) : null
       updateThreadWorkspace({ threadId: newId, workspace })
       updateThreadRunState({ threadId: newId, state: 'idle' })
       updateThreadMessages({ threadId: newId, update: [] })
@@ -203,7 +192,7 @@ export function useChat() {
   const deleteThread = async (threadId: string) => {
     try {
       window.api.stopStream(threadId)
-      setRunningThreads(prev => { const n = new Set(prev); n.delete(threadId); return n })
+      removeFromRunning(threadId)
       await threadService.deleteThread(threadId); setThreads(prev => prev.filter(t => t.id !== threadId))
       if (activeThreadIdRef.current === threadId) {
         setActiveThreadId(''); resetThreadScopedPanels()
@@ -229,10 +218,10 @@ export function useChat() {
       if (!currentId || messagesRef.current.length > 0) { currentId = await newConversation(); createdNew = true }
       const ctx = await workspaceService.selectWorkspace(currentId)
       if (ctx) {
-        resetThreadScopedPanels(); const workspace = { name: ctx.rootPath.split(/[/\\]/).pop() ?? 'Workspace', path: ctx.rootPath }
-        updateThreadWorkspace({ threadId: currentId, workspace })
+        resetThreadScopedPanels()
+        updateThreadWorkspace({ threadId: currentId, workspace: makeWorkspace(ctx.rootPath) })
         const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? [])
-        const wThreads = (tList ?? []).filter(t => t.id !== currentId && t.workspacePath && t.workspacePath.toLowerCase().replace(/\\/g, '/') === ctx.rootPath.toLowerCase().replace(/\\/g, '/'))
+        const wThreads = (tList ?? []).filter(t => t.id !== currentId && t.workspacePath && normalizeSeparators(t.workspacePath) === normalizeSeparators(ctx.rootPath))
         if (wThreads.length > 0) {
           wThreads.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
           if (createdNew) await threadService.deleteThread(currentId)
@@ -252,7 +241,7 @@ export function useChat() {
     if (isRunningMapRef.current[resolvedThreadId]) return
     isRunningMapRef.current[resolvedThreadId] = true
     try {
-      const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
+      cancelFlush(resolvedThreadId)
       const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
       const isNewThread = !existingThread || existingThread.title === 'New Chat'
       if (resolvedThreadId !== activeThreadIdRef.current && isMountedRef.current) setActiveThreadId(resolvedThreadId)
@@ -267,13 +256,11 @@ export function useChat() {
           .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error(e) } })
           .catch((err) => { console.error('[useChat] Title generation failed:', err); toast.error('Failed to generate thread title') })
       }
-
       let fullContent = ''
       const orderedBlocks: StreamBlock[] = []
       let assistantIsStreaming = true
-
       const flushNow = () => {
-        const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
+        cancelFlush(resolvedThreadId)
         if (!isMountedRef.current) return
         const snapshot = [...orderedBlocks]
         updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m) })
@@ -283,13 +270,11 @@ export function useChat() {
           flushRafsRef.current[resolvedThreadId] = requestAnimationFrame(() => { flushRafsRef.current[resolvedThreadId] = null; flushNow() })
         }
       }
-
       const processChunk = (chunk: StreamChunk) => {
         if (!isMountedRef.current || !chunk || chunk.threadId !== resolvedThreadId) return
         const chunkType = chunk.type
         const chunkData = chunk.payload && typeof chunk.payload === 'object' ? (chunk.payload as Record<string, unknown>) : undefined
         const chunkText = typeof chunk.payload === 'string' ? chunk.payload : ''
-
         if (chunkType === 'text_delta') {
           fullContent += chunkText
           const last = orderedBlocks[orderedBlocks.length - 1]
@@ -325,17 +310,13 @@ export function useChat() {
         } else if (chunkType === 'error') {
           assistantIsStreaming = false
           const finalContent = chunkData?.content as string ?? fullContent
-          const finalBlocks = (chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks).map(
-            (b) => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b
-          )
+          const finalBlocks = markPendingToolCallsAsError(chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks)
           finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
         } else if (chunkType === 'inject_queued') {
           if (chunkText) {
-            
             flushNow()
-            
             updateThreadMessages({
               threadId: resolvedThreadId,
               update: prev => [
@@ -365,30 +346,29 @@ export function useChat() {
           const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
           updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'idle' })
-          setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
+          removeFromRunning(resolvedThreadId)
         }
       }
-
       try {
         await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModelRef.current, attachments, startTime: startTimeVal }, processChunk)
       } catch (err: unknown) {
         if (!isMountedRef.current) return
-        const rafId = flushRafsRef.current[resolvedThreadId]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[resolvedThreadId] = null }
+        cancelFlush(resolvedThreadId)
         assistantIsStreaming = false
         const errorMsg = err instanceof Error ? err.message : String(err)
         const isCrashError = errorMsg.includes('Utility worker'), isAbortError = (err instanceof Error && err.name === 'AbortError') || errorMsg === 'terminated' || errorMsg.includes('aborted')
         if (!isCrashError && !isAbortError) {
           console.error('[useChat] Invocation Error:', err)
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id !== assistantMsgId ? m : { ...m, isStreaming: false, orderedBlocks: [...(m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b), { type: 'error', message: cleanErrorMessage(errorMsg) }] }) })
+          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id !== assistantMsgId ? m : { ...m, isStreaming: false, orderedBlocks: [...markPendingToolCallsAsError(m.orderedBlocks ?? []), { type: 'error', message: cleanErrorMessage(errorMsg) }] }) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
         } else if (isAbortError) {
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => !m.isStreaming ? m : { ...m, isStreaming: false, orderedBlocks: (m.orderedBlocks ?? []).map(b => b.type === 'tool_call' && b.status === 'pending' ? { ...b, status: 'error' as const } : b) }) })
+          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => !m.isStreaming ? m : { ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? []) }) })
           updateThreadRunState({ threadId: resolvedThreadId, state: 'idle' })
         }
       }
     } finally {
       isRunningMapRef.current[resolvedThreadId] = false
-      setRunningThreads(prev => { const n = new Set(prev); n.delete(resolvedThreadId); return n })
+      removeFromRunning(resolvedThreadId)
     }
   }
 

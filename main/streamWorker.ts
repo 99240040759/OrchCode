@@ -145,9 +145,7 @@ async function buildToolMessages(
 ): Promise<{ toolMessages: any[]; imageUserMessages: any[]; continuationMessages: any[] }> {
   const toolMessages: any[] = []
   const stepImageParts: any[] = []
-
   for (const res of toolResults) {
-    
     const statusLine = res.isError ? '❌ FAILED' : '✅ SUCCESS'
     const content = `${statusLine} — Tool: ${res.tool_name}\n${res.formatted.text || '(empty output)'}`
     toolMessages.push({ role: 'tool', tool_call_id: res.tool_call_id, name: res.tool_name, content })
@@ -156,20 +154,14 @@ async function buildToolMessages(
       stepImageParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } })
     }
   }
-
   const imageUserMessages: any[] = stepImageParts.length > 0
     ? [{ role: 'user', content: [{ type: 'text', text: `[browser_screenshot] Visual state of the browser after the above tool calls:` }, ...stepImageParts] }]
     : []
-
-  
-  
-  
   const errorResults = toolResults.filter(r => r.isError)
   const successResults = toolResults.filter(r => !r.isError)
   const summaryLines: string[] = []
   if (successResults.length) summaryLines.push(`Completed: ${successResults.map(r => r.tool_name).join(', ')}`)
   if (errorResults.length) summaryLines.push(`Failed: ${errorResults.map(r => r.tool_name).join(', ')} — review error output above and correct course`)
-
   const continuationPrompt = [
     `[STEP ${stepCount} COMPLETE — ASSESS AND CONTINUE]`,
     summaryLines.join(' | '),
@@ -179,10 +171,7 @@ async function buildToolMessages(
     `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`,
     `Provide a single, very brief one-sentence summary of your immediate next step in your normal text response before emitting any tool calls.`
   ].filter(Boolean).join('\n')
-
-  const continuationMessages: any[] = [{ role: 'user', content: continuationPrompt }]
-
-  return { toolMessages, imageUserMessages, continuationMessages }
+  return { toolMessages, imageUserMessages, continuationMessages: [{ role: 'user', content: continuationPrompt }] }
 }
 
 
@@ -541,7 +530,6 @@ export async function handleAgentStreamRequest(
         send({ type: 'inject_queued', payload: injText, threadId })
         log.info(`[stream] Inject consumed and saved for thread ${threadId}`)
       }
-      
       const stepInputTokens = countMessagesTokens(messages, modelType)
       const systemInstruction = buildSystemPrompt(threadId, ctx.rootPath || '', browserInstruction, skillsSection, stepInputTokens) + memorySection + (systemInstructionSuffix || '')
       const sysTokens = countTokens(systemInstruction, modelType)

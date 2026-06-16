@@ -10,6 +10,7 @@ import { agentRunStateAtom, selectedModelAtom, availableModelsAtom, activeThread
 import { FileIcon as SymbolsFileIcon } from '@react-symbols/icons/utils'
 import Tooltip from './Tooltip'
 import { workspaceService } from '../services/services'
+import { getBasename } from '../lib/pathUtils'
 import { toast } from 'sonner'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
@@ -57,7 +58,7 @@ export const AutocompleteSuggestions: React.FC<{ showFileSuggestions: boolean, f
     <div className="input-file-suggestions">
       {filteredFiles.map((file, idx) => {
         const isSelected = idx === suggestionIndex
-        const name = file.split(/[/\\]/).pop() || file
+        const name = getBasename(file)
         const dir = file.split(/[/\\]/).slice(0, -1).join('/')
         return (
           <div key={file} onClick={() => selectFileSuggestion(file)} onMouseEnter={() => setSuggestionIndex(idx)} className={`input-file-suggestion-item${isSelected ? ' input-file-suggestion-item-selected' : ''}`}>
@@ -241,7 +242,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
 
   const handleOpenFile = async (filePath: string) => {
     try {
-      const fileData = await window.api.invoke('file:read', { filePath, conversationId }) as any
+      const fileData = await workspaceService.readFile(filePath, conversationId) as any
       if (fileData) { setIsDiffMode(false); setActiveEditorFile(fileData); setArtifactPanelMode('editor'); setArtifactPanelOpen(true) }
     } catch (err) { console.error('Failed to open file:', err); toast.error('Failed to open file') }
   }
@@ -269,7 +270,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
           if (idx !== -1) {
             selection.anchor.set(node.getKey(), idx, 'text')
             selection.focus.set(node.getKey(), offset, 'text')
-            selection.insertNodes([new FileMentionNode(selectedFile.split(/[/\\]/).pop() || selectedFile, selectedFile), $createTextNode(' ')])
+            selection.insertNodes([new FileMentionNode(getBasename(selectedFile), selectedFile), $createTextNode(' ')])
           }
         }
       }
@@ -352,9 +353,9 @@ const InputBar: React.FC<InputBarProps> = ({ onSubmit, onStop }) => {
             <Tooltip key={`att-${idx}`} content={att.name}>
               <div className="input-attachment-chip">
                 {att.type === 'image' ? <img src={`data:${att.mimeType};base64,${att.base64}`} alt={att.name} className="input-attachment-chip-img" /> : (
-                  <SymbolsFileIcon fileName={att.name.split('/').pop() || att.name} autoAssign={true} width={14} height={14} className="input-file-icon" />
+                  <SymbolsFileIcon fileName={getBasename(att.name)} autoAssign={true} width={14} height={14} className="input-file-icon" />
                 )}
-                <span className="input-attachment-name">{att.name.split('/').pop() || att.name}</span>
+                <span className="input-attachment-name">{getBasename(att.name)}</span>
                 <button onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))} className="input-attachment-close">✕</button>
               </div>
             </Tooltip>

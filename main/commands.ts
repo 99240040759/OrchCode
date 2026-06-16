@@ -299,6 +299,54 @@ export const ipcCommands = {
       } catch (err) { log.error('[commands] close-and-delete error:', err); throw err }
     }
   },
+  'workspace:tsconfig': {
+    schema: z.object({ workspacePath: z.string().min(1) }),
+    execute: async ({ workspacePath }: any) => {
+      for (const name of ['tsconfig.json', 'jsconfig.json']) {
+        try {
+          const raw = await fs.readFile(join(workspacePath, name), 'utf-8')
+          const parsed = JSON.parse(raw)
+          return parsed.compilerOptions || null
+        } catch { /* try next */ }
+      }
+      return null
+    }
+  },
+  'workspace:type-libs': {
+    schema: z.object({ workspacePath: z.string().min(1), maxBytes: z.number().int().min(0).optional() }),
+    execute: async ({ workspacePath, maxBytes }: any) => {
+      const cap = maxBytes ?? 5 * 1024 * 1024
+      const typesDir = join(workspacePath, 'node_modules', '@types')
+      let entries: string[]
+      try { entries = await fs.readdir(typesDir) } catch { return [] }
+      const libs: Array<{ filePath: string; content: string }> = []
+      let totalBytes = 0
+      for (const pkg of entries.sort()) {
+        if (totalBytes >= cap) break
+        const pkgDir = join(typesDir, pkg)
+        try {
+          const stat = await fs.stat(pkgDir)
+          if (!stat.isDirectory()) continue
+          // Try index.d.ts first, then package.json types field
+          let dtsPath = join(pkgDir, 'index.d.ts')
+          try { await fs.access(dtsPath) } catch {
+            try {
+              const pkgJson = JSON.parse(await fs.readFile(join(pkgDir, 'package.json'), 'utf-8'))
+              const typesFile = pkgJson.types || pkgJson.typings
+              if (typesFile) dtsPath = join(pkgDir, typesFile)
+              else continue
+            } catch { continue }
+          }
+          const content = await fs.readFile(dtsPath, 'utf-8')
+          if (totalBytes + content.length > cap) continue
+          totalBytes += content.length
+          libs.push({ filePath: `file:///node_modules/@types/${pkg}/index.d.ts`, content })
+        } catch { /* skip broken packages */ }
+      }
+      log.info(`[commands] workspace:type-libs loaded ${libs.length} packages (${(totalBytes / 1024).toFixed(0)}KB) from ${typesDir}`)
+      return libs
+    }
+  },
   'file:read': {
     schema: z.object({ filePath: z.string().min(1), conversationId: convIdSchema }),
     execute: async ({ filePath, conversationId }: any) => {

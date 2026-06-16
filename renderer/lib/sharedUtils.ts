@@ -11,7 +11,7 @@ export const decodeBase64Utf8 = (base64Str: string): string => {
     return new TextDecoder('utf-8').decode(bytes)
   } catch { return 'Failed to decode content' }
 }
-export function oklchToHex(oklchStr: string): string {
+function oklchToHex(oklchStr: string): string {
   const match = oklchStr.match(/oklch\(\s*([\d.]+)%\s+([\d.]+)\s+([\w\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)/i)
   if (!match) return oklchStr
   const L = parseFloat(match[1]) / 100, C = parseFloat(match[2]), HStr = match[3], H = HStr === 'none' ? 0 : parseFloat(HStr), alphaStr = match[4]

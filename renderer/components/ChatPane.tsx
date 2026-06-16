@@ -7,6 +7,8 @@ import InputBar from './InputBar'
 import ChatThread from './ChatThread'
 import { isThreadLoadingAtom, isArtifactPanelOpenAtom, hasMessagesAtom, activeWorkspaceAtom,  threadListAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
+import { getWorkspaceName } from '../lib/pathUtils'
+import { workspaceService } from '../services/services'
 import Dropdown, { DropdownItem, DropdownSeparator } from './Dropdown'
 import Tooltip from './Tooltip'
 
@@ -19,7 +21,7 @@ export const ChatPane: React.FC = () => {
     const { run, stop, openWorkspace, selectThread, newConversation, loadThreads } = useChat()
     const workspaces = React.useMemo(() => {
       const seen = new Set<string>(), list: { name: string; path: string }[] = []
-      threads.forEach(t => { if (t.workspacePath && !seen.has(t.workspacePath)) { seen.add(t.workspacePath); list.push({ name: t.workspacePath.split(/[/\\]/).pop() ?? 'Workspace', path: t.workspacePath }) } })
+      threads.forEach(t => { if (t.workspacePath && !seen.has(t.workspacePath)) { seen.add(t.workspacePath); list.push({ name: getWorkspaceName(t.workspacePath), path: t.workspacePath }) } })
       return list
     }, [threads])
     const handleWorkspaceSelect = async (path: string) => {
@@ -29,7 +31,7 @@ export const ChatPane: React.FC = () => {
         await selectThread(wThreads[0].id)
       } else {
         const newId = await newConversation()
-        await window.api.invoke('workspace:set-active', { conversationId: newId, workspacePath: path })
+        await workspaceService.setActiveWorkspace(newId, path)
         await loadThreads()
         await selectThread(newId)
       }

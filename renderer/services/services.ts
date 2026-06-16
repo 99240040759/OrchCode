@@ -15,28 +15,27 @@ export const threadService = {
   updateThreadTitle: (threadId: string, title: string) => invoke<boolean>('thread:update-title', { threadId, title }),
   setActiveSession: (threadId: string) => invoke<boolean>('thread:set-active', { threadId })
 }
-
 export const workspaceService = {
   selectWorkspace: (conversationId: string) => invoke<WorkspaceContext | null>('workspace:select', { conversationId }),
   setActiveWorkspace: (conversationId: string, workspacePath: string) => invoke<WorkspaceContext>('workspace:set-active', { conversationId, workspacePath }),
   closeAndDeleteWorkspace: (workspacePath: string) => invoke<boolean>('workspace:close-and-delete', { workspacePath }),
   listWorkspaceFiles: (conversationId: string) => invoke<string[]>('workspace:list-files', { conversationId }),
   readFile: (filePath: string, conversationId: string) => invoke<FileReadResult>('file:read', { filePath, conversationId }),
-  readOriginalFile: (filePath: string, conversationId?: string) => invoke<{ content: string }>('file:read-original', { filePath, conversationId })
+  readOriginalFile: (filePath: string, conversationId?: string) => invoke<{ content: string }>('file:read-original', { filePath, conversationId }),
+  isDirectory: (filePath: string, conversationId: string) => invoke<boolean>('file:is-directory', { filePath, conversationId }),
+  openPath: (filePath: string, conversationId: string) => invoke<boolean>('file:open-path', { filePath, conversationId }),
+  readTsConfig: (workspacePath: string) => invoke<Record<string, any> | null>('workspace:tsconfig', { workspacePath }),
+  readTypeLibs: (workspacePath: string) => invoke<Array<{ filePath: string; content: string }>>('workspace:type-libs', { workspacePath }),
 }
-
 export const authService = {
   startGoogleAuth: () => invoke<UserProfile | null>('auth:login'),
   logout: () => invoke<boolean>('auth:logout'),
   getAuthUser: () => invoke<UserProfile | null>('auth:get-user'),
+  completeOnboarding: () => invoke<boolean>('auth:complete-onboarding'),
   onAuthStatusChanged: (callback: (user: UserProfile | null) => void): (() => void) => {
     return window.api.on('auth:status-changed', (user) => callback(user as UserProfile | null))
   }
 }
-
-
-
-
 export const memoryService = {
   list: (workspacePath?: string | null) => invoke<MemoryEntry[]>('memory:list', { workspacePath }),
   save: (content: string, category: string, workspacePath?: string | null) => invoke<string>('memory:save', { content, category, workspacePath }),
@@ -44,16 +43,15 @@ export const memoryService = {
   delete: (id: string) => invoke<boolean>('memory:delete', { id }),
   stats: () => invoke<{total: number; byCategory: Record<string, number>}>('memory:stats'),
 }
-
-
 export const usageService = {
   getTotals: () => invoke<UsageStats>('usage:get-totals'),
 }
-
 export const quotaService = {
   get: () => invoke<QuotaInfo>('quota:get'),
 }
-
 export const settingsService = {
   open: () => invoke<boolean>('settings:open'),
+}
+export const artifactService = {
+  list: (conversationId: string) => invoke<unknown>('artifacts:list', { conversationId }),
 }

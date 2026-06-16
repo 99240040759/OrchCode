@@ -13,7 +13,10 @@ import {
 import type { editor } from 'monaco-editor'
 import type { ArtifactEntry, FileReadResult } from '../../preload/index.d'
 import { isAgentArtifact, getArtifactIcon, getDisplayName } from '../lib/uiUtils'
+import { getBasename } from '../lib/pathUtils'
 import { setupMonaco } from '../lib/monacoConfig'
+import { loadWorkspaceTypes } from '../lib/monacoTypeLoader'
+import { workspaceService, artifactService } from '../services/services'
 import type { TerminalViewHandle } from './TerminalView'
 import OverviewPanel from './OverviewPanel'
 import TerminalView from './TerminalView'
@@ -39,7 +42,7 @@ const PanelHeader: React.FC<HeaderProps> = ({ openFiles, hoveredTabPath, setHove
         {trigger('browser', 'Browser', <Globe size={14} />, 'Browser (Ctrl+Alt+3)')}
         {openFiles.map((f, index) => {
           const hovered = hoveredTabPath === f.path
-          const baseName = f.name.split(/[/\\]/).pop() ?? f.name
+          const baseName = getBasename(f.name)
           const shortcutIdx = index + 4
           const titleText = `${getDisplayName(f.name)}${shortcutIdx <= 9 ? ` (Ctrl+Alt+${shortcutIdx})` : ''}`
           return (
@@ -103,11 +106,12 @@ const ArtifactPanel: React.FC = () => {
   }
 
   useEffect(() => { setupMonaco().then(() => setThemeLoaded(true)) }, [])
+  useEffect(() => { if (themeLoaded && activeWorkspace?.path) loadWorkspaceTypes(activeWorkspace.path).catch(() => {}) }, [themeLoaded, activeWorkspace?.path])
 
   useEffect(() => {
     if (activeFile && isDiffMode) {
       setOriginalContent(null)
-      window.api.invoke('file:read-original', { filePath: activeFile.path, conversationId: convId })
+      workspaceService.readOriginalFile(activeFile.path, convId)
         .then((res) => setOriginalContent((res as { content?: string })?.content ?? ''))
         .catch(() => { setOriginalContent(null); setIsDiffMode(false) })
     } else setOriginalContent(null)
@@ -119,7 +123,7 @@ const ArtifactPanel: React.FC = () => {
     if (!convId) return
     let active = true; setLoading(true)
     const fetchTime = Date.now()
-    window.api.invoke('artifacts:list', { conversationId: convId })
+    artifactService.list(convId)
       .then((data) => { if (active && fetchTime >= lastArtifactsUpdateRef.current) { setArtifacts(data as ArtifactEntry[]); setLoading(false) } })
       .catch(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -144,7 +148,7 @@ const ArtifactPanel: React.FC = () => {
   const handleArtifactClick = async (art: ArtifactEntry) => {
     try {
       setFileLoading(true)
-      const fileData = await window.api.invoke('file:read', { filePath: art.path, conversationId: convId }) as FileReadResult
+      const fileData = await workspaceService.readFile(art.path, convId) as FileReadResult
       if (fileData) { setIsDiffMode(false); handleOpenFile(fileData) }
     } catch (err) { console.error(err) } finally { setFileLoading(false) }
   }

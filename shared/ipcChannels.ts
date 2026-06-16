@@ -12,5 +12,3 @@ export const PUSH_CHANNELS = [
   'shortcut:focus-input',
   'shortcut:toggle-terminal',
 ] as const
-
-export type PushChannel = typeof PUSH_CHANNELS[number]

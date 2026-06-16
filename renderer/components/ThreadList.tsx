@@ -6,6 +6,7 @@ import Dropdown, { DropdownItem } from './Dropdown'
 import { threadListAtom, activeThreadIdAtom, runningThreadsAtom } from '../store/agentStore'
 import { useChat } from '../hooks/useChat'
 import { threadService } from '../services/services'
+import { getWorkspaceName } from '../lib/pathUtils'
 import Dialog from './Dialog'
 import Tooltip from './Tooltip'
 
@@ -43,7 +44,7 @@ const ThreadList: React.FC = () => {
     const grouped: Record<string, { name: string; threads: any[] }> = {}
     threads.forEach((t) => {
       const path = t.workspacePath || ''
-      const name = path ? (path.split(/[/\\]/).pop() ?? 'Workspace') : 'General'
+      const name = path ? getWorkspaceName(path) : 'General'
       if (!grouped[path]) grouped[path] = { name, threads: [] }
       grouped[path].threads.push(t)
     })
