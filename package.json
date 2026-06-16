@@ -39,7 +39,8 @@
     "mammoth": "^1.12.0",
     "officeparser": "^7.2.1",
     "pdf-parse": "^2.4.5",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -105,7 +106,6 @@
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
-    "web-tree-sitter": "0.21.0",
-    "zod": "^3.23.8"
+    "web-tree-sitter": "0.21.0"
   }
 }
