@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="renderer/assets/logo.png" width="120" height="120" alt="Orch Code">
-</p>
-
 <h1 align="center">Orch Code</h1>
 <h3 align="center">The Agentic Code Editor</h3>
 
@@ -14,23 +10,6 @@
   <img src="https://img.shields.io/badge/license-Proprietary-blue?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/version-1.0.0-brightgreen?style=flat-square" alt="Version">
 </p>
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [The Agent — Deep Reasoning Engine](#the-agent--deep-reasoning-engine)
-- [Code Intelligence](#code-intelligence)
-- [Development Toolkit](#development-toolkit)
-- [Live Browser & Web Intelligence](#live-browser--web-intelligence)
-- [Memory & Context](#memory--context)
-- [Interface & Experience](#interface--experience)
-- [Security Model](#security-model)
-- [Real-World Workflows](#real-world-workflows)
-- [System Requirements](#system-requirements)
-- [Getting Started](#getting-started)
-- [Roadmap](#roadmap)
 
 ---
 
@@ -212,17 +191,6 @@ The input bar supports:
 - **Image paste** directly from clipboard
 - **Inline approval cards** for sensitive operations
 
-### Live Agent Streaming
-
-Every agent action is streamed:
-- **Text generation** streams character by character in real time
-- **Tool calls** appear with live argument delta updates
-- **Command output** streams line by line from the terminal
-- **Browser screenshots** appear inline after capture
-- **File diffs** show line statistics (+N/-M) for every edit
-- **Context events** show compaction savings
-- **Duration blocks** show total execution time
-
 ### Tab-Based File Management
 
 Open multiple files simultaneously in the artifact panel with quick-switch shortcuts. Each tab shows a file-type icon, supports close-on-hover, and maintains scroll position. The code viewer includes:
@@ -243,13 +211,6 @@ The agent operates strictly within the bounds of the workspace you open. Path tr
 ### Command Safety
 
 Terminal commands are checked against a **blocklist of dangerous executables** (shutdown, mkfs, dd, passwd, sudo, shell spawners, network tools) and **shell operators** (pipe chains, backgrounding, sub-shells). Blocked commands are rejected with clear explanations before execution.
-
-### Approval Workflow
-
-By default, terminal commands require your explicit approval before execution. The approval card shows:
-- The friendly tool name and description
-- Expandable JSON details of the full arguments
-- A "Remember my choice" checkbox for persistent permissions
 
 ### Process Isolation
 
@@ -346,47 +307,8 @@ The agent:
 
 The agent will immediately analyze your workspace and begin working.
 
----
+This repository and its entire contents are the proprietary intellectual property of **Orch**. Unauthorized reproduction, derivation, distribution, or execution of the source code, architecture, or assets herein is strictly prohibited.
 
-## Roadmap
 
-### ✅ Current Release
+**Orch™** and the **Orch Code™** logo are registered trademarks.
 
-- [x] Multi-model agentic reasoning with live streaming
-- [x] AST-aware file editing across 35+ languages
-- [x] Workspace search with regex and glob patterns
-- [x] Native PTY terminal with command execution
-- [x] Automated browser control (navigate, click, type, screenshot, extract)
-- [x] Real-time web search with citation synthesis
-- [x] AI image generation with local artifact saving
-- [x] Persistent cross-session memory (4 categories)
-- [x] Automatic context compaction with AI summarization
-- [x] Office document preview (PDF, DOCX, XLSX, PPTX)
-- [x] File attachment support (images, documents)
-- [x] Approval workflow for sensitive commands
-- [x] Multi-process architecture (UI, agent, terminal, DB isolation)
-- [x] Cross-platform (Windows, macOS, Linux)
-- [x] Auto-updater with GitHub releases
-- [x] Dark theme with custom titlebar per platform
-
-### 🔮 In Development
-
-- [ ] Custom skill authoring and marketplace
-- [ ] Git integration (commit, diff, PR review)
-- [ ] Multi-agent collaboration on large tasks
-- [ ] Local model support (privacy-first mode)
-- [ ] Shareable conversation threads with replay
-- [ ] Inline code completion (LSP-style suggestions)
-
----
-
-<p align="center">
-  <strong>Orch Code</strong><br>
-  <em>Your code. Your workflow. Amplified.</em>
-</p>
-
-<p align="center">
-  <a href="https://orch.live">Website</a> •
-  <a href="https://github.com/sameer786ss/OrchCode">GitHub</a> •
-  <a href="https://docs.orch.live">Documentation</a>
-</p>
