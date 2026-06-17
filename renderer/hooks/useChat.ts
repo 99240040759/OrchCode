@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { useAtom, useSetAtom, useAtomValue } from 'jotai'
+import { useStore } from 'jotai'
 import {
   chatMessagesAtom, activeThreadIdAtom, threadListAtom,
   selectedModelAtom, activeWorkspaceAtom, isThreadLoadingAtom,
@@ -24,40 +24,13 @@ const markPendingToolCallsAsError = (blocks: StreamBlock[]): StreamBlock[] =>
 const makeWorkspace = (path: string) => ({ name: getWorkspaceName(path), path })
 
 export function useChat() {
-  const [activeThreadId, setActiveThreadId] = useAtom(activeThreadIdAtom)
-  const [messages, setMessages] = useAtom(chatMessagesAtom)
-  const [threads, setThreads] = useAtom(threadListAtom)
-  const [runningThreads, setRunningThreads] = useAtom(runningThreadsAtom)
-  const selectedModel = useAtomValue(selectedModelAtom)
-  const activeWorkspace = useAtomValue(activeWorkspaceAtom)
-  const setIsThreadLoading = useSetAtom(isThreadLoadingAtom)
-  const setOpenFiles = useSetAtom(openFilesAtom)
-  const setActiveEditorFile = useSetAtom(activeEditorFileAtom)
-  const setArtifacts = useSetAtom(artifactsAtom)
-  const setArtifactPanelMode = useSetAtom(artifactPanelModeAtom)
-  const updateThreadMessages = useSetAtom(updateThreadMessagesAtom)
-  const updateThreadRunState = useSetAtom(updateThreadRunStateAtom)
-  const updateThreadTokens = useSetAtom(updateThreadTokensAtom)
-  const updateThreadWorkspace = useSetAtom(updateThreadWorkspaceAtom)
-  const updateThreadArtifacts = useSetAtom(updateThreadArtifactsAtom)
-  const updateThreadOpenFiles = useSetAtom(updateThreadOpenFilesAtom)
-  const updateThreadActiveEditorFile = useSetAtom(updateThreadActiveEditorFileAtom)
-  const updatePendingApproval = useSetAtom(updatePendingApprovalAtom)
+  const store = useStore()
 
   const latestSelectRequestThreadIdRef = useRef('')
   const flushRafsRef = useRef<Record<string, number | null>>({})
   const isMountedRef = useRef(true)
   const isRunningMapRef = useRef<Record<string, boolean>>({})
-  const threadsRef = useRef(threads)
-  const selectLockRef = useRef(false)
-  const selectedModelRef = useRef(selectedModel)
-  const activeThreadIdRef = useRef(activeThreadId)
-  const messagesRef = useRef(messages)
 
-  useEffect(() => { threadsRef.current = threads }, [threads])
-  useEffect(() => { selectedModelRef.current = selectedModel }, [selectedModel])
-  useEffect(() => { activeThreadIdRef.current = activeThreadId }, [activeThreadId])
-  useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => {
     isMountedRef.current = true
     return () => {
@@ -67,21 +40,26 @@ export function useChat() {
   }, [])
 
   const resetThreadScopedPanels = () => {
-    setOpenFiles([]); setActiveEditorFile(null); setArtifacts([]); setArtifactPanelMode('overview')
+    store.set(openFilesAtom, [])
+    store.set(activeEditorFileAtom, null)
+    store.set(artifactsAtom, [])
+    store.set(artifactPanelModeAtom, 'overview')
   }
+
   const cancelFlush = (tid: string) => {
     const rafId = flushRafsRef.current[tid]; if (rafId) { cancelAnimationFrame(rafId); flushRafsRef.current[tid] = null }
   }
+
   const removeFromRunning = (tid: string) => {
-    setRunningThreads(prev => { const n = new Set(prev); n.delete(tid); return n })
+    store.set(runningThreadsAtom, prev => { const n = new Set(prev); n.delete(tid); return n })
   }
 
   useEffect(() => {
     const unsub = window.api.on('stream:worker-crashed', (payload: any) => {
       const crashedId = payload?.threadId; if (!crashedId) return
       cancelFlush(crashedId)
-      updateThreadRunState({ threadId: crashedId, state: 'error' })
-      updateThreadMessages({
+      store.set(updateThreadRunStateAtom, { threadId: crashedId, state: 'error' })
+      store.set(updateThreadMessagesAtom, {
         threadId: crashedId,
         update: prev => {
           const lastMsg = prev[prev.length - 1]; if (!lastMsg?.isStreaming) return prev
@@ -96,43 +74,43 @@ export function useChat() {
       })
     })
     return () => unsub()
-  }, [updateThreadRunState, updateThreadMessages])
+  }, [store])
 
   const loadThreads = async () => {
-    try { setThreads((await threadService.getThreads()) ?? []) }
+    try { store.set(threadListAtom, (await threadService.getThreads()) ?? []) }
     catch (err) { console.error('[useChat] Failed to load threads:', err); throw err }
   }
 
   const stop = (threadId?: string) => {
-    const tid = threadId ?? activeThreadId
+    const tid = threadId ?? store.get(activeThreadIdAtom)
     window.api.stopStream(tid)
-    updateThreadRunState({ threadId: tid, state: 'idle' })
+    store.set(updateThreadRunStateAtom, { threadId: tid, state: 'idle' })
     removeFromRunning(tid)
     cancelFlush(tid)
-    updateThreadMessages({ threadId: tid, update: prev => prev.map(m => !m.isStreaming ? m : {
+    store.set(updateThreadMessagesAtom, { threadId: tid, update: prev => prev.map(m => !m.isStreaming ? m : {
       ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? [])
     }) })
   }
 
   useEffect(() => {
     return () => {
-      const curId = activeThreadIdRef.current
+      const curId = store.get(activeThreadIdAtom)
       if (curId) {
-        setMessages(prev => prev.map(m =>
+        store.set(chatMessagesAtom, prev => prev.map(m =>
           m.isStreaming ? { ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? []) } : m
         ))
       }
     }
-  }, [])
+  }, [store])
 
   const selectThread = async (threadId: string) => {
-    if (!threadId || selectLockRef.current) return
-    selectLockRef.current = true
-    if (!runningThreads.has(threadId)) updateThreadRunState({ threadId, state: 'idle' })
+    if (!threadId) return
+    const runningThreads = store.get(runningThreadsAtom)
+    if (!runningThreads.has(threadId)) store.set(updateThreadRunStateAtom, { threadId, state: 'idle' })
     latestSelectRequestThreadIdRef.current = threadId
-    setIsThreadLoading(true)
+    store.set(isThreadLoadingAtom, true)
     const checkStale = () => {
-      if (latestSelectRequestThreadIdRef.current !== threadId) { if (isMountedRef.current) setIsThreadLoading(false); return true }
+      if (latestSelectRequestThreadIdRef.current !== threadId) return true
       return false
     }
     try {
@@ -151,8 +129,8 @@ export function useChat() {
           try { blocks = m.data ? JSON.parse(m.data) : undefined } catch (e) { console.error('Failed to parse message blocks:', e) }
           return { id: m.id ?? `msg-${idx}`, role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content), orderedBlocks: Array.isArray(blocks) ? blocks : undefined, timestamp: new Date(m.createdAt ?? Date.now()).getTime(), isStreaming: false }
         })
-        updateThreadWorkspace({ threadId, workspace })
-        updateThreadMessages({
+        store.set(updateThreadWorkspaceAtom, { threadId, workspace })
+        store.set(updateThreadMessagesAtom, {
           threadId,
           update: prev => {
             const liveStreaming = prev.filter(m => m.isStreaming)
@@ -161,31 +139,32 @@ export function useChat() {
             return [...loadedMsgs.filter(m => !liveIds.has(m.id)), ...liveStreaming]
           }
         })
-        updateThreadTokens({ threadId, session: fresh?.accumulatedTokens ?? 0, lifetime: fresh?.lifetimeTokens ?? 0 })
-        setActiveThreadId(threadId)
-        setIsThreadLoading(false)
+        store.set(updateThreadTokensAtom, { threadId, session: fresh?.accumulatedTokens ?? 0, lifetime: fresh?.lifetimeTokens ?? 0 })
+        store.set(activeThreadIdAtom, threadId)
+        store.set(isThreadLoadingAtom, false)
       }
     } catch (err) {
       console.error('[useChat] Failed to load thread:', err)
-      if (isMountedRef.current) setIsThreadLoading(false)
+      if (!checkStale() && isMountedRef.current) store.set(isThreadLoadingAtom, false)
       throw err
-    } finally { selectLockRef.current = false }
+    }
   }
 
   const newConversation = async (workspacePath?: string | null) => {
     try {
+      const activeWorkspace = store.get(activeWorkspaceAtom)
       const targetWsPath = workspacePath !== undefined ? workspacePath : (activeWorkspace?.path || null)
       const { conversationId: newId } = await threadService.newConversation(targetWsPath)
       const workspace = targetWsPath ? makeWorkspace(targetWsPath) : null
-      updateThreadWorkspace({ threadId: newId, workspace })
-      updateThreadRunState({ threadId: newId, state: 'idle' })
-      updateThreadMessages({ threadId: newId, update: [] })
-      updateThreadTokens({ threadId: newId, session: 0, lifetime: 0 })
-      updateThreadOpenFiles({ threadId: newId, openFiles: [] })
-      updateThreadActiveEditorFile({ threadId: newId, file: null })
-      updateThreadArtifacts({ threadId: newId, artifacts: [] })
+      store.set(updateThreadWorkspaceAtom, { threadId: newId, workspace })
+      store.set(updateThreadRunStateAtom, { threadId: newId, state: 'idle' })
+      store.set(updateThreadMessagesAtom, { threadId: newId, update: [] })
+      store.set(updateThreadTokensAtom, { threadId: newId, session: 0, lifetime: 0 })
+      store.set(updateThreadOpenFilesAtom, { threadId: newId, openFiles: [] })
+      store.set(updateThreadActiveEditorFileAtom, { threadId: newId, file: null })
+      store.set(updateThreadArtifactsAtom, { threadId: newId, artifacts: [] })
       if (targetWsPath) await workspaceService.setActiveWorkspace(newId, targetWsPath)
-      setActiveThreadId(newId); resetThreadScopedPanels(); await loadThreads(); return newId
+      store.set(activeThreadIdAtom, newId); resetThreadScopedPanels(); await loadThreads(); return newId
     } catch (err) { console.error('[useChat] New conversation error:', err); throw err }
   }
 
@@ -193,18 +172,19 @@ export function useChat() {
     try {
       window.api.stopStream(threadId)
       removeFromRunning(threadId)
-      await threadService.deleteThread(threadId); setThreads(prev => prev.filter(t => t.id !== threadId))
-      if (activeThreadIdRef.current === threadId) {
-        setActiveThreadId(''); resetThreadScopedPanels()
+      await threadService.deleteThread(threadId); store.set(threadListAtom, prev => prev.filter(t => t.id !== threadId))
+      if (store.get(activeThreadIdAtom) === threadId) {
+        store.set(activeThreadIdAtom, ''); resetThreadScopedPanels()
       }
     } catch (err) { console.error('[useChat] Delete thread error:', err); throw err }
   }
 
   const closeAndDeleteWorkspace = async (path: string) => {
     try {
+      const activeWorkspace = store.get(activeWorkspaceAtom)
       if (activeWorkspace?.path === path) {
-        const curId = activeThreadIdRef.current; if (curId) window.api.stopStream(curId)
-        setActiveThreadId(''); resetThreadScopedPanels()
+        const curId = store.get(activeThreadIdAtom); if (curId) window.api.stopStream(curId)
+        store.set(activeThreadIdAtom, ''); resetThreadScopedPanels()
       }
       const success = await workspaceService.closeAndDeleteWorkspace(path)
       if (success) await loadThreads()
@@ -214,13 +194,14 @@ export function useChat() {
 
   const openWorkspace = async () => {
     try {
-      const prevId = activeThreadIdRef.current; let currentId = prevId; let createdNew = false
-      if (!currentId || messagesRef.current.length > 0) { currentId = await newConversation(); createdNew = true }
+      const prevId = store.get(activeThreadIdAtom); let currentId = prevId; let createdNew = false
+      const messages = store.get(chatMessagesAtom)
+      if (!currentId || messages.length > 0) { currentId = await newConversation(); createdNew = true }
       const ctx = await workspaceService.selectWorkspace(currentId)
       if (ctx) {
         resetThreadScopedPanels()
-        updateThreadWorkspace({ threadId: currentId, workspace: makeWorkspace(ctx.rootPath) })
-        const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? [])
+        store.set(updateThreadWorkspaceAtom, { threadId: currentId, workspace: makeWorkspace(ctx.rootPath) })
+        const tList = await threadService.getThreads(); if (isMountedRef.current) store.set(threadListAtom, tList ?? [])
         const wThreads = (tList ?? []).filter(t => t.id !== currentId && t.workspacePath && normalizeSeparators(t.workspacePath) === normalizeSeparators(ctx.rootPath))
         if (wThreads.length > 0) {
           wThreads.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
@@ -229,7 +210,7 @@ export function useChat() {
         } else { await selectThread(currentId) }
         await loadThreads(); return ctx
       } else if (createdNew) {
-        await threadService.deleteThread(currentId); if (prevId) await selectThread(prevId); else setActiveThreadId('')
+        await threadService.deleteThread(currentId); if (prevId) await selectThread(prevId); else store.set(activeThreadIdAtom, '')
         await loadThreads()
       }
       return null
@@ -237,23 +218,26 @@ export function useChat() {
   }
 
   const run = async (promptText: string, attachments?: StreamPayload['attachments'], forceThreadId?: string) => {
-    const resolvedThreadId = forceThreadId || activeThreadIdRef.current || `session-${window.crypto.randomUUID()}`
+    const activeThreadId = store.get(activeThreadIdAtom)
+    const resolvedThreadId = forceThreadId || activeThreadId || `session-${window.crypto.randomUUID()}`
     if (isRunningMapRef.current[resolvedThreadId]) return
     isRunningMapRef.current[resolvedThreadId] = true
     try {
       cancelFlush(resolvedThreadId)
-      const existingThread = threadsRef.current.find(t => t.id === resolvedThreadId)
+      const threads = store.get(threadListAtom)
+      const existingThread = threads.find(t => t.id === resolvedThreadId)
       const isNewThread = !existingThread || existingThread.title === 'New Chat'
-      if (resolvedThreadId !== activeThreadIdRef.current && isMountedRef.current) setActiveThreadId(resolvedThreadId)
-      updateThreadRunState({ threadId: resolvedThreadId, state: 'thinking' })
-      setRunningThreads(prev => new Set(prev).add(resolvedThreadId))
+      if (resolvedThreadId !== activeThreadId && isMountedRef.current) store.set(activeThreadIdAtom, resolvedThreadId)
+      store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'thinking' })
+      store.set(runningThreadsAtom, prev => new Set(prev).add(resolvedThreadId))
       const startTimeVal = Date.now()
-      updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: window.crypto.randomUUID(), role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: startTimeVal }] })
+      const userMsgId = window.crypto.randomUUID()
       const assistantMsgId = window.crypto.randomUUID()
-      updateThreadMessages({ threadId: resolvedThreadId, update: prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: startTimeVal, isStreaming: true }] })
+      store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => [...prev, { id: userMsgId, role: 'user', content: promptText, data: attachments?.length ? JSON.stringify({ attachments }) : undefined, timestamp: startTimeVal }] })
+      store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', orderedBlocks: [], timestamp: startTimeVal, isStreaming: true }] })
       if (isNewThread) {
         threadService.generateTitle(promptText.slice(0, 400), resolvedThreadId)
-          .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) setThreads(tList ?? []) } catch (e) { console.error(e) } })
+          .then(async () => { try { const tList = await threadService.getThreads(); if (isMountedRef.current) store.set(threadListAtom, tList ?? []) } catch (e) { console.error(e) } })
           .catch((err) => { console.error('[useChat] Title generation failed:', err); toast.error('Failed to generate thread title') })
       }
       let fullContent = ''
@@ -263,7 +247,7 @@ export function useChat() {
         cancelFlush(resolvedThreadId)
         if (!isMountedRef.current) return
         const snapshot = [...orderedBlocks]
-        updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m) })
+        store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m) })
       }
       const scheduleFlush = () => {
         if (!flushRafsRef.current[resolvedThreadId]) {
@@ -281,7 +265,7 @@ export function useChat() {
           if (!last || last.type !== 'text') { orderedBlocks.push({ type: 'text', content: chunkText }); flushNow() }
           else { orderedBlocks[orderedBlocks.length - 1] = { ...last, content: last.content + chunkText }; scheduleFlush() }
         } else if (chunkType === 'tool_call_start') {
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'tool-calling' })
           orderedBlocks.push({ type: 'tool_call', tool_call_id: chunkData?.tool_call_id as string ?? window.crypto.randomUUID(), tool_name: chunkData?.tool_name as string ?? 'unknown', args: {} as Record<string, unknown>, args_delta: '', status: 'pending' })
           flushNow()
         } else if (chunkType === 'tool_call_delta') {
@@ -289,7 +273,7 @@ export function useChat() {
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
           if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { orderedBlocks[idx] = { ...old, args_delta: (old.args_delta || '') + delta }; scheduleFlush() } }
         } else if (chunkType === 'tool_call') {
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'tool-calling' })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'tool-calling' })
           const tcId = chunkData?.tool_call_id as string ?? window.crypto.randomUUID()
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
           if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') orderedBlocks[idx] = { ...old, args: (chunkData?.args ?? {}) as Record<string, unknown>, args_delta: undefined } }
@@ -312,12 +296,12 @@ export function useChat() {
           const finalContent = chunkData?.content as string ?? fullContent
           const finalBlocks = markPendingToolCallsAsError(chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks)
           finalBlocks.push({ type: 'error', message: cleanErrorMessage(chunkData?.message ?? chunk.payload) })
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
+          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'error' })
         } else if (chunkType === 'inject_queued') {
           if (chunkText) {
             flushNow()
-            updateThreadMessages({
+            store.set(updateThreadMessagesAtom, {
               threadId: resolvedThreadId,
               update: prev => [
                 ...prev,
@@ -327,30 +311,31 @@ export function useChat() {
           }
         } else if (chunkType === 'token_update') {
           if (chunkData?.accumulatedTokens !== undefined || chunkData?.lifetimeTokens !== undefined) {
-            updateThreadTokens({
+            store.set(updateThreadTokensAtom, {
               threadId: resolvedThreadId,
               session: chunkData.accumulatedTokens !== undefined ? Number(chunkData.accumulatedTokens) : undefined,
               lifetime: chunkData.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
             })
           }
         } else if (chunkType === 'approval_request') {
-          updatePendingApproval({ threadId: resolvedThreadId, approval: chunkData ? { toolCallId: chunkData.toolCallId as string, toolName: chunkData.toolName as string, args: (chunkData.args ?? {}) as Record<string, any> } : null })
+          store.set(updatePendingApprovalAtom, { threadId: resolvedThreadId, approval: chunkData ? { toolCallId: chunkData.toolCallId as string, toolName: chunkData.toolName as string, args: (chunkData.args ?? {}) as Record<string, any> } : null })
         } else if (chunkType === 'finish') {
           assistantIsStreaming = false
-          updateThreadTokens({
+          store.set(updateThreadTokensAtom, {
             threadId: resolvedThreadId,
             session: Number(chunkData?.accumulatedTokens ?? 0),
             lifetime: chunkData?.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
           })
           const finalContent = chunkData?.content as string ?? fullContent
           const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'idle' })
+          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'idle' })
           removeFromRunning(resolvedThreadId)
         }
       }
       try {
-        await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModelRef.current, attachments, startTime: startTimeVal }, processChunk)
+        const selectedModel = store.get(selectedModelAtom)
+        await window.api.stream({ promptText, threadId: resolvedThreadId, modelType: selectedModel, attachments, startTime: startTimeVal, userMsgId, assistantMsgId }, processChunk)
       } catch (err: unknown) {
         if (!isMountedRef.current) return
         cancelFlush(resolvedThreadId)
@@ -359,11 +344,11 @@ export function useChat() {
         const isCrashError = errorMsg.includes('Utility worker'), isAbortError = (err instanceof Error && err.name === 'AbortError') || errorMsg === 'terminated' || errorMsg.includes('aborted')
         if (!isCrashError && !isAbortError) {
           console.error('[useChat] Invocation Error:', err)
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => m.id !== assistantMsgId ? m : { ...m, isStreaming: false, orderedBlocks: [...markPendingToolCallsAsError(m.orderedBlocks ?? []), { type: 'error', message: cleanErrorMessage(errorMsg) }] }) })
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'error' })
+          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id !== assistantMsgId ? m : { ...m, isStreaming: false, orderedBlocks: [...markPendingToolCallsAsError(m.orderedBlocks ?? []), { type: 'error', message: cleanErrorMessage(errorMsg) }] }) })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'error' })
         } else if (isAbortError) {
-          updateThreadMessages({ threadId: resolvedThreadId, update: prev => prev.map(m => !m.isStreaming ? m : { ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? []) }) })
-          updateThreadRunState({ threadId: resolvedThreadId, state: 'idle' })
+          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => !m.isStreaming ? m : { ...m, isStreaming: false, orderedBlocks: markPendingToolCallsAsError(m.orderedBlocks ?? []) }) })
+          store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'idle' })
         }
       }
     } finally {

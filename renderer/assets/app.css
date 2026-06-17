@@ -649,3 +649,6 @@
 .approval-remember input[type='checkbox'] { accent-color: var(--accent-brass); width: 13px; height: 13px }
 .approval-actions { display: flex; gap: var(--space-xs) }
 .approval-actions .settings-action-btn { padding: 5px 14px }
+
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+.markdown-content > p, .markdown-content > ul > li, .markdown-content > ol > li, .markdown-content > pre, .markdown-content > blockquote, .markdown-content > h1, .markdown-content > h2, .markdown-content > h3 { animation: fadeInUp 0.3s ease-out forwards; will-change: transform, opacity }

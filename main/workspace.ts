@@ -22,13 +22,16 @@ const validateConversationId = (id: string) => { if (!id || typeof id !== 'strin
 
 
 function evictOldestWorkspace(): void {
-  if (workspaceRegistry.size <= MAX_WORKSPACES) return
-  const inactive = Array.from(workspaceLastAccess.entries()).filter(([id]) => !activeStreams.has(id)).sort((a, b) => a[1] - b[1])
-  if (inactive.length > 0) {
-    const [oldestId] = inactive[0]
-    workspaceRegistry.delete(oldestId)
-    workspaceLastAccess.delete(oldestId)
-    initPromises.delete(oldestId)
+  while (workspaceRegistry.size >= MAX_WORKSPACES) {
+    const inactive = Array.from(workspaceLastAccess.entries()).filter(([id]) => !activeStreams.has(id)).sort((a, b) => a[1] - b[1])
+    if (inactive.length > 0) {
+      const [oldestId] = inactive[0]
+      workspaceRegistry.delete(oldestId)
+      workspaceLastAccess.delete(oldestId)
+      initPromises.delete(oldestId)
+    } else {
+      break
+    }
   }
 }
 export async function getOrCreateWorkspaceContext(conversationId: string, userSelectedPath?: string): Promise<WorkspaceContext> {

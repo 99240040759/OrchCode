@@ -56,7 +56,7 @@ function getToolDisplay(toolName: string, args: Record<string, unknown> | undefi
   const isErr = status === 'error', isComp = status === 'complete'
   if (FILE_WRITE_TOOLS.includes(toolName)) {
     const path = getStreamingVal(args, argsDelta, 'target_file') || getStreamingVal(args, argsDelta, 'path') || getStreamingVal(args, argsDelta, 'file_path') || getStreamingVal(args, argsDelta, 'absolute_path')
-    const { added, removed } = getDiffStats(toolName, args, argsDelta)
+    const { added, removed } = status !== 'pending' ? getDiffStats(toolName, args, argsDelta) : { added: 0, removed: 0 }
     const targetName = getBasename(path)
     const op = toolName === 'write_to_file' ? (isComp ? 'Created' : isErr ? 'Failed to create' : 'Creating') : (isComp ? 'Edited' : isErr ? 'Failed to edit' : 'Editing')
     const suffix = (added || removed) ? (
@@ -242,7 +242,7 @@ const ToolCallBlock: React.FC<{ toolCall: ToolCallEntry }> = ({ toolCall }) => {
             {target}
             {suffix}
           </span>
-          {toolCall.status === 'pending' && !FILE_WRITE_TOOLS.includes(toolCall.tool_name) && <Loader className="animate-spin text-secondary" size={11} />}
+          {toolCall.status === 'pending' && <Loader className="animate-spin text-secondary" size={11} />}
           {toolCall.status === 'error' && <AlertCircle size={12} className="text-accent-red flex-shrink-0" />}
           {toolCall.status === 'complete' && toolCall.result && typeof toolCall.result === 'object' && Array.isArray((toolCall.result as any).syntaxErrors) && (toolCall.result as any).syntaxErrors.length > 0 && (
             <Tooltip content={`File contains ${(toolCall.result as any).syntaxErrors.length} syntax warnings`}>

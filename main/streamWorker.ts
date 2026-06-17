@@ -367,7 +367,9 @@ export async function handleAgentStreamRequest(
   attachments: Array<{ type: 'image' | 'document'; name: string; mimeType?: string; base64?: string }> | undefined,
   promptText: string | undefined,
   isBrowserActive: boolean | undefined,
-  startTimeParam?: number
+  startTimeParam?: number,
+  userMsgIdParam?: string,
+  assistantMsgIdParam?: string
 ) {
   const startTime = startTimeParam ?? Date.now()
   const text = promptText ?? ''
@@ -409,7 +411,7 @@ export async function handleAgentStreamRequest(
     throw err
   }
 
-  const assistantMsgId = crypto.randomUUID()
+  const assistantMsgId = assistantMsgIdParam || crypto.randomUUID()
   let assistantContent = ''
   const orderedBlocks: StreamBlock[] = []
   let lifetimeTokensAdded = 0
@@ -447,7 +449,7 @@ export async function handleAgentStreamRequest(
     currentContextTokens = threadData?.accumulatedTokens ?? 0
 
     
-    const userMsgId = crypto.randomUUID()
+    const userMsgId = userMsgIdParam || crypto.randomUUID()
     await saveMessage(threadId, {
       id: userMsgId,
       role: 'user',

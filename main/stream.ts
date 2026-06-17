@@ -13,6 +13,8 @@ const StreamRequestSchema = z.object({
   threadId: z.string().regex(/^[a-zA-Z0-9-_]+$/),
   modelType: z.string().max(255).optional(),
   startTime: z.number().optional(),
+  userMsgId: z.string().optional(),
+  assistantMsgId: z.string().optional(),
   attachments: z.array(z.object({
     type: z.enum(['image', 'document']),
     name: z.string().min(1).max(255),
@@ -110,7 +112,8 @@ export function registerStreamIpc() {
           attachments: request.attachments,
           promptText: request.promptText,
           token: session.idToken,
-          
+          userMsgId: request.userMsgId,
+          assistantMsgId: request.assistantMsgId,
           isBrowserActive: !!WindowManager.getSession(request.threadId),
           startTime: request.startTime
         },
