@@ -246,7 +246,7 @@ export function useChat() {
       const flushNow = () => {
         cancelFlush(resolvedThreadId)
         if (!isMountedRef.current) return
-        const snapshot = [...orderedBlocks]
+        const snapshot = orderedBlocks.map(b => b.type === 'text' || b.type === 'reasoning' ? { ...b } : b)
         store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: fullContent, orderedBlocks: snapshot, isStreaming: assistantIsStreaming } : m) })
       }
       const scheduleFlush = () => {
@@ -262,8 +262,9 @@ export function useChat() {
         if (chunkType === 'text_delta') {
           fullContent += chunkText
           const last = orderedBlocks[orderedBlocks.length - 1]
-          if (!last || last.type !== 'text') { orderedBlocks.push({ type: 'text', content: chunkText }); flushNow() }
-          else { orderedBlocks[orderedBlocks.length - 1] = { ...last, content: last.content + chunkText }; scheduleFlush() }
+          if (!last || last.type !== 'text') orderedBlocks.push({ type: 'text', content: chunkText })
+          else last.content += chunkText
+          scheduleFlush()
         } else if (chunkType === 'tool_call_start') {
           store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'tool-calling' })
           orderedBlocks.push({ type: 'tool_call', tool_call_id: chunkData?.tool_call_id as string ?? window.crypto.randomUUID(), tool_name: chunkData?.tool_name as string ?? 'unknown', args: {} as Record<string, unknown>, args_delta: '', status: 'pending' })
@@ -271,7 +272,7 @@ export function useChat() {
         } else if (chunkType === 'tool_call_delta') {
           const tcId = chunkData?.tool_call_id as string, delta = chunkData?.delta as string ?? ''
           const idx = orderedBlocks.findIndex(b => b.type === 'tool_call' && b.tool_call_id === tcId)
-          if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { orderedBlocks[idx] = { ...old, args_delta: (old.args_delta || '') + delta }; scheduleFlush() } }
+          if (idx !== -1) { const old = orderedBlocks[idx]; if (old.type === 'tool_call') { old.args_delta = (old.args_delta || '') + delta; scheduleFlush() } }
         } else if (chunkType === 'tool_call') {
           store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'tool-calling' })
           const tcId = chunkData?.tool_call_id as string ?? window.crypto.randomUUID()
