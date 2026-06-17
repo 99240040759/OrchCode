@@ -184,7 +184,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ displayFile, activeW
         <div className="fv-file-info-container">
           {isAgentArtifact(displayFile.name) ? getArtifactIcon(displayFile.name) : <SymbolsFileIcon fileName={displayFile.name} autoAssign={true} width={16} height={16} className="fv-file-icon" />}
           <span className="fv-file-name">{getDisplayName(displayFile.name)}</span>
-          <span className="fv-file-dir">{getRelativeDirPath(displayFile.path, activeWorkspace?.path)}</span>
+          {!isAgentArtifact(displayFile.name) && <span className="fv-file-dir">{getRelativeDirPath(displayFile.path, activeWorkspace?.path)}</span>}
         </div>
         <div className="fv-toolbar-group">
           {displayFile.name === 'implementation_plan.md' && (

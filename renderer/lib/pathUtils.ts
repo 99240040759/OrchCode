@@ -4,6 +4,7 @@ export const normalizeSeparators = (p: string): string => p.toLowerCase().replac
 export function getRelativeDirPath(filePath: string, workspacePath?: string): string {
   let path = filePath
   if (workspacePath && path.startsWith(workspacePath)) path = path.slice(workspacePath.length)
+  else path = path.replace(/^.*[/\\](conversations|sessions)[/\\][^/\\]+[/\\]/, '')
   if (path.startsWith('/') || path.startsWith('\\')) path = path.slice(1)
   const parts = path.split(/[/\\]/)
   return parts.length > 1 ? parts.slice(0, -1).join('/') : ''

@@ -237,10 +237,9 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
 
 const MODEL_DEFINITIONS = [
   ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],
-  ['NEMOTRON_3_ULTRA', 'opencode/nemotron-3-ultra-free',  'Nemotron Ultra',        false, 256000,  'Slow',      'opencode', 'xhigh'],
   ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash',     false, 1000000, 'Fast',      'opencode', 'max'],
   ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'MiMo V2.5',             true,  1000000, 'Long',      'opencode', 'xhigh'],
+  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'Computer',             true,  1000000, 'Preview',      'opencode', 'xhigh'],
   ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],
   ['KILO_FREE',        'kilo/nvidia/nemotron-3-super-120b-a12b:free', 'Unlimited',  false, 1000000, 'More Usage',      'kilo',     null],
 ];

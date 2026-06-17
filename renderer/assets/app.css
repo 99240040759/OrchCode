@@ -345,7 +345,8 @@
 .media-unsupported { color: var(--text-secondary); font-size: var(--font-size-sm) }
 .artifact-panel-header { display: flex; align-items: center; justify-content: space-between; height: 35px; background-color: var(--bg-app); border-bottom: 1px solid var(--border-color); flex-shrink: 0; overflow-x: auto; scrollbar-width: none; margin-top: 3px }
 .artifact-panel-tabs-list { display: flex; align-items: center; height: 100%; overflow-x: auto; scrollbar-width: none; width: 100%; padding-left: 8px }
-.artifact-tab-trigger { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background-color: transparent; border: 1px solid transparent; border-radius: 6px; margin-right: 4px; color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; transition: all 0.15s ease; outline: none; position: relative }
+.artifact-tab-trigger { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background-color: transparent; border: 1px solid transparent; border-radius: 6px; margin-right: 4px; color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; transition: all 0.15s ease; outline: none; position: relative; max-width: 160px; flex-shrink: 0 }
+.artifact-tab-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .artifact-tab-trigger:hover, .artifact-tab-trigger:focus-visible { background-color: rgba(255, 255, 255, 0.04); color: var(--text-primary) }
 .artifact-tab-trigger[data-state="active"] { color: var(--text-primary); background-color: var(--bg-active-tab); border: 1px solid var(--bg-active-tab); font-weight: 500 }
 .tab-icon-wrapper { display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
@@ -651,4 +652,4 @@
 .approval-actions .settings-action-btn { padding: 5px 14px }
 
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
-.markdown-content > p, .markdown-content > ul > li, .markdown-content > ol > li, .markdown-content > pre, .markdown-content > blockquote, .markdown-content > h1, .markdown-content > h2, .markdown-content > h3 { animation: fadeInUp 0.3s ease-out forwards; will-change: transform, opacity }
+.markdown-content:not(.markdown-artifact) > p, .markdown-content:not(.markdown-artifact) > ul > li, .markdown-content:not(.markdown-artifact) > ol > li, .markdown-content:not(.markdown-artifact) > pre, .markdown-content:not(.markdown-artifact) > blockquote, .markdown-content:not(.markdown-artifact) > h1, .markdown-content:not(.markdown-artifact) > h2, .markdown-content:not(.markdown-artifact) > h3 { animation: fadeInUp 0.3s ease-out forwards; will-change: transform, opacity }

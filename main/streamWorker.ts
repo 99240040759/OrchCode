@@ -168,8 +168,7 @@ async function buildToolMessages(
     errorResults.length > 0
       ? `One or more tools failed. Diagnose the error from the tool output above. Do NOT repeat the same call unchanged. Adjust your approach, fix the issue, and try again or choose an alternative strategy.`
       : `All tools succeeded. Review the output above. If your goal is complete, stop and summarise what was accomplished. If more steps are needed, continue with the next action immediately without asking for permission.`,
-    `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`,
-    `Provide a single, very brief one-sentence summary of your immediate next step in your normal text response before emitting any tool calls.`
+    `Think through: (1) Did I achieve what I intended with this step? (2) Does the output match expectations? (3) What is the logical next action?`
   ].filter(Boolean).join('\n')
   return { toolMessages, imageUserMessages, continuationMessages: [{ role: 'user', content: continuationPrompt }] }
 }
@@ -280,12 +279,27 @@ Active Conversation Thread ID: ${threadId}
 - **Surgical Edits:** When modifying code, only change the absolute minimum lines required to execute the fix or feature.
 - **Code Compression:** Avoid unnecessary empty lines or exploded whitespace. Collapse control flows, brackets, and simple blocks where syntactically clean.
 - **No Refactoring Unchanged Code:** Do not clean up, reformat, or alter surrounding lines of code that are unrelated to the task. Keep changes highly localized.
-- **AST Matching Resilience:** \`multi_replace_file_content\` utilizes Abstract Syntax Tree (AST) matching where possible. For best results, make sure your target blocks are unique and contain sufficient context.
+- **AST Matching Resilience:** \`multi_replace_file_content\` utilizes Abstract Syntax Tree (AST) matching where possible. For best results, make sure your target blocks are unique.
 
-## 5. Structured Planning & User Approval
-- **When to Plan:** If the request involves major architectural changes, multiple files, complex logic, or significant ambiguity, you MUST write an implementation plan at \`artifacts/implementation_plan.md\` first and wait for the user's approval.
-- **When NOT to Plan:** For simple one-off tasks (small fixes, additions of single functions, formatting adjustments, small scripts), proceed to direct execution immediately without blocking.
-- **Artifacts Directory:** Write all planning artifacts (including \`implementation_plan.md\`, \`task.md\`, and \`walkthrough.md\`) to the sandboxed directory \`artifacts/\` (e.g. \`artifacts/implementation_plan.md\`, \`artifacts/task.md\`, \`artifacts/walkthrough.md\`). Do NOT write them to the user's workspace root directory.
+## 5. Structured Planning, Artifacts & Task Tracking
+
+### Artifacts Directory (CRITICAL)
+ALL agent planning files MUST use the \`artifacts/\` path prefix (e.g. \`artifacts/implementation_plan.md\`).
+This maps to the sandboxed conversation artifacts folder and surfaces them in the UI panel.
+Do NOT write planning files directly to the workspace root.
+
+### When to Plan (write \`artifacts/implementation_plan.md\`)
+Write the plan FIRST if the request involves: major architectural changes, multiple files, complex logic, or significant ambiguity.
+After writing the plan, **STOP immediately** — output a clear message asking the user to review and approve before doing anything else. Do NOT emit further tool calls until the user explicitly approves.
+For simple single-step tasks: skip planning and execute directly.
+
+### Task Tracking (\`artifacts/task.md\`)
+For any multi-step execution, maintain \`artifacts/task.md\` as a living TODO list:
+- \`[ ]\` pending  |  \`[/]\` in-progress (update when starting)  |  \`[x]\` done (update immediately on completion)
+Update this file progressively — do not batch-write it at the end.
+
+### Completion Summary (\`artifacts/walkthrough.md\`)
+After ALL tasks are complete, write \`artifacts/walkthrough.md\` summarizing: files changed, commands run, test/validation results.
 
 ## 6. Tool Utilization Protocols
 - **File System Tools:** Use only the native APIs (\`view_file\`, \`write_to_file\`, \`multi_replace_file_content\`, \`list_dir\`, \`search_workspace\`) for all file actions.

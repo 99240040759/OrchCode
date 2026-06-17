@@ -25,24 +25,23 @@ const CodeEditorView: React.FC<CodeEditorViewProps> = ({ displayFile, activeWork
       <div className="fv-file-info-container">
         <span className="fv-file-name">
           {(() => {
-            const wName = activeWorkspace ? activeWorkspace.name : 'Workspace'
-            const relative = activeWorkspace && displayFile.path.startsWith(activeWorkspace.path) ? displayFile.path.substring(activeWorkspace.path.length) : displayFile.path
+            const wPath = activeWorkspace?.path ?? ''
+            const isInWorkspace = !!(wPath && displayFile.path.startsWith(wPath))
+            const wName = isInWorkspace ? '' : 'Session'
+            const relative = isInWorkspace ? displayFile.path : displayFile.path.replace(/^.*[/\\](conversations|sessions)[/\\][^/\\]+[/\\]/, '')
             const parts = relative.split(/[/\\]/).filter(Boolean)
             return (
               <span className="fv-breadcrumbs-wrapper">
-                <span className="fv-breadcrumb-item">{wName}</span>
-                {parts.map((part, idx) => {
-                  const isLast = idx === parts.length - 1
-                  return (
-                    <span key={idx}>
-                      <span className="fv-breadcrumb-separator">&nbsp;&gt;&nbsp;</span>
-                      {isLast && (
-                        <SymbolsFileIcon fileName={displayFile.name} autoAssign={true} width={14} height={14} className="fv-breadcrumb-file-icon" />
-                      )}
-                      <span className={isLast ? 'fv-breadcrumb-item-active' : 'fv-breadcrumb-item'}>{part}</span>
-                    </span>
-                  )
-                })}
+                {wName && <span className="fv-breadcrumb-item">{wName}</span>}
+                {parts.map((part, idx) => (
+                  <span key={idx}>
+                    {(idx > 0 || !!wName) && <span className="fv-breadcrumb-separator">&nbsp;&gt;&nbsp;</span>}
+                    {idx === parts.length - 1 && (
+                      <SymbolsFileIcon fileName={displayFile.name} autoAssign={true} width={14} height={14} className="fv-breadcrumb-file-icon" />
+                    )}
+                    <span className={idx === parts.length - 1 ? 'fv-breadcrumb-item-active' : 'fv-breadcrumb-item'}>{part}</span>
+                  </span>
+                ))}
               </span>
             )
           })()}

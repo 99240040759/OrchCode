@@ -1,5 +1,5 @@
 import React, { Component, type ErrorInfo, type ReactNode } from 'react'
-import { ClipboardList, BookOpen, FileText } from 'lucide-react'
+import { ClipboardList, BookOpen, FileText, CheckSquare } from 'lucide-react'
 import Lottie from 'lottie-react'
 import errorAnimation from '../assets/error.json'
 
@@ -15,6 +15,7 @@ export function getDisplayName(fileName: string): string {
 export function getArtifactIcon(name: string, size = 15): React.ReactNode {
   if (name === 'implementation_plan.md') return <ClipboardList size={size} className="text-accent-purple flex-shrink-0" />
   if (name === 'walkthrough.md') return <BookOpen size={size} className="text-accent-green flex-shrink-0" />
+  if (name === 'task.md') return <CheckSquare size={size} className="text-accent-teal flex-shrink-0" />
   return <FileText size={size} className="icon-secondary" />
 }
 export const GoogleIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (

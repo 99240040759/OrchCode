@@ -292,6 +292,7 @@ export function useChat() {
           orderedBlocks.push({ type: 'summarize', savedTokens: Number(chunkData?.savedTokens ?? 0), totalTokens: Number(chunkData?.totalTokens ?? 0) })
           flushNow()
         } else if (chunkType === 'error') {
+          cancelFlush(resolvedThreadId)
           assistantIsStreaming = false
           const finalContent = chunkData?.content as string ?? fullContent
           const finalBlocks = markPendingToolCallsAsError(chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks)
@@ -320,15 +321,11 @@ export function useChat() {
         } else if (chunkType === 'approval_request') {
           store.set(updatePendingApprovalAtom, { threadId: resolvedThreadId, approval: chunkData ? { toolCallId: chunkData.toolCallId as string, toolName: chunkData.toolName as string, args: (chunkData.args ?? {}) as Record<string, any> } : null })
         } else if (chunkType === 'finish') {
+          cancelFlush(resolvedThreadId)
           assistantIsStreaming = false
-          store.set(updateThreadTokensAtom, {
-            threadId: resolvedThreadId,
-            session: Number(chunkData?.accumulatedTokens ?? 0),
-            lifetime: chunkData?.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined
-          })
           const finalContent = chunkData?.content as string ?? fullContent
-          const finalBlocks = chunkData?.orderedBlocks as StreamBlock[] ?? orderedBlocks
-          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: finalBlocks, isStreaming: false } : m) })
+          store.set(updateThreadMessagesAtom, { threadId: resolvedThreadId, update: prev => prev.map(m => m.id === assistantMsgId ? { ...m, content: finalContent, orderedBlocks: m.orderedBlocks ?? orderedBlocks, isStreaming: false } : m) })
+          store.set(updateThreadTokensAtom, { threadId: resolvedThreadId, session: Number(chunkData?.accumulatedTokens ?? 0), lifetime: chunkData?.lifetimeTokens !== undefined ? Number(chunkData.lifetimeTokens) : undefined })
           store.set(updateThreadRunStateAtom, { threadId: resolvedThreadId, state: 'idle' })
           removeFromRunning(resolvedThreadId)
         }
