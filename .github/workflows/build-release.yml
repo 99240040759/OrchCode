@@ -67,6 +67,10 @@ jobs:
           CARGO_INCREMENTAL: "0"
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
       - name: Rename + Generate latest.json
         shell: bash
         run: |
@@ -137,6 +141,12 @@ jobs:
         run: npm run tauri build -- --target aarch64-apple-darwin --bundles app,dmg,updater --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
         env:
           CARGO_INCREMENTAL: "0"
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
       - name: Rename DMG
         run: |
           DMG_PATH=$(find src-tauri/target -name "*.dmg" | head -n 1)
@@ -175,6 +185,12 @@ jobs:
         run: npm run tauri build -- --target x86_64-apple-darwin --bundles app,dmg,updater --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
         env:
           CARGO_INCREMENTAL: "0"
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
       - name: Rename DMG
         run: |
           DMG_PATH=$(find src-tauri/target -name "*.dmg" | head -n 1)
