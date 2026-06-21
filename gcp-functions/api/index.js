@@ -34,19 +34,21 @@ app.use(async (req, res, next) => {
 
   const apiKeyHeader = req.headers['apikey'];
   const authHeader = req.headers['authorization'];
-  let clientKey = '';
-  if (apiKeyHeader) clientKey = apiKeyHeader;
-  else if (authHeader && authHeader.startsWith('Bearer ')) clientKey = authHeader.substring(7);
 
-  if (!clientKey || !timingSafeEqual(clientKey.trim(), expectedAnonKey.trim()))
+  // Client key validation: if apikey header present, it MUST match the anon key.
+  // If absent, we rely solely on JWT validation below (allows rig/native clients).
+  if (apiKeyHeader) {
+    if (!timingSafeEqual(apiKeyHeader.trim(), expectedAnonKey.trim()))
+      return res.status(401).json({ error: 'Unauthorized API Client' });
+  } else if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // No apikey AND no Bearer token at all → reject
     return res.status(401).json({ error: 'Unauthorized API Client' });
+  }
 
-  
   let cleanPath = req.path.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '');
   if (!cleanPath.startsWith('/')) cleanPath = '/' + cleanPath;
   req.normalizedPath = cleanPath;
 
-  
   const isPublic = cleanPath.endsWith('/models');
   if (isPublic) return next();
 
@@ -66,6 +68,7 @@ app.use(async (req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized User: Invalid JWT' });
   }
 });
+
 
 
 const KEY_POOL = {};
@@ -120,8 +123,8 @@ async function proxyRequestWithRotation(req, res, targetUrl, envName, isBearer, 
 
 
 const BUDGET_LIMIT = () => parseFloat(process.env.BUDGET_LIMIT_USD || '100');
-const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai', '/kilo'];
-const SKIP_BUDGET  = ['/models', '/generate-title'];
+const BUDGET_PATHS = ['/nvidia', '/opencode', '/z-ai'];
+const SKIP_BUDGET = ['/models', '/generate-title'];
 
 async function callBudgetRpc(rpcName, body) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -145,11 +148,11 @@ async function handleGetBudget(req, res, userId) {
   const budget = await checkBudget(userId);
   if (!budget) return res.status(503).json({ error: 'Budget service unavailable' });
   res.json({
-    cost_usd:  budget.cost_usd,
+    cost_usd: budget.cost_usd,
     limit_usd: budget.limit_usd,
     remaining: budget.remaining,
-    period:    budget.period,
-    allowed:   budget.allowed
+    period: budget.period,
+    allowed: budget.allowed
   });
 }
 
@@ -160,7 +163,7 @@ function recordUsage(userId, inputTokens, outputTokens) {
 }
 
 
-async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
+async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId, attempt = 1) {
   const keyInfo = getApiKey(envName, false);
   if (!keyInfo) return res.status(500).json({ error: `Server Configuration Error: ${envName} is missing.` });
   const headers = new Headers();
@@ -170,14 +173,14 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
   for (const h of forwardHeaders) { const val = req.headers[h]; if (val) headers.set(h, val); }
   const body = (req.method === 'POST' || req.method === 'PUT')
     ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : undefined;
-  
-  
+
+
   const prevPromptTokens = parseInt(req.headers['x-prev-prompt-tokens'] || '0', 10) || 0;
   try {
     const upstreamRes = await fetch(targetUrl, { method: req.method, headers, body });
-    if (upstreamRes.status === 429 && keyInfo.pool.keys.length > 1) {
+    if (upstreamRes.status === 429 && keyInfo.pool.keys.length > 1 && attempt < keyInfo.pool.keys.length) {
       getApiKey(envName, true);
-      return proxyWithBudget(req, res, targetUrl, envName, isBearer, userId);
+      return proxyWithBudget(req, res, targetUrl, envName, isBearer, userId, attempt + 1);
     }
     res.status(upstreamRes.status);
     for (const [k, v] of upstreamRes.headers.entries()) {
@@ -186,31 +189,24 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Cache-Control', 'no-cache');
     if (!upstreamRes.body) return res.end();
-    
+
     let inputTok = 0, outputTok = 0;
     const reader = upstreamRes.body.getReader();
     const decoder = new TextDecoder();
-    let buf = '';
-    const flush = () => {
-      
-      
-      
-      for (const line of buf.split('\n')) {
-        const trim = line.replace(/^data:\s*/, '');
-        if (!trim || trim === '[DONE]') continue;
-        try {
-          const j = JSON.parse(trim);
-          const u = j.usage || j.usageMetadata;
-          if (u) {
-            
-            const rawInput  = u.prompt_tokens     || u.promptTokenCount     || u.input_tokens  || 0;
-            const rawOutput = u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
-            if (rawInput  > inputTok)  inputTok  = rawInput;
-            if (rawOutput > outputTok) outputTok = rawOutput;
-          }
-        } catch {}
-      }
-      buf = '';
+    let lineBuf = ''; // persistent buffer across chunks for partial lines
+    const parseLine = (line) => {
+      const trim = line.replace(/^data:\s*/, '');
+      if (!trim || trim === '[DONE]') return;
+      try {
+        const j = JSON.parse(trim);
+        const u = j.usage || j.usageMetadata;
+        if (u) {
+          const rawInput = u.prompt_tokens || u.promptTokenCount || u.input_tokens || 0;
+          const rawOutput = u.completion_tokens || u.candidatesTokenCount || u.output_tokens || 0;
+          if (rawInput > inputTok) inputTok = rawInput;
+          if (rawOutput > outputTok) outputTok = rawOutput;
+        }
+      } catch { }
     };
     (async () => {
       try {
@@ -218,16 +214,21 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          buf += chunk;
           res.write(chunk);
+          lineBuf += chunk;
+          // Process all complete lines in buffer
+          const lines = lineBuf.split('\n');
+          lineBuf = lines.pop(); // last item may be incomplete — keep in buffer
+          for (const line of lines) parseLine(line);
         }
-        flush();
-        
+        // Flush any remaining
+        if (lineBuf) parseLine(lineBuf);
         const incrementalInput = Math.max(0, inputTok - prevPromptTokens);
         recordUsage(userId, incrementalInput, outputTok);
-      } catch {}
+      } catch { }
       res.end();
     })();
+
   } catch (err) {
     console.error(`Upstream proxy error: ${targetUrl}`, err);
     res.status(502).json({ error: `Upstream Proxy Error: ${err.message}` });
@@ -236,28 +237,26 @@ async function proxyWithBudget(req, res, targetUrl, envName, isBearer, userId) {
 
 
 const MODEL_DEFINITIONS = [
-  ['KIMI',             'nvidia/moonshotai/kimi-k2.6',     'Kimi K2.6',             true,  256000,  'Fast',      'nvidia',   'max'],
-  ['DEEPSEEK_FLASH',   'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash',     false, 1000000, 'Fast',      'opencode', 'max'],
-  ['BIG_PICKLE',       'opencode/big-pickle',             'Big Pickle',            false, 200000,  'Max',       'opencode', 'max'],
-  ['MIMO_FREE',        'opencode/mimo-v2.5-free',         'Computer',             true,  1000000, 'Preview',      'opencode', 'xhigh'],
-  ['GLM_4_5_FLASH',    'zai/GLM-4.5-Flash',               'GLM 4.5 Flash',         false, 128000,  'Max',       'z-ai',     'max'],
-  ['KILO_FREE',        'kilo/nvidia/nemotron-3-super-120b-a12b:free', 'Unlimited',  false, 1000000, 'More Usage',      'kilo',     null],
+  ['DEEPSEEK_FLASH', 'opencode/deepseek-v4-flash-free', 'DeepSeek V4 Flash', false, 1000000, 'Fast', 'opencode', 'max'],
+  ['BIG_PICKLE', 'opencode/big-pickle', 'Big Pickle', false, 200000, 'Max', 'opencode', 'max'],
+  ['MIMO_FREE', 'opencode/mimo-v2.5-free', 'Computer', true, 1000000, 'Preview', 'opencode', 'xhigh'],
+  ['GLM_4_6V_FLASH', 'zai/GLM-4.6V-Flash', 'GLM 4.6V Flash', true, 128000, 'Max', 'z-ai', 'max'],
 ];
 
 
-const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY', kilo: 'KILO_API_KEY' };
+const PROVIDER_KEY = { nvidia: 'NVIDIA_API_KEY', opencode: 'OPENCODE_API_KEY', 'z-ai': 'Z_AI_API_KEY' };
 
 async function handleModels(req, res) {
   const models = {};
   for (const [prefix, defaultId, defaultName, defaultMultimodal, defaultContextWindow, defaultBadge, defaultProvider, defaultReasoningEffort] of MODEL_DEFINITIONS) {
-    const id       = process.env[`${prefix}_MODEL_ID`] || defaultId;
+    const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
     const provider = process.env[`${prefix}_PROVIDER`] || defaultProvider;
-    const envKey   = PROVIDER_KEY[provider];
-    if (envKey && !process.env[envKey]) continue; 
-    const name            = process.env[`${prefix}_MODEL_NAME`]       || defaultName;
-    const multimodal      = process.env[`${prefix}_MULTIMODAL`]       ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
-    const contextWindow   = process.env[`${prefix}_CONTEXT_WINDOW`]   ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
-    const badge           = process.env[`${prefix}_BADGE`]            || defaultBadge || null;
+    const envKey = PROVIDER_KEY[provider];
+    if (envKey && !process.env[envKey]) continue;
+    const name = process.env[`${prefix}_MODEL_NAME`] || defaultName;
+    const multimodal = process.env[`${prefix}_MULTIMODAL`] ? process.env[`${prefix}_MULTIMODAL`] === 'true' : defaultMultimodal;
+    const contextWindow = process.env[`${prefix}_CONTEXT_WINDOW`] ? parseInt(process.env[`${prefix}_CONTEXT_WINDOW`], 10) : defaultContextWindow;
+    const badge = process.env[`${prefix}_BADGE`] || defaultBadge || null;
     const reasoningEffort = process.env[`${prefix}_REASONING_EFFORT`] !== undefined ? (process.env[`${prefix}_REASONING_EFFORT`] || null) : defaultReasoningEffort;
     models[prefix.toLowerCase()] = { id, name, multimodal, contextWindow, badge, provider, reasoningEffort };
   }
@@ -269,10 +268,11 @@ async function handleModels(req, res) {
 function getModelMeta() {
   const meta = {};
   for (const [prefix, defaultId, , , , , defaultProvider, defaultReasoningEffort] of MODEL_DEFINITIONS) {
-    const id              = process.env[`${prefix}_MODEL_ID`] || defaultId;
-    const provider        = process.env[`${prefix}_PROVIDER`] || defaultProvider;
+    const id = process.env[`${prefix}_MODEL_ID`] || defaultId;
+    const provider = process.env[`${prefix}_PROVIDER`] || defaultProvider;
     const reasoningEffort = process.env[`${prefix}_REASONING_EFFORT`] !== undefined ? (process.env[`${prefix}_REASONING_EFFORT`] || null) : defaultReasoningEffort;
-    meta[id] = { provider, reasoningEffort };
+    const strippedId = id.includes('/') ? id.substring(id.indexOf('/') + 1) : id;
+    meta[strippedId] = { provider, reasoningEffort };
   }
   return meta;
 }
@@ -292,7 +292,7 @@ function injectReasoningEffort(req, modelMeta) {
     if (!body.reasoning_effort) body.reasoning_effort = meta.reasoningEffort;
     req.body = JSON.stringify(body);
     req.headers['content-length'] = Buffer.byteLength(req.body).toString();
-  } catch {   }
+  } catch { }
 }
 
 const OPENAI_COMPAT_PATHS = [/^\/v1\/models$/, /^\/v1\/chat\/completions$/];
@@ -374,13 +374,13 @@ async function handleGenerateTitle(req, res, attempt = 1) {
 
 
 async function handleGenerateImage(req, res) {
-  
+
   const activeApiKey = getApiKeyVal('NVIDIA_API_KEY');
   if (!activeApiKey) return res.status(500).json({ error: 'Server Configuration Error: NVIDIA_API_KEY is missing.' });
   const { prompt, width = 1024, height = 1024, steps = 4, seed = 0 } = req.body || {};
   if (!prompt || typeof prompt !== 'string' || !prompt.trim())
     return res.status(400).json({ error: 'Missing or invalid prompt parameter' });
-  
+
   const snap = v => Math.min(Math.max(Math.round(Number(v) / 16) * 16, 512), 1568);
   const payload = {
     prompt: prompt.trim(),
@@ -416,7 +416,7 @@ async function handleE2BSandboxCreate(req, res) {
     return res.status(500).json({ error: 'E2B configuration missing: E2B_API_KEY or E2B_TEMPLATE_ID not set.' });
   const payload = {
     templateID: e2bTemplateId,
-    timeout: 1200, 
+    timeout: 1200,
     metadata: req.body?.metadata ?? { source: 'orch' }
   };
   try {
@@ -454,14 +454,14 @@ app.all('*', async (req, res) => {
   const path = req.normalizedPath;
   const userId = req.user?.id;
 
-  
+
   if (userId && BUDGET_PATHS.some(p => path.startsWith(p))) {
     const budget = await checkBudget(userId);
     if (budget) {
       res.setHeader('X-Budget-Remaining', budget.remaining);
-      res.setHeader('X-Budget-Used',      budget.cost_usd);
-      res.setHeader('X-Budget-Limit',     budget.limit_usd);
-      res.setHeader('X-Budget-Period',    budget.period);
+      res.setHeader('X-Budget-Used', budget.cost_usd);
+      res.setHeader('X-Budget-Limit', budget.limit_usd);
+      res.setHeader('X-Budget-Period', budget.period);
       if (!budget.allowed) {
         return res.status(429).json({
           error: `Monthly budget of $${budget.limit_usd} reached. Used: $${budget.cost_usd}. Resets ${budget.period}-01.`,
@@ -472,16 +472,17 @@ app.all('*', async (req, res) => {
   }
 
   const modelMeta = getModelMeta();
-  if (req.method === 'GET'    && path === '/models')                  return handleModels(req, res);
-  if (req.method === 'GET'    && path === '/budget')                  return handleGetBudget(req, res, userId);
-  if (path.startsWith('/nvidia'))   { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'nvidia',   envKey: 'NVIDIA_API_KEY',   baseUrl: 'https://integrate.api.nvidia.com',       modelMeta }, userId); }
-  if (path.startsWith('/opencode')) { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen',                modelMeta }, userId); }
-  if (path.startsWith('/z-ai'))     { injectReasoningEffort(req, modelMeta); return handleOpenAICompat(req, res, { functionName: 'z-ai',     envKey: 'Z_AI_API_KEY',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',   modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
-  if (path.startsWith('/kilo'))     { return handleOpenAICompat(req, res, { functionName: 'kilo',     envKey: 'KILO_API_KEY',     baseUrl: 'https://api.kilo.ai/api/gateway',        modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
-  if (req.method === 'POST'   && path === '/tavily')                  return handleTavily(req, res);
-  if (req.method === 'POST'   && path === '/generate-title')          return handleGenerateTitle(req, res);
-  if (req.method === 'POST'   && path === '/generate-image')          return handleGenerateImage(req, res);
-  if (req.method === 'POST'   && path === '/e2b/sandboxes')           return handleE2BSandboxCreate(req, res);
+  if (req.method === 'GET' && path === '/models') return handleModels(req, res);
+  if (req.method === 'GET' && path === '/budget') return handleGetBudget(req, res, userId);
+  // Fix #31: injectReasoningEffort only in handleOpenAICompat — removed duplicate here
+  if (path.startsWith('/nvidia')) { return handleOpenAICompat(req, res, { functionName: 'nvidia', envKey: 'NVIDIA_API_KEY', baseUrl: 'https://integrate.api.nvidia.com', modelMeta }, userId); }
+  if (path.startsWith('/opencode')) { return handleOpenAICompat(req, res, { functionName: 'opencode', envKey: 'OPENCODE_API_KEY', baseUrl: 'https://opencode.ai/zen', modelMeta }, userId); }
+  if (path.startsWith('/z-ai')) { return handleOpenAICompat(req, res, { functionName: 'z-ai', envKey: 'Z_AI_API_KEY', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', modelMeta, subpathTransform: s => s.replace('/v1', '') }, userId); }
+
+  if (req.method === 'POST' && path === '/tavily') return handleTavily(req, res);
+  if (req.method === 'POST' && path === '/generate-title') return handleGenerateTitle(req, res);
+  if (req.method === 'POST' && path === '/generate-image') return handleGenerateImage(req, res);
+  if (req.method === 'POST' && path === '/e2b/sandboxes') return handleE2BSandboxCreate(req, res);
   if (req.method === 'DELETE' && path.startsWith('/e2b/sandboxes/')) {
     req.params = { sandboxId: path.replace('/e2b/sandboxes/', '') };
     return handleE2BSandboxKill(req, res);

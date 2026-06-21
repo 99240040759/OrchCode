@@ -9,214 +9,199 @@ on:
 permissions:
   contents: write
 
+# Baked into Rust binary at compile time via std::env::var()
 env:
-  SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+  GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-  GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
-  EP_TARGET_COMMITISH: main
-  ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+  RELEASE_REPO: sameer786ss/OrchCode
 
 jobs:
-  create-draft:
-    name: Create Draft Release
+  # ─── Build frontend once, shared across all platform jobs ─────────────────
+  build-ui:
+    name: Build Frontend
     runs-on: ubuntu-latest
     steps:
-      - name: Create Draft Release
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.RELEASE_PAT }}
-          script: |
-            const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: 'sameer786ss',
-              repo: 'OrchCode',
-              per_page: 100
-            });
-            let release = releases.find(r => r.tag_name === tag);
-            if (!release) {
-              console.log(`Creating draft release for tag ${tag}`);
-              const response = await github.rest.repos.createRelease({
-                owner: 'sameer786ss',
-                repo: 'OrchCode',
-                tag_name: tag,
-                target_commitish: 'main',
-                name: tag,
-                body: `Release ${tag}`,
-                draft: true
-              });
-              release = response.data;
-            } else {
-              console.log(`Draft release for tag ${tag} already exists (ID: ${release.id})`);
-            }
-
-  compile:
-    name: Compile Application
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-      - name: Cache Electron & Builder
-        uses: actions/cache@v4
+          cache: npm
+          cache-dependency-path: src-ui/package-lock.json
+      - run: cd src-ui && npm ci && npm run build
+      - uses: actions/upload-artifact@v4
         with:
-          path: |
-            ${{ env.ELECTRON_CACHE }}
-            ${{ env.ELECTRON_BUILDER_CACHE }}
-            ~/.electron-gyp
-          key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-cache-
-      - name: Install Dependencies
-        run: npm ci
-      - name: Compile Application
-        run: npm run build
-      - name: Upload Compilation Output
-        uses: actions/upload-artifact@v4
-        with:
-          name: compilation-output
-          path: out/
+          name: ui-dist
+          path: src-ui/dist/
           retention-days: 1
 
+  # ─── Windows x64 — installer + updater bundle + signature ─────────────────
   release-windows:
-    name: Build & Publish Windows x64
-    needs: [create-draft, compile]
+    name: Windows x64
+    needs: build-ui
     runs-on: windows-latest
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-      - name: Disable Windows Defender
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/checkout@v4
+      - name: Disable Defender
         shell: powershell
-      - name: Cache Electron & Builder
-        uses: actions/cache@v4
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/download-artifact@v4
         with:
-          path: |
-            ${{ env.ELECTRON_CACHE }}
-            ${{ env.ELECTRON_BUILDER_CACHE }}
-            ~/.electron-gyp
-          key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-cache-
-      - name: Install Dependencies
-        run: npm ci
-      - name: Download Compilation Output
-        uses: actions/download-artifact@v4
+          name: ui-dist
+          path: src-ui/dist/
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: compilation-output
-          path: out/
-      - name: Build and Publish Installer
-        run: npx electron-builder --win --x64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          NODE_OPTIONS: "--max_old_space_size=8192"
-
-  release-mac-intel:
-    name: Build & Publish macOS Intel (x64)
-    needs: [create-draft, compile]
-    runs-on: macos-15
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-      - name: Setup Node.js (x64)
-        uses: actions/setup-node@v4
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          architecture: x64
-          cache: 'npm'
-      - name: Cache Electron & Builder
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.ELECTRON_CACHE }}
-            ${{ env.ELECTRON_BUILDER_CACHE }}
-            ~/.electron-gyp
-          key: ${{ runner.os }}-intel-electron-cache-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-intel-electron-cache-
-      - name: Install Dependencies
-        run: npm ci
-      - name: Download Compilation Output
-        uses: actions/download-artifact@v4
-        with:
-          name: compilation-output
-          path: out/
-      - name: Build and Publish DMG (x64)
-        run: npx electron-builder --mac --x64 --publish always
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc
         env:
+          CARGO_INCREMENTAL: "0"
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          NODE_OPTIONS: "--max_old_space_size=8192 --no-force-async-hooks-checks"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      - name: Rename + Generate latest.json
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          B=src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis
+          OUT=src-tauri/release-upload
+          mkdir -p "$OUT"
+          cp "$B"/*.exe        "$OUT/OrchCode-x64-setup.exe"
+          cp "$B"/*.nsis.zip   "$OUT/OrchCode-x64-setup.nsis.zip"
+          SIGNATURE=$(cat "$B"/*.nsis.zip.sig)
+          cp "$B"/*.nsis.zip.sig "$OUT/OrchCode-x64-setup.nsis.zip.sig"
+          cat > "$OUT/latest.json" <<EOF
+          {
+            "version": "${VERSION}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "${SIGNATURE}",
+                "url": "https://github.com/${RELEASE_REPO}/releases/download/${TAG}/OrchCode-x64-setup.nsis.zip"
+              },
+              "darwin-aarch64": {
+                "signature": "",
+                "url": "https://github.com/${RELEASE_REPO}/releases/latest"
+              },
+              "darwin-x86_64": {
+                "signature": "",
+                "url": "https://github.com/${RELEASE_REPO}/releases/latest"
+              }
+            }
+          }
+          EOF
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          repository: ${{ env.RELEASE_REPO }}
+          draft: true
+          files: |
+            src-tauri/release-upload/OrchCode-x64-setup.exe
+            src-tauri/release-upload/OrchCode-x64-setup.nsis.zip
+            src-tauri/release-upload/OrchCode-x64-setup.nsis.zip.sig
+            src-tauri/release-upload/latest.json
 
+  # ─── macOS Apple Silicon arm64 — DMG only (native on macos-15) ────────────
   release-mac-silicon:
-    name: Build & Publish macOS Apple Silicon (arm64)
-    needs: [create-draft, compile]
+    name: macOS Apple Silicon arm64
+    needs: build-ui
     runs-on: macos-15
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: src-ui/dist/
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-      - name: Cache Electron & Builder
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.ELECTRON_CACHE }}
-            ${{ env.ELECTRON_BUILDER_CACHE }}
-            ~/.electron-gyp
-          key: ${{ runner.os }}-silicon-electron-cache-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-silicon-electron-cache-
-      - name: Install Dependencies
-        run: npm ci
-      - name: Download Compilation Output
-        uses: actions/download-artifact@v4
-        with:
-          name: compilation-output
-          path: out/
-      - name: Build and Publish DMG
-        run: npx electron-builder --mac --arm64 --publish always
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run tauri build -- --target aarch64-apple-darwin
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          NODE_OPTIONS: "--max_old_space_size=8192"
+          CARGO_INCREMENTAL: "0"
+      - name: Rename DMG
+        run: cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg OrchCode-arm64.dmg
+      - name: Upload DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          repository: ${{ env.RELEASE_REPO }}
+          draft: true
+          files: OrchCode-arm64.dmg
 
+  # ─── macOS Intel x64 — DMG only (cross-compiled on macos-15) ─────────────
+  release-mac-intel:
+    name: macOS Intel x64
+    needs: build-ui
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: src-ui/dist/
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run tauri build -- --target x86_64-apple-darwin
+        env:
+          CARGO_INCREMENTAL: "0"
+      - name: Rename DMG
+        run: cp src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg OrchCode-x64.dmg
+      - name: Upload DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          repository: ${{ env.RELEASE_REPO }}
+          draft: true
+          files: OrchCode-x64.dmg
+
+  # ─── Publish draft → live once all 3 platforms succeed ────────────────────
   publish-release:
-    name: Publish GitHub Release
-    needs: [release-windows, release-mac-intel, release-mac-silicon]
+    name: Publish Release
+    needs: [release-windows, release-mac-silicon, release-mac-intel]
     runs-on: ubuntu-latest
     steps:
-      - name: Publish GitHub Release
-        uses: actions/github-script@v7
+      - uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.RELEASE_PAT }}
           script: |
             const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
+            const [owner, repo] = process.env.RELEASE_REPO.split('/');
             const { data: releases } = await github.rest.repos.listReleases({
-              owner: 'sameer786ss',
-              repo: 'OrchCode',
-              per_page: 100
+              owner, repo, per_page: 100
             });
             const release = releases.find(r => r.tag_name === tag);
-            if (!release) {
-              throw new Error(`Release with tag ${tag} not found`);
-            }
+            if (!release) throw new Error(`Release ${tag} not found in ${owner}/${repo}`);
             await github.rest.repos.updateRelease({
-              owner: 'sameer786ss',
-              repo: 'OrchCode',
-              release_id: release.id,
-              draft: false
+              owner, repo, release_id: release.id, draft: false
             });
+        env:
+          RELEASE_REPO: ${{ env.RELEASE_REPO }}
