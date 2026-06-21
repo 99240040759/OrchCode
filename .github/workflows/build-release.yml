@@ -134,7 +134,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build
-        run: npm run tauri build -- --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
+        run: npm run tauri build -- --target aarch64-apple-darwin --bundles app,dmg,updater --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
         env:
           CARGO_INCREMENTAL: "0"
       - name: Rename DMG
@@ -172,7 +172,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build
-        run: npm run tauri build -- --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
+        run: npm run tauri build -- --target x86_64-apple-darwin --bundles app,dmg,updater --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
         env:
           CARGO_INCREMENTAL: "0"
       - name: Rename DMG
