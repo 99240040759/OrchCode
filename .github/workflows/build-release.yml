@@ -62,7 +62,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build
-        run: npm run tauri build -- --target x86_64-pc-windows-msvc --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis,updater --config '{"build":{"beforeBuildCommand":"","beforeDevCommand":""}}'
         env:
           CARGO_INCREMENTAL: "0"
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
