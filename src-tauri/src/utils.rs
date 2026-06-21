@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 pub fn gcp_base() -> String {
-    std::env::var("GCP_FUNCTIONS_URL").unwrap_or_else(|_| "https://api.orchcode.app".to_string())
+    env!("GCP_FUNCTIONS_URL").to_string()
 }
 pub fn model_base_url(model_id: &str) -> String {
     let base = gcp_base();
@@ -36,11 +36,7 @@ impl AuthedClient {
     }
 
     fn apply(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let mut rb = rb.bearer_auth(&self.token);
-        if let Ok(key) = std::env::var("SUPABASE_ANON_KEY") {
-            rb = rb.header("apikey", key);
-        }
-        rb
+        rb.bearer_auth(&self.token).header("apikey", env!("SUPABASE_ANON_KEY"))
     }
 }
 

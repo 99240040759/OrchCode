@@ -21,6 +21,8 @@ struct AuthData {
 fn auth_path() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("orchcode").join("auth.json"))
 }
+fn supabase_url() -> Result<String> { Ok(env!("SUPABASE_URL").to_string()) }
+fn anon_key() -> Result<String> { Ok(env!("SUPABASE_ANON_KEY").to_string()) }
 pub async fn require_token_async() -> Result<String> {
     let path = auth_path().ok_or_else(|| anyhow!("No data dir"))?;
     let raw = tokio::fs::read_to_string(&path).await?;
@@ -40,8 +42,8 @@ pub async fn require_token_async() -> Result<String> {
     Ok(data.token)
 }
 async fn refresh_token_async(refresh_token: &str) -> Result<(String, String, u64)> {
-    let supabase_url = std::env::var("SUPABASE_URL").map_err(|_| anyhow!("SUPABASE_URL not set"))?;
-    let anon_key = std::env::var("SUPABASE_ANON_KEY").map_err(|_| anyhow!("SUPABASE_ANON_KEY not set"))?;
+    let supabase_url = supabase_url()?;
+    let anon_key = anon_key()?;
     let resp: serde_json::Value = reqwest::Client::new()
         .post(format!("{supabase_url}/auth/v1/token?grant_type=refresh_token"))
         .header("apikey", &anon_key)
@@ -76,8 +78,8 @@ pub async fn login(app: AppHandle) -> Result<UserProfile> {
     use sha2::{Sha256, Digest};
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    let supabase_url = std::env::var("SUPABASE_URL").map_err(|_| anyhow!("SUPABASE_URL not set"))?;
-    let anon_key = std::env::var("SUPABASE_ANON_KEY").map_err(|_| anyhow!("SUPABASE_ANON_KEY not set"))?;
+    let supabase_url = supabase_url()?;
+    let anon_key = anon_key()?;
     let code_verifier = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
     let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -138,8 +140,8 @@ p{font-size:13px;color:#6b5e52}</style></head>\
 }
 pub async fn complete_onboarding() -> Result<()> {
     let token = require_token_async().await?;
-    let supabase_url = std::env::var("SUPABASE_URL").map_err(|_| anyhow!("SUPABASE_URL not set"))?;
-    let anon_key = std::env::var("SUPABASE_ANON_KEY").map_err(|_| anyhow!("SUPABASE_ANON_KEY not set"))?;
+    let supabase_url = supabase_url()?;
+    let anon_key = anon_key()?;
     reqwest::Client::new()
         .put(format!("{supabase_url}/auth/v1/user"))
         .bearer_auth(&token)

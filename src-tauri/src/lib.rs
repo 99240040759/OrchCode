@@ -35,7 +35,7 @@ pub fn run() {
         default_panic(info);
     }));
     let _sentry = sentry::init((
-        std::env::var("SENTRY_DSN").unwrap_or_default(),
+        env!("SENTRY_DSN").to_string(),
         sentry::ClientOptions { release: sentry::release_name!(),
             environment: Some(if cfg!(debug_assertions) { "development" } else { "production" }.into()),
             ..Default::default() },
@@ -77,8 +77,10 @@ pub fn run() {
             app.manage(PtyStore::default());
             app.manage(AppStateManager::new());
             if let Some(w) = app.get_webview_window("main") {
-                #[cfg(target_os = "windows")]
-                let _ = apply_mica(&w, None);
+                #[cfg(target_os = "windows")] {
+                    let _ = w.set_decorations(false);
+                    let _ = apply_mica(&w, None);
+                }
                 w.show()?;
             }
             tracing::info!("OrchCode started");
