@@ -59,9 +59,6 @@ sha2 = "0.10"
 dirs = "5"
 tiktoken-rs = "0.6"
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
-
 # File system + search (ripgrep library)
 ignore = "0.4"
 grep-regex = "0.1"
@@ -94,6 +91,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 sentry = { version = "0.34", features = ["tracing", "anyhow"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [features]
 default = ["custom-protocol"]
