@@ -42,7 +42,8 @@
     "lottie-web": "^5.12.2",
     "marked": "^15.0.12",
     "solid-icons": "^1.2.0",
-    "solid-js": "^1.9.5"
+    "solid-js": "^1.9.5",
+    "solid-transition-group": "^0.3.0"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

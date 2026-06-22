@@ -89,13 +89,13 @@ function TreeItem(props: { node: TreeNode; depth: number; onSelect?: (path: stri
 }
 export default function FileTree(props: { onSelect?: (path: string) => void }) {
   const [files, { refetch }] = createResource(workspacePath, wp => wp ? workspaceListFilesByPath(wp) : Promise.resolve([]));
-  let unwatch: (() => Promise<void>) | null = null;
+  let unwatch: (() => void) | null = null;
   onMount(() => {
     const wp = workspacePath();
     if (!wp) return;
     watch(wp, () => refetch(), { recursive: true }).then(fn => { unwatch = fn; }).catch(() => {});
   });
-  onCleanup(async () => { await unwatch?.(); });
+  onCleanup(() => { unwatch?.(); });
   const root = () => (workspacePath() ?? '').replace(/\\/g, '/');
   const tree = () => buildTree(files() ?? [], root());
   return (

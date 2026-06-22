@@ -1,5 +1,6 @@
-import { createEffect, onMount, Show, onCleanup, Transition } from 'solid-js';
-import { Store } from '@tauri-apps/plugin-store';
+import { createEffect, onMount, Show, onCleanup } from 'solid-js';
+import { Transition } from 'solid-transition-group';
+import { LazyStore } from '@tauri-apps/plugin-store';
 import { authGetUser, modelsList, stateInit, onAppState, onAuthChanged } from './api';
 import { user, setUser, setAuthLoading, isDark, setIsDark, setModels, setSelectedModel, selectedModel, setAppState } from './store';
 import { applyTheme } from './theme';
@@ -9,7 +10,7 @@ import TitleBar from './components/TitleBar';
 import Auth from './Auth';
 import Onboarding from './Onboarding';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-const store = new Store('settings.json');
+const store = new LazyStore('settings.json');
 const win = getCurrentWindow();
 export default function App() {
   let unlistenAuth: (() => void) | null = null;
@@ -46,7 +47,7 @@ export default function App() {
   });
   return (
     <div class="app-layout">
-      <Transition name="fade" mode="out-in">
+      <Transition name="fade" mode="outin">
         <Show when={user()} fallback={<Auth/>}>
           <Show when={user()?.onboarding_complete !== false} fallback={<Onboarding/>}>
             <TitleBar/>
