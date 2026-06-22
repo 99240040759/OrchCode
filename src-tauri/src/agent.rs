@@ -226,15 +226,14 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
             }
             Ok(MultiTurnStreamItem::FinalResponse(fr)) => {
                 tracing::info!(thread_id=%req.thread_id, pending_map=%call_id_map.len(), turns=turn_count, items=item_count, "[agent] FinalResponse received");
-                if let Some(usage) = fr.usage() {
-                    turn_count += 1;
-                    let input_tok = usage.input_tokens as u64;
-                    let output_tok = usage.output_tokens as u64;
-                    tracing::info!(thread_id=%req.thread_id, turn_count, input_tok, output_tok, "[agent] CompletionCall (turn done)");
-                    let _ = ch.send(StreamChunk::TokenUpdate { input_tokens: input_tok, output_tokens: output_tok, turn: turn_count });
-                    let sm = app.state::<crate::state::AppStateManager>();
-                    sm.update_tokens(&app, &req.thread_id, input_tok, output_tok).await;
-                }
+                let usage = fr.usage();
+                turn_count += 1;
+                let input_tok = usage.input_tokens as u64;
+                let output_tok = usage.output_tokens as u64;
+                tracing::info!(thread_id=%req.thread_id, turn_count, input_tok, output_tok, "[agent] CompletionCall (turn done)");
+                let _ = ch.send(StreamChunk::TokenUpdate { input_tokens: input_tok, output_tokens: output_tok, turn: turn_count });
+                let sm = app.state::<crate::state::AppStateManager>();
+                sm.update_tokens(&app, &req.thread_id, input_tok, output_tok).await;
                 // Resolve any tools still without a result
                 for (internal_id, provider_id) in call_id_map.drain() {
                     let tool_name = call_name_map.remove(&internal_id).unwrap_or_default();
