@@ -10,6 +10,7 @@ import TitleBar from './components/TitleBar';
 import Auth from './Auth';
 import Onboarding from './Onboarding';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners';
 const store = new LazyStore('settings.json');
 const win = getCurrentWindow();
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
     setAuthLoading(false);
     onAppState(snap => setAppState(snap)).then(fn => { unlistenState = fn; });
     onAuthChanged(u => setUser(u)).then(fn => { unlistenAuth = fn; });
+    enableModernWindowStyle().catch(() => {});
   });
   onCleanup(() => { unlistenAuth?.(); unlistenState?.(); });
   // Persist theme and sync native OS appearance

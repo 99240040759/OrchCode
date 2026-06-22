@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod agent; mod auth; mod db; mod models; mod skills; mod state; mod terminal; mod tools; mod utils; mod workspace;
 mod appdata; mod rag;
+#[cfg(target_os = "macos")]
+mod plugins;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -111,6 +113,12 @@ pub fn run() {
             // ── App lifecycle ──
             cmd_updater_check, cmd_updater_install, cmd_app_restart, cmd_app_version, cmd_settings_open,
             cmd_pick_folder,
+            #[cfg(target_os = "macos")]
+            plugins::mac_rounded_corners::enable_rounded_corners,
+            #[cfg(target_os = "macos")]
+            plugins::mac_rounded_corners::enable_modern_window_style,
+            #[cfg(target_os = "macos")]
+            plugins::mac_rounded_corners::reposition_traffic_lights,
         ])
         .run(tauri::generate_context!())
         .expect("error running orchcode");
