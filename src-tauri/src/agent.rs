@@ -80,7 +80,7 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
     let token = crate::auth::require_token_async().await.map_err(|e| anyhow::anyhow!("{e}"))?;
     let model_base = utils::model_base_url(&req.model_id);
     let upstream_model = utils::strip_provider_prefix(&req.model_id).to_string();
-    let oai = openai::CompletionsClient::builder()
+    let oai = openai::Client::builder()
         .api_key(&token).base_url(&model_base).build()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let skills = skills::list().unwrap_or_default();
@@ -202,7 +202,7 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
             }
             Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult { tool_result, internal_call_id })) => {
                 let provider_id = call_id_map.remove(&internal_call_id)
-                    .unwrap_or_else(|| tool_result.id.clone());
+                    .unwrap_or_else(|| tool_result.tool_call_id.clone());
                 // BUG-25: look up tool name from our map
                 let tool_name = call_name_map.remove(&internal_call_id).unwrap_or_default();
                 tracing::info!(thread_id=%req.thread_id, %provider_id, %internal_call_id, %tool_name, "[agent] tool_result received");
@@ -221,17 +221,17 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
             }
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCallDelta { .. })) => {}
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ReasoningDelta { .. })) => {}
-            Ok(MultiTurnStreamItem::StreamAssistantItem(other)) => {
-                tracing::debug!(thread_id=%req.thread_id, "[agent] StreamAssistantItem other: {:?}", std::mem::discriminant(&other));
-            }
-            Ok(MultiTurnStreamItem::CompletionCall(cc)) => {
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::FinalUsage(usage))) => {
                 turn_count += 1;
-                let input_tok = cc.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0) as u64;
-                let output_tok = cc.usage.as_ref().map(|u| u.output_tokens).unwrap_or(0) as u64;
+                let input_tok = usage.input_tokens as u64;
+                let output_tok = usage.output_tokens as u64;
                 tracing::info!(thread_id=%req.thread_id, turn_count, input_tok, output_tok, "[agent] CompletionCall (turn done)");
                 let _ = ch.send(StreamChunk::TokenUpdate { input_tokens: input_tok, output_tokens: output_tok, turn: turn_count });
                 let sm = app.state::<crate::state::AppStateManager>();
                 sm.update_tokens(&app, &req.thread_id, input_tok, output_tok).await;
+            }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(other)) => {
+                tracing::debug!(thread_id=%req.thread_id, "[agent] StreamAssistantItem other: {:?}", std::mem::discriminant(&other));
             }
             Ok(MultiTurnStreamItem::FinalResponse(fr)) => {
                 tracing::info!(thread_id=%req.thread_id, pending_map=%call_id_map.len(), turns=turn_count, items=item_count, "[agent] FinalResponse received");
@@ -299,7 +299,7 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
     tracing::info!(thread_id=%req.thread_id, "[agent] run_agent END");
     Ok(())
 }
-async fn summarise_history(history: &[Message], oai: &openai::CompletionsClient, model: &str) -> Option<String> {
+async fn summarise_history(history: &[Message], oai: &openai::Client, model: &str) -> Option<String> {
     let transcript = history.iter().map(|m| match m {
         Message::User { content } => format!("[USER]\n{}", content.iter().map(|c| match c {
             UserContent::Text(t) => t.text.clone(), _ => "[tool-result]".into(),
@@ -313,8 +313,7 @@ async fn summarise_history(history: &[Message], oai: &openai::CompletionsClient,
     }).collect::<Vec<_>>().join("\n\n---\n\n");
     let summariser = AgentBuilder::new(oai.completion_model(model))
         .preamble(SUMMARISE_PROMPT).temperature(0.2).max_tokens(8192).build();
-    let mut hist = Vec::<Message>::new();
-    match summariser.chat(&format!("Summarise:\n\n{transcript}"), &mut hist).await {
+    match summariser.prompt(&format!("Summarise:\n\n{transcript}")).await {
         Ok(resp) => if resp.is_empty() { None } else { Some(resp) },
         Err(_) => None,
     }

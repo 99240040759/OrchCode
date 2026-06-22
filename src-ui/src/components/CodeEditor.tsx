@@ -130,9 +130,12 @@ export default function CodeEditor(props: Props) {
   let mounted = true;
 
   onMount(async () => {
-    const lang = getLang(props.filePath) ?? await getLegacyLang(props.filePath);
+    const path = props.filePath;
+    const content = props.content;
+    const dark = props.dark;
+    const lang = getLang(path) ?? await getLegacyLang(path);
     if (!mounted) return;
-    view = new EditorView({ state: buildState(props.content, props.dark, lang), parent: el });
+    view = new EditorView({ state: buildState(content, dark, lang), parent: el });
   });
   onCleanup(() => { mounted = false; view?.destroy(); });
 
@@ -142,7 +145,7 @@ export default function CodeEditor(props: Props) {
     if (!view) return;
     (async () => {
       const lang = getLang(path) ?? await getLegacyLang(path);
-      if (view && mounted) view.setState(buildState(content, dark, lang));
+      if (view && mounted && path === props.filePath) view.setState(buildState(content, dark, lang));
     })();
   });
 

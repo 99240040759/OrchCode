@@ -23,6 +23,7 @@ export default function TitleBar() {
   const [updateReady, setUpdateReady] = createSignal(false);
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null);
   const [updating, setUpdating] = createSignal(false);
+  const [isFullscreen, setIsFullscreen] = createSignal(false);
   const quotaUsed = () => quota()?.cost_usd as number ?? 0;
   const quotaLimit = () => quota()?.limit_usd as number ?? 0;
   onMount(async () => {
@@ -37,6 +38,8 @@ export default function TitleBar() {
         }
       }
     } catch {}
+    win.isFullscreen().then(setIsFullscreen).catch(() => {});
+    win.onResized(() => { win.isFullscreen().then(setIsFullscreen).catch(() => {}); }).catch(() => {});
   });
   // ONE CALL — backend does everything atomically
   async function openWorkspace() {
@@ -62,7 +65,7 @@ export default function TitleBar() {
   const avatarSrc = () => user()?.avatar_url ?? null;
   return (
     <>
-    <div class={`titlebar${isMac ? ' mac' : ''}`}>
+    <div class={`titlebar${isMac ? ' mac' : ''}${isFullscreen() ? ' fullscreen' : ''}`} data-tauri-drag-region>
       <div class="titlebar-left">
         <button class="tb-workspace-btn" onClick={openWorkspace}>
           <VsFolder size={13}/><span class="tb-label">Open Workspace</span>

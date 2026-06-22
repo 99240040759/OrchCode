@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod agent; mod auth; mod db; mod models; mod skills; mod state; mod terminal; mod tools; mod utils; mod workspace;
-mod appdata; mod watcher; mod rag;
+mod appdata; mod rag;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -47,6 +47,7 @@ pub fn run() {
         if let Some(p) = env_path { dotenv::from_path(p).ok(); } else { dotenv::dotenv().ok(); }
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -79,7 +80,12 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 #[cfg(target_os = "windows")] {
                     let _ = w.set_decorations(false);
+                    let _ = w.set_shadow(true);
                     let _ = apply_mica(&w, None);
+                }
+                #[cfg(target_os = "macos")] {
+                    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+                    let _ = apply_vibrancy(&w, NSVisualEffectMaterial::UnderWindowBackground, None, None);
                 }
                 w.show()?;
             }
@@ -101,7 +107,7 @@ pub fn run() {
             // ── Models / Auth / Budget / Settings ──
             cmd_models_list, cmd_quota_get,
             cmd_auth_login, cmd_auth_logout, cmd_auth_get_user, cmd_auth_complete_onboarding,
-            cmd_setting_get, cmd_setting_set, cmd_count_tokens,
+            cmd_count_tokens,
             // ── App lifecycle ──
             cmd_updater_check, cmd_updater_install, cmd_app_restart, cmd_app_version, cmd_settings_open,
             cmd_pick_folder,
@@ -244,5 +250,4 @@ pub fn run() {
     let bpe: &tiktoken_rs::CoreBPE = if model_id.contains("gpt-4o") || model_id.starts_with("o1") || model_id.starts_with("o3") || model_id.contains("o1-") || model_id.contains("o3-") { &O200K } else { &CL100K };
     bpe.encode_ordinary(&text).len()
 }
-#[tauri::command] async fn cmd_setting_get(db: State<'_, AppDb>, key: String) -> Result<Option<String>, String> { db::setting_get(&db.0, &key).await.map_err(ce) }
-#[tauri::command] async fn cmd_setting_set(db: State<'_, AppDb>, key: String, value: String) -> Result<(), String> { db::setting_set(&db.0, &key, &value).await.map_err(ce) }
+

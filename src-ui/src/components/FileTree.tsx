@@ -1,5 +1,6 @@
-import { createSignal, createEffect, onMount, onCleanup, For, Show } from 'solid-js';
-import { workspaceListFilesByPath, onFsChange } from '../api';
+import { createSignal, onMount, onCleanup, For, Show, createResource } from 'solid-js';
+import { watch } from '@tauri-apps/plugin-fs';
+import { workspaceListFilesByPath } from '../api';
 import { workspacePath } from '../store';
 import { VsFolder, VsFolderOpened, VsSymbolFile, VsMarkdown, VsGear, VsLock, VsSymbolNamespace, VsDatabase } from 'solid-icons/vs';
 import {
@@ -87,25 +88,20 @@ function TreeItem(props: { node: TreeNode; depth: number; onSelect?: (path: stri
   </div>);
 }
 export default function FileTree(props: { onSelect?: (path: string) => void }) {
-  const [files, setFiles] = createSignal<string[]>([]);
-  const [loading, setLoading] = createSignal(false);
-  async function load() {
-    const wp = workspacePath(); // derived from appState — always consistent
-    if (!wp) { setFiles([]); return; }
-    setLoading(true);
-    try { setFiles(await workspaceListFilesByPath(wp)); } catch { setFiles([]); }
-    setLoading(false);
-  }
-  createEffect(() => { if (workspacePath()) load(); else setFiles([]); });
-  let unlisten: (() => void) | null = null;
-  onMount(() => { onFsChange(e => { if (['create', 'remove'].includes(e.kind)) load(); }).then(fn => { unlisten = fn; }); });
-  onCleanup(() => unlisten?.());
+  const [files, { refetch }] = createResource(workspacePath, wp => wp ? workspaceListFilesByPath(wp) : Promise.resolve([]));
+  let unwatch: (() => Promise<void>) | null = null;
+  onMount(() => {
+    const wp = workspacePath();
+    if (!wp) return;
+    watch(wp, () => refetch(), { recursive: true }).then(fn => { unwatch = fn; }).catch(() => {});
+  });
+  onCleanup(async () => { await unwatch?.(); });
   const root = () => (workspacePath() ?? '').replace(/\\/g, '/');
-  const tree = () => buildTree(files(), root());
+  const tree = () => buildTree(files() ?? [], root());
   return (
     <div class="file-tree">
-      <Show when={loading()}><div class="ft-loading"><div class="spinner"/></div></Show>
-      <Show when={!loading() && files().length === 0}><div class="ft-empty">No workspace open</div></Show>
+      <Show when={files.loading}><div class="ft-loading"><div class="spinner"/></div></Show>
+      <Show when={!files.loading && (files() ?? []).length === 0}><div class="ft-empty">No workspace open</div></Show>
       <For each={tree()}>{n => <TreeItem node={n} depth={0} onSelect={props.onSelect}/>}</For>
     </div>
   );

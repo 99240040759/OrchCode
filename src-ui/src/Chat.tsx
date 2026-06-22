@@ -1,4 +1,4 @@
-import { createSignal, createMemo, onMount, onCleanup, For, Show, createEffect, batch, untrack } from 'solid-js';
+import { createSignal, createMemo, onCleanup, For, Show, createEffect, createResource, batch, untrack } from 'solid-js';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
@@ -78,7 +78,34 @@ type MsgItem = { id: string; role: 'user' | 'assistant' | 'tool_activity'; conte
 type CompletedEntry = { id: string; kind: 'text'; content: string } | { id: string; kind: 'tools'; tools: LiveTool[] };
 export default function Chat() {
   let messagesEl!: HTMLDivElement;
-  const [messages, setMessages] = createSignal<MsgItem[]>([]);
+  const [messages, { mutate: mutateMessages }] = createResource(activeThreadId, async (tid) => {
+    if (!tid) return [] as MsgItem[];
+    const raw = await threadMessages(tid);
+    const items: MsgItem[] = [];
+    for (const m of raw) {
+      if (m.role === 'assistant' && m.data) {
+        try {
+          const parsed = JSON.parse(m.data);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            if (parsed[0]?.type === 'text' || parsed[0]?.type === 'tools') {
+              for (const seg of parsed) {
+                if (seg.type === 'text' && seg.content)
+                  items.push({ id: crypto.randomUUID(), role: 'assistant', content: seg.content, created_at: m.created_at });
+                else if (seg.type === 'tools' && Array.isArray(seg.tools))
+                  items.push({ id: crypto.randomUUID(), role: 'tool_activity', content: JSON.stringify(seg.tools), created_at: m.created_at });
+              }
+            } else {
+              items.push({ id: m.id, role: 'assistant', content: m.content, created_at: m.created_at });
+              items.push({ id: m.id + ':tools', role: 'tool_activity', content: m.data, created_at: m.created_at });
+            }
+            continue;
+          }
+        } catch {}
+      }
+      items.push({ id: m.id, role: m.role as any, content: m.content, created_at: m.created_at });
+    }
+    return items;
+  });
   const [completedGroups, setCompletedGroups] = createSignal<CompletedEntry[]>([]);
   const [liveText, setLiveText] = createSignal('');
   const [pendingTools, setPendingTools] = createSignal<LiveTool[]>([]);
@@ -90,7 +117,6 @@ export default function Chat() {
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollTimer: ReturnType<typeof setTimeout> | null = null;
   let titleGenThread: string | null = null;
-  let loadSeq = 0;
   function scheduleRender() {
     if (renderTimer) return;
     renderTimer = setTimeout(() => {
@@ -111,55 +137,17 @@ export default function Chat() {
     if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
   }
   onCleanup(() => { if (renderTimer) clearTimeout(renderTimer); if (scrollTimer) clearTimeout(scrollTimer); });
-  // ── React to thread changes (derived from backend snapshot) ──
+  // Restore tokens when thread changes
   createEffect(() => {
     const tid = activeThreadId();
     untrack(() => {
       resetStream();
-      // Restore tokens from backend state
-      const pair = tid ? appState().threadTokens[tid] : null;
+      const pair = tid ? appState.threadTokens[tid] : null;
       setStreamTokens(pair ? { input: pair[0], output: pair[1] } : { input: 0, output: 0 });
     });
-    if (!tid) { setMessages([]); return; }
-    setMessages([]);
-    loadMessages();
   });
-  async function loadMessages() {
-    const tid = activeThreadId();
-    if (!tid) return;
-    const seq = ++loadSeq;
-    try {
-      const raw = await threadMessages(tid);
-      if (seq !== loadSeq) return;
-      const items: MsgItem[] = [];
-      for (const m of raw) {
-        if (m.role === 'assistant' && m.data) {
-          try {
-            const parsed = JSON.parse(m.data);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              // New format: ordered segments [{type:'text',content:...},{type:'tools',tools:[...]}]
-              if (parsed[0]?.type === 'text' || parsed[0]?.type === 'tools') {
-                for (const seg of parsed) {
-                  if (seg.type === 'text' && seg.content)
-                    items.push({ id: crypto.randomUUID(), role: 'assistant', content: seg.content, created_at: m.created_at });
-                  else if (seg.type === 'tools' && Array.isArray(seg.tools))
-                    items.push({ id: crypto.randomUUID(), role: 'tool_activity', content: JSON.stringify(seg.tools), created_at: m.created_at });
-                }
-              } else {
-                // Old format: flat tool array — show text then tools
-                items.push({ id: m.id, role: 'assistant', content: m.content, created_at: m.created_at });
-                items.push({ id: m.id + ':tools', role: 'tool_activity', content: m.data, created_at: m.created_at });
-              }
-              continue; // segments already cover the text
-            }
-          } catch {}
-        }
-        items.push({ id: m.id, role: m.role as any, content: m.content, created_at: m.created_at });
-      }
-      setMessages(items);
-      scrollNow();
-    } catch (e) { console.error('[Chat] loadMessages:', e); }
-  }
+  // Scroll when resource resolves
+  createEffect(() => { if (messages() !== undefined) scrollNow(); });
   async function send(text: string) {
     if (!text || isStreaming()) return;
     const tid = activeThreadId();
@@ -167,8 +155,8 @@ export default function Chat() {
     // Capture workspace at send time — stable for this stream's lifetime
     const streamTid = tid;
     const streamWs = workspacePath() ?? undefined; // derived from appState — guaranteed in sync
-    batch(() => { setIsStreaming(true); resetStream(); });
-    setMessages(m => [...m, { id: 'tmp', role: 'user', content: text, created_at: new Date().toISOString() }]);
+    batch(() => { setIsStreaming(true); resetStream(); mutateMessages(prev => prev ?? []); });
+    mutateMessages(m => [...(m ?? []), { id: 'tmp', role: 'user', content: text, created_at: new Date().toISOString() }]);
     scrollNow();
     const modelId = selectedModel();
     const model = models().find(m => m.id === modelId);
@@ -191,15 +179,14 @@ export default function Chat() {
       if (allTools.length > 0) turnItems.push({ id: crypto.randomUUID(), role: 'tool_activity', content: JSON.stringify(allTools), created_at: now });
       if (capturedLive) turnItems.push({ id: crypto.randomUUID(), role: 'assistant', content: capturedLive, created_at: now });
       batch(() => {
-        setMessages(m => {
-          const prev = m.filter(x => x.id !== 'tmp');
+        mutateMessages(m => {
+          const prev = (m ?? []).filter(x => x.id !== 'tmp');
           return [...prev, { id: crypto.randomUUID(), role: 'user' as const, content: text, created_at: now }, ...turnItems];
         });
         resetStream();
         setIsStreaming(false);
       });
-      // Title generation — fire and forget, backend emits updated snapshot
-      if (messages().filter(m => m.role === 'user').length <= 1) {
+      if ((messages() ?? []).filter(m => m.role === 'user').length <= 1) {
         titleGenThread = streamTid;
         stateGenerateTitle(text, streamTid).catch(() => {});
       }
@@ -237,26 +224,23 @@ export default function Chat() {
       );
     } catch (e) { console.error('[stream] CATCH', e); commitStream(true); }
   }
-  // ONE CALL — backend switches thread + emits snapshot
   async function switchThread(tid: string) {
     const snap = await stateSwitchThread(tid);
     setAppState(snap);
   }
-  // ONE CALL — backend creates thread + emits snapshot
   async function newThread() {
     resetStream();
     const snap = await stateCreateThread();
     setAppState(snap);
-    setMessages([]);
+    mutateMessages([]);
   }
-  // ONE CALL — backend deletes thread + emits snapshot
   async function confirmDeleteThread() {
     const t = deleteTarget();
     if (!t) return;
     setIsDeleting(true);
     const snap = await stateDeleteThread(t.id);
     setAppState(snap);
-    batch(() => { resetStream(); setMessages([]); setDeleteTarget(null); setIsDeleting(false); });
+    batch(() => { resetStream(); mutateMessages([]); setDeleteTarget(null); setIsDeleting(false); });
   }
   function handleStop() { const tid = activeThreadId(); if (tid) agentStop(tid).catch(() => {}); }
   function parseMsgTools(content: string): LiveTool[] | null { try { const t = JSON.parse(content); return Array.isArray(t) ? t : null; } catch { return null; } }
@@ -293,7 +277,7 @@ export default function Chat() {
         <button class="icon-btn" title="New thread" onClick={newThread}><VsAdd size={14}/></button>
       </div>
       <div class="chat-messages" ref={messagesEl}>
-        <For each={messages()}>{msg => renderMsg(msg)}</For>
+        <For each={messages() ?? []}>{msg => renderMsg(msg)}</For>
         <Show when={isStreaming()}>
           <div class="msg msg-assistant">
             <For each={completedGroups()}>{(g, i) => g.kind === 'text'

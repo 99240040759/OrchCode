@@ -1,13 +1,10 @@
 import { createSignal, For, Show } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { VsFolder, VsTerminal, VsSearch, VsGlobe, VsSymbolFile, VsChevronRight, VsChevronDown } from 'solid-icons/vs';
 import { fileIcon } from './FileTree';
 import { setFileToOpen } from '../store';
-
 export type LiveTool = { id: string; name: string; args: unknown; status: 'pending'|'success'|'error' };
-
 const base = (p: string) => (p ?? '').replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? p;
-
-
 type ToolKind = 'read'|'edit'|'write'|'run'|'search'|'web'|'generate'|'dir'|'other';
 function toolKind(name: string): ToolKind {
   switch (name) {
@@ -22,7 +19,6 @@ function toolKind(name: string): ToolKind {
     default: return 'other';
   }
 }
-
 function summarize(tools: LiveTool[]): string {
   const c: Partial<Record<ToolKind, number>> = {};
   for (const t of tools) { const k = toolKind(t.name); c[k] = (c[k] ?? 0) + 1; }
@@ -38,8 +34,6 @@ function summarize(tools: LiveTool[]): string {
   if (c.other)    p.push(`Used ${c.other} ${c.other === 1 ? 'tool' : 'tools'}`);
   return p.join(' · ');
 }
-
-// tool args — exact field names from tools.rs schemas (all snake_case)
 type ViewFileArgs      = { absolute_path: string; start_line?: number; end_line?: number };
 type ListDirArgs       = { directory_path: string };
 type WriteFileArgs     = { target_file: string; code_content: string };
@@ -47,7 +41,6 @@ type MultiReplaceArgs  = { target_file: string; replacement_chunks: { target_con
 type RunCmdArgs        = { command_line: string };
 type SearchArgs        = { query: string };
 type GenImageArgs      = { prompt: string };
-
 function diffStats(chunks: { target_content: string; replacement_content: string }[]) {
   let added = 0, removed = 0;
   for (const c of chunks) {
@@ -56,14 +49,10 @@ function diffStats(chunks: { target_content: string; replacement_content: string
   }
   return { added, removed };
 }
-
-// ── ToolRow ───────────────────────────────────────────────────────────────────
-
 interface ToolRowProps { tool: LiveTool; onDiffClick: (t: LiveTool) => void }
 function ToolRow(props: ToolRowProps) {
   const a = () => props.tool.args as any;
   const k = () => toolKind(props.tool.name);
-
   function rowIcon() {
     const SZ = 12;
     switch (props.tool.name) {
@@ -77,7 +66,6 @@ function ToolRow(props: ToolRowProps) {
       default:                    return <VsSymbolFile size={SZ} color="var(--text-faint)"/>;
     }
   }
-
   function verb() {
     switch (props.tool.name) {
       case 'view_file':                  return 'Read';
@@ -91,7 +79,6 @@ function ToolRow(props: ToolRowProps) {
       default: return props.tool.name.replace(/_/g, ' ');
     }
   }
-
   function label() {
     switch (props.tool.name) {
       case 'view_file': {
@@ -102,8 +89,7 @@ function ToolRow(props: ToolRowProps) {
         const range = s != null ? ` :${s}${e != null && e !== s ? `–${e}` : ''}` : '';
         return file + range;
       }
-      case 'list_dir':
-        return base((a() as ListDirArgs).directory_path) + '/';
+      case 'list_dir': return base((a() as ListDirArgs).directory_path) + '/';
       case 'multi_replace_file_content': {
         const ar = a() as MultiReplaceArgs;
         const { added, removed } = diffStats(ar.replacement_chunks ?? []);
@@ -113,28 +99,20 @@ function ToolRow(props: ToolRowProps) {
         const ar = a() as WriteFileArgs;
         return `${base(ar.target_file)}  +${(ar.code_content ?? '').split('\n').length}`;
       }
-      case 'run_command':
-        return (a() as RunCmdArgs).command_line?.slice(0, 60) ?? '';
-      case 'search_workspace':
-        return `"${((a() as SearchArgs).query ?? '').slice(0, 50)}"`;
-      case 'search_web':
-        return `"${((a() as SearchArgs).query ?? '').slice(0, 50)}"`;
-      case 'generate_image':
-        return ((a() as GenImageArgs).prompt ?? '').slice(0, 50);
-      default:
-        return '';
+      case 'run_command':       return (a() as RunCmdArgs).command_line?.slice(0, 60) ?? '';
+      case 'search_workspace':  return `"${((a() as SearchArgs).query ?? '').slice(0, 50)}"`;
+      case 'search_web':        return `"${((a() as SearchArgs).query ?? '').slice(0, 50)}"`;
+      case 'generate_image':    return ((a() as GenImageArgs).prompt ?? '').slice(0, 50);
+      default: return '';
     }
   }
-
   const clickable = () => ['read','write','edit','dir'].includes(k());
-
   function handleClick() {
     if (k() === 'edit') { props.onDiffClick(props.tool); return; }
     const ar = a();
     const path = ar.absolute_path ?? ar.target_file ?? ar.directory_path ?? '';
     if (path) setFileToOpen(String(path));
   }
-
   return (
     <div class={`ta-row${clickable() ? ' ta-row-link' : ''}`} onClick={clickable() ? handleClick : undefined}>
       <span class="ta-row-icon">{rowIcon()}</span>
@@ -143,14 +121,10 @@ function ToolRow(props: ToolRowProps) {
     </div>
   );
 }
-
-// ── Diff modal ────────────────────────────────────────────────────────────────
-
 function DiffModal(props: { tool: LiveTool; onClose: () => void }) {
   const ar = () => props.tool.args as MultiReplaceArgs;
   const chunks = () => ar().replacement_chunks ?? [];
   const filename = () => base(ar().target_file ?? 'file');
-
   return (
     <div class="diff-backdrop" onClick={props.onClose}>
       <div class="diff-modal" onClick={e => e.stopPropagation()}>
@@ -183,38 +157,29 @@ function DiffModal(props: { tool: LiveTool; onClose: () => void }) {
     </div>
   );
 }
-
-// ── Main export ───────────────────────────────────────────────────────────────
-
 interface Props { tools: LiveTool[]; active?: boolean }
 export default function ToolActivity(props: Props) {
   const [manualOpen, setManualOpen] = createSignal(false);
   const [diffTool, setDiffTool] = createSignal<LiveTool | null>(null);
-  // Auto-open when active (streaming), auto-close when deactivated
   const isOpen = () => props.active || manualOpen();
-  // Show only last 3 when active (live), all when manually opened
   const visibleTools = () => props.active ? props.tools.slice(-3) : props.tools;
   return (
     <>
     <div class="ta-wrap">
-      <button
-        class={`ta-summary${props.active ? ' tool-active' : ''}`}
-        onClick={() => setManualOpen(o => !o)}
-        aria-expanded={isOpen()}
-      >
+      <button class={`ta-summary${props.active ? ' tool-active' : ''}`} onClick={() => setManualOpen(o => !o)} aria-expanded={isOpen()}>
         <span>{summarize(props.tools)}</span>
         <span class="ta-chevron">{isOpen() ? <VsChevronDown size={10}/> : <VsChevronRight size={10}/>}</span>
       </button>
       <Show when={isOpen()}>
         <div class="ta-dropdown">
-          <For each={visibleTools()}>{tool => (
-            <ToolRow tool={tool} onDiffClick={t => setDiffTool(t)}/>
-          )}</For>
+          <For each={visibleTools()}>{tool => <ToolRow tool={tool} onDiffClick={t => setDiffTool(t)}/>}</For>
         </div>
       </Show>
     </div>
     <Show when={diffTool()}>
-      <DiffModal tool={diffTool()!} onClose={() => setDiffTool(null)}/>
+      <Portal>
+        <DiffModal tool={diffTool()!} onClose={() => setDiffTool(null)}/>
+      </Portal>
     </Show>
     </>
   );

@@ -3,7 +3,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
-use crate::{db, appdata, agent, watcher, workspace};
+use crate::{db, appdata, agent, workspace};
 use std::collections::HashMap;
 #[derive(Clone, Serialize, Debug)]
 pub struct WorkspaceMeta { pub id: String, pub path: String, pub name: String }
@@ -91,14 +91,11 @@ impl AppStateManager {
         if let Some(ref tid) = s.active_thread_id {
             db::setting_set(pool, "active_thread_id", tid).await.ok();
         }
-        // Start watcher
-        if let Some(ref path) = s.active_path { watcher::start(app.clone(), path).ok(); }
         Ok(Self::snap(&s))
     }
     /// Atomically switch to a workspace — cancels agents, stops watcher, loads threads
     pub async fn activate_workspace(&self, pool: &SqlitePool, app: &AppHandle, path: &str) -> Result<AppSnapshot> {
         cancel_all_agents();
-        watcher::stop();
         workspace::invalidate_cache();
         let norm = path.replace('\\', "/");
         let mut threads = db::thread_list_for_workspace(pool, &norm).await?;
@@ -122,8 +119,6 @@ impl AppStateManager {
         }
         db::setting_set(pool, "active_thread_id", &active_tid).await.ok();
         db::setting_set(pool, &pref_key, &active_tid).await.ok();
-        watcher::start(app.clone(), &norm).ok();
-        // RAG in background
         let ws_id = appdata::workspace_id(&norm);
         let p2 = pool.clone(); let n2 = norm.clone();
         tokio::spawn(async move { crate::rag::index_workspace(&p2, &ws_id, &n2).await.ok(); });
@@ -150,7 +145,6 @@ impl AppStateManager {
         let mut s = self.inner.write().await;
         s.workspaces.retain(|w| w.path != norm);
         if s.active_path.as_deref() == Some(norm.as_str()) {
-            watcher::stop();
             s.active_path = None;
             s.active_threads.clear();
             s.active_thread_id = None;

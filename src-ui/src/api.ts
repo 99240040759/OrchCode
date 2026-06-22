@@ -14,7 +14,7 @@ export type StreamChunk =
   | { type: 'finish'; duration_seconds: number }
   | { type: 'error'; message: string };
 // ═══════════════════════════════════════════════════════════════════════════════
-// STATE — atomic backend-driven operations (each returns full AppSnapshot)
+// STATE — atomic backend-driven operations
 // ═══════════════════════════════════════════════════════════════════════════════
 export const stateInit = () => invoke<AppSnapshot>('cmd_state_init');
 export const stateActivateWorkspace = (path: string) => invoke<AppSnapshot>('cmd_state_activate_workspace', { path });
@@ -32,7 +32,7 @@ export const workspaceListFilesByPath = (workspacePath: string) => invoke<string
 export const fileRead = (filePath: string) => invoke<{ content: string }>('cmd_file_read', { filePath });
 export const fileOpen = (filePath: string) => invoke<void>('cmd_file_open', { filePath });
 // ═══════════════════════════════════════════════════════════════════════════════
-// AGENT — streaming (not state)
+// AGENT — streaming
 // ═══════════════════════════════════════════════════════════════════════════════
 export const agentStream = (req: { thread_id: string; model_id: string; prompt_text: string; context_window?: number; workspace_path?: string; artifacts_path?: string }, onChunk: (c: StreamChunk) => void) => {
   const ch = new Channel<StreamChunk>();
@@ -41,7 +41,7 @@ export const agentStream = (req: { thread_id: string; model_id: string; prompt_t
 };
 export const agentStop = (threadId: string) => invoke<void>('cmd_agent_stop', { threadId });
 // ═══════════════════════════════════════════════════════════════════════════════
-// TERMINAL / MODELS / AUTH / SETTINGS / APP
+// TERMINAL / MODELS / AUTH / APP
 // ═══════════════════════════════════════════════════════════════════════════════
 export const terminalCreate = (id: string, cols: number, rows: number, cwd?: string) => invoke<void>('cmd_terminal_create', { id, cols, rows, cwd });
 export const terminalWrite = (id: string, data: string) => invoke<void>('cmd_terminal_write', { id, data });
@@ -56,8 +56,6 @@ export const quotaGet = () => invoke<unknown>('cmd_quota_get');
 export const appVersion = () => invoke<string>('cmd_app_version');
 export const settingsOpen = () => invoke<void>('cmd_settings_open');
 export const countTokens = (text: string, modelId: string) => invoke<number>('cmd_count_tokens', { text, modelId });
-export const settingGet = (key: string) => invoke<string | null>('cmd_setting_get', { key });
-export const settingSet = (key: string, value: string) => invoke<void>('cmd_setting_set', { key, value });
 export const pickFolder = () => invoke<string | null>('cmd_pick_folder');
 export type UpdateInfo = { available: boolean; version?: string; body?: string; platform: string };
 export const updaterCheck = () => invoke<UpdateInfo>('cmd_updater_check');
@@ -69,4 +67,3 @@ export const appRestart = () => invoke<void>('cmd_app_restart');
 export const onAppState = (cb: (s: AppSnapshot) => void) => listen<AppSnapshot>('app:state', e => cb(e.payload));
 export const onAuthChanged = (cb: (u: UserProfile | null) => void) => listen<UserProfile | null>('auth://changed', e => cb(e.payload));
 export const onTerminalData = (id: string, cb: (d: string) => void) => listen<string>(`terminal:data:${id}`, e => cb(e.payload));
-export const onFsChange = (cb: (e: { paths: string[]; kind: string }) => void) => listen<{ paths: string[]; kind: string }>('fs:change', e => cb(e.payload));

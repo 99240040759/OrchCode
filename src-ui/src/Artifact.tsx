@@ -4,8 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Breadcrumbs } from '@kobalte/core/breadcrumbs';
-import { terminalCreate, terminalWrite, terminalResize, terminalClose, onTerminalData, fileRead, workspaceListFilesByPath } from './api';
-import { artifactTab, setArtifactTab, filesSidebarOpen, setFilesSidebarOpen, workspacePath, setWorkspaceFiles, isDark, fileToOpen, setFileToOpen } from './store';
+import { terminalCreate, terminalWrite, terminalResize, terminalClose, onTerminalData, fileRead } from './api';
+import { artifactTab, setArtifactTab, filesSidebarOpen, setFilesSidebarOpen, workspacePath, isDark, fileToOpen, setFileToOpen } from './store';
 import { colors } from './theme';
 import Tabs from './components/Tabs';
 import FileTree from './components/FileTree';
@@ -44,12 +44,6 @@ export default function Artifact() {
   onCleanup(() => { resizeObs?.disconnect(); term?.dispose(); unlistenTermData?.(); terminalClose(TERM_ID).catch(() => {}); });
   createEffect(() => { if (term) term.options.theme = termTheme(isDark()); });
   createEffect(() => { const p = fileToOpen(); if (p) { setFileToOpen(null); setArtifactTab('explorer'); openFileInEditor(p); } });
-  // Reactive file tree — workspacePath derived from appState
-  createEffect(() => {
-    const path = workspacePath();
-    if (!path) { setWorkspaceFiles([]); return; }
-    workspaceListFilesByPath(path).then(setWorkspaceFiles).catch(() => {});
-  });
   createEffect(() => { if (artifactTab() === 'terminal') requestAnimationFrame(() => { fitAddon?.fit(); if (term) terminalResize(TERM_ID, term.cols, term.rows).catch(() => {}); }); });
   // Terminal reacts to workspace changes from appState — guaranteed consistent
   createEffect(() => {
@@ -80,7 +74,14 @@ export default function Artifact() {
     termReady = true;
   }
   async function openFileInEditor(path: string) {
-    try { const { content } = await fileRead(path); setOpenFile({ path, content }); } catch {}
+    try {
+      const res = await fileRead(path) as any;
+      if (res && res.is_binary) {
+        setOpenFile({ path, content: `[Binary File - ${res.mime_type || 'unknown'}]\nSize: ${res.size_bytes || 0} bytes` });
+      } else if (res && typeof res.content === 'string') {
+        setOpenFile({ path, content: res.content });
+      }
+    } catch {}
   }
   const pathParts = (path: string) => path.split(/[\\/]/).filter(Boolean).slice(-4);
   return (

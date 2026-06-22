@@ -30,10 +30,13 @@
         "height": 800,
         "minWidth": 960,
         "minHeight": 640,
+        "maxWidth": 4096,
+        "maxHeight": 2160,
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": true,
+        "tabbingIdentifier": "orchcode_main",
         "center": true,
         "visible": false
       }
