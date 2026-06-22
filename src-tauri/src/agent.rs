@@ -202,7 +202,7 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
             }
             Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult { tool_result, internal_call_id })) => {
                 let provider_id = call_id_map.remove(&internal_call_id)
-                    .unwrap_or_else(|| tool_result.call_id.clone());
+                    .unwrap_or_else(|| tool_result.call_id.clone().unwrap_or_default());
                 // BUG-25: look up tool name from our map
                 let tool_name = call_name_map.remove(&internal_call_id).unwrap_or_default();
                 tracing::info!(thread_id=%req.thread_id, %provider_id, %internal_call_id, %tool_name, "[agent] tool_result received");
@@ -226,7 +226,7 @@ pub async fn run_agent(req: StreamRequest, pool: SqlitePool, ch: Channel<StreamC
             }
             Ok(MultiTurnStreamItem::FinalResponse(fr)) => {
                 tracing::info!(thread_id=%req.thread_id, pending_map=%call_id_map.len(), turns=turn_count, items=item_count, "[agent] FinalResponse received");
-                if let Some(usage) = &fr.usage {
+                if let Some(usage) = fr.usage() {
                     turn_count += 1;
                     let input_tok = usage.input_tokens as u64;
                     let output_tok = usage.output_tokens as u64;
