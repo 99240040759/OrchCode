@@ -57,7 +57,7 @@ impl AppStateManager {
     }
     fn emit(app: &AppHandle, s: &Inner) { let _ = app.emit("app:state", Self::snap(s)); }
     /// Load state from DB, start watcher, return initial snapshot
-    pub async fn init(&self, pool: &SqlitePool, app: &AppHandle) -> Result<AppSnapshot> {
+    pub async fn init(&self, pool: &SqlitePool, _app: &AppHandle) -> Result<AppSnapshot> {
         let sessions = appdata::session_list(pool).await?;
         let active_tid = db::setting_get(pool, "active_thread_id").await?;
         let mut s = self.inner.write().await;
