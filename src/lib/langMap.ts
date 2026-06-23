@@ -1,0 +1,2 @@
+export const LANG_MAP: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', py: 'python', json: 'json', css: 'css', html: 'html', md: 'markdown', sh: 'shell', rs: 'rust', go: 'go', yml: 'yaml', yaml: 'yaml', toml: 'toml', sql: 'sql', rb: 'ruby', java: 'java', kt: 'kotlin', swift: 'swift', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp' };
+export const getLang = (filePath: string) => LANG_MAP[filePath.split('.').pop() || ''] || 'plaintext';

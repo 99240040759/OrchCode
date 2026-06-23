@@ -1,5 +1,0 @@
-[net]
-retry = 5
-
-[http]
-timeout = 120
