@@ -17,9 +17,8 @@ env:
   RELEASE_REPO: sameer786ss/OrchCode
 
 jobs:
-  # ─── macOS Apple Silicon arm64 ────────────────────────────────────────────
   release-mac-silicon:
-    name: macOS Apple Silicon (arm64)
+    name: macOS ARM64
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +26,9 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
-        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          DMG_NAME: OrchCode-macOS-ARM64
       - uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
@@ -35,9 +36,8 @@ jobs:
           draft: true
           files: out/make/*.dmg
 
-  # ─── macOS Intel x64 ──────────────────────────────────────────────────────
   release-mac-intel:
-    name: macOS Intel (x64)
+    name: macOS x64
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,9 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
-        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          DMG_NAME: OrchCode-macOS-Intel
       - uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
@@ -53,7 +55,6 @@ jobs:
           draft: true
           files: out/make/*.dmg
 
-  # ─── Windows x64 — Squirrel installer ────────────────────────────────────
   release-windows:
     name: Windows x64
     runs-on: windows-latest
@@ -73,11 +74,10 @@ jobs:
           repository: ${{ env.RELEASE_REPO }}
           draft: true
           files: |
-            out/make/squirrel.windows/x64/*.exe
+            out/make/squirrel.windows/x64/OrchCode-Windows-Setup.exe
             out/make/squirrel.windows/x64/*.nupkg
             out/make/squirrel.windows/x64/RELEASES
 
-  # ─── Publish draft → live once all 3 platforms succeed ────────────────────
   publish-release:
     name: Publish Release
     needs: [release-windows, release-mac-silicon, release-mac-intel]

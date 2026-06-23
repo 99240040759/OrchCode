@@ -3,16 +3,17 @@ import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
+import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
-  packagerConfig: { asar: { unpack: '**/node_modules/{node-pty,better-sqlite3}/**' } },
-  rebuildConfig: { onlyModules: ['better-sqlite3', 'node-pty'] },
+  packagerConfig: { asar: true },
   makers: [
-    new MakerSquirrel({ name: 'OrchCode', title: 'Orch Code', authors: 'Sameer', description: 'AI-powered coding assistant', setupExe: 'OrchCode-x64-setup.exe' }),
-    new MakerDMG({ name: `OrchCode-${process.arch}-darwin`, overwrite: true }, ['darwin']),
+    new MakerSquirrel({ name: 'OrchCode', title: 'Orch Code', authors: 'Sameer', description: 'AI-powered coding assistant', setupExe: 'OrchCode-Windows-Setup.exe' }),
+    new MakerDMG({ name: process.env.DMG_NAME || 'OrchCode', overwrite: true }, ['darwin']),
   ],
   plugins: [
+    new AutoUnpackNativesPlugin({}),
     new VitePlugin({
       build: [
         { entry: 'src/main.ts', config: 'vite.main.config.ts', target: 'main' },
