@@ -10,8 +10,8 @@ const SKILLS_DIR_ALT = path.join(__dirname, 'skills');
 // ── Zod schemas for tool parameters ──────────────────────────────────────────
 const ReadFileParams = z.object({
   path: z.string().describe('File path relative to workspace or absolute'),
-  start_line: z.number().nullable().optional().describe('1-indexed start line (inclusive)'),
-  end_line: z.number().nullable().optional().describe('1-indexed end line (inclusive)'),
+  start_line: z.coerce.number().nullable().optional().describe('1-indexed start line (inclusive)'),
+  end_line: z.coerce.number().nullable().optional().describe('1-indexed end line (inclusive)'),
 });
 const WriteFileParams = z.object({
   path: z.string().describe('File path relative to workspace or absolute'),
@@ -39,8 +39,8 @@ const ReadSkillParams = z.object({
 });
 const GenerateImageParams = z.object({
   prompt: z.string().describe('Text description of the image to generate'),
-  width: z.number().nullable().optional().describe('Image width (512-1568, snapped to 16px grid). Default 1024'),
-  height: z.number().nullable().optional().describe('Image height (512-1568, snapped to 16px grid). Default 1024'),
+  width: z.coerce.number().nullable().optional().describe('Image width (512-1568, snapped to 16px grid). Default 1024'),
+  height: z.coerce.number().nullable().optional().describe('Image height (512-1568, snapped to 16px grid). Default 1024'),
 });
 const SearchWorkspaceParams = z.object({
   query: z.string().describe('Search pattern (regex supported)'),

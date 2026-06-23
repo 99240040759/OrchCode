@@ -6,7 +6,7 @@ import FileViewer from './FileViewer';
 import FileDiffViewer from './FileDiffViewer';
 import TerminalPane from './TerminalPane';
 import BrowserPane from './BrowserPane';
-import { VscGlobe, VscTerminal, VscDiff, VscChromeClose } from 'react-icons/vsc';
+import { VscGlobe, VscTerminal, VscDiff, VscChromeClose, VscSymbolColor } from 'react-icons/vsc';
 import { LuMaximize2, LuMinimize2 } from 'react-icons/lu';
 import { FileIcon } from '@/components/ui/FileIcon';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,7 @@ export default function ArtifactPanel() {
               <button onClick={() => setActiveTabId(activeConvId, tab.id)} className={`h-7 pl-2.5 pr-1 flex items-center gap-1.5 rounded-md text-xs transition-colors max-w-[150px] ${activeTabId === tab.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}>
               <span className="relative size-[15px] shrink-0 cursor-pointer" onClick={e => { e.stopPropagation(); closeTab(activeConvId, tab.id); }}>
                 <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0">
-                  {tab.type === 'diff' ? <VscDiff className="size-[15px]" /> : <FileIcon fileName={tab.path} className="size-[15px]" />}
+                  {tab.type === 'diff' ? <VscDiff className="size-[15px]" /> : tab.content?.startsWith('data:image') ? <VscSymbolColor className="size-[15px]" /> : <FileIcon fileName={tab.path.split('/').pop() || tab.path} className="size-[15px]" />}
                 </span>
                 <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
                   <VscChromeClose className="size-3" />

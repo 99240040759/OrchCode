@@ -15,7 +15,7 @@ export function FileBreadcrumb({ filePath }: { filePath: string }) {
           <React.Fragment key={idx}>
             {idx > 0 && <span className="text-muted-foreground/40 px-1.5">›</span>}
             <span className="flex items-center gap-1.5">
-              {isLast ? <FileIcon fileName={filePath} className="size-[18px] shrink-0" /> : <FluentFolder className="size-[18px] shrink-0 text-muted-foreground/70" />}
+              {isLast ? <FileIcon fileName={p} className="size-[18px] shrink-0" /> : <FluentFolder className="size-[18px] shrink-0 text-muted-foreground/70" />}
               <span className={isLast ? "text-foreground font-medium" : ""}>{p}</span>
             </span>
           </React.Fragment>
