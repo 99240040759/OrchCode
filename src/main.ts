@@ -1,7 +1,5 @@
 import * as Sentry from '@sentry/electron/main';
 Sentry.init({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN });
-import dotenv from 'dotenv';
-dotenv.config();
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';

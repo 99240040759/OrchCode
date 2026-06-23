@@ -4,15 +4,15 @@ import keytar from 'keytar';
 import http from 'node:http';
 export interface AuthUser { id: string; email: string; avatarUrl?: string; }
 export interface StoredSession { accessToken: string; refreshToken: string; expiresAt: number; user: AuthUser; }
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const memStore = new Map<string, string>();
 const nodeStorage = {
   getItem: (k: string): string | null => memStore.get(k) ?? null,
   setItem: (k: string, v: string): void => { memStore.set(k, v); },
   removeItem: (k: string): void => { memStore.delete(k); },
 };
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
   auth: { flowType: 'pkce', persistSession: false, autoRefreshToken: false, storage: nodeStorage, detectSessionInUrl: false },
 });
 const SERVICE = 'OrchCode';

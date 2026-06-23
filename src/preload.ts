@@ -4,8 +4,8 @@ import type { StoredSession } from './auth';
 const agentPorts = new Map<string, MessagePort>();
 const agentCallbacks = new Map<string, (msg: AgentChunk) => void>();
 const pendingSends = new Map<string, unknown[]>();
-const GCP_BASE = process.env.GCP_FUNCTIONS_URL || '';
-const ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const GCP_BASE = process.env.GCP_FUNCTIONS_URL;
+const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const api = {
   getZoomFactor: () => webFrame.getZoomFactor(),
   getUserDataPath: (): Promise<string> => ipcRenderer.invoke('app:getUserDataPath'),

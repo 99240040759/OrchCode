@@ -4,11 +4,9 @@ import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
-import dotenv from 'dotenv';
-dotenv.config();
 
 const config: ForgeConfig = {
-  packagerConfig: { asar: true, extraResource: ['.env'] },
+  packagerConfig: { asar: true },
   rebuildConfig: { onlyModules: ['better-sqlite3', 'node-pty'] },
   makers: [
     new MakerSquirrel({ name: 'OrchCode', title: 'Orch Code', setupExe: 'OrchCode-x64-setup.exe' }),
