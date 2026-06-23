@@ -1,6 +1,7 @@
 import { app, ipcMain, shell, BrowserWindow } from 'electron';
 import { createClient } from '@supabase/supabase-js';
-import keytar from 'keytar';
+import fs from 'node:fs';
+import path from 'node:path';
 import http from 'node:http';
 export interface AuthUser { id: string; email: string; avatarUrl?: string; }
 export interface StoredSession { accessToken: string; refreshToken: string; expiresAt: number; user: AuthUser; }
@@ -15,17 +16,15 @@ const nodeStorage = {
 const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
   auth: { flowType: 'pkce', persistSession: false, autoRefreshToken: false, storage: nodeStorage, detectSessionInUrl: false },
 });
-const SERVICE = 'OrchCode';
-const ACCOUNT = 'session';
+const sessionPath = () => path.join(app.getPath('userData'), '.session');
 export async function saveSession(s: StoredSession): Promise<void> {
   console.log('[Auth] Saving session for:', s.user.email);
-  await keytar.setPassword(SERVICE, ACCOUNT, JSON.stringify(s));
+  fs.writeFileSync(sessionPath(), JSON.stringify(s), 'utf-8');
 }
 export async function loadSession(): Promise<StoredSession | null> {
-  try { const v = await keytar.getPassword(SERVICE, ACCOUNT); return v ? JSON.parse(v) : null; }
-  catch { return null; }
+  try { return JSON.parse(fs.readFileSync(sessionPath(), 'utf-8')); } catch { return null; }
 }
-export async function clearSession(): Promise<void> { await keytar.deletePassword(SERVICE, ACCOUNT).catch(() => {}); }
+export async function clearSession(): Promise<void> { try { fs.unlinkSync(sessionPath()); } catch {} }
 function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const s = http.createServer();

@@ -24,24 +24,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+        with: { node-version: 22, cache: npm }
       - run: npm ci
-      - name: Make distributables
-        run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-      - name: Collect & rename
-        run: |
-          mkdir -p release-upload
-          find out/make -name "*.dmg" | head -1 | xargs -I{} cp {} release-upload/OrchCode-arm64-darwin.dmg
+      - run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
+        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
           repository: ${{ env.RELEASE_REPO }}
           draft: true
-          files: release-upload/OrchCode-arm64-darwin.dmg
+          files: out/make/*.dmg
 
   # ─── macOS Intel x64 ──────────────────────────────────────────────────────
   release-mac-intel:
@@ -50,24 +42,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+        with: { node-version: 22, cache: npm }
       - run: npm ci
-      - name: Make distributables
-        run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-      - name: Collect & rename
-        run: |
-          mkdir -p release-upload
-          find out/make -name "*.dmg" | head -1 | xargs -I{} cp {} release-upload/OrchCode-x64-darwin.dmg
+      - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
+        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
           repository: ${{ env.RELEASE_REPO }}
           draft: true
-          files: release-upload/OrchCode-x64-darwin.dmg
+          files: out/make/*.dmg
 
   # ─── Windows x64 — Squirrel installer ────────────────────────────────────
   release-windows:
@@ -79,31 +63,19 @@ jobs:
         shell: powershell
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+        with: { node-version: 22, cache: npm }
       - run: npm ci
-      - name: Make distributables
-        run: npm run make -- --arch x64 --targets @electron-forge/maker-squirrel
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-      - name: Collect & rename
-        shell: bash
-        run: |
-          mkdir -p release-upload
-          find out/make/squirrel.windows -name "OrchCode-x64-setup.exe" -exec cp {} release-upload/ \;
-          find out/make/squirrel.windows -name "*.nupkg" -exec cp {} release-upload/ \;
-          find out/make/squirrel.windows -name "RELEASES" -exec cp {} release-upload/ \;
-          ls release-upload/
+      - run: npm run make -- --arch x64 --targets @electron-forge/maker-squirrel
+        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
           repository: ${{ env.RELEASE_REPO }}
           draft: true
           files: |
-            release-upload/OrchCode-x64-setup.exe
-            release-upload/*.nupkg
-            release-upload/RELEASES
+            out/make/squirrel.windows/x64/*.exe
+            out/make/squirrel.windows/x64/*.nupkg
+            out/make/squirrel.windows/x64/RELEASES
 
   # ─── Publish draft → live once all 3 platforms succeed ────────────────────
   publish-release:

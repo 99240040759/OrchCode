@@ -56,7 +56,6 @@
     "fast-glob": "^3.3.3",
     "js-tiktoken": "^1.0.21",
     "nanoid": "^5.1.15",
-    "node-pty": "^1.1.0",
     "radix-ui": "^1.6.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -81,7 +80,7 @@
     "@vscode/ripgrep": "^1.18.0",
     "better-sqlite3": "^12.11.1",
     "electron-squirrel-startup": "^1.0.1",
-    "keytar": "^7.9.0",
+    "node-pty": "^1.1.0",
     "openai": "^6.44.0",
     "zod": "^4.4.3"
   }
