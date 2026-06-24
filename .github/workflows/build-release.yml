@@ -25,7 +25,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-        env: { npm_config_arch: arm64 }
       - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch arm64
       - run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
@@ -45,7 +44,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-        env: { npm_config_arch: x64 }
+      - name: Install x64 ripgrep binary
+        run: |
+          VER=$(node -p "require('./node_modules/@vscode/ripgrep/package.json').optionalDependencies['@vscode/ripgrep-darwin-x64']")
+          npm install --no-save "@vscode/ripgrep-darwin-x64@${VER}"
       - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
@@ -68,7 +70,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-        env: { npm_config_arch: x64 }
       - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-squirrel
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
