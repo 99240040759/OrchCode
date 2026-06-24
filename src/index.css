@@ -80,7 +80,7 @@ button, [role="button"], select, summary, [type="button"], [type="submit"], [typ
 .prose-chat p { margin-top: 0.4em; margin-bottom: 0.4em; }
 .prose-chat p:first-child { margin-top: 0; }
 .prose-chat p:last-child { margin-bottom: 0; }
-.prose-chat h1,.prose-chat h2,.prose-chat h3,.prose-chat h4 { margin-top: 0.85em; margin-bottom: 0.3em; }
+.prose-chat h1,.prose-chat h2,.prose-chat h3,.prose-chat h4 { margin-top: 0.85em; margin-bottom: 0.3em; font-size: 1em; font-weight: 600; }
 .prose-chat ul,.prose-chat ol { margin-top: 0.3em; margin-bottom: 0.3em; padding-left: 1.4em; }
 .prose-chat li { margin-top: 0.15em; margin-bottom: 0.15em; }
 .prose-chat pre { margin-top: 0.6em; margin-bottom: 0.6em; border-radius: 0.5rem; overflow-x: auto; }

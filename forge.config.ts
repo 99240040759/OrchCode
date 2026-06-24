@@ -7,10 +7,10 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
-  packagerConfig: { asar: true },
+  packagerConfig: { asar: { unpack: '**/node_modules/{node-pty,better-sqlite3}/**' } },
   makers: [
-    new MakerSquirrel({ name: 'OrchCode', title: 'Orch Code', authors: 'Sameer', description: 'AI-powered coding assistant', setupExe: 'OrchCode-Windows-Setup.exe' }),
-    new MakerDMG({ name: process.env.DMG_NAME || 'OrchCode', overwrite: true }, ['darwin']),
+    new MakerSquirrel({ name: 'OrchCode', authors: 'Sameer', description: 'AI-powered coding assistant' }),
+    new MakerDMG({ overwrite: true }, ['darwin']),
   ],
   plugins: [
     new AutoUnpackNativesPlugin({}),

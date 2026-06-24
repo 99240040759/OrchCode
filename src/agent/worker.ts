@@ -14,6 +14,7 @@ let history: Message[] = [];
 let isRunning = false;
 let abortController: AbortController | null = null;
 const assistantToolCalls = new Map<string, Array<{ id: string; name: string; args: string }>>();
+const assistantReasoning = new Map<string, string>(); // msgId → reasoning_content
 function getClient() {
   if (!cfg) throw new Error('Worker not initialized');
   return makeClient(cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider);
@@ -65,6 +66,7 @@ async function tryCompact(): Promise<boolean> {
   // Clear stale assistantToolCalls entries for messages being compacted
   const keptIds = new Set(kept.map(m => m.id));
   for (const [msgId] of assistantToolCalls) { if (!keptIds.has(msgId)) assistantToolCalls.delete(msgId); }
+  for (const [msgId] of assistantReasoning) { if (!keptIds.has(msgId)) assistantReasoning.delete(msgId); }
   history = [summaryMsg, ...kept];
   send({ type: 'summary', summaryMsg });
   parent.postMessage({ type: 'db:write', message: summaryMsg });
@@ -124,7 +126,7 @@ async function runAgent(userContent: string) {
 }
 async function streamCompletion(): Promise<Array<{ id: string; name: string; args: string; msgId: string }>> {
   if (!cfg) return [];
-  const oaiMessages = toOpenAIMessages(buildSystemPrompt(), history, assistantToolCalls);
+  const oaiMessages = toOpenAIMessages(buildSystemPrompt(), history, assistantToolCalls, assistantReasoning);
   abortController = new AbortController();
   const pendingToolCalls: Array<{ id: string; name: string; args: string; msgId: string }> = [];
   let assistantContent = '';
@@ -149,11 +151,16 @@ async function streamCompletion(): Promise<Array<{ id: string; name: string; arg
     if (delta.content) {
       assistantContent += delta.content;
       send({ type: 'chunk', delta: delta.content, tokenCount, contextWindow: cfg.contextWindow, messageId: assistantMsgId });
-      // Periodic DB flush every 2s during streaming
       if (Date.now() - lastFlush > 2000) {
         parent.postMessage({ type: 'db:write', message: { ...assistantMsg, content: assistantContent } });
         lastFlush = Date.now();
       }
+    }
+    // DeepSeek thinking mode — capture reasoning_content so it can be echoed back in history
+    const reasoningDelta = (delta as any).reasoning_content;
+    if (reasoningDelta) {
+      const prev = assistantReasoning.get(assistantMsgId) || '';
+      assistantReasoning.set(assistantMsgId, prev + reasoningDelta);
     }
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {

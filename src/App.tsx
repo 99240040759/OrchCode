@@ -11,27 +11,29 @@ import ChatPanel from '@/components/ChatPanel';
 import ArtifactPanel from '@/components/ArtifactPanel';
 import { useConversationsStore } from '@/store/conversations';
 import { useWorkspacesStore } from '@/store/workspaces';
-import { useUIStore } from '@/store/ui';
+import { useUIStore, DEFAULT_CONV_UI } from '@/store/ui';
 import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
 import { VscSignOut } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
+import { pushChunk, registerFlusher } from '@/lib/streamFlusher';
 import type { AgentChunk, BudgetInfo } from '@/ipc/types';
 const hash = typeof window !== 'undefined' ? window.location.hash : '';
 function useGlobalAgentPort() {
   useEffect(() => {
     const cleanup = el.onAgentPort((convId: string) => {
       useConversationsStore.getState().setAgentReady(convId);
+      const stopFlusher = registerFlusher(convId);
       el.onAgentMessage(convId, (msg: AgentChunk) => {
         const s = useConversationsStore.getState();
         if (msg.type === 'iter_start') s.startIteration(convId, msg.messageId);
-        else if (msg.type === 'chunk') s.appendChunk(convId, msg.delta, msg.tokenCount, msg.messageId);
+        else if (msg.type === 'chunk') pushChunk(convId, msg.delta, msg.tokenCount, msg.messageId);
         else if (msg.type === 'tool_call') s.addToolCall(convId, { id: msg.toolCall.id, name: msg.toolCall.name, input: msg.toolCall.input });
         else if (msg.type === 'tool_result') s.updateToolCall(convId, msg.toolCallId, { output: msg.result, ...msg.meta });
-        else if (msg.type === 'done') s.finalizeStream(convId);
+        else if (msg.type === 'done') { s.finalizeStream(convId); stopFlusher(); }
         else if (msg.type === 'db:tokens') s.setTokenCount(convId, msg.count);
         else if (msg.type === 'summary') s.replaceWithSummary(convId, msg.summaryMsg);
-        else if (msg.type === 'error') { s.cancelStream(convId); console.error('[Agent Error]', msg.error); }
+        else if (msg.type === 'error') { s.cancelStream(convId); stopFlusher(); console.error('[Agent Error]', msg.error); }
       });
     });
     return cleanup;
@@ -57,14 +59,12 @@ function UserMenu() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64 p-0">
-        {/* Profile */}
         <div className="px-3 py-2.5 flex items-center gap-2.5 border-b border-border">
           <div className="size-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-semibold text-primary shrink-0 overflow-hidden">
             {user?.avatarUrl ? <img src={user.avatarUrl} className="size-7 rounded-full object-cover" alt="avatar" /> : initials}
           </div>
           <div className="min-w-0"><p className="text-xs font-medium truncate">{user?.email}</p></div>
         </div>
-        {/* Budget */}
         {budget && (
           <div className="px-3 py-2.5 border-b border-border">
             <p className="text-micro font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Monthly Budget</p>
@@ -77,7 +77,6 @@ function UserMenu() {
             <p className="text-micro text-muted-foreground mt-1">Remaining: <span className="text-foreground font-mono">${budget.remaining.toFixed(4)}</span> · resets {budget.period}-01</p>
           </div>
         )}
-        {/* Stats */}
         {stats && (
           <div className="px-3 py-2.5 border-b border-border">
             <p className="text-micro font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Usage</p>
@@ -106,27 +105,24 @@ export default function App() {
   const { setSession, clearSession, isLoggedIn } = useAuthStore();
   const setModels = useModelsStore(s => s.setModels);
   const [authChecked, setAuthChecked] = useState(false);
-  const { sidebarOpen, artifactOpen, setSidebarOpen, setArtifactOpen, artifactMaximized } = useUIStore();
+  const { sidebarOpen, setSidebarOpen, setArtifactOpen } = useUIStore();
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const convs = useConversationsStore(s => s.convs);
   const workspaces = useWorkspacesStore(s => s.workspaces);
+  // Narrow selector — only re-renders when THIS conv's UI changes
+  const activeConvUI = useUIStore(s => activeConvId ? (s.convUI[activeConvId] ?? DEFAULT_CONV_UI) : DEFAULT_CONV_UI);
+  const { artifactOpen, artifactMaximized } = activeConvUI;
   useEffect(() => {
     const handleSession = async (s: any) => {
       setSession(s);
       try { const models = await el.fetchModels(s.accessToken); setModels(models); } catch (e) { console.error('[App] Models fetch failed:', e); }
     };
-    (async () => {
-      const stored = await el.loadStoredSession();
-      if (stored) await handleSession(stored);
-      setAuthChecked(true);
-    })();
+    (async () => { const stored = await el.loadStoredSession(); if (stored) await handleSession(stored); setAuthChecked(true); })();
     const cleanup = el.onSessionReceived(async (s) => { if (s) await handleSession(s); });
-    const cleanupTitle = el.onConvTitleUpdated((convId: string, title: string) => {
-      useWorkspacesStore.getState().updateConversationTitle(convId, title);
-    });
+    const cleanupTitle = el.onConvTitleUpdated((convId: string, title: string) => { useWorkspacesStore.getState().updateConversationTitle(convId, title); });
     return () => { cleanup(); cleanupTitle(); };
   }, []);
-  const conv = activeConvId ? convs.get(activeConvId) : undefined;
+  const conv = activeConvId ? convs[activeConvId] : undefined;
   const wsPath = conv?.workspaceId ? workspaces.find(w => w.id === conv.workspaceId)?.path || null : null;
   if (!authChecked) return (
     <TooltipProvider><div className="h-screen w-screen flex items-center justify-center bg-background"><Spinner className="size-5" /></div></TooltipProvider>
@@ -137,11 +133,10 @@ export default function App() {
       <div className="flex-1 overflow-hidden"><Onboarding /></div>
     </div></TooltipProvider>
   );
-
   return (
     <TooltipProvider>
       <div className="flex h-screen w-screen flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
-        <TitleBar title="Orch Code" onToggleLeftSidebar={() => setSidebarOpen(!sidebarOpen)} onToggleRightSidebar={() => setArtifactOpen(!artifactOpen)} rightSlot={<UserMenu />} />
+        <TitleBar title="Orch Code" onToggleLeftSidebar={() => setSidebarOpen(!sidebarOpen)} onToggleRightSidebar={() => activeConvId && setArtifactOpen(activeConvId, !artifactOpen)} rightSlot={<UserMenu />} />
         <div className="flex-1 flex w-full overflow-hidden">
           {sidebarOpen && <Sidebar />}
           <div className="flex-1 h-full overflow-hidden relative">

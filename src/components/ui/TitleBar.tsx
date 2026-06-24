@@ -52,7 +52,7 @@ function UpdateButton() {
 export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSidebar, onToggleRightSidebar, rightSlot }: TitleBarProps) {
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const { workspaces, homeConversations, wsConversations } = useWorkspacesStore();
-  const allConvs = [...homeConversations, ...workspaces.flatMap(w => wsConversations.get(w.id) || [])];
+  const allConvs = [...homeConversations, ...workspaces.flatMap(w => wsConversations[w.id] || [])];
   const currentIndex = allConvs.findIndex(c => c.id === activeConvId);
   const activeConv = allConvs[currentIndex];
   const displayTitle = activeConv ? activeConv.title : title;

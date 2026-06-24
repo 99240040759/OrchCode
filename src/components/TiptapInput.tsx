@@ -43,7 +43,7 @@ function buildMentionSuggestion() {
     items: async ({ query }: { query: string }): Promise<MentionItem[]> => {
       const convId = useConversationsStore.getState().activeConvId;
       if (!convId) return [];
-      const conv = useConversationsStore.getState().convs.get(convId);
+      const conv = useConversationsStore.getState().convs[convId];
       const wsPath = conv?.workspaceId ? useWorkspacesStore.getState().workspaces.find(w => w.id === conv.workspaceId)?.path : null;
       if (!wsPath) return [];
       try { const files: string[] = await el.listWorkspaceFiles(wsPath, query); return files.map(f => ({ id: f, label: f })); }
@@ -78,7 +78,7 @@ const MentionNodeView = (props: NodeViewProps) => {
     e.preventDefault(); e.stopPropagation();
     const convId = useConversationsStore.getState().activeConvId;
     if (!convId) return;
-    const conv = useConversationsStore.getState().convs.get(convId);
+    const conv = useConversationsStore.getState().convs[convId];
     const ws = useWorkspacesStore.getState().workspaces.find(w => w.id === conv?.workspaceId);
     if (ws) {
       const content = await el.readWorkspaceFile(ws.path, label);

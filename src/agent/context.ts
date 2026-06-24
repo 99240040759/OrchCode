@@ -58,7 +58,7 @@ export async function generateTitle(firstMessage: string, gcpBase: string, jwt: 
   return resp.choices[0]?.message?.content?.trim() || 'New Conversation';
 }
 /** Convert internal Message[] to OpenAI ChatCompletionMessageParam[] */
-export function toOpenAIMessages(systemPrompt: string, history: Message[], toolCallsMap: Map<string, Array<{ id: string; name: string; args: string }>>): ChatCompletionMessageParam[] {
+export function toOpenAIMessages(systemPrompt: string, history: Message[], toolCallsMap: Map<string, Array<{ id: string; name: string; args: string }>>, reasoningMap?: Map<string, string>): ChatCompletionMessageParam[] {
   const out: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }];
   // Build fallback: for each assistant msg, collect tool_call_ids from subsequent tool msgs
   const historyTcMap = new Map<string, Array<{ id: string; name: string; args: string }>>();
@@ -80,10 +80,11 @@ export function toOpenAIMessages(systemPrompt: string, history: Message[], toolC
       if (tcs?.length) {
         out.push({
           role: 'assistant', content: m.content || null,
+          ...(reasoningMap?.get(m.id) ? { reasoning_content: reasoningMap.get(m.id) } as any : {}),
           tool_calls: tcs.map(tc => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: tc.args || '{}' } })),
         });
       } else {
-        out.push({ role: 'assistant', content: m.content });
+        out.push({ role: 'assistant', content: m.content, ...(reasoningMap?.get(m.id) ? { reasoning_content: reasoningMap.get(m.id) } as any : {}) });
       }
     } else if (m.role === 'user') {
       out.push({ role: 'user', content: m.content });

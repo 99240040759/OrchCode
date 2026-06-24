@@ -12,15 +12,15 @@ import { FileIcon } from '@/components/ui/FileIcon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 export default function ArtifactPanel() {
-  const { getConvUI, setActiveTabId, closeTab, artifactMaximized, setArtifactMaximized } = useUIStore();
+  const { getConvUI, setActiveTabId, closeTab, setArtifactMaximized } = useUIStore();
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const workspaces = useWorkspacesStore(s => s.workspaces);
-  const conv = useConversationsStore(s => activeConvId ? s.convs.get(activeConvId) : undefined);
+  const conv = useConversationsStore(s => activeConvId ? s.convs[activeConvId] : undefined);
   const wsPath = conv?.workspaceId ? workspaces.find(w => w.id === conv.workspaceId)?.path : undefined;
   if (!activeConvId) return (
     <div className="h-full flex items-center justify-center text-xs text-muted-foreground">No active conversation</div>
   );
-  const { activeTabId, openTabs } = getConvUI(activeConvId);
+  const { activeTabId, openTabs, artifactMaximized } = getConvUI(activeConvId);
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Tab bar */}
@@ -52,7 +52,7 @@ export default function ArtifactPanel() {
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-xs" onClick={() => setArtifactMaximized(!artifactMaximized)} className="text-muted-foreground flex-none ml-1">
+            <Button variant="ghost" size="icon-xs" onClick={() => setArtifactMaximized(activeConvId, !artifactMaximized)} className="text-muted-foreground flex-none ml-1">
               {artifactMaximized ? <LuMinimize2 className="size-4" /> : <LuMaximize2 className="size-4" />}
             </Button>
           </TooltipTrigger>

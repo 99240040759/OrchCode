@@ -49,6 +49,7 @@
     "diff": "^7.0.0",
     "drizzle-orm": "^0.45.2",
     "electron": "^42.4.1",
+    "esbuild": "^0.28.1",
     "eslint": "^10.3.0",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -77,11 +78,18 @@
     "@monaco-editor/react": "^4.7.0",
     "@sentry/electron": "^7.13.0",
     "@supabase/supabase-js": "^2.108.2",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@vscode/ripgrep": "^1.18.0",
     "better-sqlite3": "^12.11.1",
     "electron-squirrel-startup": "^1.0.1",
+    "katex": "^0.17.0",
+    "monaco-editor": "^0.55.1",
     "node-pty": "^1.1.0",
     "openai": "^6.44.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
+    "vite-plugin-monaco-editor": "^1.1.0",
     "zod": "^4.4.3"
   }
 }

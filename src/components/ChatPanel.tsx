@@ -1,12 +1,9 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { nanoid } from 'nanoid';
 import { useConversationsStore } from '@/store/conversations';
-import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
 import MessageBubble from './MessageBubble';
 import TiptapInput from './TiptapInput';
-import type { UIMessage } from '@/ipc/types';
-import { el } from '@/lib/electron';
+import { sendMessage, stopAgent } from '@/lib/agentService';
 function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-2 mb-5 py-1 text-sm text-muted-foreground">
@@ -20,19 +17,15 @@ function ThinkingIndicator() {
   );
 }
 export default function ChatPanel({ convId, workspaceId, workspacePath, compact }: { convId: string; workspaceId: string | null; workspacePath: string | null; compact?: boolean }) {
-  const conv = useConversationsStore(s => s.convs.get(convId));
-  const { addMessage, cancelStream } = useConversationsStore();
-  const accessToken = useAuthStore(s => s.accessToken);
+  const conv = useConversationsStore(s => s.convs[convId]);
   const selectedModel = useModelsStore(s => s.models[s.selectedKey] ?? null);
   const messages = conv?.messages || [];
   const currentMessage = conv?.currentMessage || null;
   const isStreaming = conv?.isStreaming || false;
   const tokenCount = conv?.tokenCount || 0;
-  const agentReady = conv?.agentReady || false;
   const contextWindow = selectedModel?.contextWindow || 128000;
   const isEmpty = messages.length === 0 && !isStreaming && !currentMessage;
   const showThinking = isStreaming && !currentMessage;
-  // Pin-to-bottom
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -46,41 +39,10 @@ export default function ChatPanel({ convId, workspaceId, workspacePath, compact 
   }, [messages, currentMessage]);
   const handleSend = useCallback(async (text: string, _mentions: string[], attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) => {
     if ((!text.trim() && !attachments?.length) || isStreaming) return;
-    if (!accessToken || !selectedModel) return;
     pinned.current = true;
-    let content: any = text;
-    if (attachments?.length && selectedModel.multimodal) {
-      const parts: any[] = [];
-      if (text.trim()) parts.push({ type: 'text', text: text.trim() });
-      for (const a of attachments) {
-        if (a.mimeType.startsWith('image/')) parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
-        else parts.push({ type: 'text', text: `[Attached file: ${a.name}]` });
-      }
-      content = parts;
-    }
-    const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
-    const historySnapshot = useConversationsStore.getState().convs.get(convId)?.messages || [];
-    const userMsg: UIMessage = { id: nanoid(), convId, role: 'user', parts: [{ type: 'text', text: contentStr }], createdAt: Date.now() };
-    addMessage(convId, userMsg);
-    // Write to DB using legacy Message format (schema unchanged)
-    el.writeMessage({ id: userMsg.id, convId, role: 'user', content: contentStr, tokenCount: 0, createdAt: userMsg.createdAt });
-    const userDataPath = await el.getUserDataPath();
-    const sessionDir = `${userDataPath}/sessions/${convId}`;
-    // Build history for worker using legacy Message format
-    const history = historySnapshot.flatMap(m => m.parts
-      .filter(p => p.type === 'text' && m.role !== 'system')
-      .map(p => ({ id: m.id, convId, role: m.role as any, content: (p as any).text, tokenCount: 0, createdAt: m.createdAt }))
-    );
-    const agentConfig = {
-      convId, workspacePath, sessionDir, history,
-      jwt: accessToken, anonKey: el.anonKey, gcpBase: el.gcpBase,
-      modelId: selectedModel.id, provider: selectedModel.provider,
-      contextWindow: selectedModel.contextWindow, reasoningEffort: selectedModel.reasoningEffort,
-    };
-    if (agentReady) { el.sendToAgent(convId, { type: 'send', content: contentStr }); }
-    else { el.spawnAgent(agentConfig); el.sendToAgent(convId, { type: 'send', content: contentStr }); }
-  }, [convId, workspacePath, isStreaming, agentReady, addMessage, accessToken, selectedModel]);
-  const handleStop = useCallback(() => { el.killAgent(convId); cancelStream(convId); el.removeAgentPort(convId); }, [convId, cancelStream]);
+    await sendMessage(convId, workspacePath, text, attachments);
+  }, [convId, workspacePath, isStreaming]);
+  const handleStop = useCallback(() => stopAgent(convId), [convId]);
   const inputBar = <TiptapInput onSubmit={handleSend} onStop={handleStop} workspacePath={workspacePath} disabled={isStreaming} isStreaming={isStreaming} tokenCount={tokenCount} contextWindow={contextWindow} />;
   if (compact) return <div className="px-3 py-2">{inputBar}</div>;
   if (isEmpty) return (

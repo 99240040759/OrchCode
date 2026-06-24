@@ -63,7 +63,7 @@ export default function Sidebar() {
   const { workspaces, homeConversations, wsConversations, addWorkspace, removeWorkspace, setWorkspaces, setHomeConversations, setWsConversations, addConversation, removeConversation, updateConversationTitle } = useWorkspacesStore();
   const { convs, setActiveConv, activeConvId, initConv, removeConv } = useConversationsStore();
   const { removeConvUI } = useUIStore();
-  const streamingConvIds = useMemo(() => new Set([...convs.entries()].filter(([, c]) => c.isStreaming).map(([id]) => id)), [convs]);
+  const streamingConvIds = useMemo(() => new Set(Object.entries(convs).filter(([, c]) => c.isStreaming).map(([id]) => id)), [convs]);
   const [filterText, setFilterText] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function Sidebar() {
       setWorkspaces(wsList);
       const homeConvs = await el.getConversations(null);
       setHomeConversations(homeConvs);
-      for (const ws of wsList) { const wc = await el.getConversations(ws.id); setWsConversations(ws.id, wc); }
+      for (const ws of wsList) { setWsConversations(ws.id, await el.getConversations(ws.id)); }
     })();
   }, []);
   const handleSelectConv = (conv: Conversation) => selectConv(conv.id, conv.workspaceId);
@@ -81,7 +81,7 @@ export default function Sidebar() {
     if (!activeConvId) return null;
     const homeMatch = homeConversations.find(c => c.id === activeConvId);
     if (homeMatch) return null;
-    for (const ws of workspaces) { if ((wsConversations.get(ws.id) || []).find(c => c.id === activeConvId)) return ws.id; }
+    for (const ws of workspaces) { if ((wsConversations[ws.id] || []).find(c => c.id === activeConvId)) return ws.id; }
     return null;
   }, [activeConvId, homeConversations, workspaces, wsConversations]);
   const newChat = async (workspaceId: string | null) => {
@@ -129,7 +129,7 @@ export default function Sidebar() {
         <FolderSection label="Home" convs={filterConvs(homeConversations)} activeConvId={activeConvId} streamingConvIds={streamingConvIds}
           onSelectConv={handleSelectConv} onDeleteConv={deleteConv} />
         {workspaces.map(ws => (
-          <FolderSection key={ws.id} label={ws.name} convs={filterConvs(wsConversations.get(ws.id) || [])} activeConvId={activeConvId} streamingConvIds={streamingConvIds}
+          <FolderSection key={ws.id} label={ws.name} convs={filterConvs(wsConversations[ws.id] || [])} activeConvId={activeConvId} streamingConvIds={streamingConvIds}
             onSelectConv={handleSelectConv} onDeleteConv={deleteConv}
             actions={<>
               <button onClick={() => newChat(ws.id)} className="text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0.5"><VscAdd className="size-3" /></button>
