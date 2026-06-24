@@ -31,7 +31,7 @@ const config: ForgeConfig = {
         }
         console.log(`[forge] Injected ${mod}`);
       };
-      for (const mod of ['node-pty', 'better-sqlite3', '@sentry/electron']) inject(mod);
+      for (const mod of ['node-pty', 'better-sqlite3', 'bindings', 'file-uri-to-path']) inject(mod);
       // Inject the JS resolver and only the binary package matching the target platform+arch.
       // e.g. darwin/x64 → @vscode/ripgrep-darwin-x64 (not arm64, not win32-x64)
       inject('@vscode/ripgrep');
@@ -54,7 +54,7 @@ const config: ForgeConfig = {
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
-      [FuseV1Options.EnableCookieEncryption]: true,
+      [FuseV1Options.EnableCookieEncryption]: false,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
