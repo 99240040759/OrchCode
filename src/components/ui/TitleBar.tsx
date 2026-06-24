@@ -57,8 +57,9 @@ export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSide
   const activeConv = allConvs[currentIndex];
   const displayTitle = activeConv ? activeConv.title : title;
   return (
-    <div className={`relative h-[36px] min-h-[36px] max-h-[36px] box-border w-full flex items-center justify-between border-b bg-muted/20 text-xs font-medium select-none ${isMac ? 'pl-[80px] pr-3' : 'pl-3 pr-[140px]'} ${className}`} style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
-      <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+    <div className={`relative h-[36px] min-h-[36px] max-h-[36px] box-border w-full flex items-center justify-between border-b bg-muted/20 text-xs font-medium select-none [-webkit-app-region:drag] ${isMac ? 'pl-[80px] pr-3' : 'pl-3 pr-[140px]'} ${className}`}>
+      <title>OrchCode - {displayTitle}</title>
+      <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         {onToggleLeftSidebar && (
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={onToggleLeftSidebar} className="text-muted-foreground"><FluentSidebarLeft className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Left Sidebar</TooltipContent></Tooltip>
         )}
@@ -66,7 +67,7 @@ export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSide
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" disabled={currentIndex === -1 || currentIndex >= allConvs.length - 1} onClick={() => currentIndex !== -1 && currentIndex < allConvs.length - 1 && selectConvHelper(allConvs[currentIndex + 1].id, allConvs[currentIndex + 1].workspaceId)} className="text-muted-foreground"><IoArrowForward className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Next Conversation</TooltipContent></Tooltip>
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-muted-foreground truncate max-w-[40%] text-center">{displayTitle}</div>
-      <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
         <UpdateButton />
         {onToggleRightSidebar && (
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={onToggleRightSidebar} className="text-muted-foreground"><FluentSidebarRight className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Right Sidebar</TooltipContent></Tooltip>

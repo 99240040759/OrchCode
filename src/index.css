@@ -4,25 +4,26 @@
 @plugin "@tailwindcss/typography";
 @custom-variant dark (&:where(.dark, .dark *));
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: hsl(0 0% 12%);
+  --color-foreground: hsl(0 0% 80%);
+  --color-card: hsl(240 1% 15%);
+  --color-card-foreground: hsl(0 0% 100%);
+  --color-popover: hsl(240 1% 15%);
+  --color-popover-foreground: hsl(0 0% 100%);
+  --color-primary: hsl(42 53% 83%);
+  --color-primary-foreground: hsl(0 0% 12%);
+  --color-secondary: hsl(0 0% 18%);
+  --color-secondary-foreground: hsl(0 0% 80%);
+  --color-muted: hsl(0 0% 18%);
+  --color-muted-foreground: hsl(0 0% 55%);
+  --color-accent: hsl(0 0% 18%);
+  --color-accent-foreground: hsl(42 53% 83%);
+  --color-destructive: hsl(3 93% 63%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+  --color-border: hsl(0 0% 17%);
+  --color-input: hsl(0 0% 17%);
+  --color-ring: hsl(42 53% 83%);
+  --radius: 0.5rem;
   --font-sans: 'Ubuntu', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
   --radius-lg: var(--radius);
@@ -37,19 +38,9 @@
   @keyframes accordion-down { from { height: 0; } to { height: var(--radix-accordion-content-height); } }
   @keyframes accordion-up { from { height: var(--radix-accordion-content-height); } to { height: 0; } }
 }
-:root {
-  --background: hsl(0 0% 12%); --foreground: hsl(0 0% 80%);
-  --card: hsl(240 1% 15%); --card-foreground: hsl(0 0% 100%);
-  --popover: hsl(240 1% 15%); --popover-foreground: hsl(0 0% 100%);
-  --primary: hsl(42 53% 83%); --primary-foreground: hsl(0 0% 12%);
-  --secondary: hsl(0 0% 18%); --secondary-foreground: hsl(0 0% 80%);
-  --muted: hsl(0 0% 18%); --muted-foreground: hsl(0 0% 55%);
-  --accent: hsl(0 0% 18%); --accent-foreground: hsl(42 53% 83%);
-  --destructive: hsl(3 93% 63%); --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(0 0% 17%); --input: hsl(0 0% 17%); --ring: hsl(42 53% 83%); --radius: 0.5rem;
-}
-* { border-color: var(--border); }
-body { font-family: var(--font-sans); background-color: var(--background); color: var(--foreground); }
+
+* { border-color: var(--color-border); }
+body { font-family: var(--font-sans); background-color: var(--color-background); color: var(--color-foreground); }
 button, [role="button"], select, summary, [type="button"], [type="submit"], [type="reset"] { cursor: pointer; }
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -123,17 +123,17 @@ export default function App() {
   }, []);
   const wsPath = useWorkspacesStore(s => { const id = conv?.workspaceId; return id ? s.workspaces.find(w => w.id === id)?.path || null : null; });
   if (!authChecked) return (
-    <TooltipProvider><div className="h-screen w-screen flex items-center justify-center bg-background"><Spinner className="size-5" /></div></TooltipProvider>
+    <TooltipProvider><div className="h-dvh w-dvw flex items-center justify-center bg-background"><Spinner className="size-5" /></div></TooltipProvider>
   );
   if (hash === '#onboarding' || !isLoggedIn) return (
-    <TooltipProvider><div className="h-screen w-screen flex flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
+    <TooltipProvider><div className="h-dvh w-dvw flex flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
       <TitleBar title="Welcome to Orch Code" />
       <div className="flex-1 overflow-hidden"><Onboarding /></div>
     </div></TooltipProvider>
   );
   return (
     <TooltipProvider>
-      <div className="flex h-screen w-screen flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
+      <div className="flex h-dvh w-dvw flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
         <TitleBar title="Orch Code" onToggleLeftSidebar={() => setSidebarOpen(!sidebarOpen)} onToggleRightSidebar={() => activeConvId && setArtifactOpen(activeConvId, !artifactOpen)} rightSlot={<UserMenu />} />
         <div className="flex-1 flex w-full overflow-hidden">
           {sidebarOpen && <Sidebar />}
