@@ -47,7 +47,7 @@ jobs:
       - name: Install x64 ripgrep binary
         run: |
           VER=$(node -p "require('./node_modules/@vscode/ripgrep/package.json').optionalDependencies['@vscode/ripgrep-darwin-x64']")
-          npm install --no-save "@vscode/ripgrep-darwin-x64@${VER}"
+          npm install --no-save --force "@vscode/ripgrep-darwin-x64@${VER}"
       - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
