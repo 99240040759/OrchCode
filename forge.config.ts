@@ -7,21 +7,36 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const NATIVE_MODULES = ['node-pty', 'better-sqlite3', '@vscode/ripgrep'];
+const STRIP: Record<string, string[]> = {
+  'node-pty': ['src', 'deps', 'prebuilds', 'third_party', 'node-addon-api', 'scripts', 'binding.gyp'],
+  'better-sqlite3': ['src', 'deps', 'prebuilds', 'node-addon-api', 'binding.gyp'],
+};
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: { unpack: '**/*.node' },
+    asar: { unpack: '{**/*.node,**/node-pty/build/Release/spawn-helper,**/node-pty/build/Release/winpty*,**/ripgrep-*/bin/rg,**/ripgrep-*/bin/rg.exe}' },
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath) => {
-      for (const mod of NATIVE_MODULES) {
-        const src = path.join(process.cwd(), 'node_modules', mod);
-        if (!fs.existsSync(src)) continue;
+      const nmRoot = path.join(process.cwd(), 'node_modules');
+      const inject = (mod: string) => {
+        const src = path.join(nmRoot, mod);
+        if (!fs.existsSync(src)) return;
         const dest = path.join(buildPath, 'node_modules', mod);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.cpSync(src, dest, { recursive: true });
+        for (const entry of (STRIP[mod] ?? [])) {
+          const p = path.join(dest, entry);
+          if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
+        }
         console.log(`[forge] Injected ${mod}`);
+      };
+      for (const mod of ['node-pty', 'better-sqlite3']) inject(mod);
+      const vscodeNm = path.join(nmRoot, '@vscode');
+      if (fs.existsSync(vscodeNm)) {
+        for (const pkg of fs.readdirSync(vscodeNm)) {
+          if (pkg.startsWith('ripgrep')) inject(`@vscode/${pkg}`);
+        }
       }
     },
   },
