@@ -1,4 +1,4 @@
-import { app, ipcMain, shell, BrowserWindow } from 'electron';
+import { app, ipcMain, shell, BrowserWindow, safeStorage } from 'electron';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,19 +19,16 @@ const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
 const sessionPath = () => path.join(app.getPath('userData'), '.session');
 export async function saveSession(s: StoredSession): Promise<void> {
   console.log('[Auth] Saving session for:', s.user.email);
-  fs.writeFileSync(sessionPath(), JSON.stringify(s), 'utf-8');
+  const d = JSON.stringify(s);
+  fs.writeFileSync(sessionPath(), safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(d).toString('base64') : d, 'utf-8');
 }
 export async function loadSession(): Promise<StoredSession | null> {
-  try { return JSON.parse(fs.readFileSync(sessionPath(), 'utf-8')); } catch { return null; }
+  try {
+    const r = fs.readFileSync(sessionPath(), 'utf-8');
+    return JSON.parse(safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(r, 'base64')) : r);
+  } catch { return null; }
 }
 export async function clearSession(): Promise<void> { try { fs.unlinkSync(sessionPath()); } catch {} }
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const s = http.createServer();
-    s.listen(0, '127.0.0.1', () => { const a = s.address() as { port: number }; s.close(() => resolve(a.port)); });
-    s.on('error', reject);
-  });
-}
 async function refreshIfExpired(stored: StoredSession): Promise<StoredSession | null> {
   if (stored.expiresAt - Math.floor(Date.now() / 1000) > 60) return stored;
   console.log('[Auth] Refreshing expired token...');
@@ -46,20 +43,12 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
   ipcMain.handle('auth:saveSession', (_, s: StoredSession) => saveSession(s));
   ipcMain.handle('auth:clearSession', () => clearSession());
   ipcMain.handle('auth:startOAuth', async () => {
-    const port = await getFreePort();
-    const redirectUri = `http://localhost:${port}/callback`;
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: redirectUri, skipBrowserRedirect: true, queryParams: { access_type: 'offline', prompt: 'select_account' } },
-    });
-    if (error || !data.url) throw new Error(error?.message || 'Failed to get OAuth URL');
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { server.close(); reject(new Error('OAuth timed out after 3 minutes')); }, 180_000);
       const server = http.createServer(async (req, res) => {
         if (!req.url?.startsWith('/callback')) { res.end(); return; }
+        const port = (server.address() as any).port;
         const parsed = new URL(req.url, `http://localhost:${port}`);
-        const code = parsed.searchParams.get('code');
-        const oauthError = parsed.searchParams.get('error');
+        const code = parsed.searchParams.get('code'), oauthError = parsed.searchParams.get('error');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!DOCTYPE html><html><head><style>*{margin:0}body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0f0f;font-family:system-ui;color:#e5e5e5;flex-direction:column;gap:8px}</style></head><body><b style="color:#f97316">Orch Code</b><p style="color:#888;font-size:13px">${oauthError ? 'Sign in failed' : 'Signed in — you can close this tab'}</p><script>setTimeout(()=>window.close(),2000)</script></body></html>`);
         clearTimeout(timeout); server.close();
@@ -68,7 +57,6 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
         try {
           const { data: ex, error: exErr } = await supabase.auth.exchangeCodeForSession(code);
           if (exErr || !ex.session) { reject(new Error(exErr?.message || 'No session returned')); return; }
-          console.log('[Auth] ✓ Session obtained! User:', ex.user?.email);
           const session: StoredSession = {
             accessToken: ex.session.access_token, refreshToken: ex.session.refresh_token!,
             expiresAt: ex.session.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
@@ -79,13 +67,21 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
           resolve();
         } catch (e: any) { reject(e); }
       });
-      server.listen(port, () => shell.openExternal(data.url!));
+      const timeout = setTimeout(() => { server.close(); reject(new Error('OAuth timed out')); }, 180_000);
+      server.listen(0, '127.0.0.1', async () => {
+        const port = (server.address() as any).port;
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: `http://localhost:${port}/callback`, skipBrowserRedirect: true, queryParams: { access_type: 'offline', prompt: 'select_account' } },
+        });
+        if (error || !data.url) { clearTimeout(timeout); server.close(); reject(new Error(error?.message || 'Failed OAuth URL')); }
+        else { shell.openExternal(data.url); }
+      });
       server.on('error', (e) => { clearTimeout(timeout); reject(e); });
     });
   });
   ipcMain.handle('auth:signOut', async () => {
     await supabase.auth.signOut().catch(() => {});
     await clearSession();
-    getMainWindow()?.close();
   });
 }

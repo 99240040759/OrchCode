@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FcGoogle } from 'react-icons/fc';
 import { VscLoading } from 'react-icons/vsc';
 import { Button } from '@/components/ui/button';
@@ -8,16 +8,10 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setSession = useAuthStore(s => s.setSession);
+  useEffect(() => el.onSessionReceived((s) => { if (s) setSession(s); }), [setSession]);
   const handleGoogleSignIn = async () => {
     setLoading(true); setError(null);
-    try {
-      // Listen for session callback BEFORE opening browser
-      const cleanup = el.onSessionReceived((s) => { if (!s) return; cleanup(); setSession(s); });
-      await el.startOAuth();
-    } catch (e: any) {
-      setError(e.message || 'Sign in failed');
-      setLoading(false);
-    }
+    try { await el.startOAuth(); } catch (e: any) { setError(e.message || 'Sign in failed'); setLoading(false); }
   };
   return (
     <div className="h-full flex flex-col items-center justify-center gap-8 px-8 select-none bg-background">

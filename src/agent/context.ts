@@ -21,7 +21,7 @@ export async function compactHistory(msgs: Message[], gcpBase: string, jwt: stri
       if (msgs[i].role === 'assistant') { keepIndices.add(i); break; }
     }
   }
-  const lastKeptIdx = Math.max(...[...keepIndices]);
+  const lastKeptIdx = keepIndices.size > 0 ? Math.max(...keepIndices) : -1;
   for (let i = lastKeptIdx + 1; i < msgs.length; i++) {
     if (msgs[i].role === 'user') keepIndices.add(i);
   }

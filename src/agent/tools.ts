@@ -79,7 +79,7 @@ const CMD_TIMEOUT = 30_000;
 type GcpConfig = { gcpBase: string; jwt: string; anonKey: string };
 export async function executeTool(name: string, args: Record<string, any>, workspacePath: string | null, gcpConfig?: GcpConfig): Promise<{ result: string; meta: Record<string, any> }> {
   const cwd = workspacePath || process.cwd();
-  const resolvePath = (p: string) => path.isAbsolute(p) ? p : path.join(cwd, p);
+  const resolvePath = (p: string) => { const fp = path.isAbsolute(p) ? p : path.join(cwd, p); if (workspacePath && path.relative(workspacePath, fp).startsWith('..')) throw new Error('Access Denied'); return fp; };
   switch (name) {
     case 'read_file': {
       const { path: fp, start_line, end_line } = ReadFileParams.parse(args);

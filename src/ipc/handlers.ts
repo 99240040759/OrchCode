@@ -78,6 +78,14 @@ function showBrowserView(convId: string, bounds: { x: number; y: number; width: 
 }
 
 export function registerHandlers() {
+  const checkOrigin = (wc: Electron.WebContents) => {
+    const u = wc.getURL(), devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : '';
+    if (!u.startsWith('file://') && (!devUrl || !u.startsWith(devUrl))) throw new Error('Unauthorized IPC');
+  };
+  const _h = ipcMain.handle.bind(ipcMain), _o = ipcMain.on.bind(ipcMain);
+  ipcMain.handle = (ch: string, fn: any) => _h(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
+  ipcMain.on = (ch: string, fn: any) => _o(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
+
   ipcMain.handle('app:getUserDataPath', () => app.getPath('userData'));
   // DB handlers
   ipcMain.handle('db:getWorkspaces', () => q.getWorkspaces());
@@ -127,6 +135,7 @@ export function registerHandlers() {
   });
   ipcMain.handle('workspace:readFile', (_, { dirPath, filePath }: { dirPath: string; filePath: string }) => {
     const fp = path.isAbsolute(filePath) ? filePath : path.join(dirPath, filePath);
+    if (path.relative(dirPath, fp).startsWith('..')) throw new Error('Access Denied');
     try { return fs.readFileSync(fp, 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
   });
 
@@ -152,8 +161,11 @@ export function registerHandlers() {
     port1.start();
     proc.postMessage({ type: 'init', ...config });
     event.sender.postMessage('agent:port', { convId }, [port2]);
-    console.log(`[Agent:${convId.slice(0, 6)}] Worker spawned, port transferred to renderer`);
-    proc.on('exit', (code) => { console.log(`[Agent:${convId.slice(0, 6)}] Worker exited with code:`, code); agentProcesses.delete(convId); port1.close(); });
+    proc.on('exit', (code) => {
+      console.log(`[Agent:${convId.slice(0, 6)}] Worker exited with code:`, code);
+      try { port1.postMessage({ type: 'error', error: `Worker exited: ${code}` }); } catch {}
+      agentProcesses.delete(convId); port1.close();
+    });
   });
   ipcMain.handle('agent:kill', (_, convId: string) => {
     const proc = agentProcesses.get(convId);

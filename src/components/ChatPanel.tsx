@@ -43,7 +43,7 @@ export default function ChatPanel({ convId, workspaceId, workspacePath, compact 
     await sendMessage(convId, workspacePath, text, attachments);
   }, [convId, workspacePath, isStreaming]);
   const handleStop = useCallback(() => stopAgent(convId), [convId]);
-  const inputBar = <TiptapInput onSubmit={handleSend} onStop={handleStop} workspacePath={workspacePath} disabled={isStreaming} isStreaming={isStreaming} tokenCount={tokenCount} contextWindow={contextWindow} />;
+  const inputBar = <TiptapInput key={convId} onSubmit={handleSend} onStop={handleStop} workspacePath={workspacePath} disabled={isStreaming} isStreaming={isStreaming} tokenCount={tokenCount} contextWindow={contextWindow} />;
   if (compact) return <div className="px-3 py-2">{inputBar}</div>;
   if (isEmpty) return (
     <div className="h-full flex flex-col items-center justify-center bg-background">

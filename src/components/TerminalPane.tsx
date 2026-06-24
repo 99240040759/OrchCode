@@ -23,7 +23,7 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
     term.loadAddon(fit);
     term.open(ref.current);
     requestAnimationFrame(() => { try { fit.fit(); } catch {} });
-    let active = true, unsub: (() => void) | undefined;
+    let active = true, unsub: (() => void) | undefined, unsubExit: (() => void) | undefined;
     (async () => {
       await el.ptyEnsure(convId, cwd);
       if (!active) return;
@@ -31,12 +31,12 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
       if (!active) { await el.ptyDetach(convId); return; }
       if (scrollback) term.write(scrollback);
       unsub = el.onPtyData(convId, (data: string) => term.write(data));
-      el.onPtyExit(convId, () => term.write('\r\n\x1b[2m[Process exited]\x1b[0m'));
+      unsubExit = el.onPtyExit(convId, () => term.write('\r\n\x1b[2m[Process exited]\x1b[0m'));
     })();
     term.onData((data: string) => el.ptyWrite(convId, data));
     const ro = new ResizeObserver(() => requestAnimationFrame(() => { try { fit.fit(); el.ptyResize(convId, term.cols, term.rows); } catch {} }));
     ro.observe(ref.current);
-    return () => { active = false; unsub?.(); ro.disconnect(); el.ptyDetach(convId).catch(() => {}); term.dispose(); };
+    return () => { active = false; unsub?.(); unsubExit?.(); ro.disconnect(); el.ptyDetach(convId).catch(() => {}); term.dispose(); };
   }, [convId]);
   return <div ref={ref} className="w-full h-full" style={{ background: '#1a1a1a', padding: '6px 8px', boxSizing: 'border-box' }} />;
 }

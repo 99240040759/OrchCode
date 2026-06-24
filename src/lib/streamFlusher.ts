@@ -16,3 +16,7 @@ export function registerFlusher(convId: string): () => void {
   rafIds[convId] = requestAnimationFrame(tick);
   return () => { cancelAnimationFrame(rafIds[convId]); delete rafIds[convId]; delete buffers[convId]; };
 }
+export function stopFlusher(convId: string) {
+  if (rafIds[convId]) { cancelAnimationFrame(rafIds[convId]); delete rafIds[convId]; }
+  delete buffers[convId];
+}

@@ -4,8 +4,8 @@ import type { StoredSession } from './auth';
 const agentPorts = new Map<string, MessagePort>();
 const agentCallbacks = new Map<string, (msg: AgentChunk) => void>();
 const pendingSends = new Map<string, unknown[]>();
-const GCP_BASE = process.env.GCP_FUNCTIONS_URL;
-const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+let GCP_BASE = '', ANON_KEY = '';
+try { GCP_BASE = process.env.GCP_FUNCTIONS_URL || ''; ANON_KEY = process.env.SUPABASE_ANON_KEY || ''; } catch {}
 const api = {
   getZoomFactor: () => webFrame.getZoomFactor(),
   getUserDataPath: (): Promise<string> => ipcRenderer.invoke('app:getUserDataPath'),
@@ -99,7 +99,11 @@ const api = {
     ipcRenderer.on(`pty:data:${convId}`, handler);
     return () => ipcRenderer.removeListener(`pty:data:${convId}`, handler);
   },
-  onPtyExit: (convId: string, cb: () => void) => ipcRenderer.once(`pty:exit:${convId}`, cb),
+  onPtyExit: (convId: string, cb: () => void): (() => void) => {
+    const h = () => cb();
+    ipcRenderer.once(`pty:exit:${convId}`, h);
+    return () => ipcRenderer.removeListener(`pty:exit:${convId}`, h);
+  },
   // ─── Updater ────────────────────────────────────────────────────────────────
   onUpdateStatus: (cb: (status: string, info?: string) => void): (() => void) => {
     const h = (_: Electron.IpcRendererEvent, status: string, info?: string) => cb(status, info);

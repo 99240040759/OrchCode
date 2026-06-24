@@ -61,9 +61,11 @@ function FolderSection({ label, icon, convs, activeConvId, streamingConvIds, onS
 }
 export default function Sidebar() {
   const { workspaces, homeConversations, wsConversations, addWorkspace, removeWorkspace, setWorkspaces, setHomeConversations, setWsConversations, addConversation, removeConversation, updateConversationTitle } = useWorkspacesStore();
-  const { convs, setActiveConv, activeConvId, initConv, removeConv } = useConversationsStore();
+  const activeConvId = useConversationsStore(s => s.activeConvId);
+  const { setActiveConv, initConv, removeConv } = useConversationsStore.getState();
   const { removeConvUI } = useUIStore();
-  const streamingConvIds = useMemo(() => new Set(Object.entries(convs).filter(([, c]) => c.isStreaming).map(([id]) => id)), [convs]);
+  const streamingIdsStr = useConversationsStore(s => Object.entries(s.convs).filter(([, c]) => c.isStreaming).map(([id]) => id).join(','));
+  const streamingConvIds = useMemo(() => new Set(streamingIdsStr ? streamingIdsStr.split(',') : []), [streamingIdsStr]);
   const [filterText, setFilterText] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   useEffect(() => {

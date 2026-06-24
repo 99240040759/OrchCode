@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { DiffEditor } from '@monaco-editor/react';
 import { FileBreadcrumb } from '@/components/ui/FileBreadcrumb';
 import { getLang } from '@/lib/langMap';
@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { computeDiff } from '@/agent/diff';
 export default function FileDiffViewer({ filePath, original, modified }: { filePath: string; original: string; modified: string }) {
-  const diff = useMemo(() => computeDiff(original, modified), [original, modified]);
+  const [diff, setDiff] = useState({ added: 0, removed: 0 });
+  useEffect(() => { const t = setTimeout(() => setDiff(computeDiff(original, modified)), 50); return () => clearTimeout(t); }, [original, modified]);
   const lang = getLang(filePath);
   const editorRef = useRef<any>(null);
   const [copied, setCopied] = useState(false);

@@ -23,17 +23,17 @@ function useGlobalAgentPort() {
   useEffect(() => {
     const cleanup = el.onAgentPort((convId: string) => {
       useConversationsStore.getState().setAgentReady(convId);
-      const stopFlusher = registerFlusher(convId);
+      let stopFlusher: (() => void) | null = null;
       el.onAgentMessage(convId, (msg: AgentChunk) => {
         const s = useConversationsStore.getState();
-        if (msg.type === 'iter_start') s.startIteration(convId, msg.messageId);
+        if (msg.type === 'iter_start') { if (!stopFlusher) stopFlusher = registerFlusher(convId); s.startIteration(convId, msg.messageId); }
         else if (msg.type === 'chunk') pushChunk(convId, msg.delta, msg.tokenCount, msg.messageId);
         else if (msg.type === 'tool_call') s.addToolCall(convId, { id: msg.toolCall.id, name: msg.toolCall.name, input: msg.toolCall.input });
         else if (msg.type === 'tool_result') s.updateToolCall(convId, msg.toolCallId, { output: msg.result, ...msg.meta });
-        else if (msg.type === 'done') { s.finalizeStream(convId); stopFlusher(); }
+        else if (msg.type === 'done') { s.finalizeStream(convId); if (stopFlusher) { stopFlusher(); stopFlusher = null; } }
         else if (msg.type === 'db:tokens') s.setTokenCount(convId, msg.count);
         else if (msg.type === 'summary') s.replaceWithSummary(convId, msg.summaryMsg);
-        else if (msg.type === 'error') { s.cancelStream(convId); stopFlusher(); console.error('[Agent Error]', msg.error); }
+        else if (msg.type === 'error') { s.cancelStream(convId); if (stopFlusher) { stopFlusher(); stopFlusher = null; } console.error('[Agent Error]', msg.error); }
       });
     });
     return cleanup;
@@ -107,8 +107,7 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const { sidebarOpen, setSidebarOpen, setArtifactOpen } = useUIStore();
   const activeConvId = useConversationsStore(s => s.activeConvId);
-  const convs = useConversationsStore(s => s.convs);
-  const workspaces = useWorkspacesStore(s => s.workspaces);
+  const conv = useConversationsStore(s => s.activeConvId ? s.convs[s.activeConvId] : undefined);
   // Narrow selector — only re-renders when THIS conv's UI changes
   const activeConvUI = useUIStore(s => activeConvId ? (s.convUI[activeConvId] ?? DEFAULT_CONV_UI) : DEFAULT_CONV_UI);
   const { artifactOpen, artifactMaximized } = activeConvUI;
@@ -122,8 +121,7 @@ export default function App() {
     const cleanupTitle = el.onConvTitleUpdated((convId: string, title: string) => { useWorkspacesStore.getState().updateConversationTitle(convId, title); });
     return () => { cleanup(); cleanupTitle(); };
   }, []);
-  const conv = activeConvId ? convs[activeConvId] : undefined;
-  const wsPath = conv?.workspaceId ? workspaces.find(w => w.id === conv.workspaceId)?.path || null : null;
+  const wsPath = useWorkspacesStore(s => { const id = conv?.workspaceId; return id ? s.workspaces.find(w => w.id === id)?.path || null : null; });
   if (!authChecked) return (
     <TooltipProvider><div className="h-screen w-screen flex items-center justify-center bg-background"><Spinner className="size-5" /></div></TooltipProvider>
   );

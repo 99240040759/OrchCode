@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { el } from './electron';
+import { stopFlusher } from './streamFlusher';
 import { useConversationsStore } from '@/store/conversations';
 import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
@@ -27,10 +28,12 @@ export async function sendMessage(convId: string, workspacePath: string | null, 
   useConversationsStore.getState().addMessage(convId, userMsg);
   el.writeMessage({ id: userMsg.id, convId, role: 'user', content: contentStr, tokenCount: 0, createdAt: userMsg.createdAt });
   const userDataPath = await getDataPath();
-  const history = historySnapshot.flatMap(m => m.parts
-    .filter(p => p.type === 'text' && m.role !== 'system')
-    .map(p => ({ id: m.id, convId, role: m.role as any, content: (p as any).text, tokenCount: 0, createdAt: m.createdAt }))
-  );
+  const history = historySnapshot.flatMap(m => {
+    const txt = m.parts.filter(p => p.type === 'text').map(p => (p as any).text).join('\n') || '';
+    const r: any[] = [{ id: m.id, convId, role: m.role, content: txt, tokenCount: 0, createdAt: m.createdAt }];
+    if (m.role === 'assistant') m.parts.forEach(p => p.type === 'tool-call' && r.push({ id: p.id, convId, role: 'tool', content: p.output || '', toolCallId: p.id, tokenCount: 0, createdAt: m.createdAt }));
+    return r;
+  });
   const agentConfig = {
     convId, workspacePath, sessionDir: `${userDataPath}/sessions/${convId}`, history,
     jwt: accessToken, anonKey: el.anonKey, gcpBase: el.gcpBase,
@@ -44,5 +47,6 @@ export async function sendMessage(convId: string, workspacePath: string | null, 
 export function stopAgent(convId: string) {
   el.killAgent(convId);
   useConversationsStore.getState().cancelStream(convId);
+  stopFlusher(convId);
   el.removeAgentPort(convId);
 }

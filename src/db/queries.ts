@@ -15,12 +15,7 @@ export const q = {
   },
   createConversation: (c: Conversation) => getDb().insert(conversations).values(c).run(),
   updateConversation: (id: string, patch: Partial<Conversation>) => getDb().update(conversations).set(patch).where(eq(conversations.id, id)).run(),
-  deleteConversation: (id: string) => {
-    const db = getDb();
-    db.delete(toolCalls).where(eq(toolCalls.convId, id)).run();
-    db.delete(messages).where(eq(messages.convId, id)).run();
-    db.delete(conversations).where(eq(conversations.id, id)).run();
-  },
+  deleteConversation: (id: string) => getDb().transaction(tx => { tx.delete(toolCalls).where(eq(toolCalls.convId, id)).run(); tx.delete(messages).where(eq(messages.convId, id)).run(); tx.delete(conversations).where(eq(conversations.id, id)).run(); }),
   getMessages: (convId: string) => getDb().select().from(messages).where(eq(messages.convId, convId)).orderBy(asc(messages.createdAt)).all() as Message[],
   writeMessage: (m: Message) => getDb().insert(messages).values(m).onConflictDoUpdate({ target: messages.id, set: { content: m.content, tokenCount: m.tokenCount, toolCallId: m.toolCallId } }).run(),
   writeToolCall: (tc: ToolCall) => {

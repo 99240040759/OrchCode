@@ -15,15 +15,16 @@ interface UIStore {
   closeTab: (convId: string, id: string) => void;
   removeConvUI: (convId: string) => void;
 }
-export const DEFAULT_CONV_UI: PerConvUI = { activeTabId: 'browser', openTabs: [], artifactOpen: false, artifactMaximized: false };
+export const makeDefaultConvUI = (): PerConvUI => ({ activeTabId: 'browser', openTabs: [], artifactOpen: false, artifactMaximized: false });
+export const DEFAULT_CONV_UI = Object.freeze({ activeTabId: 'browser', openTabs: Object.freeze([]) as any, artifactOpen: false, artifactMaximized: false });
 function updUI(convUI: Record<string, PerConvUI>, id: string, fn: (c: PerConvUI) => PerConvUI): Record<string, PerConvUI> {
-  return { ...convUI, [id]: fn(convUI[id] || DEFAULT_CONV_UI) };
+  return { ...convUI, [id]: fn(convUI[id] || makeDefaultConvUI()) };
 }
 export const useUIStore = create<UIStore>((set, get) => ({
   sidebarOpen: true,
   convUI: {},
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
-  getConvUI: (convId) => get().convUI[convId] || DEFAULT_CONV_UI,
+  getConvUI: (convId) => get().convUI[convId] || makeDefaultConvUI(),
   setArtifactOpen: (convId, v) => set(s => ({ convUI: updUI(s.convUI, convId, c => ({ ...c, artifactOpen: v })) })),
   setArtifactMaximized: (convId, v) => set(s => ({ convUI: updUI(s.convUI, convId, c => ({ ...c, artifactMaximized: v })) })),
   openFileViewer: (convId, path, content, startLine, endLine) => set(s => ({
