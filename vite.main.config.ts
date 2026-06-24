@@ -10,5 +10,5 @@ export default defineConfig({
     'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL),
     'process.env.SUPABASE_ANON_KEY': JSON.stringify(env.SUPABASE_ANON_KEY),
   },
-  build: { rollupOptions: { external: ['electron', 'better-sqlite3', 'node-pty', '@vscode/ripgrep'] } },
+  build: { rollupOptions: { external: ['electron', 'better-sqlite3', 'node-pty', '@vscode/ripgrep', '@sentry/electron'] } },
 });

@@ -17,7 +17,7 @@ const config: ForgeConfig = {
     asar: { unpack: '{**/*.node,**/node-pty/build/Release/spawn-helper,**/node-pty/build/Release/winpty*,**/ripgrep-*/bin/rg,**/ripgrep-*/bin/rg.exe}' },
   },
   hooks: {
-    packageAfterCopy: async (_config, buildPath) => {
+    packageAfterCopy: async (_config, buildPath, _electronVersion, platform, arch) => {
       const nmRoot = path.join(process.cwd(), 'node_modules');
       const inject = (mod: string) => {
         const src = path.join(nmRoot, mod);
@@ -31,13 +31,11 @@ const config: ForgeConfig = {
         }
         console.log(`[forge] Injected ${mod}`);
       };
-      for (const mod of ['node-pty', 'better-sqlite3']) inject(mod);
-      const vscodeNm = path.join(nmRoot, '@vscode');
-      if (fs.existsSync(vscodeNm)) {
-        for (const pkg of fs.readdirSync(vscodeNm)) {
-          if (pkg.startsWith('ripgrep')) inject(`@vscode/${pkg}`);
-        }
-      }
+      for (const mod of ['node-pty', 'better-sqlite3', '@sentry/electron']) inject(mod);
+      // Inject the JS resolver and only the binary package matching the target platform+arch.
+      // e.g. darwin/x64 → @vscode/ripgrep-darwin-x64 (not arm64, not win32-x64)
+      inject('@vscode/ripgrep');
+      inject(`@vscode/ripgrep-${platform}-${arch}`);
     },
   },
   makers: [
