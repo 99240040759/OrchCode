@@ -25,8 +25,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      # Rebuild natives for Electron's exact ABI, matching the target arch
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch arm64
       - run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - run: mv out/make/*.dmg out/make/OrchCode-macOS-ARM64.dmg
@@ -45,8 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      # Cross-compile natives for x64 on the ARM64 runner
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
+      # Cross-compiles native modules from ARM64 runner to x64 target via AutoUnpackNativesPlugin.
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - run: mv out/make/*.dmg out/make/OrchCode-macOS-Intel.dmg
@@ -59,8 +56,8 @@ jobs:
 
   release-windows:
     name: Windows x64
-    # windows-latest = windows-2025 with VS 2026 (version 18) which node-gyp doesn't recognise.
-    # Pin to windows-2022 which ships VS 2022 (version 17), the last version node-gyp supports.
+    # windows-latest = windows-2025 ships VS 2026 (version 18).
+    # node-gyp supports up to VS 2022 (version 17) — pin to windows-2022.
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +67,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
       - run: npm run make -- --arch x64 --targets @electron-forge/maker-squirrel
         env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
       - name: Rename installer
