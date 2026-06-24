@@ -9,13 +9,9 @@ import {
 import { CgSpinner } from "react-icons/cg"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  // Client-side theme detection
-  const theme = React.useMemo(() => {
-    if (typeof document !== 'undefined') {
-      return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
-    }
-    return 'system'
-  }, [])
+  const theme = (() => {
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  })();
 
   return (
     <Sonner

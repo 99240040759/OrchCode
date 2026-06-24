@@ -1,4 +1,3 @@
-import React from 'react';
 import { useUIStore } from '@/store/ui';
 import { useConversationsStore } from '@/store/conversations';
 import { useWorkspacesStore } from '@/store/workspaces';

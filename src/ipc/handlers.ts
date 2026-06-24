@@ -33,6 +33,7 @@ function getBrowserView(convId: string): WebContentsView {
   const view = new WebContentsView({
     webPreferences: { partition: `persist:conv-${convId}`, sandbox: true, contextIsolation: true },
   });
+  view.setBackgroundColor('#1e1e1e');
   view.webContents.setBackgroundThrottling(false);
   view.webContents.on('did-start-loading', () => sendBrowserState(convId));
   view.webContents.on('did-stop-loading', () => sendBrowserState(convId));

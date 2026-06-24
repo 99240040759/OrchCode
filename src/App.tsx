@@ -18,7 +18,7 @@ import { VscSignOut } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
 import { pushChunk, registerFlusher } from '@/lib/streamFlusher';
 import type { AgentChunk, BudgetInfo } from '@/ipc/types';
-const hash = typeof window !== 'undefined' ? window.location.hash : '';
+const hash = window.location.hash;
 function useGlobalAgentPort() {
   useEffect(() => {
     const cleanup = el.onAgentPort((convId: string) => {

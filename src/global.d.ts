@@ -54,7 +54,7 @@ type ElectronAPI = {
   ptyResize: (convId: string, cols: number, rows: number) => Promise<void>;
   ptyKill: (convId: string) => Promise<void>;
   onPtyData: (convId: string, cb: (data: string) => void) => () => void;
-  onPtyExit: (convId: string, cb: () => void) => void;
+  onPtyExit: (convId: string, cb: () => void) => () => void;
   onUpdateStatus: (cb: (status: string, info?: string) => void) => () => void;
   updateQuitAndInstall: () => void;
   updateOpenReleases: () => void;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import { FcGoogle } from 'react-icons/fc';
 import { VscLoading } from 'react-icons/vsc';
 import { Button } from '@/components/ui/button';

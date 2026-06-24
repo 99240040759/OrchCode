@@ -1,4 +1,3 @@
-import React from 'react';
 import { useModelsStore } from '@/store/models';
 import { VscChevronDown } from 'react-icons/vsc';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from '@/components/ui/dropdown-menu';

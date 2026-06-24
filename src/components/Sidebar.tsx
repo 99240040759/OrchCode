@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from "react";
+import type React from "react";
 import { nanoid } from 'nanoid';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { useConversationsStore } from '@/store/conversations';
@@ -65,7 +66,7 @@ export default function Sidebar() {
   const { setActiveConv, initConv, removeConv } = useConversationsStore.getState();
   const { removeConvUI } = useUIStore();
   const streamingIdsStr = useConversationsStore(s => Object.entries(s.convs).filter(([, c]) => c.isStreaming).map(([id]) => id).join(','));
-  const streamingConvIds = useMemo(() => new Set(streamingIdsStr ? streamingIdsStr.split(',') : []), [streamingIdsStr]);
+  const streamingConvIds = new Set(streamingIdsStr ? streamingIdsStr.split(',') : []);
   const [filterText, setFilterText] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   useEffect(() => {
@@ -79,13 +80,13 @@ export default function Sidebar() {
   }, []);
   const handleSelectConv = (conv: Conversation) => selectConv(conv.id, conv.workspaceId);
   // Determine which workspace is active to create new chat in
-  const activeWsId = useMemo(() => {
+  const activeWsId = (() => {
     if (!activeConvId) return null;
     const homeMatch = homeConversations.find(c => c.id === activeConvId);
     if (homeMatch) return null;
     for (const ws of workspaces) { if ((wsConversations[ws.id] || []).find(c => c.id === activeConvId)) return ws.id; }
     return null;
-  }, [activeConvId, homeConversations, workspaces, wsConversations]);
+  })();
   const newChat = async (workspaceId: string | null) => {
     const conv: Conversation = { id: nanoid(), workspaceId, title: 'New Conversation', createdAt: Date.now(), updatedAt: Date.now() };
     await el.createConversation(conv);

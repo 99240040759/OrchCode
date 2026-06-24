@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { el } from '@/lib/electron';
 export interface TitleBarProps { title?: string; className?: string; onToggleLeftSidebar?: () => void; onToggleRightSidebar?: () => void; rightSlot?: React.ReactNode; }
-const isMac = typeof window !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
+const isMac = navigator.userAgent.toLowerCase().includes('mac');
 function UpdateButton() {
   const [status, setStatus] = React.useState<string>('idle');
   const [info, setInfo] = React.useState<string | undefined>();

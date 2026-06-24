@@ -1,5 +1,5 @@
-import React from 'react';
 import { useUIStore } from '@/store/ui';
+import type React from "react";
 import { VscGlobe, VscTerminalCmd, VscSearch, VscSymbolColor, VscBook } from 'react-icons/vsc';
 import { FileIcon, FolderIcon } from '@/components/ui/FileIcon';
 import { Spinner } from '@/components/ui/spinner';

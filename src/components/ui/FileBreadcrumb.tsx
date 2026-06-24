@@ -1,4 +1,4 @@
-import React from 'react';
+import { Fragment } from 'react';
 import { FileIcon } from '@/components/ui/FileIcon';
 import { FluentFolder } from '@react-symbols/icons';
 import { useWorkspacesStore } from '@/store/workspaces';
@@ -12,13 +12,13 @@ export function FileBreadcrumb({ filePath }: { filePath: string }) {
       {parts.map((p, idx) => {
         const isLast = idx === parts.length - 1;
         return (
-          <React.Fragment key={idx}>
+          <Fragment key={idx}>
             {idx > 0 && <span className="text-muted-foreground/40 px-1.5">›</span>}
             <span className="flex items-center gap-1.5">
               {isLast ? <FileIcon fileName={p} className="size-[18px] shrink-0" /> : <FluentFolder className="size-[18px] shrink-0 text-muted-foreground/70" />}
               <span className={isLast ? "text-foreground font-medium" : ""}>{p}</span>
             </span>
-          </React.Fragment>
+          </Fragment>
         );
       })}
     </div>

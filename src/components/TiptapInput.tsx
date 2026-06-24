@@ -1,4 +1,5 @@
-import React, { useRef, useCallback, useState } from 'react';
+import { useRef, useState, useEffect } from "react";
+import type React from "react";
 import { createRoot, Root } from 'react-dom/client';
 import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer, NodeViewProps } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -23,8 +24,8 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
 interface MentionItem { id: string; label: string; }
 const MentionList = ({ items, command, selectedIndex, onHighlight }: { items: MentionItem[]; command: (item: MentionItem) => void; selectedIndex: number; onHighlight: (idx: number) => void }) => {
-  const activeRef = React.useRef<HTMLButtonElement>(null);
-  React.useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }); }, [selectedIndex]);
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }); }, [selectedIndex]);
   return (
     <div className="bg-popover border border-border rounded-md shadow-md p-1 text-xs z-50 max-h-[220px] overflow-y-auto w-full flex flex-col gap-0.5 scrollbar-thin">
       {items.length === 0 ? <div className="px-2 py-1.5 text-muted-foreground text-center">No files found</div> : items.map((item, idx) => (
@@ -111,7 +112,7 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
       }
     }
   });
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = () => {
     if (!editor || disabled) return;
     const text = editor.getText().trim();
     if (!text && attachments.length === 0) return;
@@ -120,10 +121,10 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
     onSubmit(text, mentions, attachments.length ? attachments : undefined);
     editor.commands.clearContent();
     setAttachments([]);
-  }, [editor, disabled, onSubmit, attachments]);
+  };
   submitRef.current = handleSubmit;
-  const handleAttach = useCallback(() => fileInputRef.current?.click(), []);
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAttach = () => fileInputRef.current?.click();
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const loaded: Attachment[] = await Promise.all(files.map(f => new Promise<Attachment>((res) => {
       const reader = new FileReader();
@@ -132,7 +133,7 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
     })));
     setAttachments(prev => [...prev, ...loaded]);
     e.target.value = '';
-  }, []);
+  };
   return (
     <div className="border border-border/60 rounded-2xl bg-card/80 backdrop-blur-sm px-4 pt-3 pb-3 flex flex-col gap-2">
       <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.md,.csv" multiple className="hidden" onChange={handleFileChange} />

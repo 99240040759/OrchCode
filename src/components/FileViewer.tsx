@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from "react";
 import Editor from '@monaco-editor/react';
 import { FileBreadcrumb } from '@/components/ui/FileBreadcrumb';
 import { getLang } from '@/lib/langMap';

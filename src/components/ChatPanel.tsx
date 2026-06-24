@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 import { useConversationsStore } from '@/store/conversations';
 import { useModelsStore } from '@/store/models';
 import MessageBubble from './MessageBubble';
@@ -29,20 +29,20 @@ export default function ChatPanel({ convId, workspaceId, workspacePath, compact 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
-  const handleScroll = useCallback(() => {
+  const handleScroll = () => {
     const el = scrollerRef.current;
     if (!el) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  }, []);
+  };
   useEffect(() => {
     if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages, currentMessage]);
-  const handleSend = useCallback(async (text: string, _mentions: string[], attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) => {
+  const handleSend = async (text: string, _mentions: string[], attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) => {
     if ((!text.trim() && !attachments?.length) || isStreaming) return;
     pinned.current = true;
     await sendMessage(convId, workspacePath, text, attachments);
-  }, [convId, workspacePath, isStreaming]);
-  const handleStop = useCallback(() => stopAgent(convId), [convId]);
+  };
+  const handleStop = () => stopAgent(convId);
   const inputBar = <TiptapInput key={convId} onSubmit={handleSend} onStop={handleStop} workspacePath={workspacePath} disabled={isStreaming} isStreaming={isStreaming} tokenCount={tokenCount} contextWindow={contextWindow} />;
   if (compact) return <div className="px-3 py-2">{inputBar}</div>;
   if (isEmpty) return (
