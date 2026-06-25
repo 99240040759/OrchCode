@@ -6,12 +6,13 @@ import FileViewer from './FileViewer';
 import FileDiffViewer from './FileDiffViewer';
 import TerminalPane from './TerminalPane';
 import BrowserPane from './BrowserPane';
-import { VscGlobe, VscTerminal, VscDiff, VscChromeClose, VscSymbolColor } from 'react-icons/vsc';
+import { VscGlobe, VscTerminal, VscChromeClose } from 'react-icons/vsc';
 import { LuMaximize2, LuMinimize2 } from 'react-icons/lu';
 import { FileIcon } from '@/components/ui/FileIcon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { VscSymbolColor } from 'react-icons/vsc';
 
 export default function ArtifactPanel() {
   const { getConvUI, setActiveTabId, closeTab, setArtifactMaximized, toggleTabViewMode } = useUIStore();
@@ -19,31 +20,28 @@ export default function ArtifactPanel() {
   const workspaces = useWorkspacesStore(s => s.workspaces);
   const conv = useConversationsStore(s => activeConvId ? s.convs[activeConvId] : undefined);
   const wsPath = conv?.workspaceId ? workspaces.find(w => w.id === conv.workspaceId)?.path : undefined;
-  if (!activeConvId) return (
-    <div className="h-full flex items-center justify-center text-xs text-muted-foreground">No active conversation</div>
-  );
+  if (!activeConvId) return <div className="h-full flex items-center justify-center text-xs text-foreground/30">No active conversation</div>;
   const { activeTabId, openTabs, artifactMaximized } = getConvUI(activeConvId);
   return (
     <Tabs value={activeTabId} onValueChange={(v) => setActiveTabId(activeConvId, v)} className="h-full flex flex-col bg-background gap-0 border-none p-0">
-      {/* Tab bar */}
-      <div className="px-2 py-1 border-b flex items-center justify-between shrink-0 overflow-hidden">
-        <TabsList>
+      <div className="px-1.5 py-1 border-b border-border/60 flex items-center justify-between shrink-0 overflow-hidden gap-1">
+        <TabsList className="flex-1 overflow-x-auto overflow-y-hidden gap-0.5 w-auto h-7 justify-start">
           {[
-            { id: 'browser', icon: <VscGlobe className="size-4" />, label: 'Browser' },
-            { id: 'terminal', icon: <VscTerminal className="size-4" />, label: 'Terminal' },
+            { id: 'browser', icon: <VscGlobe className="size-3" />, label: 'Browser' },
+            { id: 'terminal', icon: <VscTerminal className="size-3" />, label: 'Terminal' },
           ].map(tab => (
-            <TabsTrigger key={tab.id} value={tab.id}>
+            <TabsTrigger key={tab.id} value={tab.id} className="text-xs px-2.5 h-6 gap-1">
               {tab.icon}{tab.label}
             </TabsTrigger>
           ))}
           {openTabs.map(tab => (
-            <TabsTrigger key={tab.id} value={tab.id} className="group">
-              <span className="relative size-4 shrink-0 cursor-pointer" onClick={e => { e.stopPropagation(); closeTab(activeConvId, tab.id); }}>
-                <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0">
-                  {tab.type === 'image' || tab.content?.startsWith('data:image') ? <VscSymbolColor className="size-4" /> : <FileIcon fileName={path.basename(tab.path.replace(/\\/g, '/'))} className="size-4" />}
+            <TabsTrigger key={tab.id} value={tab.id} className="group text-xs px-2 h-6 gap-1 max-w-36">
+              <span className="relative size-3 shrink-0 cursor-pointer" onClick={e => { e.stopPropagation(); closeTab(activeConvId, tab.id); }}>
+                <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-100 group-hover:opacity-0">
+                  {tab.type === 'image' || tab.content?.startsWith('data:image') ? <VscSymbolColor className="size-3" /> : <FileIcon fileName={path.basename(tab.path.replace(/\\/g, '/'))} className="size-3" />}
                 </span>
-                <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
-                  <VscChromeClose className="size-3" />
+                <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-100 text-foreground/40 hover:text-foreground/80">
+                  <VscChromeClose className="size-2.5" />
                 </span>
               </span>
               <span className="truncate">{tab.title}</span>
@@ -52,8 +50,8 @@ export default function ArtifactPanel() {
         </TabsList>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost-muted" size="icon" onClick={() => setArtifactMaximized(activeConvId, !artifactMaximized)} className="flex-none ml-1">
-              {artifactMaximized ? <LuMinimize2 className="size-4" /> : <LuMaximize2 className="size-4" />}
+            <Button variant="ghost" size="icon-xs" onClick={() => setArtifactMaximized(activeConvId, !artifactMaximized)} className="text-foreground/35 hover:text-foreground/70 shrink-0">
+              {artifactMaximized ? <LuMinimize2 className="size-3" /> : <LuMaximize2 className="size-3" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{artifactMaximized ? 'Restore' : 'Maximize'}</TooltipContent>
@@ -68,7 +66,7 @@ export default function ArtifactPanel() {
           return (
             <TabsContent key={tab.id} value={tab.id} className="h-full w-full m-0 overflow-hidden data-[state=active]:block data-[state=inactive]:hidden">
               {tab.type === 'image' || tab.content?.startsWith('data:image') ? (
-                <div className="h-full w-full flex items-center justify-center bg-background p-4 overflow-auto"><img src={tab.content} alt={tab.title} className="max-w-full max-h-full object-contain rounded-lg" /></div>
+                <div className="h-full w-full flex items-center justify-center bg-background p-4 overflow-auto"><img src={tab.content} alt={tab.title} className="max-w-full max-h-full object-contain rounded-md" /></div>
               ) : tab.viewMode === 'diff' ? (
                 <FileDiffViewer filePath={tab.path} original={tab.original || ''} modified={tab.modified || ''} hasDiff={hasDiff} viewMode={tab.viewMode} onToggleDiff={onToggle} />
               ) : (

@@ -70,16 +70,16 @@ export default function BrowserPane({ convId }: { convId: string }) {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
       {/* Toolbar */}
-      <div className="h-9 min-h-9 px-2 border-b flex items-center gap-2 bg-muted/5 shrink-0 select-none">
+      <div className="h-8 min-h-8 px-2 border-b border-border/60 flex items-center gap-1.5 bg-sidebar shrink-0 select-none">
         <Tooltip><TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" disabled={!state.canGoBack} onClick={() => el.browserBack(convId)}><VscArrowLeft className="size-4" /></Button>
+          <Button variant="ghost" size="icon-xs" disabled={!state.canGoBack} onClick={() => el.browserBack(convId)} className="text-foreground/35 hover:text-foreground/70"><VscArrowLeft className="size-3" /></Button>
         </TooltipTrigger><TooltipContent side="bottom">Back</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" disabled={!state.canGoForward} onClick={() => el.browserForward(convId)}><VscArrowRight className="size-4" /></Button>
+          <Button variant="ghost" size="icon-xs" disabled={!state.canGoForward} onClick={() => el.browserForward(convId)} className="text-foreground/35 hover:text-foreground/70"><VscArrowRight className="size-3" /></Button>
         </TooltipTrigger><TooltipContent side="bottom">Forward</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={() => state.loading ? el.browserStop(convId) : el.browserReload(convId)}>
-            {state.loading ? <VscChromeClose className="size-4" /> : <VscRefresh className="size-4" />}
+          <Button variant="ghost" size="icon-xs" onClick={() => state.loading ? el.browserStop(convId) : el.browserReload(convId)} className="text-foreground/35 hover:text-foreground/70">
+            {state.loading ? <VscChromeClose className="size-3" /> : <VscRefresh className="size-3" />}
           </Button>
         </TooltipTrigger><TooltipContent side="bottom">{state.loading ? 'Stop' : 'Reload'}</TooltipContent></Tooltip>
         <div className="flex-1 relative">
@@ -88,10 +88,10 @@ export default function BrowserPane({ convId }: { convId: string }) {
             onFocus={() => { inputFocused.current = true; (document.activeElement as HTMLInputElement)?.select(); }}
             onBlur={() => { inputFocused.current = false; }}
             onKeyDown={e => e.key === 'Enter' && navigate(inputUrl)}
-            className="w-full bg-popover border border-border rounded-md px-2 py-1 text-xs outline-none text-foreground focus:ring-1 focus:ring-ring" />
+            className="w-full bg-white/4 border border-border/50 rounded px-2 py-0.5 text-xs outline-none text-foreground/70 focus:border-border focus:bg-white/6 transition-colors duration-100" />
         </div>
         <Tooltip><TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={() => setSearchOpen(v => !v)} className={searchOpen ? 'bg-accent text-accent-foreground' : ''}><VscSearch className="size-4" /></Button>
+          <Button variant="ghost" size="icon-xs" onClick={() => setSearchOpen(v => !v)} className={searchOpen ? 'bg-white/8 text-foreground/80' : 'text-foreground/35 hover:text-foreground/70'}><VscSearch className="size-3" /></Button>
         </TooltipTrigger><TooltipContent side="bottom">Find in page</TooltipContent></Tooltip>
       </div>
       {/* Loading bar */}
@@ -102,20 +102,20 @@ export default function BrowserPane({ convId }: { convId: string }) {
       )}
       {/* Find bar */}
       {searchOpen && (
-        <div className="h-9 px-2 border-b flex items-center gap-2 bg-muted/5 shrink-0">
+        <div className="h-8 px-2 border-b border-border/60 flex items-center gap-1.5 bg-sidebar shrink-0">
           <input type="text" placeholder="Find…" value={searchText} autoFocus
             onChange={e => onSearch(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') el.browserFindInPage(convId, searchText, { forward: !e.shiftKey, findNext: true }); }}
-            className="flex-1 bg-popover border border-border rounded-md px-2 py-1 outline-none text-xs" />
-          <span className="text-xs text-muted-foreground shrink-0 w-12 text-right">{searchResult.total > 0 ? `${searchResult.active}/${searchResult.total}` : '0/0'}</span>
+            className="flex-1 bg-white/4 border border-border/50 rounded px-2 py-0.5 outline-none text-xs focus:border-border transition-colors" />
+          <span className="text-[11px] text-foreground/25 shrink-0 w-10 text-right tabular-nums">{searchResult.total > 0 ? `${searchResult.active}/${searchResult.total}` : '0/0'}</span>
           <Tooltip><TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => el.browserFindInPage(convId, searchText, { forward: false, findNext: true })}><VscChevronUp className="size-4" /></Button>
+            <Button variant="ghost" size="icon-xs" onClick={() => el.browserFindInPage(convId, searchText, { forward: false, findNext: true })} className="text-foreground/35 hover:text-foreground/70"><VscChevronUp className="size-3" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">Prev</TooltipContent></Tooltip>
           <Tooltip><TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => el.browserFindInPage(convId, searchText, { forward: true, findNext: true })}><VscChevronDown className="size-4" /></Button>
+            <Button variant="ghost" size="icon-xs" onClick={() => el.browserFindInPage(convId, searchText, { forward: true, findNext: true })} className="text-foreground/35 hover:text-foreground/70"><VscChevronDown className="size-3" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">Next</TooltipContent></Tooltip>
           <Tooltip><TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => { setSearchOpen(false); setSearchText(''); el.browserStopFind(convId); }}><VscChromeClose className="size-4" /></Button>
+            <Button variant="ghost" size="icon-xs" onClick={() => { setSearchOpen(false); setSearchText(''); el.browserStopFind(convId); }} className="text-foreground/35 hover:text-foreground/70"><VscChromeClose className="size-3" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">Close</TooltipContent></Tooltip>
         </div>
       )}

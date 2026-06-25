@@ -18,17 +18,23 @@ import { VscSend, VscDebugStop, VscChromeClose } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
 import tippy, { Instance } from 'tippy.js';
 import 'tippy.js/dist/tippy.css';
+
 const MentionList = ({ items, command, selectedIndex, onHighlight }: any) => {
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }); }, [selectedIndex]);
   return (
-    <div className="bg-popover border border-border rounded-md shadow-md p-1 text-xs z-50 max-h-56 overflow-y-auto w-full flex flex-col gap-0.5 scrollbar-thin">
-      {items.length === 0 ? <div className="px-2 py-1.5 text-muted-foreground text-center">No files found</div> : items.map((item: any, idx: number) => (
-        <button key={item.id} ref={idx === selectedIndex ? activeRef : null} onMouseDown={(e) => { e.preventDefault(); command(item); }} onMouseEnter={() => onHighlight(idx)} className={cn("w-full text-left px-2 py-1.5 rounded-sm flex items-center gap-2 transition-colors outline-hidden text-sm hover:bg-accent hover:text-accent-foreground", idx === selectedIndex ? "bg-accent text-accent-foreground" : "text-popover-foreground")}><span className="shrink-0 size-4 flex items-center justify-center"><FileIcon fileName={item.label} className="size-4" /></span><span className="truncate flex-1 font-mono text-xs">{item.label}</span></button>
+    <div className="bg-popover border border-border rounded-md shadow-lg p-1 text-xs z-50 max-h-52 overflow-y-auto w-full flex flex-col gap-px">
+      {items.length === 0 ? <div className="px-2 py-1.5 text-foreground/40 text-center">No files found</div> : items.map((item: any, idx: number) => (
+        <button key={item.id} ref={idx === selectedIndex ? activeRef : null} onMouseDown={(e) => { e.preventDefault(); command(item); }} onMouseEnter={() => onHighlight(idx)}
+          className={cn("w-full text-left px-2 py-1 rounded-sm flex items-center gap-2 outline-hidden transition-colors text-xs", idx === selectedIndex ? "bg-white/6 text-foreground" : "text-foreground/60 hover:bg-white/4 hover:text-foreground/90")}>
+          <span className="shrink-0 size-3.5 flex items-center justify-center"><FileIcon fileName={item.label} className="size-3.5" /></span>
+          <span className="truncate flex-1 font-mono">{item.label}</span>
+        </button>
       ))}
     </div>
   );
 };
+
 function buildMentionSuggestion() {
   return {
     char: '@',
@@ -61,21 +67,27 @@ function buildMentionSuggestion() {
     },
   };
 }
+
 const MentionNodeView = (props: any) => {
-  const label = props.node.attrs.label ?? props.node.attrs.id, handleClick = (e: any) => {
-    e.preventDefault(); e.stopPropagation();
-    const cId = useConversationsStore.getState().activeConvId; if (cId) useUIStore.getState().openWorkspaceFile(cId, label);
-  };
-  return <NodeViewWrapper as="span" className="inline-flex items-center" onClick={handleClick}><span className="mention font-sans align-middle select-none mx-0.5"><FileIcon fileName={label} className="size-3.5 shrink-0" /><span>{label}</span></span></NodeViewWrapper>;
+  const label = props.node.attrs.label ?? props.node.attrs.id;
+  const handleClick = (e: any) => { e.preventDefault(); e.stopPropagation(); const cId = useConversationsStore.getState().activeConvId; if (cId) useUIStore.getState().openWorkspaceFile(cId, label); };
+  return <NodeViewWrapper as="span" className="inline-flex items-center" onClick={handleClick}><span className="mention font-sans align-middle select-none mx-0.5"><FileIcon fileName={label} className="size-3 shrink-0" /><span>{label}</span></span></NodeViewWrapper>;
 };
+
 export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled, isStreaming }: any) {
-  const submitRef = useRef<any>(null), fileInputRef = useRef<HTMLInputElement>(null), [attachments, setAttachments] = useState<any[]>([]), model = useModelsStore(s => s.models[s.selectedKey] ?? null);
+  const submitRef = useRef<any>(null), fileInputRef = useRef<HTMLInputElement>(null), [attachments, setAttachments] = useState<any[]>([]);
+  const model = useModelsStore(s => s.models[s.selectedKey] ?? null);
   const tokenCount = useConversationsStore(s => s.activeConvId ? s.convs[s.activeConvId]?.tokenCount ?? 0 : 0);
   const contextWindow = model?.contextWindow || 128000;
   const editor = useEditor({
-    extensions: [StarterKit, Placeholder.configure({ placeholder: 'Plan, Build, / for skills, @ for context' }), Mention.extend({ addNodeView() { return ReactNodeViewRenderer(MentionNodeView); } }).configure({ HTMLAttributes: { class: 'mention' }, suggestion: buildMentionSuggestion() }), CharacterCount],
+    extensions: [
+      StarterKit,
+      Placeholder.configure({ placeholder: 'Plan, Build, / for skills, @ for context' }),
+      Mention.extend({ addNodeView() { return ReactNodeViewRenderer(MentionNodeView); } }).configure({ HTMLAttributes: { class: 'mention' }, suggestion: buildMentionSuggestion() }),
+      CharacterCount,
+    ],
     editorProps: {
-      attributes: { class: 'prose prose-invert max-w-none text-sm outline-none min-h-6 max-h-56 overflow-y-auto py-1 px-0' },
+      attributes: { class: 'prose prose-invert max-w-none text-sm outline-none min-h-5 max-h-52 overflow-y-auto py-0.5 px-0 leading-relaxed' },
       handleKeyDown: (_view, event) => { if (event.key === 'Enter' && !event.shiftKey && !document.querySelector('.tippy-box[data-theme~="mention"]')) { event.preventDefault(); submitRef.current?.(); return true; } return false; }
     }
   });
@@ -98,21 +110,44 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
     setAttachments(prev => [...prev, ...loaded]); e.target.value = '';
   };
   return (
-    <div className="border border-border rounded-2xl bg-card px-4 pt-3 pb-3 flex flex-col gap-2">
+    <div className="border border-border/60 rounded-xl bg-card px-3.5 pt-2.5 pb-2.5 flex flex-col gap-1.5 focus-within:border-border transition-colors duration-100">
       <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.md,.csv" multiple className="hidden" onChange={handleFileChange} />
-      {attachments.length > 0 && <div className="flex flex-wrap gap-1.5">{attachments.map((a, i) => <div key={i} className="flex items-center gap-1 bg-muted rounded-md px-2 py-0.5 text-xs max-w-36"><span className="truncate">{a.name}</span><Button type="button" variant="ghost" size="icon-xs" onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-foreground hover:bg-transparent"><VscChromeClose className="size-3" /></Button></div>)}</div>}
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap gap-1">{attachments.map((a, i) => (
+          <div key={i} className="flex items-center gap-1 bg-white/5 border border-border/50 rounded px-2 py-0.5 text-xs max-w-36">
+            <span className="truncate text-foreground/70">{a.name}</span>
+            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} className="text-foreground/30 hover:text-foreground/70 hover:bg-transparent"><VscChromeClose className="size-2.5" /></Button>
+          </div>
+        ))}</div>
+      )}
       <EditorContent editor={editor} />
-      <div className="flex items-center justify-between mt-0.5">
-        <div className="flex items-center gap-2">
-          {model?.multimodal && <Tooltip><TooltipTrigger asChild><Button type="button" id="attach-btn" variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} className="rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-border text-lg font-light">+</Button></TooltipTrigger><TooltipContent side="top">Attach file</TooltipContent></Tooltip>}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          {model?.multimodal && (
+            <Tooltip><TooltipTrigger asChild>
+              <Button type="button" id="attach-btn" variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} className="rounded-full border border-border/50 text-foreground/35 hover:text-foreground/70 hover:border-border text-base font-light leading-none">+</Button>
+            </TooltipTrigger><TooltipContent side="top">Attach file</TooltipContent></Tooltip>
+          )}
           <ModelDropdown />
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           {(() => {
             const pct = Math.min((tokenCount / contextWindow) * 100, 100);
-            return <Tooltip><TooltipTrigger asChild><div className="size-4 flex items-center justify-center cursor-help shrink-0 select-none"><svg className="size-4 -rotate-90" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" className="stroke-muted" strokeWidth="4" /><circle cx="18" cy="18" r="15" fill="none" className={pct > 80 ? 'stroke-destructive' : pct > 60 ? 'stroke-amber-400' : 'stroke-emerald-500'} strokeWidth="4" strokeDasharray="100" strokeDashoffset={100 - pct} pathLength="100" /></svg></div></TooltipTrigger><TooltipContent side="top"><span className="font-mono text-xs">{tokenCount.toLocaleString()} / {contextWindow.toLocaleString()} tokens ({pct.toFixed(1)}%)</span></TooltipContent></Tooltip>;
+            return (
+              <Tooltip><TooltipTrigger asChild>
+                <div className="size-3.5 flex items-center justify-center cursor-help shrink-0 select-none">
+                  <svg className="size-3.5 -rotate-90" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="15" fill="none" className="stroke-white/10" strokeWidth="4" />
+                    <circle cx="18" cy="18" r="15" fill="none" className={pct > 80 ? 'stroke-destructive' : pct > 60 ? 'stroke-amber-400' : 'stroke-emerald-500'} strokeWidth="4" strokeDasharray="100" strokeDashoffset={100 - pct} pathLength="100" />
+                  </svg>
+                </div>
+              </TooltipTrigger><TooltipContent side="top"><span className="font-mono">{tokenCount.toLocaleString()} / {contextWindow.toLocaleString()} tokens ({pct.toFixed(1)}%)</span></TooltipContent></Tooltip>
+            );
           })()}
-          {isStreaming ? <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="destructive" onClick={onStop} className="rounded-full"><VscDebugStop className="size-3.5" /></Button></TooltipTrigger><TooltipContent side="top">Stop generation</TooltipContent></Tooltip> : <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="default" onClick={handleSubmit} disabled={disabled} className="rounded-full"><VscSend className="size-3.5" /></Button></TooltipTrigger><TooltipContent side="top">Send (Enter)</TooltipContent></Tooltip>}
+          {isStreaming
+            ? <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="destructive" onClick={onStop} className="rounded-full size-6"><VscDebugStop className="size-3" /></Button></TooltipTrigger><TooltipContent side="top">Stop</TooltipContent></Tooltip>
+            : <Tooltip><TooltipTrigger asChild><Button type="button" size="icon" variant="default" onClick={handleSubmit} disabled={disabled} className="rounded-full size-6"><VscSend className="size-3" /></Button></TooltipTrigger><TooltipContent side="top">Send (Enter)</TooltipContent></Tooltip>
+          }
         </div>
       </div>
     </div>

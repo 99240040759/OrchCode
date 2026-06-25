@@ -47,41 +47,41 @@ function UserMenu() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full hover:bg-primary/30 shrink-0 overflow-hidden" id="user-menu-btn">
-          <Avatar className="w-5 h-5">
+        <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/6 shrink-0 overflow-hidden" id="user-menu-btn">
+          <Avatar className="size-5">
             <AvatarImage src={user?.avatarUrl} alt="avatar" />
-            <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
+            <AvatarFallback className="text-[10px] bg-primary/15 text-primary font-semibold">{initials}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 p-0">
-        <div className="px-3 py-2 flex items-center gap-2 border-b border-border">
-          <Avatar className="size-7">
+      <DropdownMenuContent align="end" className="w-60 p-0">
+        <div className="px-3 py-2 flex items-center gap-2 border-b border-border/60">
+          <Avatar className="size-6">
             <AvatarImage src={user?.avatarUrl} alt="avatar" />
-            <AvatarFallback className="text-xs bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
+            <AvatarFallback className="text-[10px] bg-primary/15 text-primary font-semibold">{initials}</AvatarFallback>
           </Avatar>
-          <div className="min-w-0"><p className="text-xs font-medium truncate">{user?.email}</p></div>
+          <div className="min-w-0"><p className="text-xs text-foreground/70 truncate">{user?.email}</p></div>
         </div>
         {budget && (
-          <div className="px-3 py-2 border-b border-border">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Monthly Budget</p>
-            <div className="flex justify-between text-xs text-muted-foreground mb-1">
+          <div className="px-3 py-2 border-b border-border/60">
+            <p className="label-xs mb-1.5">Monthly Budget</p>
+            <div className="flex justify-between text-[11px] text-foreground/40 mb-1">
               <span>${budget.cost_usd.toFixed(4)} used</span><span>${budget.limit_usd.toFixed(2)} limit</span>
             </div>
-            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-              <div className={`h-full rounded-full transition-all ${budgetPct > 90 ? 'bg-red-500' : budgetPct > 70 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${budgetPct}%` }} />
+            <div className="h-1 bg-white/6 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all duration-300 ${budgetPct > 90 ? 'bg-destructive' : budgetPct > 70 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${budgetPct}%` }} />
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Remaining: <span className="text-foreground font-mono">${budget.remaining.toFixed(4)}</span> · resets {budget.period}-01</p>
+            <p className="text-[11px] text-foreground/30 mt-1">Remaining: <span className="text-foreground/60 font-mono">${budget.remaining.toFixed(4)}</span> · resets {budget.period}-01</p>
           </div>
         )}
         {stats && (
-          <div className="px-3 py-2 border-b border-border">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Usage</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[{ l: 'Tokens', v: stats.lifetimeTokens.toLocaleString() }, { l: 'Convos', v: stats.conversationCount.toLocaleString() }, { l: 'Messages', v: stats.messageCount.toLocaleString() }].map(s => (
-                <div key={s.l} className="bg-muted/30 rounded p-2 flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground">{s.l}</span>
-                  <span className="font-mono text-xs font-semibold">{s.v}</span>
+          <div className="px-3 py-2 border-b border-border/60">
+            <p className="label-xs mb-1.5">Usage</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[{ l: 'Tokens', v: stats.lifetimeTokens.toLocaleString() }, { l: 'Convos', v: stats.conversationCount.toLocaleString() }, { l: 'Msgs', v: stats.messageCount.toLocaleString() }].map(s => (
+                <div key={s.l} className="bg-white/4 rounded p-1.5 flex flex-col gap-0.5">
+                  <span className="text-[11px] text-foreground/30">{s.l}</span>
+                  <span className="font-mono text-xs text-foreground/70 font-medium">{s.v}</span>
                 </div>
               ))}
             </div>
@@ -89,8 +89,8 @@ function UserMenu() {
         )}
         <div className="p-1">
           <DropdownMenuItem id="signout-menu-item" onSelect={async () => { setOpen(false); await el.signOut(); clearSession(); }}
-            className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer">
-            <VscSignOut className="size-3.5" /> Sign out
+            variant="destructive" className="cursor-pointer">
+            <VscSignOut className="size-3" /> Sign out
           </DropdownMenuItem>
         </div>
       </DropdownMenuContent>
@@ -150,10 +150,10 @@ export default function App() {
                 <ChatPanel key={activeConvId} convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
               )
             ) : (
-              <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                <div className="text-5xl opacity-20">✦</div>
-                <p className="text-sm">Select or create a conversation</p>
-                <p className="text-xs opacity-50">Open a workspace from the sidebar to scope your work</p>
+              <div className="h-full flex flex-col items-center justify-center gap-2">
+                <div className="size-8 rounded-lg bg-white/4 flex items-center justify-center text-foreground/20 text-base mb-1">✦</div>
+                <p className="text-xs text-foreground/40 font-medium">No conversation selected</p>
+                <p className="text-[11px] text-foreground/20">Open the sidebar to start or continue a conversation</p>
               </div>
             )}
           </div>

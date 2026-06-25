@@ -88,6 +88,8 @@
     "zustand": "^5.0.14"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@sentry/electron": "^7.13.0",
     "@vscode/ripgrep": "^1.18.0",
     "better-sqlite3": "^12.11.1",
