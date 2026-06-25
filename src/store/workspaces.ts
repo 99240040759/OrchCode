@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Workspace, Conversation } from '../ipc/types';
 interface WorkspacesStore {
+  loaded: boolean; setLoaded: (val: boolean) => void;
   workspaces: Workspace[]; homeConversations: Conversation[]; wsConversations: Record<string, Conversation[]>;
   setWorkspaces: (ws: Workspace[]) => void; addWorkspace: (ws: Workspace) => void; removeWorkspace: (id: string) => void;
   setHomeConversations: (convs: Conversation[]) => void; setWsConversations: (wsId: string, convs: Conversation[]) => void;
@@ -8,6 +9,7 @@ interface WorkspacesStore {
   updateConversationTitle: (convId: string, title: string) => void;
 }
 export const useWorkspacesStore = create<WorkspacesStore>((set) => ({
+  loaded: false, setLoaded: (val) => set({ loaded: val }),
   workspaces: [], homeConversations: [], wsConversations: {},
   setWorkspaces: (ws) => set({ workspaces: ws }),
   addWorkspace: (ws) => set(s => ({ workspaces: [...s.workspaces, ws] })),

@@ -13,7 +13,7 @@ export default function ModelDropdown() {
     <div className="flex items-center gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button id="model-dropdown-trigger" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground font-mono">
+          <Button id="model-dropdown-trigger" variant="ghost" size="xs" className="text-muted-foreground font-mono">
             <span className="max-w-24 truncate">{model?.name || 'Select model'}</span>
             {model?.badge && <Badge variant="secondary" className="text-xs px-1 py-0 h-4">{model.badge}</Badge>}
             <VscChevronDown className="size-3 shrink-0" />

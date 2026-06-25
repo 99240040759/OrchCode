@@ -9,14 +9,14 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    const style = getComputedStyle(document.documentElement);
+    const style = getComputedStyle(ref.current || document.body);
     const getVar = (name: string) => style.getPropertyValue(name).trim() || undefined;
     const theme: ITheme = {
       background: 'transparent',
       foreground: getVar('--color-foreground'),
       cursor: getVar('--color-primary'),
       cursorAccent: getVar('--color-background'),
-      selectionBackground: 'rgba(255, 255, 255, 0.1)',
+      selectionBackground: 'rgba(255, 255, 255, 0.15)',
       black: getVar('--color-background'),
       red: getVar('--color-destructive'),
       yellow: getVar('--color-primary'),
@@ -24,11 +24,26 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
       brightBlack: getVar('--color-muted-foreground'),
       brightRed: getVar('--color-destructive'),
       brightYellow: getVar('--color-primary'),
-      brightWhite: '#ffffff',
-      green: '#98c379', blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2',
-      brightGreen: '#98c379', brightBlue: '#61afef', brightMagenta: '#c678dd', brightCyan: '#56b6c2',
+      brightWhite: getVar('--color-foreground'),
+      green: getVar('--color-term-green'), 
+      blue: getVar('--color-term-blue'), 
+      magenta: getVar('--color-term-magenta'), 
+      cyan: getVar('--color-term-cyan'),
+      brightGreen: getVar('--color-term-green'), 
+      brightBlue: getVar('--color-term-blue'), 
+      brightMagenta: getVar('--color-term-magenta'), 
+      brightCyan: getVar('--color-term-cyan'),
     };
-    const term = new Terminal({ theme, lineHeight: 1.45, cursorBlink: true, allowTransparency: true, scrollback: 5000, convertEol: true });
+    const term = new Terminal({ 
+      theme, 
+      lineHeight: 1.45, 
+      cursorBlink: true, 
+      allowTransparency: true, 
+      scrollback: 5000, 
+      convertEol: true,
+      fontFamily: getVar('--font-mono') || 'monospace',
+      fontSize: 13
+    });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(ref.current);
@@ -48,5 +63,5 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
     ro.observe(ref.current);
     return () => { active = false; unsub?.(); unsubExit?.(); ro.disconnect(); el.ptyDetach(convId).catch(() => {}); term.dispose(); };
   }, [convId]);
-  return <div ref={ref} className="w-full h-full bg-background py-1.5 px-2 box-border" />;
+  return <div ref={ref} className="w-full h-full bg-background p-4 box-border overflow-hidden" />;
 }

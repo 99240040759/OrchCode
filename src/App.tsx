@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { TitleBar } from '@/components/ui/TitleBar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
@@ -46,19 +47,23 @@ function UserMenu() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-xs" className="w-5 h-5 rounded-full bg-primary/20 hover:bg-primary/30 flex items-center justify-center text-xs font-semibold text-primary shrink-0 select-none overflow-hidden p-0" id="user-menu-btn">
-          {user?.avatarUrl ? <img src={user.avatarUrl} className="w-5 h-5 rounded-full object-cover block" alt="avatar" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} /> : initials}
+        <Button variant="ghost" size="icon" className="rounded-full hover:bg-primary/30 shrink-0 overflow-hidden" id="user-menu-btn">
+          <Avatar className="w-5 h-5">
+            <AvatarImage src={user?.avatarUrl} alt="avatar" />
+            <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
+          </Avatar>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64 p-0">
-        <div className="px-3 py-2.5 flex items-center gap-2.5 border-b border-border">
-          <div className="size-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-semibold text-primary shrink-0 overflow-hidden">
-            {user?.avatarUrl ? <img src={user.avatarUrl} className="size-7 rounded-full object-cover" alt="avatar" /> : initials}
-          </div>
+        <div className="px-3 py-2 flex items-center gap-2 border-b border-border">
+          <Avatar className="size-7">
+            <AvatarImage src={user?.avatarUrl} alt="avatar" />
+            <AvatarFallback className="text-xs bg-primary/20 text-primary font-semibold">{initials}</AvatarFallback>
+          </Avatar>
           <div className="min-w-0"><p className="text-xs font-medium truncate">{user?.email}</p></div>
         </div>
         {budget && (
-          <div className="px-3 py-2.5 border-b border-border">
+          <div className="px-3 py-2 border-b border-border">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Monthly Budget</p>
             <div className="flex justify-between text-xs text-muted-foreground mb-1">
               <span>${budget.cost_usd.toFixed(4)} used</span><span>${budget.limit_usd.toFixed(2)} limit</span>
@@ -70,11 +75,11 @@ function UserMenu() {
           </div>
         )}
         {stats && (
-          <div className="px-3 py-2.5 border-b border-border">
+          <div className="px-3 py-2 border-b border-border">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Usage</p>
             <div className="grid grid-cols-3 gap-2">
               {[{ l: 'Tokens', v: stats.lifetimeTokens.toLocaleString() }, { l: 'Convos', v: stats.conversationCount.toLocaleString() }, { l: 'Messages', v: stats.messageCount.toLocaleString() }].map(s => (
-                <div key={s.l} className="bg-muted/30 rounded p-1.5 flex flex-col gap-0.5">
+                <div key={s.l} className="bg-muted/30 rounded p-2 flex flex-col gap-1">
                   <span className="text-xs text-muted-foreground">{s.l}</span>
                   <span className="font-mono text-xs font-semibold">{s.v}</span>
                 </div>
@@ -118,14 +123,14 @@ export default function App() {
     <TooltipProvider><div className="h-dvh w-dvw flex items-center justify-center bg-background"><Spinner className="size-5" /></div></TooltipProvider>
   );
   if (hash === '#onboarding' || !isLoggedIn) return (
-    <TooltipProvider><div className="h-dvh w-dvw flex flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
+    <TooltipProvider><div className="h-dvh w-dvw flex flex-col bg-background text-foreground font-sans overflow-hidden select-none">
       <TitleBar title="Welcome to Orch Code" />
       <div className="flex-1 overflow-hidden"><Onboarding /></div>
     </div></TooltipProvider>
   );
   return (
     <TooltipProvider>
-      <div className="flex h-dvh w-dvw flex-col bg-background text-foreground font-sans antialiased overflow-hidden select-none">
+      <div className="flex h-dvh w-dvw flex-col bg-background text-foreground font-sans overflow-hidden select-none">
         <TitleBar title="Orch Code" onToggleLeftSidebar={() => setSidebarOpen(!sidebarOpen)} onToggleRightSidebar={() => activeConvId && setArtifactOpen(activeConvId, !artifactOpen)} rightSlot={<UserMenu />} />
         <div className="flex-1 flex w-full overflow-hidden">
           {sidebarOpen && <Sidebar />}
@@ -136,13 +141,13 @@ export default function App() {
               artifactOpen ? (
                 <ResizablePanelGroup orientation="horizontal">
                   <ResizablePanel defaultSize="40%" minSize="25%" maxSize="75%">
-                    <ChatPanel convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
+                    <ChatPanel key={activeConvId} convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
                   </ResizablePanel>
                   <ResizableHandle />
                   <ResizablePanel minSize="25%"><ArtifactPanel /></ResizablePanel>
                 </ResizablePanelGroup>
               ) : (
-                <ChatPanel convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
+                <ChatPanel key={activeConvId} convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
               )
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">

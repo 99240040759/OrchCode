@@ -29,14 +29,23 @@ export async function loadSession(): Promise<StoredSession | null> {
   } catch { return null; }
 }
 export async function clearSession(): Promise<void> { try { fs.unlinkSync(sessionPath()); } catch {} }
+let refreshPromise: Promise<StoredSession | null> | null = null;
 async function refreshIfExpired(stored: StoredSession): Promise<StoredSession | null> {
   if (stored.expiresAt - Math.floor(Date.now() / 1000) > 60) return stored;
-  console.log('[Auth] Refreshing expired token...');
-  const { data, error } = await supabase.auth.refreshSession({ refresh_token: stored.refreshToken });
-  if (error || !data.session) { await clearSession(); return null; }
-  console.log('[Auth] Token refreshed OK');
-  const fresh: StoredSession = { ...stored, accessToken: data.session.access_token, refreshToken: data.session.refresh_token!, expiresAt: data.session.expires_at! };
-  await saveSession(fresh); return fresh;
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      console.log('[Auth] Refreshing expired token...');
+      const { data, error } = await supabase.auth.refreshSession({ refresh_token: stored.refreshToken });
+      if (error || !data.session) { await clearSession(); return null; }
+      console.log('[Auth] Token refreshed OK');
+      const fresh: StoredSession = { ...stored, accessToken: data.session.access_token, refreshToken: data.session.refresh_token!, expiresAt: data.session.expires_at! };
+      await saveSession(fresh); return fresh;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
 }
 export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('auth:loadSession', async () => { const s = await loadSession(); return s ? refreshIfExpired(s) : null; });

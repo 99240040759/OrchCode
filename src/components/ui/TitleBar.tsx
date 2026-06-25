@@ -20,8 +20,7 @@ function UpdateButton() {
   if (status === 'ready' && !isMac) return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="secondary" size="sm" onClick={() => el.updateQuitAndInstall()}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 h-auto font-medium">
+        <Button variant="secondary" size="xs" onClick={() => el.updateQuitAndInstall()}>
           <VscCloudDownload className="size-3.5 shrink-0" />
           <span>Restart & Update</span>
         </Button>
@@ -32,8 +31,7 @@ function UpdateButton() {
   if (status === 'available' && isMac) return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="secondary" size="sm" onClick={() => el.updateOpenReleases()}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 h-auto font-medium">
+        <Button variant="secondary" size="xs" onClick={() => el.updateOpenReleases()}>
           <VscCloudDownload className="size-3.5 shrink-0" />
           <span>Update v{info}</span>
         </Button>
@@ -61,16 +59,16 @@ export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSide
       <title>OrchCode - {displayTitle}</title>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         {onToggleLeftSidebar && (
-          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={onToggleLeftSidebar} className="text-muted-foreground"><FluentSidebarLeft className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Left Sidebar</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={onToggleLeftSidebar} className="text-muted-foreground"><FluentSidebarLeft className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Left Sidebar</TooltipContent></Tooltip>
         )}
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" disabled={currentIndex <= 0} onClick={() => currentIndex > 0 && selectConvHelper(allConvs[currentIndex - 1].id, allConvs[currentIndex - 1].workspaceId)} className="text-muted-foreground"><IoArrowBack className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Previous Conversation</TooltipContent></Tooltip>
-        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" disabled={currentIndex === -1 || currentIndex >= allConvs.length - 1} onClick={() => currentIndex !== -1 && currentIndex < allConvs.length - 1 && selectConvHelper(allConvs[currentIndex + 1].id, allConvs[currentIndex + 1].workspaceId)} className="text-muted-foreground"><IoArrowForward className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Next Conversation</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" disabled={currentIndex <= 0} onClick={() => currentIndex > 0 && selectConvHelper(allConvs[currentIndex - 1].id, allConvs[currentIndex - 1].workspaceId)} className="text-muted-foreground"><IoArrowBack className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Previous Conversation</TooltipContent></Tooltip>
+        <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" disabled={currentIndex === -1 || currentIndex >= allConvs.length - 1} onClick={() => currentIndex !== -1 && currentIndex < allConvs.length - 1 && selectConvHelper(allConvs[currentIndex + 1].id, allConvs[currentIndex + 1].workspaceId)} className="text-muted-foreground"><IoArrowForward className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Next Conversation</TooltipContent></Tooltip>
       </div>
       <div className="absolute left-1/2 -translate-x-1/2 text-muted-foreground truncate max-w-sm text-center">{displayTitle}</div>
       <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
         <UpdateButton />
         {onToggleRightSidebar && (
-          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={onToggleRightSidebar} className="text-muted-foreground"><FluentSidebarRight className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Right Sidebar</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={onToggleRightSidebar} className="text-muted-foreground"><FluentSidebarRight className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Toggle Right Sidebar</TooltipContent></Tooltip>
         )}
         {rightSlot}
       </div>

@@ -30,7 +30,10 @@ const createWindow = () => {
     backgroundColor: '#1e1e1e', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false },
   });
-  mainWindow.webContents.on('will-navigate', (e, u) => { const x = new URL(u); if (x.hostname !== 'localhost' && x.hostname !== '127.0.0.1' && x.protocol !== 'file:') { e.preventDefault(); shell.openExternal(u); } });
+  mainWindow.webContents.on('will-navigate', (e, u) => { 
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && u.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
+    e.preventDefault(); shell.openExternal(u); 
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
