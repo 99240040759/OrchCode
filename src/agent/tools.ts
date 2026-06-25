@@ -1,10 +1,11 @@
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { zodFunction } from 'openai/helpers/zod';
 import { execa } from 'execa';
 import { rgPath } from '@vscode/ripgrep';
 import { computeDiff } from './diff';
+import { secureResolve } from '../lib/securePath';
 const SKILLS_DIR = path.join(__dirname, '..', 'src', 'agent', 'skills');
 const SKILLS_DIR_ALT = path.join(__dirname, 'skills');
 // ── Zod schemas for tool parameters ──────────────────────────────────────────
@@ -79,7 +80,7 @@ const CMD_TIMEOUT = 30_000;
 type GcpConfig = { gcpBase: string; jwt: string; anonKey: string };
 export async function executeTool(name: string, args: Record<string, any>, workspacePath: string | null, gcpConfig?: GcpConfig): Promise<{ result: string; meta: Record<string, any> }> {
   const cwd = workspacePath || process.cwd();
-  const resolvePath = (p: string) => { const fp = path.isAbsolute(p) ? p : path.join(cwd, p); if (workspacePath && path.relative(workspacePath, fp).startsWith('..')) throw new Error('Access Denied'); return fp; };
+  const resolvePath = (p: string) => workspacePath ? secureResolve(workspacePath, p) : (path.isAbsolute(p) ? p : path.join(cwd, p));
   switch (name) {
     case 'read_file': {
       const { path: fp, start_line, end_line } = ReadFileParams.parse(args);

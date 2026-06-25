@@ -21,7 +21,7 @@ export default function FileDiffViewer({ filePath, original, modified, hasDiff, 
       <div className="h-9 min-h-9 max-h-9 px-3 border-b text-xs text-muted-foreground flex items-center justify-between shrink-0 bg-muted/5">
         <div className="flex items-center gap-1.5 overflow-hidden"><FileBreadcrumb filePath={filePath} /></div>
         <div className="flex items-center gap-3 shrink-0 select-none">
-          <div className="flex items-center gap-2 font-mono text-xs">
+          <div className="flex items-center gap-2 font-mono text-[11px]">
             <span className="text-green-400">+{diff.added}</span>
             <span className="text-red-400">-{diff.removed}</span>
           </div>
@@ -32,7 +32,7 @@ export default function FileDiffViewer({ filePath, original, modified, hasDiff, 
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" onClick={handleCopy} className="text-muted-foreground cursor-pointer">{copied ? <IoCheckmark className="size-4 text-green-400" /> : <FluentFiles className="size-4" />}</Button></TooltipTrigger><TooltipContent side="bottom">{copied ? "Copied" : "Copy Modified Content"}</TooltipContent></Tooltip>
         </div>
       </div>
-      <div className="flex-1 min-h-0 pl-3 pt-3">
+      <div className="flex-1 min-h-0">
         <DiffEditor height="100%" original={original} modified={modified} language={lang} theme="orchTheme" options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, scrollBeyondLastLine: false, wordWrap: 'on', lineDecorationsWidth: 6, lineNumbersMinChars: 3, folding: false, renderLineHighlight: 'none' }} onMount={editor => editorRef.current = editor} />
       </div>
     </div>

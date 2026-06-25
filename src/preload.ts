@@ -52,6 +52,7 @@ const api = {
   browserFindInPage: (convId: string, text: string, opts?: { forward?: boolean; findNext?: boolean }): Promise<void> => ipcRenderer.invoke('browser:findInPage', { convId, text, opts }),
   browserStopFind: (convId: string): Promise<void> => ipcRenderer.invoke('browser:stopFind', convId),
   onBrowserState: (cb: (state: BrowserState) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, state: BrowserState) => cb(state); ipcRenderer.on('browser:state', h); return () => ipcRenderer.removeListener('browser:state', h); },
+  onBrowserFindResult: (cb: (convId: string, active: number, total: number) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, data: any) => cb(data.convId, data.active, data.total); ipcRenderer.on('browser:find-result', h); return () => ipcRenderer.removeListener('browser:find-result', h); },
   // ─── PTY ───
   ptyEnsure: (convId: string, cwd?: string): Promise<void> => ipcRenderer.invoke('pty:ensure', { convId, cwd }),
   ptyAttach: (convId: string, cols: number, rows: number): Promise<string> => ipcRenderer.invoke('pty:attach', { convId, cols, rows }),

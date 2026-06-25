@@ -63,7 +63,7 @@ export default function Sidebar() {
     const c: Conversation = { id: nanoid(), workspaceId: wId, title: 'New Conversation', createdAt: Date.now(), updatedAt: Date.now() };
     addConversation(c); initConv(c.id, wId, []); setActiveConv(c.id); el.createConversation(c).catch(console.error);
   };
-  const deleteConv = async (c: Conversation) => { await el.deleteConversation(c.id); removeConversation(c.id, c.workspaceId); removeConv(c.id); removeConvUI(c.id); el.browserDestroy(c.id).catch(() => {}); el.ptyKill(c.id).catch(() => {}); };
+  const deleteConv = async (c: Conversation) => { await el.deleteConversation(c.id); removeConversation(c.id, c.workspaceId); removeConv(c.id); removeConvUI(c.id); };
   const deleteWorkspace = async (w: Workspace) => { await el.deleteWorkspace(w.id); removeWorkspace(w.id); };
   const openWorkspace = async () => { const w = await el.openWorkspaceDialog(); if (w) { addWorkspace(w); setWsConversations(w.id, []); } };
   const filterConvs = (list: Conversation[]) => filterText ? list.filter(c => c.title.toLowerCase().includes(filterText.toLowerCase())) : list;

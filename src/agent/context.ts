@@ -4,6 +4,7 @@ import { getEncoding } from 'js-tiktoken';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 import type { HistoryMessage, HistoryPart } from '../ipc/types';
+import { secureResolve } from '../lib/securePath';
 const enc = getEncoding('cl100k_base');
 export const countText = (t: string): number => enc.encode(t || '').length;
 export const extractModelName = (modelId: string) => modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
@@ -20,8 +21,7 @@ export function countHistory(history: HistoryMessage[]): number {
 const MENTION_MAX = 24_000;
 function readMention(workspacePath: string | null, rel: string): string {
   try {
-    const fp = path.isAbsolute(rel) ? rel : path.join(workspacePath || process.cwd(), rel);
-    if (workspacePath && path.relative(workspacePath, fp).startsWith('..')) return `[mention ${rel}: access denied]`;
+    const fp = workspacePath ? secureResolve(workspacePath, rel) : (path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel));
     const raw = readFileSync(fp, 'utf8');
     return raw.length > MENTION_MAX ? raw.slice(0, MENTION_MAX) + '\n…[truncated]' : raw;
   } catch (e: any) { return `[mention ${rel}: ${e.message}]`; }

@@ -62,16 +62,16 @@ function buildMentionSuggestion() {
   };
 }
 const MentionNodeView = (props: any) => {
-  const label = props.node.attrs.label ?? props.node.attrs.id, handleClick = async (e: any) => {
+  const label = props.node.attrs.label ?? props.node.attrs.id, handleClick = (e: any) => {
     e.preventDefault(); e.stopPropagation();
-    const cId = useConversationsStore.getState().activeConvId; if (!cId) return;
-    const conv = useConversationsStore.getState().convs[cId], ws = useWorkspacesStore.getState().workspaces.find(w => w.id === conv?.workspaceId);
-    if (ws) { const c = await el.readWorkspaceFile(ws.path, label); useUIStore.getState().openFileViewer(cId, label, c, 1, c.split('\n').length); }
+    const cId = useConversationsStore.getState().activeConvId; if (cId) useUIStore.getState().openWorkspaceFile(cId, label);
   };
-  return <NodeViewWrapper as="span" className="inline-flex items-center" onClick={handleClick}><span className="px-1.5 py-0.5 bg-accent text-accent-foreground rounded-md inline-flex items-center gap-1 font-mono text-xs cursor-pointer transition-colors align-middle select-none mx-0.5"><FileIcon fileName={label} className="size-3.5 shrink-0" /><span>{label}</span></span></NodeViewWrapper>;
+  return <NodeViewWrapper as="span" className="inline-flex items-center" onClick={handleClick}><span className="mention font-sans align-middle select-none mx-0.5"><FileIcon fileName={label} className="size-3.5 shrink-0" /><span>{label}</span></span></NodeViewWrapper>;
 };
-export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled, isStreaming, tokenCount = 0, contextWindow = 128000 }: any) {
+export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled, isStreaming }: any) {
   const submitRef = useRef<any>(null), fileInputRef = useRef<HTMLInputElement>(null), [attachments, setAttachments] = useState<any[]>([]), model = useModelsStore(s => s.models[s.selectedKey] ?? null);
+  const tokenCount = useConversationsStore(s => s.activeConvId ? s.convs[s.activeConvId]?.tokenCount ?? 0 : 0);
+  const contextWindow = model?.contextWindow || 128000;
   const editor = useEditor({
     extensions: [StarterKit, Placeholder.configure({ placeholder: 'Plan, Build, / for skills, @ for context' }), Mention.extend({ addNodeView() { return ReactNodeViewRenderer(MentionNodeView); } }).configure({ HTMLAttributes: { class: 'mention' }, suggestion: buildMentionSuggestion() }), CharacterCount],
     editorProps: {
@@ -94,7 +94,7 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
   submitRef.current = handleSubmit;
   const handleFileChange = async (e: any) => {
     const files = Array.from(e.target.files || []);
-    const loaded: any[] = await Promise.all(files.map(f => new Promise<any>((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, dataUrl: r.result as string, mimeType: f.type }); r.readAsDataURL(f); })));
+    const loaded: any[] = await Promise.all(files.map((f: any) => new Promise<any>((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, dataUrl: r.result as string, mimeType: f.type }); r.readAsDataURL(f); })));
     setAttachments(prev => [...prev, ...loaded]); e.target.value = '';
   };
   return (

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { useConversationsStore } from '@/store/conversations';
-import { useModelsStore } from '@/store/models';
 import MessageBubble from './MessageBubble';
 import TiptapInput from './TiptapInput';
 import { sendMessage, stopAgent, type EditorPart, type Attachment } from '@/lib/agentService';
@@ -18,11 +17,8 @@ function ThinkingIndicator() {
 }
 export default function ChatPanel({ convId, workspacePath, compact }: { convId: string; workspaceId: string | null; workspacePath: string | null; compact?: boolean }) {
   const conv = useConversationsStore(s => s.convs[convId]);
-  const selectedModel = useModelsStore(s => s.models[s.selectedKey] ?? null);
   const messages = conv?.messages || [];
   const busy = conv?.status === 'busy';
-  const tokenCount = conv?.tokenCount || 0;
-  const contextWindow = selectedModel?.contextWindow || 128000;
   const last = messages[messages.length - 1];
   const showThinking = busy && (!last || last.role !== 'assistant' || last.parts.length === 0);
   const isEmpty = messages.length === 0 && !busy;
@@ -36,7 +32,7 @@ export default function ChatPanel({ convId, workspacePath, compact }: { convId: 
     pinned.current = true;
     sendMessage(convId, workspacePath, parts, attachments);
   };
-  const inputBar = <TiptapInput key={convId} onSubmit={handleSend} onStop={() => stopAgent(convId)} workspacePath={workspacePath} disabled={busy} isStreaming={busy} tokenCount={tokenCount} contextWindow={contextWindow} />;
+  const inputBar = <TiptapInput key={convId} onSubmit={handleSend} onStop={() => stopAgent(convId)} workspacePath={workspacePath} disabled={busy} isStreaming={busy} />;
   if (compact) return <div className="px-3 py-2">{inputBar}</div>;
   if (isEmpty) return (
     <div className="h-full flex flex-col items-center justify-center bg-background">

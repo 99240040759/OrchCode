@@ -40,10 +40,11 @@ function CodeBlock({ language, children }: { language: string; children: string 
 const mdComponents: any = {
   pre({ children, ...props }: any) {
     const codeElement = children;
-    const className = codeElement?.props?.className;
-    const match = /language-(\w+)/.exec(className || '');
-    if (match) {
-      return <CodeBlock language={match[1]}>{String(codeElement.props.children).replace(/\n$/, '')}</CodeBlock>;
+    const isCode = codeElement?.type === 'code';
+    const className = codeElement?.props?.className || '';
+    const match = /language-(\w+)/.exec(className);
+    if (isCode || match) {
+      return <CodeBlock language={match ? match[1] : 'text'}>{String(codeElement?.props?.children || '').replace(/\n$/, '')}</CodeBlock>;
     }
     return <pre {...props}>{children}</pre>;
   },

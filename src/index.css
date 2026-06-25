@@ -79,7 +79,8 @@ button, [role="button"], select, summary, [type="button"], [type="submit"], [typ
 .prose-chat blockquote { border-left-width: 3px; padding-left: 0.9em; font-style: normal; }
 .prose-chat hr { margin-top: 1em; margin-bottom: 1em; }
 /* TipTap editor overrides */
-.mention { background: hsl(42 53% 83% / 0.2); color: hsl(42 53% 83%); border-radius: 4px; padding: 0 4px; font-size: 0.8em; }
+.mention { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--color-accent-foreground); border-radius: 9999px; padding: 2px 10px; font-size: 13px; font-weight: 500; border: none; transition: background 120ms ease; cursor: pointer; }
+.mention:hover { background: rgba(255, 255, 255, 0.15); }
 .ProseMirror p.is-editor-empty:first-child::before { color: hsl(0 0% 40%); content: attr(data-placeholder); float: left; pointer-events: none; height: 0; }
 .tippy-box[data-theme~='mention'] { background-color: transparent !important; box-shadow: none !important; border: none !important; }
 .tippy-box[data-theme~='mention'] .tippy-content { padding: 0 !important; }

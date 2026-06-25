@@ -1,9 +1,8 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import path from 'path';
 import fs from 'fs';
-const env = { ...loadEnv('', process.cwd(), ''), ...process.env };
-const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'GCP_FUNCTIONS_URL', 'SENTRY_DSN'];
-if (env.CI) { for (const k of required) if (!env[k]) throw new Error(`Missing required env var: ${k}`); }
+import { validateEnv } from './vite.env';
+const env = validateEnv();
 export default defineConfig({
   resolve: { alias: { '@': path.resolve(__dirname, './src'), 'tslib': path.resolve(__dirname, 'node_modules/tslib/tslib.es6.js') } },
   define: {

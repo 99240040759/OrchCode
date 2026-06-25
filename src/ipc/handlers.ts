@@ -6,7 +6,9 @@ import { nanoid } from 'nanoid';
 import { q } from '../db/queries';
 import { registerAuthHandlers } from '../auth';
 import { quitAndInstall, openReleasesPage, checkForUpdate } from '../main';
+import { buildHistoryMessages } from './types';
 import type { Workspace, Conversation, AgentRunConfig, AgentEvent, HistoryMessage, HistoryPart, DBMessage, DBPart, DBArtifact } from './types';
+import { secureResolve } from '../lib/securePath';
 const now = () => Date.now();
 // ─── Agent runtime state (main is the single authority) ─────────────────────
 type Proc = ReturnType<typeof utilityProcess.fork>;
@@ -54,17 +56,7 @@ function persistAndForward(convId: string, ev: AgentEvent) {
   send('agent:event', convId, ev);
 }
 function buildHistory(convId: string): HistoryMessage[] {
-  const msgs = q.getMessages(convId), parts = q.getParts(convId), arts = new Map(q.getArtifacts(convId).map(a => [a.id, a]));
-  const byMsg = new Map<string, DBPart[]>();
-  for (const p of parts) { const a = byMsg.get(p.messageId) || []; a.push(p); byMsg.set(p.messageId, a); }
-  return msgs.map(m => ({
-    message: m,
-    parts: (byMsg.get(m.id) || []).sort((a, b) => a.seq - b.seq).map(p => {
-      const hp: HistoryPart = { ...p };
-      if ((p.type === 'image' || p.type === 'file') && p.artifactId) { const a = arts.get(p.artifactId); if (a) hp.dataUrl = `data:${a.mime};base64,${a.data}`; }
-      return hp;
-    }),
-  }));
+  return buildHistoryMessages(q.getMessages(convId), q.getParts(convId), q.getArtifacts(convId));
 }
 function getWorker(convId: string): WorkerBox {
   const existing = workers.get(convId);
@@ -145,9 +137,7 @@ export function registerHandlers() {
     return files.slice(0, 30);
   });
   ipcMain.handle('workspace:readFile', (_, { dirPath, filePath }: { dirPath: string; filePath: string }) => {
-    const fp = path.isAbsolute(filePath) ? filePath : path.join(dirPath, filePath);
-    if (path.relative(dirPath, fp).startsWith('..')) throw new Error('Access Denied');
-    try { return fs.readFileSync(fp, 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
+    try { return fs.readFileSync(secureResolve(dirPath, filePath), 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
   });
   // ─── Agent ───
   ipcMain.handle('agent:send', (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {
@@ -208,6 +198,7 @@ function getBrowserView(convId: string): WebContentsView {
   view.setBackgroundColor('#1e1e1e');
   view.webContents.setBackgroundThrottling(false);
   for (const ev of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated']) view.webContents.on(ev as any, () => sendBrowserState(convId));
+  view.webContents.on('found-in-page', (_, r) => send('browser:find-result', { convId, active: r.activeMatchOrdinal, total: r.matches }));
   view.webContents.loadURL('https://www.google.com');
   convBrowserViews.set(convId, view);
   return view;

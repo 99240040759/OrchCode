@@ -29,6 +29,10 @@ export default function BrowserPane({ convId }: { convId: string }) {
       if (s.convId !== convId) return;
       setState(s);
     });
+    // Listen for find-in-page results
+    const cleanupFind = el.onBrowserFindResult?.((cId, active, total) => {
+      if (cId === convId) setSearchResult({ active, total });
+    });
     // Track resize — repositions the view
     const ro = new ResizeObserver(updateBounds);
     ro.observe(containerRef.current);
@@ -37,6 +41,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
     return () => {
       el.browserHide();
       cleanup();
+      cleanupFind?.();
       ro.disconnect();
       window.removeEventListener('resize', updateBounds);
     };

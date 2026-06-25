@@ -1,4 +1,5 @@
 import { useUIStore } from '@/store/ui';
+import path from 'path-browserify';
 import { useConversationsStore } from '@/store/conversations';
 import { useWorkspacesStore } from '@/store/workspaces';
 import FileViewer from './FileViewer';
@@ -39,7 +40,7 @@ export default function ArtifactPanel() {
             <TabsTrigger key={tab.id} value={tab.id} className="group">
               <span className="relative size-4 shrink-0 cursor-pointer" onClick={e => { e.stopPropagation(); closeTab(activeConvId, tab.id); }}>
                 <span className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0">
-                  {tab.type === 'image' || tab.content?.startsWith('data:image') ? <VscSymbolColor className="size-4" /> : <FileIcon fileName={tab.path.split('/').pop() || tab.path} className="size-4" />}
+                  {tab.type === 'image' || tab.content?.startsWith('data:image') ? <VscSymbolColor className="size-4" /> : <FileIcon fileName={path.basename(tab.path.replace(/\\/g, '/'))} className="size-4" />}
                 </span>
                 <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground">
                   <VscChromeClose className="size-3" />

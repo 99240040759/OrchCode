@@ -2,15 +2,37 @@ import { Fragment } from 'react';
 import { FileIcon } from '@/components/ui/FileIcon';
 import { FluentFolder } from '@react-symbols/icons';
 import { useWorkspacesStore } from '@/store/workspaces';
+import { useConversationsStore } from '@/store/conversations';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbSeparator, BreadcrumbPage } from '@/components/ui/breadcrumb';
+import path from 'path-browserify';
+
 export function FileBreadcrumb({ filePath }: { filePath: string }) {
   const workspaces = useWorkspacesStore(s => s.workspaces);
-  const activeWs = workspaces.find(w => filePath.startsWith(w.path));
-  const displayPath = activeWs ? filePath.slice(activeWs.path.length).replace(/^\//, '') : filePath;
+  const activeConvId = useConversationsStore(s => s.activeConvId);
+  const conv = useConversationsStore(s => activeConvId ? s.convs[activeConvId] : null);
+  const wsId = conv?.workspaceId;
+
+  const normFile = filePath.replace(/\\/g, '/');
+  const isAbs = normFile.startsWith('/') || /^[a-zA-Z]:/.test(normFile);
+
+  const activeWs = workspaces.find(w => {
+    if (!isAbs) return wsId ? w.id === wsId : true;
+    const normWs = w.path.replace(/\\/g, '/');
+    return normFile.toLowerCase().startsWith(normWs.toLowerCase());
+  });
+
+  let displayPath = normFile;
+  if (activeWs && isAbs) {
+    const normWs = activeWs.path.replace(/\\/g, '/');
+    displayPath = path.relative(normWs, normFile);
+  }
+
   const parts = displayPath.split('/').filter(Boolean);
+  if (activeWs) parts.unshift(activeWs.name);
+
   return (
-    <Breadcrumb className="truncate select-none font-mono text-xs">
-      <BreadcrumbList className="flex-nowrap gap-1">
+    <Breadcrumb className="select-none font-mono text-xs">
+      <BreadcrumbList className="flex-wrap gap-1">
         {parts.map((p, idx) => {
           const isLast = idx === parts.length - 1;
           return (

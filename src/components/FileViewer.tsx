@@ -39,9 +39,9 @@ export default function FileViewer({ filePath, content, startLine, endLine, hasD
         </div>
       </div>
       <style>{`.monaco-highlight-line { background: hsl(42 53% 83% / 0.08) !important; } .monaco-highlight-line-margin { border-left: 2px solid hsl(42 53% 83%); }`}</style>
-      <div className="flex-1 min-h-0 pl-3 pt-3 overflow-y-auto">
+      <div className="flex-1 min-h-0 relative">
         {filePath.toLowerCase().endsWith('.md') ? (
-          <div className="pr-3 pb-3 max-w-4xl">
+          <div className="absolute inset-0 overflow-y-auto p-4 max-w-4xl">
             <Markdown text={content} />
           </div>
         ) : (

@@ -102,7 +102,7 @@ export default function App() {
   const { setSession, clearSession, isLoggedIn } = useAuthStore();
   const setModels = useModelsStore(s => s.setModels);
   const [authChecked, setAuthChecked] = useState(false);
-  const { sidebarOpen, setSidebarOpen, setArtifactOpen } = useUIStore();
+  const sidebarOpen = useUIStore(s => s.sidebarOpen), setSidebarOpen = useUIStore(s => s.setSidebarOpen), setArtifactOpen = useUIStore(s => s.setArtifactOpen);
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const conv = useConversationsStore(s => s.activeConvId ? s.convs[s.activeConvId] : undefined);
   // Narrow selector — only re-renders when THIS conv's UI changes

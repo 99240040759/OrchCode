@@ -66,3 +66,16 @@ export type AgentEvent =
   | { type: 'title'; title: string }
   | { type: 'tokens'; count: number }
   | { type: 'compacted'; summaryMessage: DBMessage; summaryPart: DBPart; compactedIds: string[] };
+export function buildHistoryMessages(messages: DBMessage[], parts: DBPart[], artifacts: DBArtifact[]): HistoryMessage[] {
+  const arts = new Map(artifacts.map(a => [a.id, a]));
+  const byMsg = new Map<string, DBPart[]>();
+  for (const p of parts) { const a = byMsg.get(p.messageId) || []; a.push(p); byMsg.set(p.messageId, a); }
+  return messages.map(m => ({
+    message: m,
+    parts: (byMsg.get(m.id) || []).sort((a, b) => a.seq - b.seq).map(p => {
+      const hp: HistoryPart = { ...p };
+      if ((p.type === 'image' || p.type === 'file') && p.artifactId) { const a = arts.get(p.artifactId); if (a) hp.dataUrl = `data:${a.mime};base64,${a.data}`; }
+      return hp;
+    }),
+  }));
+}
