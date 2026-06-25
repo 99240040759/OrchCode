@@ -17,10 +17,10 @@ export default function FileDiffViewer({ filePath, original, modified }: { fileP
   const handleCopy = () => { navigator.clipboard.writeText(modified); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      <div className="h-9 min-h-[36px] max-h-[36px] px-3 border-b text-sm text-muted-foreground flex items-center justify-between shrink-0 bg-muted/5">
+      <div className="h-9 min-h-9 max-h-9 px-3 border-b text-xs text-muted-foreground flex items-center justify-between shrink-0 bg-muted/5">
         <div className="flex items-center gap-1.5 overflow-hidden"><FileBreadcrumb filePath={filePath} /></div>
         <div className="flex items-center gap-3 shrink-0 select-none">
-          <div className="flex items-center gap-2 font-mono text-micro">
+          <div className="flex items-center gap-2 font-mono text-xs">
             <span className="text-green-400">+{diff.added}</span>
             <span className="text-red-400">-{diff.removed}</span>
           </div>
@@ -29,7 +29,7 @@ export default function FileDiffViewer({ filePath, original, modified }: { fileP
         </div>
       </div>
       <div className="flex-1 min-h-0 pl-3 pt-3">
-        <DiffEditor height="100%" original={original} modified={modified} language={lang} theme="vs-dark" options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 14, fontFamily: 'var(--font-mono)', wordWrap: 'on', lineDecorationsWidth: 6, lineNumbersMinChars: 3, folding: false, renderLineHighlight: 'none' }} onMount={editor => editorRef.current = editor} />
+        <DiffEditor height="100%" original={original} modified={modified} language={lang} theme="vs-dark" options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, scrollBeyondLastLine: false, wordWrap: 'on', lineDecorationsWidth: 6, lineNumbersMinChars: 3, folding: false, renderLineHighlight: 'none' }} onMount={editor => editorRef.current = editor} />
       </div>
     </div>
   );

@@ -1,52 +1,42 @@
 import { nanoid } from 'nanoid';
 import { el } from './electron';
-import { stopFlusher } from './streamFlusher';
+import type { InputPart } from '../preload';
 import { useConversationsStore } from '@/store/conversations';
 import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
-import type { UIMessage } from '@/ipc/types';
-let cachedUserDataPath: string | null = null;
-const getDataPath = async () => { if (!cachedUserDataPath) cachedUserDataPath = await el.getUserDataPath(); return cachedUserDataPath; };
-export async function sendMessage(convId: string, workspacePath: string | null, text: string, attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) {
+import type { UIMessage, UIPart, AgentRunConfig } from '@/ipc/types';
+export type EditorPart = { type: 'text'; text: string } | { type: 'mention'; path: string };
+export type Attachment = { name: string; dataUrl: string; mimeType: string };
+let cachedDataPath: string | null = null;
+const dataPath = async () => (cachedDataPath ??= await el.getUserDataPath());
+export async function sendMessage(convId: string, workspacePath: string | null, editorParts: EditorPart[], attachments: Attachment[] = []) {
   const { accessToken } = useAuthStore.getState();
-  const { models, selectedKey } = useModelsStore.getState();
-  const selectedModel = models[selectedKey] ?? null;
-  if (!accessToken || !selectedModel) return;
-  let content: any = text;
-  if (attachments?.length && selectedModel.multimodal) {
-    const parts: any[] = [];
-    if (text.trim()) parts.push({ type: 'text', text: text.trim() });
-    for (const a of attachments) {
-      if (a.mimeType.startsWith('image/')) parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
-      else parts.push({ type: 'text', text: `[Attached file: ${a.name}]` });
-    }
-    content = parts;
+  const model = useModelsStore.getState().selectedModel();
+  if (!accessToken || !model) return;
+  const allowImages = model.multimodal;
+  // Build persisted input parts + optimistic UI parts (same order)
+  const inputParts: InputPart[] = [];
+  const uiParts: UIPart[] = [];
+  for (const p of editorParts) {
+    if (p.type === 'text' && p.text.trim()) { inputParts.push({ type: 'text', text: p.text }); uiParts.push({ type: 'text', id: nanoid(), text: p.text }); }
+    else if (p.type === 'mention') { inputParts.push({ type: 'mention', path: p.path }); uiParts.push({ type: 'mention', id: nanoid(), path: p.path }); }
   }
-  const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
-  const historySnapshot = useConversationsStore.getState().convs[convId]?.messages || [];
-  const userMsg: UIMessage = { id: nanoid(), convId, role: 'user', parts: [{ type: 'text', text: contentStr }], createdAt: Date.now() };
-  useConversationsStore.getState().addMessage(convId, userMsg);
-  el.writeMessage({ id: userMsg.id, convId, role: 'user', content: contentStr, tokenCount: 0, createdAt: userMsg.createdAt });
-  const userDataPath = await getDataPath();
-  const history = historySnapshot.flatMap(m => {
-    const txt = m.parts.filter(p => p.type === 'text').map(p => (p as any).text).join('\n') || '';
-    const r: any[] = [{ id: m.id, convId, role: m.role, content: txt, tokenCount: 0, createdAt: m.createdAt }];
-    if (m.role === 'assistant') m.parts.forEach(p => p.type === 'tool-call' && r.push({ id: p.id, convId, role: 'tool', content: p.output || '', toolCallId: p.id, tokenCount: 0, createdAt: m.createdAt }));
-    return r;
-  });
-  const agentConfig = {
-    convId, workspacePath, sessionDir: `${userDataPath}/sessions/${convId}`, history,
-    jwt: accessToken, anonKey: el.anonKey, gcpBase: el.gcpBase,
-    modelId: selectedModel.id, provider: selectedModel.provider,
-    contextWindow: selectedModel.contextWindow, reasoningEffort: selectedModel.reasoningEffort,
+  for (const a of attachments) {
+    const isImg = a.mimeType.startsWith('image/');
+    const kind = isImg && allowImages ? 'image' : 'file';
+    inputParts.push({ type: kind, name: a.name, mime: a.mimeType, dataUrl: a.dataUrl });
+    uiParts.push(kind === 'image' ? { type: 'image', id: nanoid(), artifactId: null, mime: a.mimeType, name: a.name, dataUrl: a.dataUrl } : { type: 'file', id: nanoid(), artifactId: null, name: a.name, mime: a.mimeType });
+  }
+  if (!inputParts.length) return;
+  const id = nanoid();
+  const userMsg: UIMessage = { id, convId, role: 'user', status: 'complete', parts: uiParts, createdAt: Date.now() };
+  useConversationsStore.getState().addUserMessage(convId, userMsg);
+  const sessionDir = `${await dataPath()}/sessions/${convId}`;
+  const config: AgentRunConfig = {
+    convId, workspacePath, sessionDir, jwt: accessToken, anonKey: el.anonKey, gcpBase: el.gcpBase,
+    modelId: model.id, provider: model.provider, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort,
   };
-  const agentReady = useConversationsStore.getState().convs[convId]?.agentReady;
-  if (!agentReady) el.spawnAgent(agentConfig);
-  el.sendToAgent(convId, { type: 'send', content: contentStr });
+  const res = await el.agentSend(config, { id, parts: inputParts });
+  if (!res.ok) useConversationsStore.setState(s => ({ convs: { ...s.convs, [convId]: { ...s.convs[convId], status: 'idle' } } }));
 }
-export function stopAgent(convId: string) {
-  el.killAgent(convId);
-  useConversationsStore.getState().cancelStream(convId);
-  stopFlusher(convId);
-  el.removeAgentPort(convId);
-}
+export function stopAgent(convId: string) { el.agentAbort(convId); }

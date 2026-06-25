@@ -65,7 +65,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
       {/* Toolbar */}
-      <div className="h-9 min-h-[36px] px-2 border-b flex items-center gap-1.5 bg-muted/5 shrink-0 select-none">
+      <div className="h-9 min-h-9 px-2 border-b flex items-center gap-1.5 bg-muted/5 shrink-0 select-none">
         <Tooltip><TooltipTrigger asChild>
           <Button variant="ghost" size="icon-xs" disabled={!state.canGoBack} onClick={() => el.browserBack(convId)}><VscArrowLeft className="size-4" /></Button>
         </TooltipTrigger><TooltipContent side="bottom">Back</TooltipContent></Tooltip>
@@ -91,7 +91,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
       </div>
       {/* Loading bar */}
       {state.loading && (
-        <div className="h-[2px] w-full bg-muted/20 shrink-0 overflow-hidden">
+        <div className="h-0.5 w-full bg-muted/20 shrink-0 overflow-hidden">
           <div className="h-full bg-primary" style={{ animation: 'loadbar 1.5s ease-in-out infinite', width: '35%' }} />
         </div>
       )}
@@ -102,7 +102,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
             onChange={e => onSearch(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') el.browserFindInPage(convId, searchText, { forward: !e.shiftKey, findNext: true }); }}
             className="flex-1 bg-neutral-900 border border-border rounded px-2 py-1 outline-none text-xs" />
-          <span className="text-micro text-muted-foreground shrink-0 w-12 text-right">{searchResult.total > 0 ? `${searchResult.active}/${searchResult.total}` : '0/0'}</span>
+          <span className="text-xs text-muted-foreground shrink-0 w-12 text-right">{searchResult.total > 0 ? `${searchResult.active}/${searchResult.total}` : '0/0'}</span>
           <Tooltip><TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" onClick={() => el.browserFindInPage(convId, searchText, { forward: false, findNext: true })}><VscChevronUp className="size-4" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">Prev</TooltipContent></Tooltip>

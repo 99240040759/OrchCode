@@ -20,11 +20,11 @@ function UpdateButton() {
   if (status === 'ready' && !isMac) return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button onClick={() => el.updateQuitAndInstall()}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-foreground/10 hover:bg-foreground/15 text-foreground transition-colors font-medium">
+        <Button variant="secondary" size="sm" onClick={() => el.updateQuitAndInstall()}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1 h-auto font-medium">
           <VscCloudDownload className="size-3.5 shrink-0" />
           <span>Restart & Update</span>
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">{info || 'Update downloaded — click to restart and install'}</TooltipContent>
     </Tooltip>
@@ -32,11 +32,11 @@ function UpdateButton() {
   if (status === 'available' && isMac) return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button onClick={() => el.updateOpenReleases()}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-foreground/10 hover:bg-foreground/15 text-foreground transition-colors font-medium">
+        <Button variant="secondary" size="sm" onClick={() => el.updateOpenReleases()}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1 h-auto font-medium">
           <VscCloudDownload className="size-3.5 shrink-0" />
           <span>Update v{info}</span>
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">Click to open the releases page and download the latest version</TooltipContent>
     </Tooltip>
@@ -57,7 +57,7 @@ export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSide
   const activeConv = allConvs[currentIndex];
   const displayTitle = activeConv ? activeConv.title : title;
   return (
-    <div className={`relative h-[36px] min-h-[36px] max-h-[36px] box-border w-full flex items-center justify-between border-b bg-muted/20 text-xs font-medium select-none [-webkit-app-region:drag] ${isMac ? 'pl-[80px] pr-3' : 'pl-3 pr-[140px]'} ${className}`}>
+    <div className={`relative h-9 min-h-9 max-h-9 box-border w-full flex items-center justify-between border-b bg-muted/20 text-xs font-medium select-none [-webkit-app-region:drag] ${isMac ? 'pl-20 pr-3' : 'pl-3 pr-36'} ${className}`}>
       <title>OrchCode - {displayTitle}</title>
       <div className="flex items-center gap-1 [-webkit-app-region:no-drag]">
         {onToggleLeftSidebar && (
@@ -66,7 +66,7 @@ export function TitleBar({ title = 'Orch Code', className = '', onToggleLeftSide
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" disabled={currentIndex <= 0} onClick={() => currentIndex > 0 && selectConvHelper(allConvs[currentIndex - 1].id, allConvs[currentIndex - 1].workspaceId)} className="text-muted-foreground"><IoArrowBack className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Previous Conversation</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" disabled={currentIndex === -1 || currentIndex >= allConvs.length - 1} onClick={() => currentIndex !== -1 && currentIndex < allConvs.length - 1 && selectConvHelper(allConvs[currentIndex + 1].id, allConvs[currentIndex + 1].workspaceId)} className="text-muted-foreground"><IoArrowForward className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Next Conversation</TooltipContent></Tooltip>
       </div>
-      <div className="absolute left-1/2 -translate-x-1/2 text-muted-foreground truncate max-w-[40%] text-center">{displayTitle}</div>
+      <div className="absolute left-1/2 -translate-x-1/2 text-muted-foreground truncate max-w-sm text-center">{displayTitle}</div>
       <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
         <UpdateButton />
         {onToggleRightSidebar && (

@@ -24,10 +24,10 @@ function timeAgo(ts: number): string {
 function ConvItem({ conv, isActive, isStreaming, onClick, onDelete }: { conv: Conversation; isActive: boolean; isStreaming: boolean; onClick: () => void; onDelete: () => void }) {
   return (
     <div className={`w-full flex items-center group rounded-md transition-all duration-150 ${isActive ? 'bg-accent/80 text-accent-foreground' : 'hover:bg-muted/60 text-muted-foreground hover:text-foreground'}`}>
-      <button onClick={onClick} className="flex-1 text-left pl-7 pr-1 py-[5px] text-mini flex items-center gap-2 min-w-0">
+      <button onClick={onClick} className="flex-1 text-left pl-7 pr-1 py-1 text-xs flex items-center gap-2 min-w-0">
         {isStreaming && <Spinner className="size-3 shrink-0 text-orange-400" />}
         <span className="truncate flex-1">{conv.title}</span>
-        <span className="text-micro text-muted-foreground/50 shrink-0 tabular-nums">{timeAgo(conv.updatedAt)}</span>
+        <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums">{timeAgo(conv.updatedAt)}</span>
       </button>
       <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="px-1.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
         <VscTrash className="size-3" />
@@ -43,17 +43,17 @@ function FolderSection({ label, icon, convs, activeConvId, streamingConvIds, onS
   return (
     <div className="mb-0.5">
       <div className="w-full flex items-center group">
-        <button onClick={() => setOpen(o => !o)} className="flex-1 flex items-center gap-1.5 px-2 py-[5px] text-mini font-medium text-muted-foreground hover:text-foreground transition-colors min-w-0">
-          {open ? <VscFolderOpened className="size-[14px] shrink-0 text-muted-foreground/70" /> : <VscFolder className="size-[14px] shrink-0 text-muted-foreground/70" />}
+        <button onClick={() => setOpen(o => !o)} className="flex-1 flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors min-w-0">
+          {open ? <VscFolderOpened className="size-3.5 shrink-0 text-muted-foreground/70" /> : <VscFolder className="size-3.5 shrink-0 text-muted-foreground/70" />}
           {icon}
           <span className="truncate">{label}</span>
-          <span className="text-micro text-muted-foreground/40 ml-auto shrink-0">{convs.length || ''}</span>
+          <span className="text-xs text-muted-foreground/40 ml-auto shrink-0">{convs.length || ''}</span>
         </button>
         <div className="opacity-0 group-hover:opacity-100 transition-all flex items-center shrink-0 pr-1">{actions}</div>
       </div>
       {open && (
         <div className="flex flex-col gap-px">
-          {convs.length === 0 && <div className="pl-7 py-1 text-micro text-muted-foreground/40 italic">No conversations</div>}
+          {convs.length === 0 && <div className="pl-7 py-1 text-xs text-muted-foreground/40 italic">No conversations</div>}
           {convs.map(c => <ConvItem key={c.id} conv={c} isActive={c.id === activeConvId} isStreaming={streamingConvIds.has(c.id)} onClick={() => onSelectConv(c)} onDelete={() => onDeleteConv(c)} />)}
         </div>
       )}
@@ -65,7 +65,7 @@ export default function Sidebar() {
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const { setActiveConv, initConv, removeConv } = useConversationsStore.getState();
   const { removeConvUI } = useUIStore();
-  const streamingIdsStr = useConversationsStore(s => Object.entries(s.convs).filter(([, c]) => c.isStreaming).map(([id]) => id).join(','));
+  const streamingIdsStr = useConversationsStore(s => Object.entries(s.convs).filter(([, c]) => c.status === 'busy').map(([id]) => id).join(','));
   const streamingConvIds = new Set(streamingIdsStr ? streamingIdsStr.split(',') : []);
   const [filterText, setFilterText] = useState('');
   const [showFilter, setShowFilter] = useState(false);
@@ -99,7 +99,6 @@ export default function Sidebar() {
     removeConversation(conv.id, conv.workspaceId);
     removeConv(conv.id);
     removeConvUI(conv.id);
-    el.removeAgentPort(conv.id);
     el.browserDestroy(conv.id).catch(() => {});
     el.ptyKill(conv.id).catch(() => {});
   };
@@ -107,16 +106,16 @@ export default function Sidebar() {
   const openWorkspace = async () => { const ws = await el.openWorkspaceDialog(); if (!ws) return; addWorkspace(ws); setWsConversations(ws.id, []); };
   const filterConvs = (list: Conversation[]) => filterText ? list.filter(c => c.title.toLowerCase().includes(filterText.toLowerCase())) : list;
   return (
-    <div className="w-[220px] min-w-[220px] h-full flex flex-col border-r bg-muted/5 overflow-hidden">
+    <div className="w-56 min-w-56 h-full flex flex-col border-r bg-muted/5 overflow-hidden">
       {/* Header */}
       <div className="h-9 flex items-center justify-between px-3 border-b shrink-0">
-        <span className="text-mini font-semibold text-muted-foreground tracking-wide">Repositories</span>
+        <span className="text-xs font-semibold text-muted-foreground tracking-wide">Repositories</span>
         <div className="flex items-center gap-0.5">
           <Tooltip><TooltipTrigger asChild>
-            <button onClick={() => setShowFilter(f => !f)} className={`p-1 rounded transition-colors ${showFilter ? 'text-orange-400' : 'text-muted-foreground/60 hover:text-muted-foreground'}`}><VscFilter className="size-3.5" /></button>
+            <Button variant="ghost" size="icon-xs" onClick={() => setShowFilter(f => !f)} className={`h-6 w-6 p-0 ${showFilter ? 'text-orange-400 hover:text-orange-400' : 'text-muted-foreground/60 hover:text-foreground'}`}><VscFilter className="size-3.5" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">Filter</TooltipContent></Tooltip>
           <Tooltip><TooltipTrigger asChild>
-            <button onClick={() => newChat(activeWsId)} className="p-1 rounded text-muted-foreground/60 hover:text-muted-foreground transition-colors"><VscAdd className="size-3.5" /></button>
+            <Button variant="ghost" size="icon-xs" onClick={() => newChat(activeWsId)} className="h-6 w-6 p-0 text-muted-foreground/60 hover:text-foreground"><VscAdd className="size-3.5" /></Button>
           </TooltipTrigger><TooltipContent side="bottom">New Conversation</TooltipContent></Tooltip>
         </div>
       </div>
@@ -124,7 +123,7 @@ export default function Sidebar() {
       {showFilter && (
         <div className="px-2 py-1.5 border-b shrink-0">
           <input autoFocus value={filterText} onChange={e => setFilterText(e.target.value)} placeholder="Filter conversations…"
-            className="w-full bg-muted/40 border border-border/50 rounded-md px-2 py-1 text-mini text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-orange-500/50 transition-colors" />
+            className="w-full bg-muted/40 border border-border/50 rounded-md px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-orange-500/50 transition-colors" />
         </div>
       )}
       {/* Conversation list */}
@@ -135,14 +134,14 @@ export default function Sidebar() {
           <FolderSection key={ws.id} label={ws.name} convs={filterConvs(wsConversations[ws.id] || [])} activeConvId={activeConvId} streamingConvIds={streamingConvIds}
             onSelectConv={handleSelectConv} onDeleteConv={deleteConv}
             actions={<>
-              <button onClick={() => newChat(ws.id)} className="text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0.5"><VscAdd className="size-3" /></button>
-              <button onClick={() => deleteWorkspace(ws)} className="text-muted-foreground hover:text-destructive transition-colors p-0.5"><VscTrash className="size-3" /></button>
+              <Button variant="ghost" size="icon-xs" onClick={() => newChat(ws.id)} className="h-5 w-5 p-0 text-muted-foreground/60 hover:text-foreground hover:bg-transparent"><VscAdd className="size-3" /></Button>
+              <Button variant="ghost" size="icon-xs" onClick={() => deleteWorkspace(ws)} className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive hover:bg-transparent"><VscTrash className="size-3" /></Button>
             </>} />
         ))}
       </div>
       {/* Bottom */}
       <div className="p-2 border-t shrink-0">
-        <Button variant="outline" size="xs" onClick={openWorkspace} className="w-full text-micro gap-1.5"><VscFolderOpened className="size-3" /> Open Workspace</Button>
+        <Button variant="outline" size="xs" onClick={openWorkspace} className="w-full text-xs gap-1.5"><VscFolderOpened className="size-3" /> Open Workspace</Button>
       </div>
     </div>
   );

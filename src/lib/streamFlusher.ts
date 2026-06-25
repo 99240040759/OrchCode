@@ -1,22 +1,13 @@
 import { useConversationsStore } from '@/store/conversations';
-type Buf = { delta: string; tokenCount: number; messageId: string };
-const buffers: Record<string, Buf> = {};
-const rafIds: Record<string, number> = {};
-export function pushChunk(convId: string, delta: string, tokenCount: number, messageId: string) {
-  const b = buffers[convId];
-  if (b) { b.delta += delta; b.tokenCount = tokenCount; b.messageId = messageId; }
-  else buffers[convId] = { delta, tokenCount, messageId };
+type Buf = { convId: string; messageId: string; partId: string; text: string };
+const buffers = new Map<string, Buf>();
+let raf = 0;
+function tick() {
+  if (buffers.size) { const store = useConversationsStore.getState(); for (const b of buffers.values()) if (b.text) { store.appendDelta(b.convId, b.messageId, b.partId, b.text); b.text = ''; } }
+  raf = requestAnimationFrame(tick);
 }
-export function registerFlusher(convId: string): () => void {
-  const tick = () => {
-    const b = buffers[convId];
-    if (b?.delta) { useConversationsStore.getState().appendChunk(convId, b.delta, b.tokenCount, b.messageId); b.delta = ''; }
-    rafIds[convId] = requestAnimationFrame(tick);
-  };
-  rafIds[convId] = requestAnimationFrame(tick);
-  return () => { cancelAnimationFrame(rafIds[convId]); delete rafIds[convId]; delete buffers[convId]; };
-}
-export function stopFlusher(convId: string) {
-  if (rafIds[convId]) { cancelAnimationFrame(rafIds[convId]); delete rafIds[convId]; }
-  delete buffers[convId];
+export function startFlusher() { if (!raf) raf = requestAnimationFrame(tick); }
+export function pushDelta(convId: string, messageId: string, partId: string, text: string) {
+  const k = convId + '|' + partId, b = buffers.get(k);
+  if (b) b.text += text; else buffers.set(k, { convId, messageId, partId, text });
 }

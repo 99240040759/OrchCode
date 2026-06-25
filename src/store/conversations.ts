@@ -1,74 +1,55 @@
 import { create } from 'zustand';
-import type { UIMessage, ToolPart, Message } from '../ipc/types';
-export interface ConvState { messages: UIMessage[]; currentMessage: UIMessage | null; isStreaming: boolean; tokenCount: number; workspaceId: string | null; agentReady: boolean; }
-interface ConversationsStore {
-  convs: Record<string, ConvState>; activeConvId: string | null;
+import type { UIMessage, UIPart, UIToolPart, AgentEvent } from '../ipc/types';
+export type ConvStatus = 'idle' | 'busy' | 'error';
+export interface ConvState { messages: UIMessage[]; status: ConvStatus; tokenCount: number; workspaceId: string | null; }
+interface Store {
+  convs: Record<string, ConvState>;
+  activeConvId: string | null;
   setActiveConv: (id: string | null) => void;
   initConv: (convId: string, workspaceId: string | null, messages: UIMessage[]) => void;
   removeConv: (convId: string) => void;
-  startIteration: (convId: string, messageId: string) => void;
-  appendChunk: (convId: string, delta: string, tokenCount: number, messageId: string) => void;
-  addToolCall: (convId: string, tc: { id: string; name: string; input: string }) => void;
-  updateToolCall: (convId: string, tcId: string, patch: Partial<ToolPart>) => void;
-  commitCurrentMessage: (convId: string) => void;
-  finalizeStream: (convId: string) => void;
-  cancelStream: (convId: string) => void;
-  setAgentReady: (convId: string) => void;
   getConv: (convId: string) => ConvState | undefined;
-  replaceWithSummary: (convId: string, summaryMsg: Message) => void;
-  setTokenCount: (convId: string, count: number) => void;
-  addMessage: (convId: string, msg: UIMessage) => void;
+  addUserMessage: (convId: string, msg: UIMessage) => void;
+  appendDelta: (convId: string, messageId: string, partId: string, text: string) => void;
+  apply: (convId: string, ev: AgentEvent) => void;
+  setTokenCount: (convId: string, n: number) => void;
 }
-const defaultConv = (workspaceId: string | null): ConvState => ({ messages: [], currentMessage: null, isStreaming: false, tokenCount: 0, workspaceId, agentReady: false });
-function upd(convs: Record<string, ConvState>, id: string, fn: (c: ConvState) => ConvState): Record<string, ConvState> {
-  const c = convs[id]; if (!c) return convs; return { ...convs, [id]: fn(c) };
-}
-export const useConversationsStore = create<ConversationsStore>((set, get) => ({
+const def = (workspaceId: string | null): ConvState => ({ messages: [], status: 'idle', tokenCount: 0, workspaceId });
+const upd = (convs: Record<string, ConvState>, id: string, fn: (c: ConvState) => ConvState) => { const c = convs[id]; return c ? { ...convs, [id]: fn(c) } : convs; };
+const patchMsg = (msgs: UIMessage[], id: string, fn: (m: UIMessage) => UIMessage) => msgs.map(m => m.id === id ? fn(m) : m);
+const addPart = (m: UIMessage, p: UIPart): UIMessage => ({ ...m, parts: [...m.parts, p] });
+export const useConversationsStore = create<Store>((set, get) => ({
   convs: {}, activeConvId: null,
   setActiveConv: (id) => set({ activeConvId: id }),
-  initConv: (convId, workspaceId, messages) => set(s => ({ convs: { ...s.convs, [convId]: { ...defaultConv(workspaceId), messages, agentReady: s.convs[convId]?.agentReady || false } } })),
+  initConv: (convId, workspaceId, messages) => set(s => ({ convs: { ...s.convs, [convId]: { ...def(workspaceId), messages } } })),
   removeConv: (convId) => set(s => { const { [convId]: _, ...rest } = s.convs; return { convs: rest, activeConvId: s.activeConvId === convId ? null : s.activeConvId }; }),
-  startIteration: (convId, messageId) => set(s => ({
-    convs: upd(s.convs, convId, c => {
-      const msgs = c.currentMessage ? [...c.messages, c.currentMessage] : c.messages;
-      return { ...c, messages: msgs, currentMessage: { id: messageId, convId, role: 'assistant', parts: [], createdAt: Date.now() }, isStreaming: true };
-    })
-  })),
-  appendChunk: (convId, delta, tokenCount, messageId) => set(s => ({
-    convs: upd(s.convs, convId, c => {
-      let cur = c.currentMessage ?? { id: messageId, convId, role: 'assistant' as const, parts: [], createdAt: Date.now() };
-      const parts = [...cur.parts];
-      const last = parts[parts.length - 1];
-      if (last?.type === 'text') parts[parts.length - 1] = { type: 'text', text: last.text + delta };
-      else parts.push({ type: 'text', text: delta });
-      const liveCount = tokenCount + Math.ceil(parts.reduce((n, p) => n + (p.type === 'text' ? p.text.length : 0), 0) / 4);
-      return { ...c, currentMessage: { ...cur, parts }, isStreaming: true, tokenCount: liveCount };
-    })
-  })),
-  addToolCall: (convId, tc) => set(s => ({
-    convs: upd(s.convs, convId, c => {
-      const cur = c.currentMessage ?? { id: `tc-${Date.now()}`, convId, role: 'assistant' as const, parts: [], createdAt: Date.now() };
-      const part: ToolPart = { type: 'tool-call', id: tc.id, name: tc.name, input: tc.input };
-      return { ...c, currentMessage: { ...cur, parts: [...cur.parts, part] } };
-    })
-  })),
-  updateToolCall: (convId, tcId, patch) => set(s => ({
-    convs: upd(s.convs, convId, c => {
-      const up = (msg: UIMessage): UIMessage => ({ ...msg, parts: msg.parts.map(p => p.type === 'tool-call' && p.id === tcId ? { ...p, ...patch } : p) });
-      return { ...c, currentMessage: c.currentMessage ? up(c.currentMessage) : null, messages: c.messages.map(up) };
-    })
-  })),
-  commitCurrentMessage: (convId) => set(s => ({ convs: upd(s.convs, convId, c => c.currentMessage ? { ...c, messages: [...c.messages, c.currentMessage], currentMessage: null } : c) })),
-  finalizeStream: (convId) => set(s => ({ convs: upd(s.convs, convId, c => { const msgs = c.currentMessage ? [...c.messages, c.currentMessage] : c.messages; return { ...c, messages: msgs, currentMessage: null, isStreaming: false }; }) })),
-  cancelStream: (convId) => set(s => ({ convs: upd(s.convs, convId, c => { const msgs = c.currentMessage ? [...c.messages, c.currentMessage] : c.messages; return { ...c, messages: msgs, currentMessage: null, isStreaming: false, agentReady: false }; }) })),
-  setAgentReady: (convId) => set(s => ({ convs: { ...s.convs, [convId]: { ...(s.convs[convId] || defaultConv(null)), agentReady: true } } })),
   getConv: (convId) => get().convs[convId],
-  replaceWithSummary: (convId, summaryMsg) => set(s => ({
-    convs: upd(s.convs, convId, c => {
-      const summaryUI: UIMessage = { id: summaryMsg.id, convId, role: 'system', parts: [{ type: 'text', text: summaryMsg.content }], createdAt: summaryMsg.createdAt };
-      return { ...c, messages: [summaryUI, ...c.messages.slice(-10)], currentMessage: null };
-    })
-  })),
-  setTokenCount: (convId, count) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, tokenCount: count })) })),
-  addMessage: (convId, msg) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, messages: [...c.messages, msg], isStreaming: true, currentMessage: null })) })),
+  addUserMessage: (convId, msg) => set(s => ({ convs: { ...s.convs, [convId]: { ...(s.convs[convId] || def(null)), messages: [...(s.convs[convId]?.messages || []), msg], status: 'busy' } } })),
+  appendDelta: (convId, messageId, partId, text) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, messages: patchMsg(c.messages, messageId, m => ({ ...m, parts: m.parts.map(p => p.id === partId && (p.type === 'text' || p.type === 'reasoning') ? { ...p, text: p.text + text } : p) })) })) })),
+  setTokenCount: (convId, n) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, tokenCount: n })) })),
+  apply: (convId, ev) => set(s => {
+    const c = s.convs[convId] || def(null);
+    const reduce = (c: ConvState): ConvState => {
+    switch (ev.type) {
+      case 'message.start': return { ...c, status: 'busy', messages: [...c.messages, { id: ev.message.id, convId, role: 'assistant', status: 'streaming', parts: [], createdAt: ev.message.createdAt }] };
+      case 'part.start': {
+        const p: UIPart = ev.part.type === 'tool'
+          ? { type: 'tool', id: ev.part.id, toolCallId: ev.part.toolCallId!, name: ev.part.toolName!, args: ev.part.toolArgs || '{}', status: 'running' }
+          : { type: ev.part.type as 'text' | 'reasoning', id: ev.part.id, text: '' };
+        return { ...c, messages: patchMsg(c.messages, ev.part.messageId, m => addPart(m, p)) };
+      }
+      case 'part.image': return { ...c, messages: patchMsg(c.messages, ev.messageId, m => addPart(m, { type: 'image', id: ev.partId, artifactId: null, mime: ev.mime, name: ev.name, dataUrl: ev.dataUrl })) };
+      case 'tool.update': return { ...c, messages: patchMsg(c.messages, ev.messageId, m => ({ ...m, parts: m.parts.map(p => p.type === 'tool' && p.id === ev.partId ? { ...p, status: ev.status, result: ev.result ?? p.result, meta: ev.meta ?? (p as UIToolPart).meta } : p) })) };
+      case 'message.end': return { ...c, status: ev.status === 'error' ? 'error' : 'idle', messages: patchMsg(c.messages, ev.messageId, m => ({ ...m, status: ev.status, error: ev.error })) };
+      case 'compacted': {
+        const summary: UIMessage = { id: ev.summaryMessage.id, convId, role: 'system', status: 'complete', parts: [{ type: 'text', id: ev.summaryPart.id, text: ev.summaryPart.text || '' }], createdAt: ev.summaryMessage.createdAt };
+        const last = c.messages[c.messages.length - 1];
+        const insertAt = last?.status === 'streaming' ? c.messages.length - 1 : c.messages.length;
+        return { ...c, messages: [...c.messages.slice(0, insertAt), summary, ...c.messages.slice(insertAt)] };
+      }
+      default: return c;
+    }
+    };
+    return { convs: { ...s.convs, [convId]: reduce(c) } };
+  }),
 }));

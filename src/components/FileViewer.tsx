@@ -26,7 +26,7 @@ export default function FileViewer({ filePath, content, startLine, endLine }: { 
   const handleCopy = () => { navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      <div className="h-9 min-h-[36px] max-h-[36px] px-3 border-b text-sm text-muted-foreground flex items-center justify-between shrink-0 bg-muted/5">
+      <div className="h-9 min-h-9 max-h-9 px-3 border-b text-xs text-muted-foreground flex items-center justify-between shrink-0 bg-muted/5">
         <div className="flex items-center gap-1.5 overflow-hidden"><FileBreadcrumb filePath={filePath} /></div>
         <div className="flex items-center gap-1.5 shrink-0 select-none">
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={handleSearch} className="text-muted-foreground cursor-pointer"><FluentSearch className="size-4" /></Button></TooltipTrigger><TooltipContent side="bottom">Search in File</TooltipContent></Tooltip>
@@ -35,7 +35,7 @@ export default function FileViewer({ filePath, content, startLine, endLine }: { 
       </div>
       <style>{`.monaco-highlight-line { background: hsl(42 53% 83% / 0.08) !important; } .monaco-highlight-line-margin { border-left: 2px solid hsl(42 53% 83%); }`}</style>
       <div className="flex-1 min-h-0 pl-3 pt-3">
-        <Editor height="100%" language={lang} theme="vs-dark" value={content} options={{ readOnly: true, lineNumbers: 'on', minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 14, fontFamily: 'var(--font-mono)', lineDecorationsWidth: 6, lineNumbersMinChars: 3, wordWrap: 'on', domReadOnly: true, folding: false, renderLineHighlight: 'none' }} onMount={handleEditorDidMount} />
+        <Editor height="100%" language={lang} theme="vs-dark" value={content} options={{ readOnly: true, lineNumbers: 'on', minimap: { enabled: false }, scrollBeyondLastLine: false, lineDecorationsWidth: 6, lineNumbersMinChars: 3, wordWrap: 'on', domReadOnly: true, folding: false, renderLineHighlight: 'none' }} onMount={handleEditorDidMount} />
       </div>
     </div>
   );

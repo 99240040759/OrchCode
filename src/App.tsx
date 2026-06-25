@@ -3,7 +3,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { TitleBar } from '@/components/ui/TitleBar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import Onboarding from '@/components/Onboarding';
 import Sidebar from '@/components/Sidebar';
@@ -16,27 +17,18 @@ import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
 import { VscSignOut } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
-import { pushChunk, registerFlusher } from '@/lib/streamFlusher';
-import type { AgentChunk, BudgetInfo } from '@/ipc/types';
+import { startFlusher, pushDelta } from '@/lib/streamFlusher';
+import type { BudgetInfo } from '@/ipc/types';
 const hash = window.location.hash;
-function useGlobalAgentPort() {
+function useGlobalAgentEvents() {
   useEffect(() => {
-    const cleanup = el.onAgentPort((convId: string) => {
-      useConversationsStore.getState().setAgentReady(convId);
-      let stopFlusher: (() => void) | null = null;
-      el.onAgentMessage(convId, (msg: AgentChunk) => {
-        const s = useConversationsStore.getState();
-        if (msg.type === 'iter_start') { if (!stopFlusher) stopFlusher = registerFlusher(convId); s.startIteration(convId, msg.messageId); }
-        else if (msg.type === 'chunk') pushChunk(convId, msg.delta, msg.tokenCount, msg.messageId);
-        else if (msg.type === 'tool_call') s.addToolCall(convId, { id: msg.toolCall.id, name: msg.toolCall.name, input: msg.toolCall.input });
-        else if (msg.type === 'tool_result') s.updateToolCall(convId, msg.toolCallId, { output: msg.result, ...msg.meta });
-        else if (msg.type === 'done') { s.finalizeStream(convId); if (stopFlusher) { stopFlusher(); stopFlusher = null; } }
-        else if (msg.type === 'db:tokens') s.setTokenCount(convId, msg.count);
-        else if (msg.type === 'summary') s.replaceWithSummary(convId, msg.summaryMsg);
-        else if (msg.type === 'error') { s.cancelStream(convId); if (stopFlusher) { stopFlusher(); stopFlusher = null; } console.error('[Agent Error]', msg.error); }
-      });
+    startFlusher();
+    return el.onAgentEvent((convId, ev) => {
+      const s = useConversationsStore.getState();
+      if (ev.type === 'part.delta') pushDelta(convId, ev.messageId, ev.partId, ev.text);
+      else if (ev.type === 'tokens') s.setTokenCount(convId, ev.count);
+      else s.apply(convId, ev);
     });
-    return cleanup;
   }, []);
 }
 function UserMenu() {
@@ -54,9 +46,9 @@ function UserMenu() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <button className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-2xs font-semibold text-primary hover:bg-primary/30 transition-colors shrink-0 select-none overflow-hidden" id="user-menu-btn">
+        <Button variant="ghost" size="icon-xs" className="w-5 h-5 rounded-full bg-primary/20 hover:bg-primary/30 flex items-center justify-center text-xs font-semibold text-primary shrink-0 select-none overflow-hidden p-0" id="user-menu-btn">
           {user?.avatarUrl ? <img src={user.avatarUrl} className="w-5 h-5 rounded-full object-cover block" alt="avatar" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} /> : initials}
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64 p-0">
         <div className="px-3 py-2.5 flex items-center gap-2.5 border-b border-border">
@@ -67,41 +59,41 @@ function UserMenu() {
         </div>
         {budget && (
           <div className="px-3 py-2.5 border-b border-border">
-            <p className="text-micro font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Monthly Budget</p>
-            <div className="flex justify-between text-mini text-muted-foreground mb-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Monthly Budget</p>
+            <div className="flex justify-between text-xs text-muted-foreground mb-1">
               <span>${budget.cost_usd.toFixed(4)} used</span><span>${budget.limit_usd.toFixed(2)} limit</span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
               <div className={`h-full rounded-full transition-all ${budgetPct > 90 ? 'bg-red-500' : budgetPct > 70 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${budgetPct}%` }} />
             </div>
-            <p className="text-micro text-muted-foreground mt-1">Remaining: <span className="text-foreground font-mono">${budget.remaining.toFixed(4)}</span> · resets {budget.period}-01</p>
+            <p className="text-xs text-muted-foreground mt-1">Remaining: <span className="text-foreground font-mono">${budget.remaining.toFixed(4)}</span> · resets {budget.period}-01</p>
           </div>
         )}
         {stats && (
           <div className="px-3 py-2.5 border-b border-border">
-            <p className="text-micro font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Usage</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Usage</p>
             <div className="grid grid-cols-3 gap-2">
               {[{ l: 'Tokens', v: stats.lifetimeTokens.toLocaleString() }, { l: 'Convos', v: stats.conversationCount.toLocaleString() }, { l: 'Messages', v: stats.messageCount.toLocaleString() }].map(s => (
                 <div key={s.l} className="bg-muted/30 rounded p-1.5 flex flex-col gap-0.5">
-                  <span className="text-micro text-muted-foreground">{s.l}</span>
-                  <span className="font-mono text-mini font-semibold">{s.v}</span>
+                  <span className="text-xs text-muted-foreground">{s.l}</span>
+                  <span className="font-mono text-xs font-semibold">{s.v}</span>
                 </div>
               ))}
             </div>
           </div>
         )}
         <div className="p-1">
-          <button id="signout-menu-item" onClick={async () => { setOpen(false); await el.signOut(); clearSession(); }}
-            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10 rounded-sm transition-colors">
+          <DropdownMenuItem id="signout-menu-item" onSelect={async () => { setOpen(false); await el.signOut(); clearSession(); }}
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer">
             <VscSignOut className="size-3.5" /> Sign out
-          </button>
+          </DropdownMenuItem>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 export default function App() {
-  useGlobalAgentPort();
+  useGlobalAgentEvents();
   const { setSession, clearSession, isLoggedIn } = useAuthStore();
   const setModels = useModelsStore(s => s.setModels);
   const [authChecked, setAuthChecked] = useState(false);

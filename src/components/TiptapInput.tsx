@@ -27,7 +27,7 @@ const MentionList = ({ items, command, selectedIndex, onHighlight }: { items: Me
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { activeRef.current?.scrollIntoView({ block: 'nearest' }); }, [selectedIndex]);
   return (
-    <div className="bg-popover border border-border rounded-md shadow-md p-1 text-xs z-50 max-h-[220px] overflow-y-auto w-full flex flex-col gap-0.5 scrollbar-thin">
+    <div className="bg-popover border border-border rounded-md shadow-md p-1 text-xs z-50 max-h-56 overflow-y-auto w-full flex flex-col gap-0.5 scrollbar-thin">
       {items.length === 0 ? <div className="px-2 py-1.5 text-muted-foreground text-center">No files found</div> : items.map((item, idx) => (
         <button key={item.id} ref={idx === selectedIndex ? activeRef : null} onMouseDown={(e) => { e.preventDefault(); command(item); }} onMouseEnter={() => onHighlight(idx)}
           className={cn("w-full text-left px-2 py-1.5 rounded-sm flex items-center gap-2 transition-colors outline-hidden text-sm hover:bg-accent hover:text-accent-foreground", idx === selectedIndex ? "bg-accent text-accent-foreground" : "text-popover-foreground")}>
@@ -97,7 +97,8 @@ const MentionNodeView = (props: NodeViewProps) => {
   );
 };
 interface Attachment { name: string; dataUrl: string; mimeType: string; }
-export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled, isStreaming, tokenCount = 0, contextWindow = 128000 }: { onSubmit: (text: string, mentions: string[], attachments?: Attachment[]) => void; onStop?: () => void; workspacePath: string | null; disabled?: boolean; isStreaming?: boolean; tokenCount?: number; contextWindow?: number }) {
+type EditorPart = { type: 'text'; text: string } | { type: 'mention'; path: string };
+export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled, isStreaming, tokenCount = 0, contextWindow = 128000 }: { onSubmit: (parts: EditorPart[], attachments?: Attachment[]) => void; onStop?: () => void; workspacePath: string | null; disabled?: boolean; isStreaming?: boolean; tokenCount?: number; contextWindow?: number }) {
   const submitRef = useRef<(() => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -105,7 +106,7 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
   const editor = useEditor({
     extensions: [StarterKit, Placeholder.configure({ placeholder: 'Plan, Build, / for skills, @ for context' }), Mention.extend({ addNodeView() { return ReactNodeViewRenderer(MentionNodeView); } }).configure({ HTMLAttributes: { class: 'mention' }, suggestion: buildMentionSuggestion() }), CharacterCount],
     editorProps: {
-      attributes: { class: 'prose prose-invert max-w-none text-chat outline-none min-h-[24px] max-h-[220px] overflow-y-auto py-1 px-0' },
+      attributes: { class: 'prose prose-invert max-w-none text-sm outline-none min-h-6 max-h-56 overflow-y-auto py-1 px-0' },
       handleKeyDown: (_view: EditorView, event: KeyboardEvent) => {
         if (event.key === 'Enter' && !event.shiftKey && !document.querySelector('.tippy-box[data-theme~="mention"]')) { event.preventDefault(); submitRef.current?.(); return true; }
         return false;
@@ -114,11 +115,20 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
   });
   const handleSubmit = () => {
     if (!editor || disabled) return;
-    const text = editor.getText().trim();
-    if (!text && attachments.length === 0) return;
-    const mentions: string[] = [];
-    editor.state.doc.descendants((node: ProseMirrorNode) => { if (node.type.name === 'mention') mentions.push(node.attrs.id as string); });
-    onSubmit(text, mentions, attachments.length ? attachments : undefined);
+    const parts: EditorPart[] = [];
+    let buf = '', first = true;
+    const flushText = () => { if (buf) { parts.push({ type: 'text', text: buf }); buf = ''; } };
+    editor.state.doc.forEach((block: ProseMirrorNode) => {
+      if (!first) buf += '\n'; first = false;
+      block.forEach((inline: ProseMirrorNode) => {
+        if (inline.isText) buf += inline.text || '';
+        else if (inline.type.name === 'mention') { flushText(); parts.push({ type: 'mention', path: inline.attrs.id as string }); }
+      });
+    });
+    flushText();
+    const hasText = parts.some(p => p.type === 'text' && p.text.trim()) || parts.some(p => p.type === 'mention');
+    if (!hasText && attachments.length === 0) return;
+    onSubmit(parts, attachments.length ? attachments : undefined);
     editor.commands.clearContent();
     setAttachments([]);
   };
@@ -140,9 +150,9 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map((a, i) => (
-            <div key={i} className="flex items-center gap-1 bg-muted/50 rounded-md px-2 py-0.5 text-xs max-w-[140px]">
+            <div key={i} className="flex items-center gap-1 bg-muted/50 rounded-md px-2 py-0.5 text-xs max-w-36">
               <span className="truncate">{a.name}</span>
-              <button onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-foreground"><VscChromeClose className="size-3" /></button>
+              <Button variant="ghost" size="icon-xs" onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} className="h-4 w-4 p-0 text-muted-foreground hover:text-foreground hover:bg-transparent"><VscChromeClose className="size-3" /></Button>
             </div>
           ))}
         </div>

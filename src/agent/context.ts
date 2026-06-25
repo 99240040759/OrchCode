@@ -1,96 +1,103 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { getEncoding } from 'js-tiktoken';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
-import type { Message } from '../ipc/types';
+import type { HistoryMessage, HistoryPart } from '../ipc/types';
 const enc = getEncoding('cl100k_base');
-export const countTokens = (text: string): number => enc.encode(text).length;
-export const countMessages = (msgs: Message[]): number => msgs.reduce((sum, m) => sum + countTokens(m.content) + 3, 0);
+export const countText = (t: string): number => enc.encode(t || '').length;
 export const extractModelName = (modelId: string) => modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
 export function makeClient(gcpBase: string, jwt: string, anonKey: string, provider?: string) {
   const route = provider === 'z-ai' ? 'z-ai' : 'opencode';
   return new OpenAI({ baseURL: `${gcpBase}/${route}/v1`, apiKey: jwt, defaultHeaders: { apikey: anonKey } });
 }
-export async function compactHistory(msgs: Message[], gcpBase: string, jwt: string, anonKey: string, provider?: string, modelId?: string): Promise<{ summary: string; kept: Message[] }> {
-  const toolMsgIndices: number[] = [];
-  for (let i = msgs.length - 1; i >= 0 && toolMsgIndices.length < 10; i--) {
-    if (msgs[i].role === 'tool') toolMsgIndices.unshift(i);
-  }
-  const keepIndices = new Set<number>(toolMsgIndices);
-  for (const ti of toolMsgIndices) {
-    for (let i = ti - 1; i >= 0; i--) {
-      if (msgs[i].role === 'assistant') { keepIndices.add(i); break; }
-    }
-  }
-  const lastKeptIdx = keepIndices.size > 0 ? Math.max(...keepIndices) : -1;
-  for (let i = lastKeptIdx + 1; i < msgs.length; i++) {
-    if (msgs[i].role === 'user') keepIndices.add(i);
-  }
-  const toSummarize = msgs.filter((_, i) => !keepIndices.has(i));
-  const kept = msgs.filter((_, i) => keepIndices.has(i));
-  if (toSummarize.length === 0) return { summary: '', kept: msgs };
-  const prompt = toSummarize.map(m => `[${m.role}]: ${m.content.slice(0, 600)}`).join('\n\n');
-  const client = makeClient(gcpBase, jwt, anonKey, provider);
-  const model = extractModelName(modelId || 'deepseek-v4-flash-free');
-  const params: ChatCompletionCreateParamsNonStreaming = {
-    model,
-    messages: [
-      { role: 'system', content: 'Summarize this conversation history concisely. Preserve all key decisions, file paths, code written, errors encountered, and context needed to continue.' },
-      { role: 'user', content: prompt },
-    ],
-    max_tokens: 2048,
-    stream: false,
-  };
-  const resp = await client.chat.completions.create(params);
-  const text = resp.choices[0]?.message?.content;
-  if (!text) throw new Error('Compaction returned empty summary');
-  return { summary: text, kept };
+// Tokens for a whole history (approx) — used for compaction decisions
+export function countHistory(history: HistoryMessage[]): number {
+  let n = 0;
+  for (const { parts } of history) for (const p of parts) n += countText(p.text || p.toolResult || p.toolArgs || '') + 4;
+  return n;
 }
-export async function generateTitle(firstMessage: string, gcpBase: string, jwt: string, anonKey: string, provider?: string, modelId?: string): Promise<string> {
+const MENTION_MAX = 24_000;
+function readMention(workspacePath: string | null, rel: string): string {
+  try {
+    const fp = path.isAbsolute(rel) ? rel : path.join(workspacePath || process.cwd(), rel);
+    if (workspacePath && path.relative(workspacePath, fp).startsWith('..')) return `[mention ${rel}: access denied]`;
+    const raw = readFileSync(fp, 'utf8');
+    return raw.length > MENTION_MAX ? raw.slice(0, MENTION_MAX) + '\n…[truncated]' : raw;
+  } catch (e: any) { return `[mention ${rel}: ${e.message}]`; }
+}
+// Serialize a user message's parts into OpenAI content (multimodal when images present)
+function userContent(parts: HistoryPart[], workspacePath: string | null): string | any[] {
+  const text: string[] = [];
+  const images: any[] = [];
+  for (const p of parts) {
+    if (p.type === 'text') text.push(p.text || '');
+    else if (p.type === 'mention') text.push(`@${p.path}\n<file path="${p.path}">\n${readMention(workspacePath, p.path!)}\n</file>`);
+    else if (p.type === 'file') text.push(p.dataUrl ? `<file name="${p.text || 'file'}">\n${decodeText(p.dataUrl)}\n</file>` : `[file ${p.text}]`);
+    else if (p.type === 'image' && p.dataUrl) images.push({ type: 'image_url', image_url: { url: p.dataUrl } });
+  }
+  const joined = text.join('\n').trim();
+  if (!images.length) return joined;
+  return [...(joined ? [{ type: 'text', text: joined }] : []), ...images];
+}
+function decodeText(dataUrl: string): string {
+  const i = dataUrl.indexOf('base64,');
+  if (i === -1) return '';
+  try { return Buffer.from(dataUrl.slice(i + 7), 'base64').toString('utf8').slice(0, MENTION_MAX); } catch { return ''; }
+}
+// Split an assistant message's ordered parts into valid OpenAI message rounds.
+function assistantRounds(parts: HistoryPart[], out: ChatCompletionMessageParam[]) {
+  let text: string[] = [], reasoning: string[] = [], tools: HistoryPart[] = [];
+  const flush = () => {
+    if (!text.length && !tools.length) return;
+    const msg: any = { role: 'assistant', content: text.join('') || null };
+    if (reasoning.length) msg.reasoning_content = reasoning.join('');
+    if (tools.length) msg.tool_calls = tools.map(t => ({ id: t.toolCallId!, type: 'function', function: { name: t.toolName || 'unknown', arguments: t.toolArgs || '{}' } }));
+    out.push(msg);
+    for (const t of tools) out.push({ role: 'tool', tool_call_id: t.toolCallId!, content: t.toolResult ?? '[interrupted]' });
+    text = []; reasoning = []; tools = [];
+  };
+  for (const p of parts) {
+    if (p.type === 'tool') tools.push(p);
+    else if (p.type === 'reasoning') { if (tools.length) flush(); reasoning.push(p.text || ''); }
+    else if (p.type === 'text') { if (tools.length) flush(); text.push(p.text || ''); }
+    // image parts on assistant are display-only; the model already got the tool result
+  }
+  flush();
+}
+export function buildOpenAIMessages(systemPrompt: string, history: HistoryMessage[], workspacePath: string | null): ChatCompletionMessageParam[] {
+  const out: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }];
+  const live = history.filter(h => !h.message.compacted);
+  // Compaction summaries (system role) always lead, regardless of seq, so prior context precedes the live tail.
+  for (const { message, parts } of live) if (message.role === 'system') { const t = parts.map(p => p.text || '').join('\n'); if (t) out.push({ role: 'system', content: t }); }
+  for (const { message, parts } of live) {
+    if (message.role === 'user') { const c = userContent(parts, workspacePath); if ((typeof c === 'string' && c) || (Array.isArray(c) && c.length)) out.push({ role: 'user', content: c as any }); }
+    else if (message.role === 'assistant') assistantRounds(parts, out);
+  }
+  return out;
+}
+export async function generateTitle(firstMessage: string, gcpBase: string, jwt: string, anonKey: string, provider: string, modelId: string): Promise<string> {
   const client = makeClient(gcpBase, jwt, anonKey, provider);
-  const model = extractModelName(modelId || 'deepseek-v4-flash-free');
   const params: ChatCompletionCreateParamsNonStreaming = {
-    model,
+    model: extractModelName(modelId),
     messages: [{ role: 'user', content: `Generate a short 3-5 word title for this conversation. Just the title, no quotes, no punctuation.\n\n${firstMessage.slice(0, 300)}` }],
-    max_tokens: 20,
-    stream: false,
+    max_tokens: 20, stream: false,
   };
   const resp = await client.chat.completions.create(params);
   return resp.choices[0]?.message?.content?.trim() || 'New Conversation';
 }
-/** Convert internal Message[] to OpenAI ChatCompletionMessageParam[] */
-export function toOpenAIMessages(systemPrompt: string, history: Message[], toolCallsMap: Map<string, Array<{ id: string; name: string; args: string }>>, reasoningMap?: Map<string, string>): ChatCompletionMessageParam[] {
-  const out: ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt }];
-  // Build fallback: for each assistant msg, collect tool_call_ids from subsequent tool msgs
-  const historyTcMap = new Map<string, Array<{ id: string; name: string; args: string }>>();
-  for (let i = 0; i < history.length; i++) {
-    const m = history[i];
-    if (m.role === 'assistant') {
-      const tcs: Array<{ id: string; name: string; args: string }> = [];
-      for (let j = i + 1; j < history.length && history[j].role === 'tool'; j++) {
-        if (history[j].toolCallId) tcs.push({ id: history[j].toolCallId!, name: '', args: '{}' });
-      }
-      if (tcs.length) historyTcMap.set(m.id, tcs);
-    }
-  }
-  for (const m of history) {
-    if (m.role === 'tool') {
-      out.push({ role: 'tool', tool_call_id: m.toolCallId!, content: m.content });
-    } else if (m.role === 'assistant') {
-      const tcs = toolCallsMap.get(m.id) || historyTcMap.get(m.id);
-      if (tcs?.length) {
-        out.push({
-          role: 'assistant', content: m.content || null,
-          ...(reasoningMap?.get(m.id) ? { reasoning_content: reasoningMap.get(m.id) } as any : {}),
-          tool_calls: tcs.map(tc => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: tc.args || '{}' } })),
-        });
-      } else {
-        out.push({ role: 'assistant', content: m.content, ...(reasoningMap?.get(m.id) ? { reasoning_content: reasoningMap.get(m.id) } as any : {}) });
-      }
-    } else if (m.role === 'user') {
-      out.push({ role: 'user', content: m.content });
-    } else if (m.role === 'system') {
-      out.push({ role: 'system', content: m.content });
-    }
-  }
-  return out;
+// Summarize the OpenAI-shaped messages (everything except the trailing window) into one string.
+export async function summarize(messages: ChatCompletionMessageParam[], gcpBase: string, jwt: string, anonKey: string, provider: string, modelId: string): Promise<string> {
+  const text = messages.map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content.slice(0, 600) : '[multimodal]'}`).join('\n\n');
+  const client = makeClient(gcpBase, jwt, anonKey, provider);
+  const params: ChatCompletionCreateParamsNonStreaming = {
+    model: extractModelName(modelId),
+    messages: [
+      { role: 'system', content: 'Summarize this conversation history concisely. Preserve all key decisions, file paths, code written, errors encountered, and context needed to continue.' },
+      { role: 'user', content: text },
+    ],
+    max_tokens: 2048, stream: false,
+  };
+  const resp = await client.chat.completions.create(params);
+  return resp.choices[0]?.message?.content?.trim() || '';
 }

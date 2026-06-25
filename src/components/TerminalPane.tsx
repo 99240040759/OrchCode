@@ -4,21 +4,31 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { ITheme } from '@xterm/xterm';
 import { el } from '@/lib/electron';
-const THEME: ITheme = {
-  background: '#1a1a1a', foreground: '#cccccc',
-  cursor: '#e5c07b', cursorAccent: '#1a1a1a',
-  selectionBackground: '#3a3a3a80',
-  black: '#1a1a1a', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
-  blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#abb2bf',
-  brightBlack: '#5c6370', brightRed: '#e06c75', brightGreen: '#98c379',
-  brightYellow: '#e5c07b', brightBlue: '#61afef', brightMagenta: '#c678dd',
-  brightCyan: '#56b6c2', brightWhite: '#ffffff',
-};
+
 export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    const term = new Terminal({ theme: THEME, fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.45, cursorBlink: true, allowTransparency: true, scrollback: 5000, convertEol: true });
+    const style = getComputedStyle(document.documentElement);
+    const getVar = (name: string) => style.getPropertyValue(name).trim() || undefined;
+    const theme: ITheme = {
+      background: 'transparent',
+      foreground: getVar('--color-foreground'),
+      cursor: getVar('--color-primary'),
+      cursorAccent: getVar('--color-background'),
+      selectionBackground: 'rgba(255, 255, 255, 0.1)',
+      black: getVar('--color-background'),
+      red: getVar('--color-destructive'),
+      yellow: getVar('--color-primary'),
+      white: getVar('--color-foreground'),
+      brightBlack: getVar('--color-muted-foreground'),
+      brightRed: getVar('--color-destructive'),
+      brightYellow: getVar('--color-primary'),
+      brightWhite: '#ffffff',
+      green: '#98c379', blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2',
+      brightGreen: '#98c379', brightBlue: '#61afef', brightMagenta: '#c678dd', brightCyan: '#56b6c2',
+    };
+    const term = new Terminal({ theme, lineHeight: 1.45, cursorBlink: true, allowTransparency: true, scrollback: 5000, convertEol: true });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(ref.current);
@@ -38,5 +48,5 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
     ro.observe(ref.current);
     return () => { active = false; unsub?.(); unsubExit?.(); ro.disconnect(); el.ptyDetach(convId).catch(() => {}); term.dispose(); };
   }, [convId]);
-  return <div ref={ref} className="w-full h-full" style={{ background: '#1a1a1a', padding: '6px 8px', boxSizing: 'border-box' }} />;
+  return <div ref={ref} className="w-full h-full bg-background py-1.5 px-2 box-border" />;
 }

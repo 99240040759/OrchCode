@@ -50,7 +50,7 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
         const parsed = new URL(req.url, `http://localhost:${port}`);
         const code = parsed.searchParams.get('code'), oauthError = parsed.searchParams.get('error');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!DOCTYPE html><html><head><style>*{margin:0}body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0f0f;font-family:system-ui;color:#e5e5e5;flex-direction:column;gap:8px}</style></head><body><b style="color:#f97316">Orch Code</b><p style="color:#888;font-size:13px">${oauthError ? 'Sign in failed' : 'Signed in — you can close this tab'}</p><script>setTimeout(()=>window.close(),2000)</script></body></html>`);
+        res.end(`<!DOCTYPE html><html><head><style>*{margin:0}body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0f0f;font-family:system-ui;color:#e5e5e5;flex-direction:column;gap:8px}</style></head><body><b style="color:orange">Orch Code</b><p style="opacity:0.6;font-size:small">${oauthError ? 'Sign in failed' : 'Signed in — you can close this tab'}</p><script>setTimeout(()=>window.close(),2000)</script></body></html>`);
         clearTimeout(timeout); server.close();
         if (oauthError) { reject(new Error(parsed.searchParams.get('error_description') || oauthError)); return; }
         if (!code) { reject(new Error('No code in callback')); return; }

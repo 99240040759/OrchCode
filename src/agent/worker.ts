@@ -1,201 +1,146 @@
 import { nanoid } from 'nanoid';
 import { buildToolDefs, executeTool, parseToolArgs } from './tools';
-import { countMessages, compactHistory, generateTitle, makeClient, extractModelName, toOpenAIMessages } from './context';
-import type { Message, ToolCall, AgentChunk, AgentInitConfig } from '../ipc/types';
-import type { ChatCompletionChunk, ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
+import { buildOpenAIMessages, makeClient, extractModelName, countText, countHistory, summarize, generateTitle } from './context';
+import type { AgentRunConfig, HistoryMessage, HistoryPart, DBMessage, DBPart, AgentEvent, WorkerInbound } from '../ipc/types';
+import type { ChatCompletionMessageParam, ChatCompletionCreateParamsStreaming, ChatCompletionChunk } from 'openai/resources/chat/completions';
 import type { Stream } from 'openai/streaming';
 const MAX_TOOL_ITERATIONS = 40;
 const COMPACT_AT = 0.80;
+const KEEP_TAIL = 6;
 const parent = (process as any).parentPort;
 if (!parent) throw new Error('Must run as UtilityProcess');
-console.log('[Worker] Process loaded');
-let cfg: AgentInitConfig | null = null;
-let history: Message[] = [];
-let isRunning = false;
+const now = () => Date.now();
 let abortController: AbortController | null = null;
-const assistantToolCalls = new Map<string, Array<{ id: string; name: string; args: string }>>();
-const assistantReasoning = new Map<string, string>(); // msgId → reasoning_content
-function getClient() {
-  if (!cfg) throw new Error('Worker not initialized');
-  return makeClient(cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider);
-}
-function send(chunk: AgentChunk) { parent.postMessage(chunk); }
-function buildSystemPrompt(): string {
-  const ws = cfg!.workspacePath;
-  const sd = cfg!.sessionDir;
+let running = false;
+function emit(e: AgentEvent) { parent.postMessage(e); }
+function systemPrompt(cfg: AgentRunConfig): string {
+  const ws = cfg.workspacePath, sd = cfg.sessionDir;
   return [
-    `You are OrchCode, an AI coding assistant with full filesystem and shell access.`,
-    ``,
+    `You are OrchCode, an AI coding assistant with full filesystem and shell access.`, ``,
     `# Environment`,
     ws ? `- Workspace: ${ws}` : `- No workspace bound (home mode)`,
     `- Session directory: ${sd} (for your plans, tasks, notes)`,
-    `- OS: ${process.platform}`,
-    ``,
+    `- OS: ${process.platform}`, ``,
     `# Workflow`,
-    `For complex tasks (multi-file changes, new features, refactors):`,
-    `1. Research: read relevant files, understand the codebase`,
-    `2. Plan: write ${sd}/implementation_plan.md with your approach`,
-    `3. Execute: make changes, track progress in ${sd}/task.md`,
-    `4. Verify: run tests/builds to confirm correctness`,
-    `5. Summarize: write ${sd}/walkthrough.md with what changed`,
-    ``,
-    `For simple tasks (quick fixes, questions, small edits): act directly.`,
-    ``,
+    `For complex tasks: 1) research/read files 2) write ${sd}/implementation_plan.md 3) execute, track in ${sd}/task.md 4) verify with tests/builds 5) write ${sd}/walkthrough.md.`,
+    `For simple tasks: act directly.`, ``,
     `# Tools`,
-    `- read_file / write_file / edit_file: file operations`,
-    `- list_dir: explore directory structure`,
-    `- run_command: shell commands (installs, builds, git, tests)`,
-    `- search_web: search the internet`,
-    `- search_workspace: ripgrep search across workspace files`,
-    `- generate_image: create images from text prompts`,
-    `- read_skill: load guides for specialized tasks (pdf, docx, xlsx, pptx, file-reading)`,
-    ``,
+    `read_file / write_file / edit_file / list_dir / run_command / search_web / search_workspace / generate_image / read_skill.`, ``,
     `# Style`,
-    `- Be concise. Use edit_file for surgical changes, write_file for new/full rewrites.`,
-    `- Paths are relative to workspace root unless absolute.`,
+    `Be concise. edit_file for surgical changes, write_file for new/full rewrites. Paths relative to workspace root unless absolute.`,
   ].join('\n');
 }
-async function tryCompact(): Promise<boolean> {
-  if (!cfg) return false;
-  const tokens = countMessages(history);
-  if (tokens <= COMPACT_AT * cfg.contextWindow) return false;
-  console.log(`[Agent] Compacting at ${tokens}/${cfg.contextWindow} tokens (${Math.round(tokens / cfg.contextWindow * 100)}%)`);
-  const { summary, kept } = await compactHistory(history, cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider, cfg.modelId);
-  if (!summary) return false;
-  const summaryMsg: Message = { id: nanoid(), convId: cfg.convId, role: 'system', content: summary, tokenCount: 0, createdAt: Date.now() };
-  // Clear stale assistantToolCalls entries for messages being compacted
-  const keptIds = new Set(kept.map(m => m.id));
-  for (const [msgId] of assistantToolCalls) { if (!keptIds.has(msgId)) assistantToolCalls.delete(msgId); }
-  for (const [msgId] of assistantReasoning) { if (!keptIds.has(msgId)) assistantReasoning.delete(msgId); }
-  history = [summaryMsg, ...kept];
-  send({ type: 'summary', summaryMsg });
-  parent.postMessage({ type: 'db:write', message: summaryMsg });
-  return true;
+const textPart = (id: string, msgId: string, convId: string, seq: number, type: 'text' | 'reasoning'): DBPart => ({ id, messageId: msgId, convId, seq, type, text: '', toolCallId: null, toolName: null, toolArgs: null, toolResult: null, toolStatus: null, toolMeta: null, artifactId: null, path: null, createdAt: now(), updatedAt: now() });
+const lightMeta = (meta: any) => { if (!meta) return undefined; const { dataUrl, ...rest } = meta; return rest; };
+function countMessages(msgs: ChatCompletionMessageParam[]): number {
+  let n = 0;
+  for (const m of msgs) { if (typeof m.content === 'string') n += countText(m.content) + 4; if ((m as any).tool_calls) for (const t of (m as any).tool_calls) n += countText(t.function?.arguments || '') + 4; }
+  return n;
 }
-async function runAgent(userContent: string) {
-  if (isRunning || !cfg) return;
-  isRunning = true;
-  try {
-    // Add user message to in-memory history (DB write happens in renderer)
-    const userMsg: Message = { id: nanoid(), convId: cfg.convId, role: 'user', content: userContent, tokenCount: 0, createdAt: Date.now() };
-    history.push(userMsg);
-    console.log(`[Agent:${cfg.convId.slice(0, 6)}] Starting: "${userContent.slice(0, 60)}"`);
-    if (history.filter(m => m.role === 'user').length <= 1) {
-      generateTitle(userContent, cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider, cfg.modelId)
-        .then(title => parent.postMessage({ type: 'db:title', title }))
-        .catch(e => console.error('[Agent] Title gen failed:', e.message));
-    }
-    // Pre-flight compaction
-    await tryCompact();
-    let iteration = 0;
-    while (iteration < MAX_TOOL_ITERATIONS) {
-      iteration++;
-      const pendingToolCalls = await streamCompletion();
-      if (!pendingToolCalls.length) break;
-      console.log(`[Agent] Iter ${iteration}: ${pendingToolCalls.length} tools`);
-      for (const ptc of pendingToolCalls) {
-        const tcRecord: ToolCall = { id: ptc.id, msgId: ptc.msgId, convId: cfg.convId, name: ptc.name, input: ptc.args, createdAt: Date.now() };
-        send({ type: 'tool_call', toolCall: tcRecord });
-        parent.postMessage({ type: 'db:toolcall', toolCall: tcRecord });
-        try {
-          const parsedArgs = parseToolArgs(ptc.name, ptc.args);
-          const { result, meta } = await executeTool(ptc.name, parsedArgs, cfg.workspacePath, { gcpBase: cfg.gcpBase, jwt: cfg.jwt, anonKey: cfg.anonKey });
-          send({ type: 'tool_result', toolCallId: ptc.id, result, meta });
-          parent.postMessage({ type: 'db:toolcall', toolCall: { ...tcRecord, output: result, ...meta } });
-          const r: Message = { id: nanoid(), convId: cfg.convId, role: 'tool', content: result, toolCallId: ptc.id, tokenCount: 0, createdAt: Date.now() };
-          history.push(r); parent.postMessage({ type: 'db:write', message: r });
-        } catch (toolErr: any) {
-          const errMsg = toolErr.message || String(toolErr);
-          console.error(`[Agent] Tool ${ptc.name} failed:`, errMsg);
-          send({ type: 'tool_result', toolCallId: ptc.id, result: `Error: ${errMsg}` });
-          parent.postMessage({ type: 'db:toolcall', toolCall: { ...tcRecord, output: `Error: ${errMsg}` } });
-          const r: Message = { id: nanoid(), convId: cfg.convId, role: 'tool', content: `Error: ${errMsg}`, toolCallId: ptc.id, tokenCount: 0, createdAt: Date.now() };
-          history.push(r); parent.postMessage({ type: 'db:write', message: r });
-        }
-      }
-      // In-flight compaction between tool iterations
-      await tryCompact();
-    }
-    if (iteration >= MAX_TOOL_ITERATIONS) console.warn(`[Agent] Hit max iterations (${MAX_TOOL_ITERATIONS})`);
-    send({ type: 'done' });
-    parent.postMessage({ type: 'db:tokens', count: countMessages(history) });
-  } catch (err: any) {
-    console.error('[Agent] Run error:', err.message);
-    send({ type: 'error', error: err.message || String(err) });
-  } finally { isRunning = false; abortController = null; }
-}
-async function streamCompletion(): Promise<Array<{ id: string; name: string; args: string; msgId: string }>> {
-  if (!cfg) return [];
-  const oaiMessages = toOpenAIMessages(buildSystemPrompt(), history, assistantToolCalls, assistantReasoning);
-  abortController = new AbortController();
-  const pendingToolCalls: Array<{ id: string; name: string; args: string; msgId: string }> = [];
-  let assistantContent = '';
-  const assistantMsgId = nanoid();
-  send({ type: 'iter_start', messageId: assistantMsgId });
-  const client = getClient();
-  const modelName = extractModelName(cfg.modelId);
+interface RoundTool { id: string; name: string; args: string; }
+async function streamOnce(messages: ChatCompletionMessageParam[], asstId: string, convId: string, nextSeq: () => number, cfg: AgentRunConfig): Promise<{ text: string; reasoning: string; toolCalls: RoundTool[] }> {
+  const client = makeClient(cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider);
   const params: ChatCompletionCreateParamsStreaming = {
-    model: modelName, messages: oaiMessages, tools: buildToolDefs(),
-    tool_choice: 'auto', stream: true, max_tokens: 8192,
+    model: extractModelName(cfg.modelId), messages, tools: buildToolDefs(), tool_choice: 'auto', stream: true, max_tokens: 8192,
     ...(cfg.reasoningEffort ? { reasoning_effort: cfg.reasoningEffort as any } : {}),
   };
-  // Write assistant message placeholder immediately for crash resilience
-  const assistantMsg: Message = { id: assistantMsgId, convId: cfg.convId, role: 'assistant', content: '', tokenCount: 0, createdAt: Date.now() };
-  parent.postMessage({ type: 'db:write', message: assistantMsg });
-  const stream: Stream<ChatCompletionChunk> = await client.chat.completions.create(params, { signal: abortController.signal });
-  const tokenCount = countMessages(history);
-  let lastFlush = Date.now();
+  const stream: Stream<ChatCompletionChunk> = await client.chat.completions.create(params, { signal: abortController!.signal });
+  let text = '', reasoning = '', textId: string | null = null, reasonId: string | null = null;
+  const pending: RoundTool[] = [];
   for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta;
-    if (!delta) continue;
+    const delta = chunk.choices[0]?.delta; if (!delta) continue;
     if (delta.content) {
-      assistantContent += delta.content;
-      send({ type: 'chunk', delta: delta.content, tokenCount, contextWindow: cfg.contextWindow, messageId: assistantMsgId });
-      if (Date.now() - lastFlush > 2000) {
-        parent.postMessage({ type: 'db:write', message: { ...assistantMsg, content: assistantContent } });
-        lastFlush = Date.now();
-      }
+      if (!textId) { textId = nanoid(); emit({ type: 'part.start', part: textPart(textId, asstId, convId, nextSeq(), 'text') }); }
+      text += delta.content; emit({ type: 'part.delta', messageId: asstId, partId: textId, text: delta.content });
     }
-    // DeepSeek thinking mode — capture reasoning_content so it can be echoed back in history
-    const reasoningDelta = (delta as any).reasoning_content;
-    if (reasoningDelta) {
-      const prev = assistantReasoning.get(assistantMsgId) || '';
-      assistantReasoning.set(assistantMsgId, prev + reasoningDelta);
+    const rc = (delta as any).reasoning_content;
+    if (rc) {
+      if (!reasonId) { reasonId = nanoid(); emit({ type: 'part.start', part: textPart(reasonId, asstId, convId, nextSeq(), 'reasoning') }); }
+      reasoning += rc; emit({ type: 'part.delta', messageId: asstId, partId: reasonId, text: rc });
     }
-    if (delta.tool_calls) {
-      for (const tc of delta.tool_calls) {
-        if (tc.index !== undefined) {
-          if (!pendingToolCalls[tc.index]) pendingToolCalls[tc.index] = { id: tc.id || nanoid(), name: tc.function?.name || '', args: '', msgId: assistantMsgId };
-          if (tc.function?.name) pendingToolCalls[tc.index].name = tc.function.name;
-          if (tc.function?.arguments) pendingToolCalls[tc.index].args += tc.function.arguments;
+    if (delta.tool_calls) for (const tc of delta.tool_calls) {
+      if (tc.index === undefined) continue;
+      if (!pending[tc.index]) pending[tc.index] = { id: tc.id || nanoid(), name: tc.function?.name || '', args: '' };
+      if (tc.function?.name) pending[tc.index].name = tc.function.name;
+      if (tc.function?.arguments) pending[tc.index].args += tc.function.arguments;
+    }
+  }
+  return { text, reasoning, toolCalls: pending.filter(Boolean) };
+}
+// Pre-run compaction: summarize all-but-tail, emit summary message, return trimmed history.
+async function maybeCompact(history: HistoryMessage[], cfg: AgentRunConfig): Promise<HistoryMessage[]> {
+  if (countHistory(history) <= COMPACT_AT * cfg.contextWindow) return history;
+  const live = history.filter(h => !h.message.compacted);
+  if (live.length <= KEEP_TAIL + 1) return history;
+  const older = live.slice(0, live.length - KEEP_TAIL);
+  const kept = live.slice(live.length - KEEP_TAIL);
+  try {
+    const text = await summarize(buildOpenAIMessages('', older, cfg.workspacePath).slice(1), cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider, cfg.modelId);
+    if (!text) return history;
+    const sid = nanoid(), pid = nanoid();
+    const summaryMessage: DBMessage = { id: sid, convId: cfg.convId, role: 'system', seq: 0, status: 'complete', error: null, model: cfg.modelId, compacted: 0, createdAt: now(), updatedAt: now() };
+    const summaryPart: DBPart = { ...textPart(pid, sid, cfg.convId, 0, 'text'), text };
+    emit({ type: 'compacted', summaryMessage, summaryPart, compactedIds: older.map(h => h.message.id) });
+    return [{ message: summaryMessage, parts: [summaryPart as HistoryPart] }, ...kept];
+  } catch { return history; }
+}
+async function run(req: { config: AgentRunConfig; history: HistoryMessage[] }) {
+  if (running) return;
+  running = true;
+  const cfg = req.config, convId = cfg.convId;
+  abortController = new AbortController();
+  let aborted = false;
+  abortController.signal.addEventListener('abort', () => { aborted = true; });
+  const asstId = nanoid();
+  emit({ type: 'message.start', message: { id: asstId, convId, role: 'assistant', seq: 0, status: 'streaming', error: null, model: cfg.modelId, compacted: 0, createdAt: now(), updatedAt: now() } });
+  let seqCounter = 0;
+  const nextSeq = () => seqCounter++;
+  try {
+    const userTurns = req.history.filter(h => h.message.role === 'user');
+    if (userTurns.length === 1) {
+      const firstText = userTurns[0].parts.map(p => p.text || p.path || '').join(' ').trim();
+      generateTitle(firstText, cfg.gcpBase, cfg.jwt, cfg.anonKey, cfg.provider, cfg.modelId).then(t => emit({ type: 'title', title: t })).catch(() => {});
+    }
+    const history = await maybeCompact(req.history, cfg);
+    const messages = buildOpenAIMessages(systemPrompt(cfg), history, cfg.workspacePath);
+    let iteration = 0;
+    while (iteration < MAX_TOOL_ITERATIONS && !aborted) {
+      iteration++;
+      const round = await streamOnce(messages, asstId, convId, nextSeq, cfg);
+      const apiAsst: any = { role: 'assistant', content: round.text || null };
+      if (round.reasoning) apiAsst.reasoning_content = round.reasoning;
+      if (round.toolCalls.length) apiAsst.tool_calls = round.toolCalls.map(t => ({ id: t.id, type: 'function', function: { name: t.name, arguments: t.args || '{}' } }));
+      messages.push(apiAsst);
+      if (!round.toolCalls.length) break;
+      for (const tc of round.toolCalls) {
+        if (aborted) break;
+        const partId = nanoid();
+        emit({ type: 'part.start', part: { id: partId, messageId: asstId, convId, seq: nextSeq(), type: 'tool', text: null, toolCallId: tc.id, toolName: tc.name, toolArgs: tc.args || '{}', toolResult: null, toolStatus: 'running', toolMeta: null, artifactId: null, path: null, createdAt: now(), updatedAt: now() } });
+        try {
+          const parsed = parseToolArgs(tc.name, tc.args || '{}');
+          const { result, meta } = await executeTool(tc.name, parsed, cfg.workspacePath, { gcpBase: cfg.gcpBase, jwt: cfg.jwt, anonKey: cfg.anonKey });
+          emit({ type: 'tool.update', messageId: asstId, partId, status: 'done', result, meta: lightMeta(meta) });
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+          if (meta?.dataUrl) emit({ type: 'part.image', messageId: asstId, partId: nanoid(), seq: nextSeq(), mime: 'image/png', name: (meta.prompt || 'image').slice(0, 40), dataUrl: meta.dataUrl });
+        } catch (e: any) {
+          if (aborted) break;
+          const msg = e.message || String(e);
+          emit({ type: 'tool.update', messageId: asstId, partId, status: 'error', result: `Error: ${msg}` });
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: `Error: ${msg}` });
         }
       }
     }
-  }
-  const resolvedTCs = pendingToolCalls.filter(Boolean);
-  if (resolvedTCs.length) {
-    assistantToolCalls.set(assistantMsgId, resolvedTCs.map(tc => ({ id: tc.id, name: tc.name, args: tc.args })));
-  }
-  // Final DB write with complete content
-  assistantMsg.content = assistantContent;
-  history.push(assistantMsg);
-  parent.postMessage({ type: 'db:write', message: assistantMsg });
-  return resolvedTCs;
+    emit({ type: 'message.end', messageId: asstId, status: aborted ? 'aborted' : 'complete' });
+    emit({ type: 'tokens', count: countMessages(messages) });
+  } catch (e: any) {
+    emit({ type: 'message.end', messageId: asstId, status: aborted ? 'aborted' : 'error', error: aborted ? undefined : (e.message || String(e)) });
+  } finally { running = false; abortController = null; }
 }
-parent.on('message', async (e: any) => {
-  const msg = e.data;
-  console.log('[Worker] Received message type:', msg?.type);
-  if (msg.type === 'init') {
-    cfg = msg as AgentInitConfig & { type: string };
-    history = (msg as AgentInitConfig).history || [];
-    console.log(`[Agent:${cfg.convId.slice(0, 6)}] Init. Model: ${cfg.modelId} ctx: ${cfg.contextWindow}`);
-  } else if (msg.type === 'send' && !isRunning) {
-    await runAgent(msg.content).catch(err => { console.error('[Agent] Fatal:', err); send({ type: 'error', error: String(err) }); isRunning = false; });
-  } else if (msg.type === 'kill') {
-    abortController?.abort();
-    send({ type: 'done' });
-    isRunning = false;
-  }
+parent.on('message', (e: any) => {
+  const msg = e.data as WorkerInbound;
+  if (msg.type === 'run') run(msg).catch(err => emit({ type: 'message.end', messageId: 'unknown', status: 'error', error: String(err) }));
+  else if (msg.type === 'abort') abortController?.abort();
 });
 parent.start();
-console.log('[Worker] parentPort started, ready for messages');
+parent.postMessage({ type: 'ready' });
+console.log('[Worker] ready');
