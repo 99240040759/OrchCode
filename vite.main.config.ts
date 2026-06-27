@@ -18,5 +18,5 @@ export default defineConfig({
       if (fs.existsSync(s)) { fs.mkdirSync(d, { recursive: true }); fs.readdirSync(s).forEach(f => fs.copyFileSync(path.join(s, f), path.join(d, f))); }
     }
   }],
-  build: { rollupOptions: { external: ['electron', 'better-sqlite3', 'node-pty', '@vscode/ripgrep'] } },
+  build: { rollupOptions: { external: ['electron', 'better-sqlite3', 'node-pty', '@vscode/ripgrep', 'web-tree-sitter', 'tree-sitter-wasms', 'officeparser'] } },
 });

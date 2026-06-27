@@ -64,7 +64,7 @@ export type AgentEvent =
   | { type: 'tool.update'; messageId: string; partId: string; status: ToolStatus; result?: string; meta?: Record<string, any> }
   | { type: 'message.end'; messageId: string; status: MessageStatus; error?: string }
   | { type: 'title'; title: string }
-  | { type: 'tokens'; count: number }
+  | { type: 'tokens'; context: number; lifetime: number }
   | { type: 'compacted'; summaryMessage: DBMessage; summaryPart: DBPart; compactedIds: string[] };
 export function buildHistoryMessages(messages: DBMessage[], parts: DBPart[], artifacts: DBArtifact[]): HistoryMessage[] {
   const arts = new Map(artifacts.map(a => [a.id, a]));

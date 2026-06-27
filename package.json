@@ -64,8 +64,8 @@
     "fast-glob": "^3.3.3",
     "js-tiktoken": "^1.0.21",
     "katex": "^0.17.0",
-    "nanoid": "^5.1.15",
     "monaco-editor": "^0.55.1",
+    "nanoid": "^5.1.15",
     "openai": "^6.44.0",
     "radix-ui": "^1.6.0",
     "react": "^19.2.7",
@@ -95,6 +95,9 @@
     "bindings": "^1.5.0",
     "file-uri-to-path": "^2.0.0",
     "node-pty": "^1.1.0",
-    "path-browserify": "^1.0.1"
+    "officeparser": "^7.2.2",
+    "path-browserify": "^1.0.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8"
   }
 }

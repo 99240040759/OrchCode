@@ -1,13 +1,13 @@
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { zodFunction } from 'openai/helpers/zod';
 import { execa } from 'execa';
 import { rgPath } from '@vscode/ripgrep';
 import { computeDiff } from './diff';
+import { applyEdits } from './astEdit';
 import { secureResolve } from '../lib/securePath';
-const SKILLS_DIR = path.join(__dirname, '..', 'src', 'agent', 'skills');
-const SKILLS_DIR_ALT = path.join(__dirname, 'skills');
+const SKILLS_DIR = path.join(__dirname, 'skills');
 // ── Zod schemas for tool parameters ──────────────────────────────────────────
 const ReadFileParams = z.object({
   path: z.string().describe('File path relative to workspace or absolute'),
@@ -76,9 +76,8 @@ export function parseToolArgs(name: string, rawArgs: string): Record<string, any
 }
 // ── Execution ────────────────────────────────────────────────────────────────
 const MAX_BUFFER = 5 * 1024 * 1024;
-const CMD_TIMEOUT = 30_000;
 type GcpConfig = { gcpBase: string; jwt: string; anonKey: string };
-export async function executeTool(name: string, args: Record<string, any>, workspacePath: string | null, gcpConfig?: GcpConfig): Promise<{ result: string; meta: Record<string, any> }> {
+export async function executeTool(name: string, args: Record<string, any>, workspacePath: string | null, gcpConfig?: GcpConfig, signal?: AbortSignal): Promise<{ result: string; meta: Record<string, any> }> {
   const cwd = workspacePath || process.cwd();
   const resolvePath = (p: string) => workspacePath ? secureResolve(workspacePath, p) : (path.isAbsolute(p) ? p : path.join(cwd, p));
   switch (name) {
@@ -104,14 +103,10 @@ export async function executeTool(name: string, args: Record<string, any>, works
       const { path: fp, replacements } = EditFileParams.parse(args);
       const resolved = resolvePath(fp);
       const original = readFileSync(resolved, 'utf8');
-      let content = original;
-      for (const r of replacements) {
-        if (!content.includes(r.target)) throw new Error(`Target string not found in file: "${r.target.slice(0, 80)}..."`);
-        content = content.replaceAll(r.target, r.replacement);
-      }
+      const { content, warnings } = await applyEdits(resolved, original, replacements);
       writeFileSync(resolved, content, 'utf8');
       const diff = computeDiff(original, content);
-      return { result: JSON.stringify({ original, modified: content }), meta: { path: fp, diffAdded: diff.added, diffRemoved: diff.removed } };
+      return { result: JSON.stringify({ original, modified: content, warnings }), meta: { path: fp, diffAdded: diff.added, diffRemoved: diff.removed, warnings: warnings.length ? warnings : undefined } };
     }
     case 'list_dir': {
       const { path: fp } = ListDirParams.parse(args);
@@ -123,7 +118,7 @@ export async function executeTool(name: string, args: Record<string, any>, works
     case 'run_command': {
       const { command, cwd: cmdCwd } = RunCommandParams.parse(args);
       const shell = process.platform === 'win32' ? 'powershell.exe' : true;
-      const result = await execa(command, { shell, cwd: cmdCwd ? resolvePath(cmdCwd) : cwd, timeout: CMD_TIMEOUT, maxBuffer: MAX_BUFFER });
+      const result = await execa(command, { shell, cwd: cmdCwd ? resolvePath(cmdCwd) : cwd, maxBuffer: MAX_BUFFER, cancelSignal: signal });
       const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
       return { result: out || '(no output)', meta: { command, exitCode: result.exitCode } };
     }
@@ -134,6 +129,7 @@ export async function executeTool(name: string, args: Record<string, any>, works
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': gcpConfig.anonKey, 'Authorization': `Bearer ${gcpConfig.jwt}` },
         body: JSON.stringify({ query, maxResults: 5 }),
+        signal,
       });
       if (!res.ok) throw new Error(`Web search failed: ${res.status} ${await res.text()}`);
       const data = await res.json() as any;
@@ -144,8 +140,7 @@ export async function executeTool(name: string, args: Record<string, any>, works
     }
     case 'read_skill': {
       const { name: skillName } = ReadSkillParams.parse(args);
-      let skillPath = path.join(SKILLS_DIR, `${skillName}.md`);
-      if (!existsSync(skillPath)) skillPath = path.join(SKILLS_DIR_ALT, `${skillName}.md`);
+      const skillPath = path.join(SKILLS_DIR, `${skillName}.md`);
       if (!existsSync(skillPath)) throw new Error(`Skill not found: ${skillName}. Available: pdf, docx, xlsx, pptx, file-reading`);
       return { result: readFileSync(skillPath, 'utf8'), meta: { skill: skillName } };
     }
@@ -156,6 +151,7 @@ export async function executeTool(name: string, args: Record<string, any>, works
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': gcpConfig.anonKey, 'Authorization': `Bearer ${gcpConfig.jwt}` },
         body: JSON.stringify({ prompt, width: width || 1024, height: height || 1024 }),
+        signal,
       });
       if (!res.ok) throw new Error(`Image generation failed: ${res.status} ${await res.text()}`);
       const data = await res.json() as any;
@@ -172,7 +168,7 @@ export async function executeTool(name: string, args: Record<string, any>, works
       if (!case_sensitive) rgArgs.push('-i');
       if (include) rgArgs.push('-g', include);
       rgArgs.push('--', query, searchDir);
-      const result = await execa(rgPath, rgArgs, { timeout: 15_000, maxBuffer: MAX_BUFFER, reject: false });
+      const result = await execa(rgPath, rgArgs, { timeout: 15_000, maxBuffer: MAX_BUFFER, reject: false, cancelSignal: signal });
       const lines = (result.stdout || '').split('\n').filter(Boolean);
       const matches: Array<{ file: string; line: number; text: string }> = [];
       for (const line of lines) {

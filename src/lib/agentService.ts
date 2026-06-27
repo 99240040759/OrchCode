@@ -24,7 +24,8 @@ export async function sendMessage(convId: string, workspacePath: string | null, 
   }
   for (const a of attachments) {
     const isImg = a.mimeType.startsWith('image/');
-    const kind = isImg && allowImages ? 'image' : 'file';
+    if (isImg && !allowImages) { toast.warning(`${a.name} skipped — ${model.name} can't read images`); continue; }
+    const kind = isImg ? 'image' : 'file';
     inputParts.push({ type: kind, name: a.name, mime: a.mimeType, dataUrl: a.dataUrl });
     uiParts.push(kind === 'image' ? { type: 'image', id: nanoid(), artifactId: null, mime: a.mimeType, name: a.name, dataUrl: a.dataUrl } : { type: 'file', id: nanoid(), artifactId: null, name: a.name, mime: a.mimeType });
   }

@@ -9,6 +9,7 @@ import { quitAndInstall, openReleasesPage, checkForUpdate } from '../main';
 import { buildHistoryMessages } from './types';
 import type { Workspace, Conversation, AgentRunConfig, AgentEvent, HistoryMessage, HistoryPart, DBMessage, DBPart, DBArtifact } from './types';
 import { secureResolve } from '../lib/securePath';
+import { extractText } from '../lib/extractText';
 const now = () => Date.now();
 // ─── Agent runtime state (main is the single authority) ─────────────────────
 type Proc = ReturnType<typeof utilityProcess.fork>;
@@ -51,7 +52,7 @@ function persistAndForward(convId: string, ev: AgentEvent) {
     case 'compacted': { const seq = q.nextSeq(convId); ev.summaryMessage.seq = seq; q.insertMessage(ev.summaryMessage); q.insertPart(ev.summaryPart); q.markCompacted(ev.compactedIds); break; }
     case 'message.end': flushBuffers(); q.setMessageStatus(ev.messageId, ev.status, ev.error ?? null); q.touchConversation(convId); active.delete(convId); break;
     case 'title': q.updateConversation(convId, { title: ev.title, updatedAt: now() }); send('conv:titleUpdated', convId, ev.title); break;
-    case 'tokens': q.addLifetimeTokens(ev.count); break;
+    case 'tokens': q.addLifetimeTokens(ev.lifetime); break;
   }
   send('agent:event', convId, ev);
 }
@@ -88,7 +89,7 @@ function postToWorker(convId: string, payload: any) {
 }
 // ─── User-message input parts (from renderer) ───────────────────────────────
 type InputPart = { type: 'text'; text: string } | { type: 'mention'; path: string } | { type: 'image' | 'file'; name: string; mime: string; dataUrl: string };
-function persistUserMessage(convId: string, id: string, parts: InputPart[]): DBMessage {
+async function persistUserMessage(convId: string, id: string, parts: InputPart[]): Promise<DBMessage> {
   const seq = q.nextSeq(convId);
   const m: DBMessage = { id, convId, role: 'user', seq, status: 'complete', error: null, model: null, compacted: 0, createdAt: now(), updatedAt: now() };
   q.insertMessage(m);
@@ -97,7 +98,12 @@ function persistUserMessage(convId: string, id: string, parts: InputPart[]): DBM
     const pid = nanoid(), base = { id: pid, messageId: id, convId, seq: ps++, text: null as string | null, toolCallId: null, toolName: null, toolArgs: null, toolResult: null, toolStatus: null, toolMeta: null, artifactId: null as string | null, path: null as string | null, createdAt: now(), updatedAt: now() };
     if (p.type === 'text') q.insertPart({ ...base, type: 'text', text: p.text });
     else if (p.type === 'mention') q.insertPart({ ...base, type: 'mention', path: p.path });
-    else { const mm = /^data:([^;]+);base64,(.*)$/s.exec(p.dataUrl); const artId = nanoid(); q.insertArtifact({ id: artId, convId, messageId: id, partId: pid, kind: p.type, mime: mm?.[1] || p.mime, name: p.name, data: mm?.[2] || '', createdAt: now() }); q.insertPart({ ...base, type: p.type, text: p.name, artifactId: artId }); }
+    else {
+      const mm = /^data:([^;]+);base64,(.*)$/s.exec(p.dataUrl), artId = nanoid(), b64 = mm?.[2] || '';
+      q.insertArtifact({ id: artId, convId, messageId: id, partId: pid, kind: p.type, mime: mm?.[1] || p.mime, name: p.name, data: b64, createdAt: now() });
+      if (p.type === 'file') { const text = await extractText(p.name, p.mime, Buffer.from(b64, 'base64')); q.insertPart({ ...base, type: 'file', text, path: p.name, artifactId: artId }); }
+      else q.insertPart({ ...base, type: p.type, text: p.name, artifactId: artId });
+    }
   }
   q.touchConversation(convId);
   return m;
@@ -144,13 +150,16 @@ export function registerHandlers() {
     try { return fs.readFileSync(secureResolve(dirPath, filePath), 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
   });
   // ─── Agent ───
-  safeHandle('agent:send', (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {
+  safeHandle('agent:send', async (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {
     const convId = config.convId;
     if (active.has(convId)) return { ok: false, busy: true };
-    persistUserMessage(convId, message.id, message.parts);
-    const history = buildHistory(convId);
-    postToWorker(convId, { type: 'run', config, history });
-    return { ok: true };
+    active.set(convId, message.id); // reserve synchronously to close the concurrent-send race; overwritten by message.start
+    try {
+      await persistUserMessage(convId, message.id, message.parts);
+      const history = buildHistory(convId);
+      postToWorker(convId, { type: 'run', config, history });
+      return { ok: true };
+    } catch (e) { active.delete(convId); throw e; }
   });
   safeHandle('agent:abort', (_, convId: string) => { const box = workers.get(convId); if (!box) return; if (box.ready) box.proc.postMessage({ type: 'abort' }); else box.queue.push({ type: 'abort' }); });
   safeHandle('budget:get', async (_, { gcpBase, jwt, anonKey }: { gcpBase: string; jwt: string; anonKey: string }) => {

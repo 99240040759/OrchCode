@@ -27,7 +27,7 @@ function useGlobalAgentEvents() {
     const cleanup = el.onAgentEvent((convId, ev) => {
       const s = useConversationsStore.getState();
       if (ev.type === 'part.delta') pushDelta(convId, ev.messageId, ev.partId, ev.text);
-      else if (ev.type === 'tokens') s.setTokenCount(convId, ev.count);
+      else if (ev.type === 'tokens') s.setTokenCount(convId, ev.context);
       else s.apply(convId, ev);
     });
     return () => { cleanup(); stopFlusher(); };

@@ -15,14 +15,17 @@ const STRIP: Record<string, string[]> = {
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: { unpack: '{**/*.node,**/node-pty/build/Release/spawn-helper,**/node-pty/build/Release/winpty*,**/ripgrep-*/bin/rg,**/ripgrep-*/bin/rg.exe}' },
+    asar: { unpack: '{**/*.node,**/*.wasm,**/node-pty/build/Release/spawn-helper,**/node-pty/build/Release/winpty*,**/ripgrep-*/bin/rg,**/ripgrep-*/bin/rg.exe}' },
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath, _electronVersion, platform, arch) => {
       const nmRoot = path.join(process.cwd(), 'node_modules');
+      const copied = new Set<string>();
       const inject = (mod: string) => {
+        if (copied.has(mod)) return;
         const src = path.join(nmRoot, mod);
         if (!fs.existsSync(src)) return;
+        copied.add(mod);
         const dest = path.join(buildPath, 'node_modules', mod);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.cpSync(src, dest, { recursive: true });
@@ -30,9 +33,11 @@ const config: ForgeConfig = {
           const p = path.join(dest, entry);
           if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
         }
+        // Recurse into hoisted transitive dependencies so externalized packages resolve at runtime.
+        try { const pkg = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')); for (const dep of Object.keys(pkg.dependencies ?? {})) inject(dep); } catch { /* no package.json */ }
         console.log(`[forge] Injected ${mod}`);
       };
-      for (const mod of ['node-pty', 'better-sqlite3', 'bindings', 'file-uri-to-path']) inject(mod);
+      for (const mod of ['node-pty', 'better-sqlite3', 'bindings', 'file-uri-to-path', 'web-tree-sitter', 'tree-sitter-wasms', 'officeparser']) inject(mod);
       // Inject the JS resolver and only the binary package matching the target platform+arch.
       // e.g. darwin/x64 → @vscode/ripgrep-darwin-x64 (not arm64, not win32-x64)
       inject('@vscode/ripgrep');

@@ -12,10 +12,22 @@ export function makeClient(gcpBase: string, jwt: string, anonKey: string, provid
   const route = provider === 'z-ai' ? 'z-ai' : 'opencode';
   return new OpenAI({ baseURL: `${gcpBase}/${route}/v1`, apiKey: jwt, defaultHeaders: { apikey: anonKey } });
 }
-// Tokens for a whole history (approx) — used for compaction decisions
+// Tokens for a whole history (approx) — used for compaction decisions. Compacted messages are excluded (they aren't sent).
 export function countHistory(history: HistoryMessage[]): number {
   let n = 0;
-  for (const { parts } of history) for (const p of parts) n += countText(p.text || p.toolResult || p.toolArgs || '') + 4;
+  for (const { message, parts } of history) { if (message.compacted) continue; for (const p of parts) n += countText(p.text || p.toolResult || p.toolArgs || '') + 4; }
+  return n;
+}
+// Approx token size of a built OpenAI message array — used for mid-loop compaction decisions.
+export function estimateMessages(messages: ChatCompletionMessageParam[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') n += countText(m.content);
+    else if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'text') n += countText(c.text);
+    const tc = (m as any).tool_calls; if (tc) for (const t of tc) n += countText(t.function?.arguments || '');
+    const rc = (m as any).reasoning_content; if (rc) n += countText(rc);
+    n += 4;
+  }
   return n;
 }
 const MENTION_MAX = 24_000;
@@ -33,17 +45,12 @@ function userContent(parts: HistoryPart[], workspacePath: string | null): string
   for (const p of parts) {
     if (p.type === 'text') text.push(p.text || '');
     else if (p.type === 'mention') text.push(`@${p.path}\n<file path="${p.path}">\n${readMention(workspacePath, p.path!)}\n</file>`);
-    else if (p.type === 'file') text.push(p.dataUrl ? `<file name="${p.text || 'file'}">\n${decodeText(p.dataUrl)}\n</file>` : `[file ${p.text}]`);
+    else if (p.type === 'file') text.push(`<file name="${p.path || 'file'}">\n${p.text || ''}\n</file>`);
     else if (p.type === 'image' && p.dataUrl) images.push({ type: 'image_url', image_url: { url: p.dataUrl } });
   }
   const joined = text.join('\n').trim();
   if (!images.length) return joined;
   return [...(joined ? [{ type: 'text', text: joined }] : []), ...images];
-}
-function decodeText(dataUrl: string): string {
-  const i = dataUrl.indexOf('base64,');
-  if (i === -1) return '';
-  try { return Buffer.from(dataUrl.slice(i + 7), 'base64').toString('utf8').slice(0, MENTION_MAX); } catch { return ''; }
 }
 // Split an assistant message's ordered parts into valid OpenAI message rounds.
 function assistantRounds(parts: HistoryPart[], out: ChatCompletionMessageParam[]) {
