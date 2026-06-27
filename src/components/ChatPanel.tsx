@@ -17,7 +17,7 @@ function ThinkingIndicator() {
   );
 }
 
-export default function ChatPanel({ convId, workspacePath, compact }: { convId: string; workspaceId: string | null; workspacePath: string | null; compact?: boolean }) {
+export default function ChatPanel({ convId, workspacePath, compact }: { convId: string; workspacePath: string | null; compact?: boolean }) {
   const conv = useConversationsStore(s => s.convs[convId]);
   const messages = conv?.messages || [];
   const busy = conv?.status === 'busy';
@@ -27,8 +27,13 @@ export default function ChatPanel({ convId, workspacePath, compact }: { convId: 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const scrollRaf = useRef(0);
   const handleScroll = () => { const el = scrollerRef.current; if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
-  useEffect(() => { if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: 'instant' }); }, [messages]);
+  useEffect(() => {
+    if (!pinned.current) return;
+    if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current);
+    scrollRaf.current = requestAnimationFrame(() => { bottomRef.current?.scrollIntoView({ behavior: 'instant' }); scrollRaf.current = 0; });
+  }, [messages]);
   const handleSend = (parts: EditorPart[], attachments?: Attachment[]) => { if (busy) return; pinned.current = true; sendMessage(convId, workspacePath, parts, attachments); };
   const inputBar = <TiptapInput key={convId} onSubmit={handleSend} onStop={() => stopAgent(convId)} workspacePath={workspacePath} disabled={busy} isStreaming={busy} />;
   if (compact) return <div className="px-3 py-2">{inputBar}</div>;

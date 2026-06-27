@@ -50,6 +50,7 @@ function buildMentionSuggestion() {
       const setWidth = (props: any) => { if (component) component.style.width = `${props.editor.view.dom.getBoundingClientRect().width}px`; };
       return {
         onStart: (props: any) => {
+          root?.unmount(); popup?.destroy();
           currentProps = props; selectedIndex = 0; component = document.createElement('div'); setWidth(props); root = createRoot(component); renderReact();
           popup = tippy('body', { getReferenceClientRect: props.clientRect, appendTo: () => document.body, content: component, showOnCreate: true, interactive: true, trigger: 'manual', placement: 'top-start', theme: 'mention' })[0];
         },

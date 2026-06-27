@@ -9,6 +9,7 @@ export default defineConfig({
     'process.env.SENTRY_DSN': JSON.stringify(env.SENTRY_DSN),
     'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL),
     'process.env.SUPABASE_ANON_KEY': JSON.stringify(env.SUPABASE_ANON_KEY),
+    'process.env.GCP_FUNCTIONS_URL': JSON.stringify(env.GCP_FUNCTIONS_URL),
   },
   plugins: [{
     name: 'copy-skills',

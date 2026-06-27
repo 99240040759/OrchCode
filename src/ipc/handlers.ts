@@ -73,7 +73,12 @@ function getWorker(convId: string): WorkerBox {
   proc.on('exit', (code) => {
     workers.delete(convId);
     const msgId = active.get(convId);
-    if (msgId) { flushBuffers(); q.setMessageStatus(msgId, 'error', `Worker exited (${code})`); active.delete(convId); send('agent:event', convId, { type: 'message.end', messageId: msgId, status: 'error', error: `Worker exited (${code})` }); }
+    if (msgId) {
+      // Flush only this conv's text buffers, clear stale entries
+      for (const [partId, b] of textBuffers) if (b.convId === convId) { q.setPartText(partId, b.text); textBuffers.delete(partId); }
+      q.setMessageStatus(msgId, 'error', `Worker exited (${code})`); active.delete(convId);
+      send('agent:event', convId, { type: 'message.end', messageId: msgId, status: 'error', error: `Worker exited (${code})` });
+    }
   });
   return box;
 }
@@ -102,45 +107,44 @@ export function registerHandlers() {
     const u = wc.getURL(), devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : '';
     if (!u.startsWith('file://') && (!devUrl || !u.startsWith(devUrl))) throw new Error('Unauthorized IPC');
   };
-  const _h = ipcMain.handle.bind(ipcMain), _o = ipcMain.on.bind(ipcMain);
-  ipcMain.handle = (ch: string, fn: any) => _h(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
-  ipcMain.on = (ch: string, fn: any) => _o(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
-  ipcMain.handle('app:getUserDataPath', () => app.getPath('userData'));
+  const safeHandle = (ch: string, fn: (e: Electron.IpcMainInvokeEvent, ...a: any[]) => any) => ipcMain.handle(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
+  const safeOn = (ch: string, fn: (e: Electron.IpcMainEvent, ...a: any[]) => any) => ipcMain.on(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
+  safeHandle('app:getUserDataPath', () => app.getPath('userData'));
   // ─── DB ───
-  ipcMain.handle('db:getWorkspaces', () => q.getWorkspaces());
-  ipcMain.handle('db:createWorkspace', (_, w: Workspace) => { q.createWorkspace(w); return w; });
-  ipcMain.handle('db:deleteWorkspace', (_, id: string) => q.deleteWorkspace(id));
-  ipcMain.handle('db:getConversations', (_, wsId: string | null) => q.getConversations(wsId));
-  ipcMain.handle('db:createConversation', (_, c: Conversation) => { q.createConversation(c); return c; });
-  ipcMain.handle('db:updateConversation', (_, id: string, patch: Partial<Conversation>) => q.updateConversation(id, patch));
-  ipcMain.handle('db:deleteConversation', (_, id: string) => {
+  safeHandle('db:getWorkspaces', () => q.getWorkspaces());
+  safeHandle('db:createWorkspace', (_, w: Workspace) => { q.createWorkspace(w); return w; });
+  safeHandle('db:deleteWorkspace', (_, id: string) => q.deleteWorkspace(id));
+  safeHandle('db:getConversations', (_, wsId: string | null) => q.getConversations(wsId));
+  safeHandle('db:createConversation', (_, c: Conversation) => { q.createConversation(c); return c; });
+  safeHandle('db:updateConversation', (_, id: string, patch: Partial<Conversation>) => q.updateConversation(id, patch));
+  safeHandle('db:deleteConversation', (_, id: string) => {
     workers.get(id)?.proc.kill(); workers.delete(id); active.delete(id);
     q.deleteConversation(id);
     const view = convBrowserViews.get(id); if (view) { if (activeBrowserConvId === id) hideBrowserView(); convBrowserViews.delete(id); }
     ptyInstances.get(id)?.kill(); ptyInstances.delete(id); ptyScrollback.delete(id); ptySubscribers.delete(id);
   });
-  ipcMain.handle('db:loadConversation', (_, convId: string) => q.loadConversation(convId));
-  ipcMain.handle('db:getFirstLaunch', () => q.isFirstLaunch());
-  ipcMain.handle('db:setFirstLaunchDone', () => q.setFirstLaunchDone());
-  ipcMain.on('onboarding:close', () => q.setFirstLaunchDone());
-  ipcMain.handle('stats:get', () => ({ lifetimeTokens: q.getLifetimeTokens(), conversationCount: q.getConversationCount(), messageCount: q.getMessageCount() }));
-  ipcMain.handle('workspace:open', async () => {
+  safeHandle('db:loadConversation', (_, convId: string) => q.loadConversation(convId));
+  safeHandle('db:getFirstLaunch', () => q.isFirstLaunch());
+  safeHandle('db:setFirstLaunchDone', () => q.setFirstLaunchDone());
+  safeOn('onboarding:close', () => q.setFirstLaunchDone());
+  safeHandle('stats:get', () => ({ lifetimeTokens: q.getLifetimeTokens(), conversationCount: q.getConversationCount(), messageCount: q.getMessageCount() }));
+  safeHandle('workspace:open', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
     const dirPath = result.filePaths[0];
     const ws: Workspace = { id: nanoid(), name: path.basename(dirPath), path: dirPath, createdAt: now() };
     q.createWorkspace(ws); return ws;
   });
-  ipcMain.handle('workspace:listFiles', async (_, { dirPath, query }: { dirPath: string; query: string }) => {
+  safeHandle('workspace:listFiles', async (_, { dirPath, query }: { dirPath: string; query: string }) => {
     const { glob } = await import('fast-glob');
-    const files = await glob(query ? `**/*${query}*` : '**/*', { cwd: dirPath, onlyFiles: true, ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.vite/**', '**/out/**'], absolute: false, deep: 4 });
+    const files = await glob(query ? `**/*${query}*` : '**/*', { cwd: dirPath, onlyFiles: true, dot: true, ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.vite/**', '**/out/**'], absolute: false, deep: 4 });
     return files.slice(0, 30);
   });
-  ipcMain.handle('workspace:readFile', (_, { dirPath, filePath }: { dirPath: string; filePath: string }) => {
+  safeHandle('workspace:readFile', (_, { dirPath, filePath }: { dirPath: string; filePath: string }) => {
     try { return fs.readFileSync(secureResolve(dirPath, filePath), 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
   });
   // ─── Agent ───
-  ipcMain.handle('agent:send', (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {
+  safeHandle('agent:send', (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {
     const convId = config.convId;
     if (active.has(convId)) return { ok: false, busy: true };
     persistUserMessage(convId, message.id, message.parts);
@@ -148,46 +152,51 @@ export function registerHandlers() {
     postToWorker(convId, { type: 'run', config, history });
     return { ok: true };
   });
-  ipcMain.handle('agent:abort', (_, convId: string) => { const box = workers.get(convId); if (!box) return; if (box.ready) box.proc.postMessage({ type: 'abort' }); else box.queue.push({ type: 'abort' }); });
-  ipcMain.handle('budget:get', async (_, { gcpBase, jwt, anonKey }: { gcpBase: string; jwt: string; anonKey: string }) => {
+  safeHandle('agent:abort', (_, convId: string) => { const box = workers.get(convId); if (!box) return; if (box.ready) box.proc.postMessage({ type: 'abort' }); else box.queue.push({ type: 'abort' }); });
+  safeHandle('budget:get', async (_, { gcpBase, jwt, anonKey }: { gcpBase: string; jwt: string; anonKey: string }) => {
     const res = await fetch(`${gcpBase}/budget`, { headers: { apikey: anonKey, Authorization: `Bearer ${jwt}` } });
     if (!res.ok) throw new Error(`Budget fetch failed: ${res.status}`); return res.json();
   });
-  ipcMain.handle('models:get', async (_, { gcpBase, jwt, anonKey }: { gcpBase: string; jwt: string; anonKey: string }) => {
+  safeHandle('models:get', async (_, { gcpBase, jwt, anonKey }: { gcpBase: string; jwt: string; anonKey: string }) => {
     const res = await fetch(`${gcpBase}/models`, { headers: { apikey: anonKey, Authorization: `Bearer ${jwt}` } });
     if (!res.ok) throw new Error(`Models fetch failed: ${res.status}`); return res.json();
   });
   // ─── Browser ───
-  ipcMain.handle('browser:show', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => showBrowserView(convId, bounds));
-  ipcMain.handle('browser:hide', () => hideBrowserView());
-  ipcMain.handle('browser:setBounds', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => { if (convId === activeBrowserConvId) convBrowserViews.get(convId)?.setBounds(roundB(bounds)); });
-  ipcMain.handle('browser:navigate', (_, { convId, url }: { convId: string; url: string }) => { getBrowserView(convId).webContents.loadURL(url); });
-  ipcMain.handle('browser:back', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.goBack(); });
-  ipcMain.handle('browser:forward', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.goForward(); });
-  ipcMain.handle('browser:reload', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.reload(); });
-  ipcMain.handle('browser:stop', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.stop(); });
-  ipcMain.handle('browser:destroy', (_, convId: string) => { const v = convBrowserViews.get(convId); if (v) { if (activeBrowserConvId === convId) hideBrowserView(); convBrowserViews.delete(convId); } });
-  ipcMain.handle('browser:findInPage', (_, { convId, text, opts }: { convId: string; text: string; opts?: any }) => { convBrowserViews.get(convId)?.webContents.findInPage(text, opts); });
-  ipcMain.handle('browser:stopFind', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.stopFindInPage('clearSelection'); });
+  safeHandle('browser:show', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => showBrowserView(convId, bounds));
+  safeHandle('browser:hide', () => hideBrowserView());
+  safeHandle('browser:setBounds', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => { if (convId === activeBrowserConvId) convBrowserViews.get(convId)?.setBounds(roundB(bounds)); });
+  safeHandle('browser:navigate', (_, { convId, url }: { convId: string; url: string }) => { getBrowserView(convId).webContents.loadURL(url); });
+  safeHandle('browser:back', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.goBack(); });
+  safeHandle('browser:forward', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.goForward(); });
+  safeHandle('browser:reload', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.reload(); });
+  safeHandle('browser:stop', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.stop(); });
+  safeHandle('browser:destroy', (_, convId: string) => { const v = convBrowserViews.get(convId); if (v) { if (activeBrowserConvId === convId) hideBrowserView(); convBrowserViews.delete(convId); } });
+  safeHandle('browser:findInPage', (_, { convId, text, opts }: { convId: string; text: string; opts?: any }) => { convBrowserViews.get(convId)?.webContents.findInPage(text, opts); });
+  safeHandle('browser:stopFind', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.stopFindInPage('clearSelection'); });
   // ─── PTY ───
-  ipcMain.handle('pty:ensure', (_, { convId, cwd }: { convId: string; cwd?: string }) => {
+  safeHandle('pty:ensure', (_, { convId, cwd }: { convId: string; cwd?: string }) => {
     if (ptyInstances.has(convId)) return;
     if (!ptyScrollback.has(convId)) ptyScrollback.set(convId, []);
-    const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh';
-    const term = pty.spawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: cwd || app.getPath('home'), env: process.env as Record<string, string> });
-    ptyInstances.set(convId, term);
-    term.onData(data => { const buf = ptyScrollback.get(convId)!; buf.push(data); if (buf.length > SCROLLBACK_LIMIT) buf.splice(0, buf.length - SCROLLBACK_LIMIT); ptySubscribers.get(convId)?.send(`pty:data:${convId}`, data); });
-    term.onExit(() => { ptyInstances.delete(convId); ptySubscribers.get(convId)?.send(`pty:exit:${convId}`); });
+    const shell = process.platform === 'win32' ? (process.env.COMSPEC || 'powershell.exe') : (process.env.SHELL || '/bin/bash');
+    try {
+      const term = pty.spawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: cwd || app.getPath('home'), env: process.env as Record<string, string> });
+      ptyInstances.set(convId, term);
+      term.onData(data => { const buf = ptyScrollback.get(convId)!; buf.push(data); if (buf.length > SCROLLBACK_LIMIT) buf.splice(0, buf.length - SCROLLBACK_LIMIT); ptySubscribers.get(convId)?.send(`pty:data:${convId}`, data); });
+      term.onExit(() => { ptyInstances.delete(convId); ptySubscribers.get(convId)?.send(`pty:exit:${convId}`); });
+    } catch (e: any) {
+      ptyScrollback.get(convId)?.push(`\r\n\x1b[31m[Terminal] Failed to spawn shell '${shell}': ${e.message}\x1b[0m\r\n`);
+      ptySubscribers.get(convId)?.send(`pty:data:${convId}`, `\r\n\x1b[31m[Terminal] Failed to spawn shell '${shell}': ${e.message}\x1b[0m\r\n`);
+    }
   });
-  ipcMain.handle('pty:attach', (event, { convId, cols, rows }: { convId: string; cols: number; rows: number }) => { ptySubscribers.set(convId, event.sender); try { ptyInstances.get(convId)?.resize(cols, rows); } catch {} return (ptyScrollback.get(convId) || []).join(''); });
-  ipcMain.handle('pty:detach', (_, convId: string) => { ptySubscribers.delete(convId); });
-  ipcMain.on('pty:write', (_, { convId, data }: { convId: string; data: string }) => ptyInstances.get(convId)?.write(data));
-  ipcMain.handle('pty:resize', (_, { convId, cols, rows }: { convId: string; cols: number; rows: number }) => { try { ptyInstances.get(convId)?.resize(cols, rows); } catch {} });
-  ipcMain.handle('pty:kill', (_, convId: string) => { ptyInstances.get(convId)?.kill(); ptyInstances.delete(convId); ptyScrollback.delete(convId); ptySubscribers.delete(convId); });
+  safeHandle('pty:attach', (event, { convId, cols, rows }: { convId: string; cols: number; rows: number }) => { ptySubscribers.set(convId, event.sender); try { ptyInstances.get(convId)?.resize(cols, rows); } catch {} return (ptyScrollback.get(convId) || []).join(''); });
+  safeHandle('pty:detach', (_, convId: string) => { ptySubscribers.delete(convId); });
+  safeOn('pty:write', (_, { convId, data }: { convId: string; data: string }) => ptyInstances.get(convId)?.write(data));
+  safeHandle('pty:resize', (_, { convId, cols, rows }: { convId: string; cols: number; rows: number }) => { try { ptyInstances.get(convId)?.resize(cols, rows); } catch {} });
+  safeHandle('pty:kill', (_, convId: string) => { ptyInstances.get(convId)?.kill(); ptyInstances.delete(convId); ptyScrollback.delete(convId); ptySubscribers.delete(convId); });
   // ─── Updater ───
-  ipcMain.on('update:quitAndInstall', () => quitAndInstall());
-  ipcMain.on('update:openReleases', () => openReleasesPage());
-  ipcMain.on('update:check', () => checkForUpdate());
+  safeOn('update:quitAndInstall', () => quitAndInstall());
+  safeOn('update:openReleases', () => openReleasesPage());
+  safeOn('update:check', () => checkForUpdate());
 }
 // ─── Browser helpers ───
 type Bounds = { x: number; y: number; width: number; height: number };

@@ -18,18 +18,19 @@ import { useAuthStore } from '@/store/auth';
 import { useModelsStore } from '@/store/models';
 import { VscSignOut } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
-import { startFlusher, pushDelta } from '@/lib/streamFlusher';
+import { startFlusher, stopFlusher, pushDelta } from '@/lib/streamFlusher';
 import type { BudgetInfo } from '@/ipc/types';
 const hash = window.location.hash;
 function useGlobalAgentEvents() {
   useEffect(() => {
     startFlusher();
-    return el.onAgentEvent((convId, ev) => {
+    const cleanup = el.onAgentEvent((convId, ev) => {
       const s = useConversationsStore.getState();
       if (ev.type === 'part.delta') pushDelta(convId, ev.messageId, ev.partId, ev.text);
       else if (ev.type === 'tokens') s.setTokenCount(convId, ev.count);
       else s.apply(convId, ev);
     });
+    return () => { cleanup(); stopFlusher(); };
   }, []);
 }
 function UserMenu() {
@@ -141,13 +142,13 @@ export default function App() {
               artifactOpen ? (
                 <ResizablePanelGroup orientation="horizontal">
                   <ResizablePanel defaultSize="40%" minSize="25%" maxSize="75%">
-                    <ChatPanel key={activeConvId} convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
+                    <ChatPanel key={activeConvId} convId={activeConvId} workspacePath={wsPath} />
                   </ResizablePanel>
                   <ResizableHandle />
                   <ResizablePanel minSize="25%"><ArtifactPanel /></ResizablePanel>
                 </ResizablePanelGroup>
               ) : (
-                <ChatPanel key={activeConvId} convId={activeConvId} workspaceId={conv?.workspaceId || null} workspacePath={wsPath} />
+                <ChatPanel key={activeConvId} convId={activeConvId} workspacePath={wsPath} />
               )
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-2">

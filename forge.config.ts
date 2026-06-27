@@ -1,6 +1,7 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerDMG } from '@electron-forge/maker-dmg';
+import { MakerZIP } from '@electron-forge/maker-zip';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
@@ -41,6 +42,7 @@ const config: ForgeConfig = {
   makers: [
     new MakerSquirrel({ name: 'OrchCode', authors: 'Sameer', description: 'AI-powered coding assistant' }),
     new MakerDMG({ overwrite: true }, ['darwin']),
+    new MakerZIP({}, ['linux']),
   ],
   plugins: [
     new VitePlugin({

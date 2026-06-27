@@ -30,6 +30,7 @@ export async function loadSession(): Promise<StoredSession | null> {
 }
 export async function clearSession(): Promise<void> { try { fs.unlinkSync(sessionPath()); } catch {} }
 let refreshPromise: Promise<StoredSession | null> | null = null;
+let activeOAuthServer: ReturnType<typeof http.createServer> | null = null;
 async function refreshIfExpired(stored: StoredSession): Promise<StoredSession | null> {
   if (stored.expiresAt - Math.floor(Date.now() / 1000) > 60) return stored;
   if (refreshPromise) return refreshPromise;
@@ -53,6 +54,7 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
   ipcMain.handle('auth:clearSession', () => clearSession());
   ipcMain.handle('auth:startOAuth', async () => {
     return new Promise<void>((resolve, reject) => {
+      if (activeOAuthServer) { try { activeOAuthServer.close(); } catch {} activeOAuthServer = null; }
       const server = http.createServer(async (req, res) => {
         if (!req.url?.startsWith('/callback')) { res.end(); return; }
         const port = (server.address() as any).port;
@@ -60,7 +62,7 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
         const code = parsed.searchParams.get('code'), oauthError = parsed.searchParams.get('error');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!DOCTYPE html><html><head><style>*{margin:0}body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f0f0f;font-family:system-ui;color:#e5e5e5;flex-direction:column;gap:8px}</style></head><body><b style="color:orange">Orch Code</b><p style="opacity:0.6;font-size:small">${oauthError ? 'Sign in failed' : 'Signed in — you can close this tab'}</p><script>setTimeout(()=>window.close(),2000)</script></body></html>`);
-        clearTimeout(timeout); server.close();
+        clearTimeout(timeout); server.close(); activeOAuthServer = null;
         if (oauthError) { reject(new Error(parsed.searchParams.get('error_description') || oauthError)); return; }
         if (!code) { reject(new Error('No code in callback')); return; }
         try {
@@ -76,7 +78,8 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
           resolve();
         } catch (e: any) { reject(e); }
       });
-      const timeout = setTimeout(() => { server.close(); reject(new Error('OAuth timed out')); }, 180_000);
+      const timeout = setTimeout(() => { server.close(); activeOAuthServer = null; reject(new Error('OAuth timed out')); }, 60_000);
+      activeOAuthServer = server;
       server.listen(0, '127.0.0.1', async () => {
         const port = (server.address() as any).port;
         const { data, error } = await supabase.auth.signInWithOAuth({

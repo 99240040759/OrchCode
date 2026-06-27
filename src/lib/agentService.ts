@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { el } from './electron';
+import { toast } from 'sonner';
 import type { InputPart } from '../preload';
 import { useConversationsStore } from '@/store/conversations';
 import { useAuthStore } from '@/store/auth';
@@ -37,6 +38,9 @@ export async function sendMessage(convId: string, workspacePath: string | null, 
     modelId: model.id, provider: model.provider, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort,
   };
   const res = await el.agentSend(config, { id, parts: inputParts });
-  if (!res.ok) useConversationsStore.setState(s => ({ convs: { ...s.convs, [convId]: { ...s.convs[convId], status: 'idle' } } }));
+  if (!res.ok) {
+    useConversationsStore.setState(s => ({ convs: { ...s.convs, [convId]: { ...s.convs[convId], status: 'idle' } } }));
+    if (res.busy) toast.warning('Agent is busy — stop the current run first');
+  }
 }
 export function stopAgent(convId: string) { el.agentAbort(convId); }

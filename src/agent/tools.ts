@@ -122,7 +122,8 @@ export async function executeTool(name: string, args: Record<string, any>, works
     }
     case 'run_command': {
       const { command, cwd: cmdCwd } = RunCommandParams.parse(args);
-      const result = await execa(command, { shell: true, cwd: cmdCwd ? resolvePath(cmdCwd) : cwd, timeout: CMD_TIMEOUT, maxBuffer: MAX_BUFFER });
+      const shell = process.platform === 'win32' ? 'powershell.exe' : true;
+      const result = await execa(command, { shell, cwd: cmdCwd ? resolvePath(cmdCwd) : cwd, timeout: CMD_TIMEOUT, maxBuffer: MAX_BUFFER });
       const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
       return { result: out || '(no output)', meta: { command, exitCode: result.exitCode } };
     }

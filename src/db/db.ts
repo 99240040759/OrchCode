@@ -23,7 +23,6 @@ export function getDb(): SqliteDb {
   const sqlite = new Database(path.join(app.getPath('userData'), 'orchcode.db'));
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('synchronous = NORMAL');
-  sqlite.pragma('foreign_keys = ON');
   for (const sql of SCHEMA) sqlite.exec(sql);
   for (const sql of INDEXES) sqlite.exec(sql);
   _db = sqlite;

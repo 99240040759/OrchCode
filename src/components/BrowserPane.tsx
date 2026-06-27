@@ -3,6 +3,7 @@ import { VscArrowLeft, VscArrowRight, VscRefresh, VscSearch, VscChromeClose, Vsc
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { el } from '@/lib/electron';
+import { useUIStore } from '@/store/ui';
 interface BrowserState { url: string; title: string; loading: boolean; canGoBack: boolean; canGoForward: boolean; }
 export default function BrowserPane({ convId }: { convId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -11,6 +12,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchResult, setSearchResult] = useState({ active: 0, total: 0 });
+  const sidebarOpen = useUIStore(s => s.sidebarOpen);
   // Update inputUrl from state only when user isn't focused on it
   const inputFocused = useRef(false);
   useEffect(() => { if (!inputFocused.current) setInputUrl(state.url); }, [state.url]);
@@ -20,6 +22,8 @@ export default function BrowserPane({ convId }: { convId: string }) {
     const rect = containerRef.current.getBoundingClientRect();
     el.browserSetBounds(convId, { x: rect.left, y: rect.top, width: rect.width, height: Math.max(rect.height, 100) });
   }, [convId]);
+  // Re-sync bounds whenever sidebar/panel layout shifts
+  useEffect(() => { requestAnimationFrame(updateBounds); }, [sidebarOpen, updateBounds]);
   useEffect(() => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();

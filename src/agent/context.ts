@@ -89,15 +89,14 @@ export async function generateTitle(firstMessage: string, gcpBase: string, jwt: 
 // Summarize the OpenAI-shaped messages (everything except the trailing window) into one string.
 export async function summarize(messages: ChatCompletionMessageParam[], gcpBase: string, jwt: string, anonKey: string, provider: string, modelId: string): Promise<string> {
   const text = messages.map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content.slice(0, 600) : '[multimodal]'}`).join('\n\n');
-  const client = makeClient(gcpBase, jwt, anonKey, provider);
-  const params: ChatCompletionCreateParamsNonStreaming = {
-    model: extractModelName(modelId),
-    messages: [
-      { role: 'system', content: 'Summarize this conversation history concisely. Preserve all key decisions, file paths, code written, errors encountered, and context needed to continue.' },
-      { role: 'user', content: text },
-    ],
-    max_tokens: 2048, stream: false,
-  };
-  const resp = await client.chat.completions.create(params);
-  return resp.choices[0]?.message?.content?.trim() || '';
+  try {
+    const res = await fetch(`${gcpBase}/generate-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': anonKey, 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return '';
+    const data = await res.json() as any;
+    return data.summary || '';
+  } catch { return ''; }
 }

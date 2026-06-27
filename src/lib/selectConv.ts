@@ -4,7 +4,7 @@ export async function selectConv(convId: string, workspaceId: string | null) {
   const { setActiveConv, convs, initConv } = useConversationsStore.getState();
   setActiveConv(convId);
   const existing = convs[convId];
-  if (!existing || existing.status === 'idle') {
+  if (!existing || (existing.status !== 'busy' && existing.messages.length === 0)) {
     const messages = await el.loadConversation(convId);
     initConv(convId, workspaceId, messages);
   }
