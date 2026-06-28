@@ -39,10 +39,15 @@ export async function sendMessage(convId: string, workspacePath: string | null, 
     convId, workspacePath, sessionDir, jwt: accessToken, anonKey: el.anonKey, gcpBase: el.gcpBase,
     modelId: model.id, provider: model.provider, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort,
   };
-  const res = await el.agentSend(config, { id, parts: inputParts });
-  if (!res.ok) {
+  try {
+    const res = await el.agentSend(config, { id, parts: inputParts });
+    if (!res.ok) {
+      useConversationsStore.setState(s => ({ convs: { ...s.convs, [convId]: { ...s.convs[convId], status: 'idle' } } }));
+      if (res.busy) toast.warning('Agent is busy — stop the current run first');
+    }
+  } catch (err: any) {
     useConversationsStore.setState(s => ({ convs: { ...s.convs, [convId]: { ...s.convs[convId], status: 'idle' } } }));
-    if (res.busy) toast.warning('Agent is busy — stop the current run first');
+    toast.error(`Failed to send message: ${err.message || err}`);
   }
 }
 export function stopAgent(convId: string) { el.agentAbort(convId); }

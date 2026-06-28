@@ -16,13 +16,15 @@ const BubbleImage = ({ convId, name, dataUrl }: { convId: string; name: string; 
 
 function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
   const [mOpen, setMOpen] = useState<boolean | null>(null), wasStr = useRef(isStreaming), open = mOpen !== null ? mOpen : isStreaming;
+  const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (wasStr.current && !isStreaming) setMOpen(false); wasStr.current = isStreaming; }, [isStreaming]);
+  useEffect(() => { if (isStreaming && open && containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight; }, [text, isStreaming, open]);
   return text.trim() ? (
     <div className="flex flex-col items-start">
       <Button variant="ghost" onClick={() => setMOpen(!open)} className="text-foreground/35 hover:text-foreground/60 text-xs font-medium -ml-2 px-2 gap-1 h-6">
         <span>Thought</span><VscChevronRight className={cn("size-3 transition-transform duration-100", open && "rotate-90")} />
       </Button>
-      {open && <div className="mt-0.5 text-xs text-foreground/40 whitespace-pre-wrap leading-relaxed pl-0.5 max-h-[100px] overflow-y-auto">{text}</div>}
+      {open && <div ref={containerRef} className="mt-0.5 text-xs text-foreground/40 whitespace-pre-wrap leading-relaxed pl-0.5 max-h-[100px] overflow-y-auto">{text}</div>}
     </div>
   ) : null;
 }

@@ -19,7 +19,7 @@ export { quitAndInstall, openReleasesPage, checkForUpdate };
 
 if (started) { app.quit(); process.exit(0); }
 app.name = 'Orch Code';
-app.setAppUserModelId('Orch Code');
+app.setAppUserModelId('com.squirrel.OrchCode.OrchCode');
 app.setPath('userData', path.join(app.getPath('appData'), 'OrchCode'));
 let mainWindow: BrowserWindow | null = null;
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
