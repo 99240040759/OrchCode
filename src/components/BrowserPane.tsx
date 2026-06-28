@@ -43,7 +43,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
     // Track scroll/layout shifts
     window.addEventListener('resize', updateBounds);
     return () => {
-      el.browserHide();
+      el.browserHide(convId);
       cleanup();
       cleanupFind?.();
       ro.disconnect();
@@ -62,7 +62,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
   const navigate = useCallback((val: string) => {
     let t = val.trim();
     if (!t) return;
-    if (!/^(https?|file):\/\//i.test(t)) t = t.includes('.') && !t.includes(' ') ? 'https://' + t : 'https://www.google.com/search?q=' + encodeURIComponent(t);
+    if (!/^https?:\/\//i.test(t)) t = t.includes('.') && !t.includes(' ') ? 'https://' + t : 'https://www.google.com/search?q=' + encodeURIComponent(t);
     el.browserNavigate(convId, t);
     setInputUrl(t);
   }, [convId]);

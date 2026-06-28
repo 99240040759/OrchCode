@@ -1,4 +1,4 @@
-import { ipcMain, dialog, utilityProcess, app, WebContentsView, BrowserWindow } from 'electron';
+import { ipcMain, dialog, utilityProcess, app, WebContentsView, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import * as pty from 'node-pty';
@@ -13,10 +13,12 @@ import { extractText } from '../lib/extractText';
 const now = () => Date.now();
 // ─── Agent runtime state (main is the single authority) ─────────────────────
 type Proc = ReturnType<typeof utilityProcess.fork>;
-interface WorkerBox { proc: Proc; ready: boolean; queue: any[]; }
+interface WorkerBox { proc: Proc; ready: boolean; queue: any[]; idleTimer: ReturnType<typeof setTimeout> | null; }
 const workers = new Map<string, WorkerBox>();
-const active = new Map<string, string>(); // convId → in-flight assistant messageId
+const active = new Map<string, string>(); // convId → in-flight assistant messageId (presence = busy guard)
+const startedAssistant = new Map<string, string>(); // convId → assistant messageId, set once message.start lands
 const textBuffers = new Map<string, { convId: string; text: string; dirty: boolean }>(); // partId → buffer
+const WORKER_IDLE_MS = 5 * 60_000; // reap idle worker processes so conversations don't leak Node procs forever
 // ─── PTY / Browser ──────────────────────────────────────────────────────────
 const ptyInstances = new Map<string, ReturnType<typeof pty.spawn>>();
 const ptyScrollback = new Map<string, string[]>();
@@ -35,7 +37,7 @@ function flushBuffers() { for (const [partId, b] of textBuffers) if (b.dirty) { 
 setInterval(flushBuffers, 150);
 function persistAndForward(convId: string, ev: AgentEvent) {
   switch (ev.type) {
-    case 'message.start': { const seq = q.nextSeq(convId); ev.message.seq = seq; q.insertMessage(ev.message); active.set(convId, ev.message.id); break; }
+    case 'message.start': { const seq = q.nextSeq(convId); ev.message.seq = seq; q.insertMessage(ev.message); active.set(convId, ev.message.id); startedAssistant.set(convId, ev.message.id); break; }
     case 'part.start': { q.insertPart(ev.part); if (ev.part.type === 'text' || ev.part.type === 'reasoning') textBuffers.set(ev.part.id, { convId, text: '', dirty: false }); break; }
     case 'part.delta': { const b = textBuffers.get(ev.partId); if (b) { b.text += ev.text; b.dirty = true; } break; }
     case 'part.image': {
@@ -50,7 +52,7 @@ function persistAndForward(convId: string, ev: AgentEvent) {
     }
     case 'tool.update': q.setPartTool(ev.partId, ev.status, ev.result ?? null, ev.meta ? JSON.stringify(ev.meta) : null); break;
     case 'compacted': { const seq = q.nextSeq(convId); ev.summaryMessage.seq = seq; q.insertMessage(ev.summaryMessage); q.insertPart(ev.summaryPart); q.markCompacted(ev.compactedIds); break; }
-    case 'message.end': flushBuffers(); q.setMessageStatus(ev.messageId, ev.status, ev.error ?? null); q.touchConversation(convId); active.delete(convId); break;
+    case 'message.end': flushBuffers(); q.setMessageStatus(ev.messageId, ev.status, ev.error ?? null); q.touchConversation(convId); active.delete(convId); startedAssistant.delete(convId); armIdle(convId); break;
     case 'title': q.updateConversation(convId, { title: ev.title, updatedAt: now() }); send('conv:titleUpdated', convId, ev.title); break;
     case 'tokens': q.addLifetimeTokens(ev.lifetime); break;
   }
@@ -62,8 +64,8 @@ function buildHistory(convId: string): HistoryMessage[] {
 function getWorker(convId: string): WorkerBox {
   const existing = workers.get(convId);
   if (existing) return existing;
-  const proc = utilityProcess.fork(path.join(__dirname, 'worker.js'), [], { env: { ...process.env }, stdio: 'pipe' });
-  const box: WorkerBox = { proc, ready: false, queue: [] };
+  const proc = utilityProcess.fork(path.join(__dirname, 'worker.js'), [], { env: { ...process.env }, stdio: 'pipe', serviceName: 'Orch Code Worker' });
+  const box: WorkerBox = { proc, ready: false, queue: [], idleTimer: null };
   workers.set(convId, box);
   proc.stdout?.on('data', (d: Buffer) => console.log(`[Worker:${convId.slice(0, 6)}]`, d.toString().trim()));
   proc.stderr?.on('data', (d: Buffer) => console.error(`[Worker:${convId.slice(0, 6)}]`, d.toString().trim()));
@@ -72,19 +74,28 @@ function getWorker(convId: string): WorkerBox {
     persistAndForward(convId, ev as AgentEvent);
   });
   proc.on('exit', (code) => {
+    if (box.idleTimer) clearTimeout(box.idleTimer);
     workers.delete(convId);
-    const msgId = active.get(convId);
-    if (msgId) {
-      // Flush only this conv's text buffers, clear stale entries
-      for (const [partId, b] of textBuffers) if (b.convId === convId) { q.setPartText(partId, b.text); textBuffers.delete(partId); }
-      q.setMessageStatus(msgId, 'error', `Worker exited (${code})`); active.delete(convId);
-      send('agent:event', convId, { type: 'message.end', messageId: msgId, status: 'error', error: `Worker exited (${code})` });
-    }
+    // Flush only this conv's text buffers, clear stale entries
+    for (const [partId, b] of textBuffers) if (b.convId === convId) { q.setPartText(partId, b.text); textBuffers.delete(partId); }
+    if (!active.has(convId)) { startedAssistant.delete(convId); return; } // clean exit — nothing in flight
+    const asstId = startedAssistant.get(convId), err = `Worker exited (${code})`;
+    if (asstId) { q.setMessageStatus(asstId, 'error', err); send('agent:event', convId, { type: 'message.end', messageId: asstId, status: 'error', error: err }); }
+    // Crashed before the assistant message existed: surface the failure without corrupting the user's message.
+    else send('agent:event', convId, { type: 'message.end', messageId: nanoid(), status: 'error', error: err });
+    active.delete(convId); startedAssistant.delete(convId);
   });
   return box;
 }
+// Reap a worker after it sits idle (no in-flight run) for WORKER_IDLE_MS.
+function armIdle(convId: string) {
+  const box = workers.get(convId); if (!box) return;
+  if (box.idleTimer) clearTimeout(box.idleTimer);
+  box.idleTimer = setTimeout(() => { if (!active.has(convId)) workers.get(convId)?.proc.kill(); }, WORKER_IDLE_MS);
+}
 function postToWorker(convId: string, payload: any) {
   const box = getWorker(convId);
+  if (box.idleTimer) { clearTimeout(box.idleTimer); box.idleTimer = null; } // activity — cancel pending reap
   if (box.ready) box.proc.postMessage(payload); else box.queue.push(payload);
 }
 // ─── User-message input parts (from renderer) ───────────────────────────────
@@ -124,7 +135,8 @@ export function registerHandlers() {
   safeHandle('db:createConversation', (_, c: Conversation) => { q.createConversation(c); return c; });
   safeHandle('db:updateConversation', (_, id: string, patch: Partial<Conversation>) => q.updateConversation(id, patch));
   safeHandle('db:deleteConversation', (_, id: string) => {
-    workers.get(id)?.proc.kill(); workers.delete(id); active.delete(id);
+    const box = workers.get(id); if (box?.idleTimer) clearTimeout(box.idleTimer);
+    box?.proc.kill(); workers.delete(id); active.delete(id); startedAssistant.delete(id);
     q.deleteConversation(id);
     const view = convBrowserViews.get(id); if (view) { if (activeBrowserConvId === id) hideBrowserView(); convBrowserViews.delete(id); }
     ptyInstances.get(id)?.kill(); ptyInstances.delete(id); ptyScrollback.delete(id); ptySubscribers.delete(id);
@@ -172,7 +184,7 @@ export function registerHandlers() {
   });
   // ─── Browser ───
   safeHandle('browser:show', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => showBrowserView(convId, bounds));
-  safeHandle('browser:hide', () => hideBrowserView());
+  safeHandle('browser:hide', (_, convId?: string) => hideBrowserView(convId));
   safeHandle('browser:setBounds', (_, { convId, bounds }: { convId: string; bounds: Bounds }) => { if (convId === activeBrowserConvId) convBrowserViews.get(convId)?.setBounds(roundB(bounds)); });
   safeHandle('browser:navigate', (_, { convId, url }: { convId: string; url: string }) => { getBrowserView(convId).webContents.loadURL(url); });
   safeHandle('browser:back', (_, convId: string) => { convBrowserViews.get(convId)?.webContents.goBack(); });
@@ -215,6 +227,7 @@ function getBrowserView(convId: string): WebContentsView {
   const view = new WebContentsView({ webPreferences: { partition: `persist:conv-${convId}`, sandbox: true, contextIsolation: true } });
   view.setBackgroundColor('#1e1e1e');
   view.webContents.setBackgroundThrottling(false);
+  view.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; }); // no uncontrolled child windows from web content
   for (const ev of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated']) view.webContents.on(ev as any, () => sendBrowserState(convId));
   view.webContents.on('found-in-page', (_, r) => send('browser:find-result', { convId, active: r.activeMatchOrdinal, total: r.matches }));
   view.webContents.loadURL('https://www.google.com');
@@ -226,5 +239,5 @@ function sendBrowserState(convId: string) {
   const wc = view.webContents;
   send('browser:state', { convId, url: wc.getURL(), title: wc.getTitle(), loading: wc.isLoading(), canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
 }
-function hideBrowserView() { if (!mainWindow || !activeBrowserConvId) return; const view = convBrowserViews.get(activeBrowserConvId); if (view) { try { mainWindow.contentView.removeChildView(view); } catch {} } activeBrowserConvId = null; }
+function hideBrowserView(convId?: string) { if (!mainWindow || !activeBrowserConvId) return; if (convId && convId !== activeBrowserConvId) return; const view = convBrowserViews.get(activeBrowserConvId); if (view) { try { mainWindow.contentView.removeChildView(view); } catch {} } activeBrowserConvId = null; }
 function showBrowserView(convId: string, bounds: Bounds) { if (!mainWindow) return; hideBrowserView(); const view = getBrowserView(convId); mainWindow.contentView.addChildView(view); view.setBounds(roundB(bounds)); activeBrowserConvId = convId; sendBrowserState(convId); }

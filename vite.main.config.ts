@@ -12,10 +12,12 @@ export default defineConfig({
     'process.env.GCP_FUNCTIONS_URL': JSON.stringify(env.GCP_FUNCTIONS_URL),
   },
   plugins: [{
-    name: 'copy-skills',
+    name: 'copy-assets',
     closeBundle() {
       const s = path.resolve(__dirname, 'src/agent/skills'), d = path.resolve(__dirname, '.vite/build/skills');
       if (fs.existsSync(s)) { fs.mkdirSync(d, { recursive: true }); fs.readdirSync(s).forEach(f => fs.copyFileSync(path.join(s, f), path.join(d, f))); }
+      const logoSrc = path.resolve(__dirname, 'logo.png'), logoDest = path.resolve(__dirname, '.vite/build/logo.png');
+      if (fs.existsSync(logoSrc)) { fs.copyFileSync(logoSrc, logoDest); }
     }
   }],
   build: { rollupOptions: { external: ['electron', 'better-sqlite3', 'node-pty', '@vscode/ripgrep', 'web-tree-sitter', 'tree-sitter-wasms', 'officeparser'] } },

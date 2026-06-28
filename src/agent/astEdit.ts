@@ -23,25 +23,29 @@ async function parse(fp: string, src: string) {
   const name = grammarName(fp); if (!name) return null;
   try { const P = await getParser(), L = await loadLang(name), p = new P(); p.setLanguage(L); return p.parse(src); } catch { return null; }
 }
+// Collect every AST node whose source text equals `target` (boundary-exact, native tree-sitter).
 function nodesWithText(root: any, target: string): any[] {
   const out: any[] = [], stack = [root];
   while (stack.length) { const n = stack.pop(); if (n.text === target) out.push(n); for (let i = 0; i < n.childCount; i++) stack.push(n.child(i)); }
   return out;
 }
-const allIndexes = (s: string, t: string) => { const a: number[] = []; let i = s.indexOf(t); while (i !== -1) { a.push(i); i = s.indexOf(t, i + 1); } return a; };
 const byteToChar = (s: string, byteOffset: number) => Buffer.from(s, 'utf8').subarray(0, byteOffset).toString('utf8').length;
+const allIndexes = (s: string, t: string) => { const a: number[] = []; let i = s.indexOf(t); while (i !== -1) { a.push(i); i = s.indexOf(t, i + 1); } return a; };
+// edit_file = exact verbatim string replacement (Claude Code / Aider style). Each target must resolve to a single
+// location: if it appears once, replace it; if it appears multiple times, tree-sitter disambiguates and accepts
+// only when exactly one whole node IS the target, else the model must add context. Syntax is validated after.
 export async function applyEdits(filePath: string, source: string, replacements: { target: string; replacement: string }[]): Promise<{ content: string; warnings: string[] }> {
   let content = source; const warnings: string[] = [];
   for (const { target, replacement } of replacements) {
     if (!target) throw new Error('Empty target string');
     const idx = allIndexes(content, target);
-    if (!idx.length) throw new Error(`Target string not found: "${target.slice(0, 80)}"`);
+    if (idx.length === 0) throw new Error(`Target string not found: "${target.slice(0, 80)}"`);
     let pos: number;
     if (idx.length === 1) pos = idx[0];
     else {
       const tree = await parse(filePath, content), nodes = tree ? nodesWithText(tree.rootNode, target) : [];
-      if (nodes.length === 1) pos = byteToChar(content, nodes[0].startIndex);
-      else throw new Error(`Ambiguous target ("${target.slice(0, 60)}") matched ${idx.length} times; provide a larger unique snippet.`);
+      if (nodes.length !== 1) throw new Error(`Ambiguous target ("${target.slice(0, 60)}") matched ${idx.length} times; add surrounding context so it is unique.`);
+      pos = byteToChar(content, nodes[0].startIndex);
     }
     content = content.slice(0, pos) + replacement + content.slice(pos + target.length);
   }

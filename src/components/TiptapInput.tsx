@@ -14,7 +14,9 @@ import { useModelsStore } from '@/store/models';
 import ModelDropdown from './ModelDropdown';
 import { cn } from '@/lib/utils';
 import { FileIcon } from '@/components/ui/FileIcon';
-import { VscSend, VscDebugStop, VscChromeClose } from 'react-icons/vsc';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { FilePill, ImageThumb, IMAGE_ACCEPT, FILE_ACCEPT } from '@/components/ui/attachment';
+import { VscSend, VscDebugStop, VscFileMedia, VscFile } from 'react-icons/vsc';
 import { el } from '@/lib/electron';
 import tippy, { Instance } from 'tippy.js';
 import 'tippy.js/dist/tippy.css';
@@ -110,23 +112,34 @@ export default function TiptapInput({ onSubmit, onStop, workspacePath, disabled,
     const loaded: any[] = await Promise.all(files.map((f: any) => new Promise<any>((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, dataUrl: r.result as string, mimeType: f.type }); r.readAsDataURL(f); })));
     setAttachments(prev => [...prev, ...loaded]); e.target.value = '';
   };
+  const pick = (accept: string) => { const inp = fileInputRef.current; if (inp) { inp.accept = accept; inp.click(); } };
+  const removeAttachment = (i: number) => setAttachments(p => p.filter((_, j) => j !== i));
   return (
     <div className="border border-border/60 rounded-xl bg-card px-3.5 pt-2.5 pb-2.5 flex flex-col gap-1.5 focus-within:border-border transition-colors duration-100">
-      <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.md,.csv" multiple className="hidden" onChange={handleFileChange} />
+      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-1">{attachments.map((a, i) => (
-          <div key={i} className="flex items-center gap-1 bg-white/5 border border-border/50 rounded px-2 py-0.5 text-xs max-w-36">
-            <span className="truncate text-foreground/70">{a.name}</span>
-            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} className="text-foreground/30 hover:text-foreground/70 hover:bg-transparent"><VscChromeClose className="size-2.5" /></Button>
-          </div>
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border/30 pb-2 mb-1.5">{attachments.map((a, i) => (
+          a.mimeType?.startsWith('image/')
+            ? <ImageThumb key={i} name={a.name} dataUrl={a.dataUrl} onRemove={() => removeAttachment(i)} className="size-12" />
+            : <FilePill key={i} name={a.name} onRemove={() => removeAttachment(i)} />
         ))}</div>
       )}
       <EditorContent editor={editor} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          {model?.multimodal && (
+          {model?.multimodal ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" id="attach-btn" variant="ghost" size="icon-sm" className="rounded-full border border-border/50 text-foreground/35 hover:text-foreground/70 hover:border-border text-base font-light leading-none">+</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-32">
+                <DropdownMenuItem onSelect={() => pick(IMAGE_ACCEPT)}><VscFileMedia /> Image</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => pick(FILE_ACCEPT)}><VscFile /> File</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
             <Tooltip><TooltipTrigger asChild>
-              <Button type="button" id="attach-btn" variant="ghost" size="icon-sm" onClick={() => fileInputRef.current?.click()} className="rounded-full border border-border/50 text-foreground/35 hover:text-foreground/70 hover:border-border text-base font-light leading-none">+</Button>
+              <Button type="button" id="attach-btn" variant="ghost" size="icon-sm" onClick={() => pick(FILE_ACCEPT)} className="rounded-full border border-border/50 text-foreground/35 hover:text-foreground/70 hover:border-border text-base font-light leading-none">+</Button>
             </TooltipTrigger><TooltipContent side="top">Attach file</TooltipContent></Tooltip>
           )}
           <ModelDropdown />

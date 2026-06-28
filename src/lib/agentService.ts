@@ -11,6 +11,7 @@ export type Attachment = { name: string; dataUrl: string; mimeType: string };
 let cachedDataPath: string | null = null;
 const dataPath = async () => (cachedDataPath ??= await el.getUserDataPath());
 export async function sendMessage(convId: string, workspacePath: string | null, editorParts: EditorPart[], attachments: Attachment[] = []) {
+  if (useConversationsStore.getState().convs[convId]?.status === 'busy') return; // single source of truth for the busy guard
   const { accessToken } = useAuthStore.getState();
   const model = useModelsStore.getState().selectedModel();
   if (!accessToken || !model) return;

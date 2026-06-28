@@ -6,7 +6,15 @@ import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming
 import type { HistoryMessage, HistoryPart } from '../ipc/types';
 import { secureResolve } from '../lib/securePath';
 const enc = getEncoding('cl100k_base');
-export const countText = (t: string): number => enc.encode(t || '').length;
+// Bounded memo: the same message strings get re-encoded across every compaction check each round.
+const _tokCache = new Map<string, number>();
+export const countText = (t: string): number => {
+  const s = t || '';
+  if (s.length > 2000) return enc.encode(s).length; // skip caching large one-off blobs
+  let n = _tokCache.get(s);
+  if (n === undefined) { if (_tokCache.size > 4000) _tokCache.clear(); n = enc.encode(s).length; _tokCache.set(s, n); }
+  return n;
+};
 export const extractModelName = (modelId: string) => modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
 export function makeClient(gcpBase: string, jwt: string, anonKey: string, provider?: string) {
   const route = provider === 'z-ai' ? 'z-ai' : 'opencode';
@@ -83,18 +91,20 @@ export function buildOpenAIMessages(systemPrompt: string, history: HistoryMessag
   }
   return out;
 }
-export async function generateTitle(firstMessage: string, gcpBase: string, jwt: string, anonKey: string, provider: string, modelId: string): Promise<string> {
-  const client = makeClient(gcpBase, jwt, anonKey, provider);
-  const params: ChatCompletionCreateParamsNonStreaming = {
-    model: extractModelName(modelId),
-    messages: [{ role: 'user', content: `Generate a short 3-5 word title for this conversation. Just the title, no quotes, no punctuation.\n\n${firstMessage.slice(0, 300)}` }],
-    max_tokens: 20, stream: false,
-  };
-  const resp = await client.chat.completions.create(params);
-  return resp.choices[0]?.message?.content?.trim() || 'New Conversation';
+export async function generateTitle(firstMessage: string, gcpBase: string, jwt: string, anonKey: string): Promise<string> {
+  try {
+    const res = await fetch(`${gcpBase}/generate-title`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': anonKey, 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({ text: firstMessage }),
+    });
+    if (!res.ok) return 'New Conversation';
+    const data = await res.json() as any;
+    return data.title || 'New Conversation';
+  } catch { return 'New Conversation'; }
 }
 // Summarize the OpenAI-shaped messages (everything except the trailing window) into one string.
-export async function summarize(messages: ChatCompletionMessageParam[], gcpBase: string, jwt: string, anonKey: string, provider: string, modelId: string): Promise<string> {
+export async function summarize(messages: ChatCompletionMessageParam[], gcpBase: string, jwt: string, anonKey: string): Promise<string> {
   const text = messages.map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content.slice(0, 600) : '[multimodal]'}`).join('\n\n');
   try {
     const res = await fetch(`${gcpBase}/generate-summary`, {

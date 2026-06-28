@@ -18,6 +18,8 @@ import { initUpdater, quitAndInstall, openReleasesPage, checkForUpdate } from '.
 export { quitAndInstall, openReleasesPage, checkForUpdate };
 
 if (started) { app.quit(); process.exit(0); }
+app.name = 'Orch Code';
+app.setAppUserModelId('Orch Code');
 app.setPath('userData', path.join(app.getPath('appData'), 'OrchCode'));
 let mainWindow: BrowserWindow | null = null;
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
@@ -26,6 +28,7 @@ const createWindow = () => {
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1280, height: 820, title: 'Orch Code', titleBarStyle: 'hidden',
+    icon: path.join(__dirname, 'logo.png'),
     ...(isMac ? { trafficLightPosition: { x: 15, y: 11 } } : { titleBarOverlay: { color: '#00000000', symbolColor: '#737373', height: 36 } }),
     backgroundColor: '#1e1e1e', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false },

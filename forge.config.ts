@@ -16,6 +16,7 @@ const STRIP: Record<string, string[]> = {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: { unpack: '{**/*.node,**/*.wasm,**/node-pty/build/Release/spawn-helper,**/node-pty/build/Release/winpty*,**/ripgrep-*/bin/rg,**/ripgrep-*/bin/rg.exe}' },
+    icon: './logo',
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath, _electronVersion, platform, arch) => {
@@ -45,7 +46,7 @@ const config: ForgeConfig = {
     },
   },
   makers: [
-    new MakerSquirrel({ name: 'OrchCode', authors: 'Sameer', description: 'AI-powered coding assistant' }),
+    new MakerSquirrel({ name: 'OrchCode', authors: 'Sameer', description: 'AI-powered coding assistant', setupIcon: './logo.ico' }),
     new MakerDMG({ overwrite: true }, ['darwin']),
     new MakerZIP({}, ['linux']),
   ],

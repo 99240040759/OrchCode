@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -9,7 +9,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { VscCopy, VscCheck } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 
-function CodeBlock({ language, children }: { language: string; children: string }) {
+const CodeBlock = memo(function CodeBlock({ language, children }: { language: string; children: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => { navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 1800); };
   return (
@@ -35,7 +35,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
       </SyntaxHighlighter>
     </div>
   );
-}
+});
 
 const mdComponents: any = {
   pre({ children, ...props }: any) {
@@ -49,7 +49,7 @@ const mdComponents: any = {
   code({ className, children, ...props }: any) { return <code className={className} {...props}>{children}</code>; },
 };
 
-export function Markdown({ text, className = "prose prose-chat min-w-0" }: { text: string; className?: string }) {
+export const Markdown = memo(function Markdown({ text, className = "prose prose-chat min-w-0" }: { text: string; className?: string }) {
   return (
     <div className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={mdComponents}>
@@ -57,4 +57,4 @@ export function Markdown({ text, className = "prose prose-chat min-w-0" }: { tex
       </ReactMarkdown>
     </div>
   );
-}
+});

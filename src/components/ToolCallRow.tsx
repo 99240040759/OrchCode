@@ -26,9 +26,12 @@ export default function ToolCallRow({ tc, convId }: { tc: UIToolPart; convId: st
     if (!isClickable) return;
     const p = meta.path || args.path;
     if (tc.name === 'edit_file') {
-      if (!tc.result) return;
-      let o = '', m = ''; try { const j = JSON.parse(tc.result); o = j.original; m = j.modified; } catch { m = tc.result; }
+      const o = (meta.original as string) ?? '', m = (meta.modified as string) ?? '';
+      if (!o && !m) return;
       openFileDiff(convId, p, o, m);
+    } else if (tc.name === 'write_file') {
+      const o = (meta.original as string) ?? '', m = (meta.modified as string) ?? '';
+      if (meta.isNew || (!o && !m)) openWorkspaceFile(convId, p); else openFileDiff(convId, p, o, m);
     } else { openWorkspaceFile(convId, p); }
   };
 

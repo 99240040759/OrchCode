@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/auth';
 import { el } from '@/lib/electron';
 
+import logo from '../../logo.png';
+
 export default function Onboarding() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +16,7 @@ export default function Onboarding() {
   return (
     <div className="h-full flex flex-col items-center justify-center gap-6 px-8 select-none bg-background">
       <div className="flex flex-col items-center gap-2 text-center">
+        <img src={logo} className="size-16 mb-1 object-contain" alt="Logo" />
         <div className="text-2xl font-semibold tracking-tight text-foreground">OrchCode</div>
         <p className="text-xs text-foreground/40 max-w-56">AI-powered coding agent. Sign in to get started.</p>
       </div>

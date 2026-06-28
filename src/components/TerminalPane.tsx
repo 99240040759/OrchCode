@@ -62,6 +62,6 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
     const ro = new ResizeObserver(() => requestAnimationFrame(() => { try { fit.fit(); el.ptyResize(convId, term.cols, term.rows); } catch {} }));
     ro.observe(ref.current);
     return () => { active = false; unsub?.(); unsubExit?.(); ro.disconnect(); el.ptyDetach(convId).catch(() => {}); term.dispose(); };
-  }, [convId]);
+  }, [convId, cwd]);
   return <div ref={ref} className="w-full h-full bg-background p-4 box-border overflow-hidden" />;
 }

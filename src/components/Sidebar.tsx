@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import logo from '../../logo.png';
 import { nanoid } from 'nanoid';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { useConversationsStore } from '@/store/conversations';
@@ -73,7 +74,8 @@ export default function Sidebar() {
   const handleSelectConv = (c: Conversation) => selectConv(c.id, c.workspaceId);
   const newChat = async (wId: string | null) => {
     const c: Conversation = { id: nanoid(), workspaceId: wId, title: 'New Conversation', createdAt: Date.now(), updatedAt: Date.now() };
-    addConversation(c); initConv(c.id, wId, []); setActiveConv(c.id); el.createConversation(c).catch(console.error);
+    addConversation(c); initConv(c.id, wId, []); setActiveConv(c.id);
+    await el.createConversation(c).catch(console.error); // persist the row before any send/title update can race it
   };
   const deleteConv = async (c: Conversation) => { await el.deleteConversation(c.id); removeConversation(c.id, c.workspaceId); removeConv(c.id); removeConvUI(c.id); };
   const deleteWorkspace = async (w: Workspace) => { await el.deleteWorkspace(w.id); removeWorkspace(w.id); };
@@ -81,6 +83,10 @@ export default function Sidebar() {
   const filterConvs = (list: Conversation[]) => filterText ? list.filter(c => c.title.toLowerCase().includes(filterText.toLowerCase())) : list;
   return (
     <div className="w-60 h-full flex flex-col border-r border-border/60 bg-sidebar p-2 select-none overflow-hidden shrink-0">
+      <div className="flex items-center gap-1.5 px-2 py-1 mb-2 select-none shrink-0">
+        <img src={logo} className="size-4 object-contain" alt="Logo" />
+        <span className="text-[11px] font-semibold tracking-wide text-foreground/50">ORCH CODE</span>
+      </div>
       <Button type="button" variant="outline" onClick={(e) => { e.preventDefault(); newChat(null); }} className="w-full justify-start gap-1.5 mb-2 text-foreground/60 hover:text-foreground border-border/50">
         <VscAdd className="size-3 shrink-0" /><span>New Conversation</span>
       </Button>

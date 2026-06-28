@@ -41,7 +41,7 @@ const api = {
   onConvTitleUpdated: (cb: (convId: string, title: string) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, convId: string, title: string) => cb(convId, title); ipcRenderer.on('conv:titleUpdated', h); return () => ipcRenderer.removeListener('conv:titleUpdated', h); },
   // ─── Browser ───
   browserShow: (convId: string, bounds: Bounds): Promise<void> => ipcRenderer.invoke('browser:show', { convId, bounds }),
-  browserHide: (): Promise<void> => ipcRenderer.invoke('browser:hide'),
+  browserHide: (convId?: string): Promise<void> => ipcRenderer.invoke('browser:hide', convId),
   browserSetBounds: (convId: string, bounds: Bounds): Promise<void> => ipcRenderer.invoke('browser:setBounds', { convId, bounds }),
   browserNavigate: (convId: string, url: string): Promise<void> => ipcRenderer.invoke('browser:navigate', { convId, url }),
   browserBack: (convId: string): Promise<void> => ipcRenderer.invoke('browser:back', convId),
