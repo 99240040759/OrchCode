@@ -24,7 +24,7 @@ const api = {
   getStats: (): Promise<{ lifetimeTokens: number; conversationCount: number; messageCount: number }> => ipcRenderer.invoke('stats:get'),
   openWorkspaceDialog: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:open'),
   listWorkspaceFiles: (dirPath: string, query: string): Promise<string[]> => ipcRenderer.invoke('workspace:listFiles', { dirPath, query }),
-  readWorkspaceFile: (dirPath: string, filePath: string): Promise<string> => ipcRenderer.invoke('workspace:readFile', { dirPath, filePath }),
+  readWorkspaceFile: (roots: string | string[], filePath: string): Promise<string> => ipcRenderer.invoke('workspace:readFile', { roots: Array.isArray(roots) ? roots : [roots], filePath }),
   // ─── Auth ───
   loadStoredSession: (): Promise<StoredSession | null> => ipcRenderer.invoke('auth:loadSession'),
   saveSession: (s: StoredSession): Promise<void> => ipcRenderer.invoke('auth:saveSession', s),

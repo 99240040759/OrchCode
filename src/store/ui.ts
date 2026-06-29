@@ -3,6 +3,8 @@ import pathModule from 'path-browserify';
 import { useConversationsStore } from './conversations';
 import { useWorkspacesStore } from './workspaces';
 import { el } from '@/lib/electron';
+let _dataPath: string | null = null;
+const dataPath = async () => (_dataPath ??= await el.getUserDataPath());
 export interface OpenTab { id: string; type: 'file' | 'image'; path: string; title: string; content?: string; original?: string; modified?: string; viewMode?: 'viewer' | 'diff'; startLine?: number; endLine?: number; }
 export interface PerConvUI { activeTabId: string; openTabs: OpenTab[]; artifactOpen: boolean; artifactMaximized: boolean; }
 interface UIStore {
@@ -43,7 +45,9 @@ export const useUIStore = create<UIStore>((set, get) => ({
   })),
   openWorkspaceFile: async (convId, path) => {
     const conv = useConversationsStore.getState().convs[convId], ws = useWorkspacesStore.getState().workspaces.find(w => w.id === conv?.workspaceId);
-    if (ws) { const c = await el.readWorkspaceFile(ws.path, path); get().openFileViewer(convId, path, c, 1, c.split('\n').length); }
+    const roots = [ws?.path, `${await dataPath()}/sessions/${convId}`].filter(Boolean) as string[]; // workspace files AND agent session artifacts
+    const c = await el.readWorkspaceFile(roots, path);
+    get().openFileViewer(convId, path, c, 1, c.split('\n').length);
   },
   openFileDiff: (convId: string, path: string, original: string, modified: string) => set(s => ({
     convUI: updUI(s.convUI, convId, cur => {

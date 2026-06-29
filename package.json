@@ -67,6 +67,7 @@
     "monaco-editor": "^0.55.1",
     "nanoid": "^5.1.15",
     "openai": "^6.44.0",
+    "png2icons": "^2.0.1",
     "radix-ui": "^1.6.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

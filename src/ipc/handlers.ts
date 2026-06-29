@@ -158,8 +158,15 @@ export function registerHandlers() {
     const files = await glob(query ? `**/*${query}*` : '**/*', { cwd: dirPath, onlyFiles: true, dot: true, ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.vite/**', '**/out/**'], absolute: false, deep: 4 });
     return files.slice(0, 30);
   });
-  safeHandle('workspace:readFile', (_, { dirPath, filePath }: { dirPath: string; filePath: string }) => {
-    try { return fs.readFileSync(secureResolve(dirPath, filePath), 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
+  safeHandle('workspace:readFile', (_, { roots, filePath }: { roots: string[]; filePath: string }) => {
+    let lastErr = 'Access Denied';
+    for (const root of (roots || []).filter(Boolean)) {
+      let resolved: string;
+      try { resolved = secureResolve(root, filePath); } catch (e: any) { lastErr = e.message; continue; } // escapes this root → try next
+      if (!fs.existsSync(resolved)) { lastErr = `ENOENT: no such file in ${root}`; continue; } // resolves here but absent → try next root (e.g. session dir)
+      try { return fs.readFileSync(resolved, 'utf8'); } catch (e: any) { return `Error: ${e.message}`; }
+    }
+    return `Error: ${lastErr}`;
   });
   // ─── Agent ───
   safeHandle('agent:send', async (_, { config, message }: { config: AgentRunConfig; message: { id: string; parts: InputPart[] } }) => {

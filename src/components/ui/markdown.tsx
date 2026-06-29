@@ -5,9 +5,23 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { VscCopy, VscCheck } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
+
+/* Warm earth syntax palette — matches the Monaco orchTheme tokens */
+const c = (color: string) => ({ color });
+const warmCode: any = {
+  'code[class*="language-"]': { color: '#f0e0cf', fontFamily: 'var(--font-mono)', background: 'none' },
+  'pre[class*="language-"]': { color: '#f0e0cf', background: 'transparent' },
+  comment: { color: '#8a7560', fontStyle: 'italic' }, prolog: c('#8a7560'), doctype: c('#8a7560'), cdata: c('#8a7560'),
+  punctuation: c('#b8a692'), operator: c('#b8a692'), delimiter: c('#b8a692'),
+  property: c('#e08a5f'), boolean: c('#e08a5f'), number: c('#e08a5f'), constant: c('#e08a5f'), symbol: c('#e08a5f'),
+  tag: c('#c08bb0'), keyword: c('#c08bb0'), atrule: c('#c08bb0'),
+  string: c('#9caa6b'), char: c('#9caa6b'), selector: c('#9caa6b'), inserted: c('#9caa6b'),
+  'attr-name': c('#dca24a'), entity: c('#dca24a'), regex: c('#dca24a'),
+  builtin: c('#d9b88a'), 'class-name': c('#d9b88a'),
+  function: c('#7fa0b8'), url: c('#7fb8b0'), variable: c('#f0e0cf'), deleted: c('#cf5a44'), important: c('#cf5a44'),
+};
 
 const CodeBlock = memo(function CodeBlock({ language, children }: { language: string; children: string }) {
   const [copied, setCopied] = useState(false);
@@ -23,13 +37,13 @@ const CodeBlock = memo(function CodeBlock({ language, children }: { language: st
       </div>
       <SyntaxHighlighter
         language={language || 'text'}
-        style={vscDarkPlus}
+        style={warmCode}
         showLineNumbers={true}
         customStyle={{ margin: 0, borderRadius: 0, background: 'transparent', fontSize: '12px', padding: '0.75rem 0' }}
         wrapLines={true}
         wrapLongLines={true}
         codeTagProps={{ style: { fontFamily: 'var(--font-mono)' } }}
-        lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1em', color: 'rgba(255,255,255,0.18)', textAlign: 'right', userSelect: 'none' }}
+        lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1em', color: 'rgba(247,237,226,0.18)', textAlign: 'right', userSelect: 'none' }}
       >
         {children}
       </SyntaxHighlighter>

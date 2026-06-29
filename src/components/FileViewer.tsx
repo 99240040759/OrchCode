@@ -38,7 +38,7 @@ export default function FileViewer({ filePath, content, startLine, endLine, hasD
           <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-xs" onClick={handleCopy} className="text-foreground/35 hover:text-foreground/70">{copied ? <IoCheckmark className="size-3 text-emerald-400" /> : <FluentFiles className="size-3" />}</Button></TooltipTrigger><TooltipContent side="bottom">{copied ? 'Copied' : 'Copy'}</TooltipContent></Tooltip>
         </div>
       </div>
-      <style>{`.monaco-highlight-line { background: hsl(42 53% 83% / 0.08) !important; } .monaco-highlight-line-margin { border-left: 2px solid hsl(42 53% 83%); }`}</style>
+      <style>{`.monaco-highlight-line { background: rgba(208,122,82,0.10) !important; } .monaco-highlight-line-margin { border-left: 2px solid #d07a52; }`}</style>
       <div className="flex-1 min-h-0 relative">
         {filePath.toLowerCase().endsWith('.md') ? (
           <div className="absolute inset-0 overflow-y-auto p-4 max-w-4xl">

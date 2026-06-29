@@ -4,7 +4,6 @@ import { FluentFolder } from '@react-symbols/icons';
 import { useWorkspacesStore } from '@/store/workspaces';
 import { useConversationsStore } from '@/store/conversations';
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbSeparator, BreadcrumbPage } from '@/components/ui/breadcrumb';
-import path from 'path-browserify';
 
 export function FileBreadcrumb({ filePath }: { filePath: string }) {
   const workspaces = useWorkspacesStore(s => s.workspaces);
@@ -15,6 +14,22 @@ export function FileBreadcrumb({ filePath }: { filePath: string }) {
   const normFile = filePath.replace(/\\/g, '/');
   const isAbs = normFile.startsWith('/') || /^[a-zA-Z]:/.test(normFile);
 
+  // Agent session artifacts live outside any workspace — show just the filename, no folder trail.
+  if (activeConvId && normFile.includes(`/sessions/${activeConvId}/`)) {
+    const name = normFile.split('/').pop() || normFile;
+    return (
+      <Breadcrumb className="select-none font-mono text-xs">
+        <BreadcrumbList className="flex-wrap gap-1">
+          <BreadcrumbItem>
+            <BreadcrumbPage className="flex items-center gap-1 font-medium">
+              <FileIcon fileName={name} className="size-3.5 shrink-0" />{name}
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+    );
+  }
+
   const activeWs = workspaces.find(w => {
     if (!isAbs) return wsId ? w.id === wsId : true;
     const normWs = w.path.replace(/\\/g, '/');
@@ -24,7 +39,7 @@ export function FileBreadcrumb({ filePath }: { filePath: string }) {
   let displayPath = normFile;
   if (activeWs && isAbs) {
     const normWs = activeWs.path.replace(/\\/g, '/');
-    displayPath = path.relative(normWs, normFile);
+    displayPath = normFile.slice(normWs.length).replace(/^\/+/, '');
   }
 
   const parts = displayPath.split('/').filter(Boolean);

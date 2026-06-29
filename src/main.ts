@@ -29,8 +29,8 @@ const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1280, height: 820, title: 'Orch Code', titleBarStyle: 'hidden',
     icon: path.join(__dirname, 'logo.png'),
-    ...(isMac ? { trafficLightPosition: { x: 15, y: 11 } } : { titleBarOverlay: { color: '#00000000', symbolColor: '#737373', height: 36 } }),
-    backgroundColor: '#1e1e1e', show: false,
+    ...(isMac ? { trafficLightPosition: { x: 15, y: 11 } } : { titleBarOverlay: { color: '#00000000', symbolColor: '#b8a692', height: 36 } }),
+    backgroundColor: '#1c1714', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false },
   });
   mainWindow.webContents.on('will-navigate', (e, u) => { 

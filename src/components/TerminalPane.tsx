@@ -16,7 +16,7 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
       foreground: getVar('--color-foreground'),
       cursor: getVar('--color-primary'),
       cursorAccent: getVar('--color-background'),
-      selectionBackground: 'rgba(255, 255, 255, 0.15)',
+      selectionBackground: 'rgba(208, 122, 82, 0.28)',
       black: getVar('--color-background'),
       red: getVar('--color-destructive'),
       yellow: getVar('--color-primary'),
