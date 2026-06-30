@@ -30,7 +30,12 @@ export function buildUIMessages(messages: DBMessage[], parts: DBPart[], artifact
   for (const p of parts) { const a = partsByMsg.get(p.messageId) || []; a.push(p); partsByMsg.set(p.messageId, a); }
   return messages.map(m => ({
     id: m.id, convId: m.convId, role: m.role, status: m.status, error: m.error, createdAt: m.createdAt,
-    parts: (partsByMsg.get(m.id) || []).sort((a, b) => a.seq - b.seq).map(p => dbPartToUI(p, artMap)),
+    parts: (partsByMsg.get(m.id) || []).sort((a, b) => a.seq - b.seq).map(p => {
+      const ui = dbPartToUI(p, artMap);
+      // A finished message can't have a live tool — coerce orphaned 'running' rows so they don't spin forever.
+      if (ui.type === 'tool' && ui.status === 'running' && m.status !== 'streaming') { ui.status = 'error'; if (!ui.result) ui.result = 'Interrupted'; }
+      return ui;
+    }),
   }));
 }
 export function dbPartToUI(p: DBPart, artMap: Map<string, DBArtifact>): UIPart {

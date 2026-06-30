@@ -40,13 +40,13 @@ export default function ToolCallRow({ tc, convId }: { tc: UIToolPart; convId: st
   const verb = (v: string) => <span className={`${errored ? 'text-destructive/50' : 'text-foreground/30'} text-xs shrink-0 font-normal`}>{v}</span>;
   /* mono — prominent filename */
   const mono = (t: string) => <span className={`${errored ? 'text-destructive/80' : 'text-foreground/70'} font-medium text-xs truncate`}>{t}</span>;
-  const lineRange = (meta.startLine || meta.endLine) ? <span className="text-foreground/25 text-[11px] shrink-0 font-mono ml-1">:{meta.startLine}–{meta.endLine}</span> : null;
+  const lineRange = (meta.startLine || meta.endLine) ? <span className="text-foreground/25 text-[11px] shrink-0 font-mono ml-1">#L{meta.startLine}-{meta.endLine}</span> : null;
   const iconCls = `size-3 shrink-0 ${errored ? 'text-destructive/50' : 'text-foreground/30'}`;
 
   let content: React.ReactNode;
   switch (tc.name) {
     case 'read_file':   content = <>{verb('Read')} <FileIcon fileName={basename(filePath)} className="size-3 shrink-0 text-foreground/30" /> {mono(basename(filePath))}{lineRange}</>; break;
-    case 'write_file':  content = <>{verb('Created')} <FileIcon fileName={basename(filePath)} className="size-3 shrink-0 text-foreground/30" /> {mono(basename(filePath))}<DiffStats added={meta.diffAdded} /></>; break;
+    case 'write_file':  content = <>{verb('Created')} <FileIcon fileName={basename(filePath)} className="size-3 shrink-0 text-foreground/30" /> {mono(basename(filePath))}<DiffStats added={meta.diffAdded} removed={meta.isNew ? undefined : meta.diffRemoved} /></>; break;
     case 'edit_file':   content = <>{verb('Edited')} <FileIcon fileName={basename(filePath)} className="size-3 shrink-0 text-foreground/30" /> {mono(basename(filePath))}<DiffStats added={meta.diffAdded} removed={meta.diffRemoved} /></>; break;
     case 'list_dir': {
       const count = meta.count ?? 0;

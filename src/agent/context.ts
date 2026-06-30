@@ -23,7 +23,13 @@ export function makeClient(gcpBase: string, jwt: string, anonKey: string, provid
 // Tokens for a whole history (approx) — used for compaction decisions. Compacted messages are excluded (they aren't sent).
 export function countHistory(history: HistoryMessage[]): number {
   let n = 0;
-  for (const { message, parts } of history) { if (message.compacted) continue; for (const p of parts) n += countText(p.text || p.toolResult || p.toolArgs || '') + 4; }
+  for (const { message, parts } of history) {
+    if (message.compacted) continue;
+    for (const p of parts) {
+      if (p.type === 'image') { n += 1000; continue; } // images aren't text — approximate their prompt cost
+      n += countText(p.text || '') + countText(p.toolArgs || '') + countText(p.toolResult || '') + 4;
+    }
+  }
   return n;
 }
 // Approx token size of a built OpenAI message array — used for mid-loop compaction decisions.
@@ -31,7 +37,7 @@ export function estimateMessages(messages: ChatCompletionMessageParam[]): number
   let n = 0;
   for (const m of messages) {
     if (typeof m.content === 'string') n += countText(m.content);
-    else if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'text') n += countText(c.text);
+    else if (Array.isArray(m.content)) for (const c of m.content as any[]) { if (c.type === 'text') n += countText(c.text); else if (c.type === 'image_url') n += 1000; }
     const tc = (m as any).tool_calls; if (tc) for (const t of tc) n += countText(t.function?.arguments || '');
     const rc = (m as any).reasoning_content; if (rc) n += countText(rc);
     n += 4;

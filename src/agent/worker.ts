@@ -9,6 +9,9 @@ const COMPACT_AT = 0.80;
 const KEEP_TAIL = 6;
 const parent = (process as any).parentPort;
 if (!parent) throw new Error('Must run as UtilityProcess');
+// Surface fatal worker errors to main's stderr logger (the utility process has no Sentry of its own).
+process.on('uncaughtException', (e) => console.error('[Worker] uncaughtException', e));
+process.on('unhandledRejection', (e) => console.error('[Worker] unhandledRejection', e));
 const now = () => Date.now();
 let abortController: AbortController | null = null;
 let running = false;
@@ -149,9 +152,10 @@ async function run(req: { config: AgentRunConfig; history: HistoryMessage[] }) {
           messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
           if (meta?.dataUrl) emit({ type: 'part.image', messageId: asstId, partId: nanoid(), seq: nextSeq(), mime: 'image/png', name: (meta.prompt || 'image').slice(0, 40), dataUrl: meta.dataUrl });
         } catch (e: any) {
-          if (aborted) break;
+          // Always finalize the part — never leave a tool row stuck on 'running' (perpetual spinner on reload).
           const msg = e.message || String(e);
-          emit({ type: 'tool.update', messageId: asstId, partId, status: 'error', result: `Error: ${msg}` });
+          emit({ type: 'tool.update', messageId: asstId, partId, status: 'error', result: aborted ? 'Aborted by user' : `Error: ${msg}` });
+          if (aborted) break;
           messages.push({ role: 'tool', tool_call_id: tc.id, content: `Error: ${msg}` });
         }
       }

@@ -63,7 +63,7 @@ const mdComponents: any = {
   code({ className, children, ...props }: any) { return <code className={className} {...props}>{children}</code>; },
 };
 
-export const Markdown = memo(function Markdown({ text, className = "prose prose-chat min-w-0" }: { text: string; className?: string }) {
+export const Markdown = memo(function Markdown({ text, className = "prose prose-chat min-w-0 select-text" }: { text: string; className?: string }) {
   return (
     <div className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={mdComponents}>

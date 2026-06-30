@@ -42,7 +42,7 @@ export default function TerminalPane({ convId, cwd }: { convId: string; cwd?: st
       scrollback: 5000, 
       convertEol: true,
       fontFamily: getVar('--font-mono') || 'monospace',
-      fontSize: 13
+      fontSize: 14
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

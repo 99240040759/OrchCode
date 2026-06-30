@@ -41,8 +41,8 @@ export default function FileViewer({ filePath, content, startLine, endLine, hasD
       <style>{`.monaco-highlight-line { background: rgba(208,122,82,0.10) !important; } .monaco-highlight-line-margin { border-left: 2px solid #d07a52; }`}</style>
       <div className="flex-1 min-h-0 relative">
         {filePath.toLowerCase().endsWith('.md') ? (
-          <div className="absolute inset-0 overflow-y-auto p-4 max-w-4xl">
-            <Markdown text={content} />
+          <div className="absolute inset-0 overflow-y-auto">
+            <div className="p-4 max-w-4xl mx-auto"><Markdown text={content} /></div>
           </div>
         ) : (
           <Editor height="100%" language={lang} theme="orchTheme" value={content} options={{ readOnly: true, lineNumbers: 'on', minimap: { enabled: false }, scrollBeyondLastLine: false, lineDecorationsWidth: 10, lineNumbersMinChars: 4, wordWrap: 'on', domReadOnly: true, folding: false, renderLineHighlight: 'none', padding: { top: 12, bottom: 12 } }} onMount={handleEditorDidMount} />

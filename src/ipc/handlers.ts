@@ -32,6 +32,15 @@ function send(channel: string, ...args: any[]) {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
   win?.webContents.send(channel, ...args);
 }
+// On a crashed/killed worker, any tool part still marked 'running' must be resolved so the UI doesn't spin forever.
+function finalizeRunningTools(convId: string, messageId: string, reason: string) {
+  for (const p of q.getPartsForMessage(messageId)) {
+    if (p.type === 'tool' && p.toolStatus === 'running') {
+      q.setPartTool(p.id, 'error', `Error: ${reason}`, null);
+      send('agent:event', convId, { type: 'tool.update', messageId, partId: p.id, status: 'error', result: `Error: ${reason}` });
+    }
+  }
+}
 // ─── Persistence-first event handling ───────────────────────────────────────
 function flushBuffers() { for (const [partId, b] of textBuffers) if (b.dirty) { q.setPartText(partId, b.text); b.dirty = false; } }
 setInterval(flushBuffers, 150);
@@ -54,7 +63,7 @@ function persistAndForward(convId: string, ev: AgentEvent) {
     case 'compacted': { const seq = q.nextSeq(convId); ev.summaryMessage.seq = seq; q.insertMessage(ev.summaryMessage); q.insertPart(ev.summaryPart); q.markCompacted(ev.compactedIds); break; }
     case 'message.end': flushBuffers(); q.setMessageStatus(ev.messageId, ev.status, ev.error ?? null); q.touchConversation(convId); active.delete(convId); startedAssistant.delete(convId); armIdle(convId); break;
     case 'title': q.updateConversation(convId, { title: ev.title, updatedAt: now() }); send('conv:titleUpdated', convId, ev.title); break;
-    case 'tokens': q.addLifetimeTokens(ev.lifetime); break;
+    case 'tokens': q.addLifetimeTokens(ev.lifetime); q.setSetting(`ctx:${convId}`, String(ev.context)); break;
   }
   send('agent:event', convId, ev);
 }
@@ -80,9 +89,17 @@ function getWorker(convId: string): WorkerBox {
     for (const [partId, b] of textBuffers) if (b.convId === convId) { q.setPartText(partId, b.text); textBuffers.delete(partId); }
     if (!active.has(convId)) { startedAssistant.delete(convId); return; } // clean exit — nothing in flight
     const asstId = startedAssistant.get(convId), err = `Worker exited (${code})`;
-    if (asstId) { q.setMessageStatus(asstId, 'error', err); send('agent:event', convId, { type: 'message.end', messageId: asstId, status: 'error', error: err }); }
-    // Crashed before the assistant message existed: surface the failure without corrupting the user's message.
-    else send('agent:event', convId, { type: 'message.end', messageId: nanoid(), status: 'error', error: err });
+    if (asstId) {
+      finalizeRunningTools(convId, asstId, 'Worker exited');
+      q.setMessageStatus(asstId, 'error', err);
+      send('agent:event', convId, { type: 'message.end', messageId: asstId, status: 'error', error: err });
+    } else {
+      // Crashed before the assistant message existed — synthesize one so the renderer can render the failure.
+      const m: DBMessage = { id: nanoid(), convId, role: 'assistant', seq: q.nextSeq(convId), status: 'error', error: err, model: null, compacted: 0, createdAt: now(), updatedAt: now() };
+      q.insertMessage(m);
+      send('agent:event', convId, { type: 'message.start', message: m });
+      send('agent:event', convId, { type: 'message.end', messageId: m.id, status: 'error', error: err });
+    }
     active.delete(convId); startedAssistant.delete(convId);
   });
   return box;
@@ -138,10 +155,13 @@ export function registerHandlers() {
     const box = workers.get(id); if (box?.idleTimer) clearTimeout(box.idleTimer);
     box?.proc.kill(); workers.delete(id); active.delete(id); startedAssistant.delete(id);
     q.deleteConversation(id);
-    const view = convBrowserViews.get(id); if (view) { if (activeBrowserConvId === id) hideBrowserView(); convBrowserViews.delete(id); }
+    q.deleteSetting(`ctx:${id}`);
+    try { fs.rmSync(path.join(app.getPath('userData'), 'sessions', id), { recursive: true, force: true }); } catch { /* best-effort: orphaned scratch dir */ }
+    const view = convBrowserViews.get(id); if (view) { if (activeBrowserConvId === id) hideBrowserView(); try { view.webContents.close(); } catch {} convBrowserViews.delete(id); }
     ptyInstances.get(id)?.kill(); ptyInstances.delete(id); ptyScrollback.delete(id); ptySubscribers.delete(id);
   });
   safeHandle('db:loadConversation', (_, convId: string) => q.loadConversation(convId));
+  safeHandle('db:getContextTokens', (_, convId: string) => parseInt(q.getSetting(`ctx:${convId}`)?.value || '0', 10));
   safeHandle('db:getFirstLaunch', () => q.isFirstLaunch());
   safeHandle('db:setFirstLaunchDone', () => q.setFirstLaunchDone());
   safeOn('onboarding:close', () => q.setFirstLaunchDone());
@@ -205,12 +225,12 @@ export function registerHandlers() {
   safeHandle('pty:ensure', (_, { convId, cwd }: { convId: string; cwd?: string }) => {
     if (ptyInstances.has(convId)) return;
     if (!ptyScrollback.has(convId)) ptyScrollback.set(convId, []);
-    const shell = process.platform === 'win32' ? (process.env.COMSPEC || 'powershell.exe') : (process.env.SHELL || '/bin/bash');
+    const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL || '/bin/bash'); // match the agent's run_command shell
     try {
       const term = pty.spawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: cwd || app.getPath('home'), env: process.env as Record<string, string> });
       ptyInstances.set(convId, term);
-      term.onData(data => { const buf = ptyScrollback.get(convId)!; buf.push(data); if (buf.length > SCROLLBACK_LIMIT) buf.splice(0, buf.length - SCROLLBACK_LIMIT); ptySubscribers.get(convId)?.send(`pty:data:${convId}`, data); });
-      term.onExit(() => { ptyInstances.delete(convId); ptySubscribers.get(convId)?.send(`pty:exit:${convId}`); });
+      term.onData(data => { const buf = ptyScrollback.get(convId); if (!buf) return; buf.push(data); if (buf.length > SCROLLBACK_LIMIT) buf.splice(0, buf.length - SCROLLBACK_LIMIT); ptySubscribers.get(convId)?.send(`pty:data:${convId}`, data); });
+      term.onExit(() => { ptyScrollback.get(convId)?.push('\r\n\x1b[2m[Process exited]\x1b[0m'); ptyInstances.delete(convId); ptySubscribers.get(convId)?.send(`pty:exit:${convId}`); });
     } catch (e: any) {
       ptyScrollback.get(convId)?.push(`\r\n\x1b[31m[Terminal] Failed to spawn shell '${shell}': ${e.message}\x1b[0m\r\n`);
       ptySubscribers.get(convId)?.send(`pty:data:${convId}`, `\r\n\x1b[31m[Terminal] Failed to spawn shell '${shell}': ${e.message}\x1b[0m\r\n`);
@@ -247,4 +267,22 @@ function sendBrowserState(convId: string) {
   send('browser:state', { convId, url: wc.getURL(), title: wc.getTitle(), loading: wc.isLoading(), canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
 }
 function hideBrowserView(convId?: string) { if (!mainWindow || !activeBrowserConvId) return; if (convId && convId !== activeBrowserConvId) return; const view = convBrowserViews.get(activeBrowserConvId); if (view) { try { mainWindow.contentView.removeChildView(view); } catch {} } activeBrowserConvId = null; }
-function showBrowserView(convId: string, bounds: Bounds) { if (!mainWindow) return; hideBrowserView(); const view = getBrowserView(convId); mainWindow.contentView.addChildView(view); view.setBounds(roundB(bounds)); activeBrowserConvId = convId; sendBrowserState(convId); }
+const MAX_BROWSER_VIEWS = 4;
+// Keep at most MAX_BROWSER_VIEWS live web views; destroy the least-recently-shown inactive ones to stop process leaks.
+function evictBrowserViews() {
+  for (const [cid, view] of convBrowserViews) {
+    if (convBrowserViews.size <= MAX_BROWSER_VIEWS) break;
+    if (cid === activeBrowserConvId) continue;
+    try { view.webContents.close(); } catch {}
+    convBrowserViews.delete(cid);
+  }
+}
+function showBrowserView(convId: string, bounds: Bounds) {
+  if (!mainWindow) return;
+  hideBrowserView();
+  const view = getBrowserView(convId);
+  convBrowserViews.delete(convId); convBrowserViews.set(convId, view); // bump recency (Map preserves insertion order)
+  mainWindow.contentView.addChildView(view); view.setBounds(roundB(bounds)); activeBrowserConvId = convId;
+  evictBrowserViews();
+  sendBrowserState(convId);
+}

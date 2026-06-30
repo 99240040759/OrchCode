@@ -28,7 +28,10 @@ export const useConversationsStore = create<Store>((set, get) => ({
   appendDelta: (convId, messageId, partId, text) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, messages: patchMsg(c.messages, messageId, m => ({ ...m, parts: m.parts.map(p => p.id === partId && (p.type === 'text' || p.type === 'reasoning') ? { ...p, text: p.text + text } : p) })) })) })),
   setTokenCount: (convId, n) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, tokenCount: n })) })),
   apply: (convId, ev) => set(s => {
-    const c = s.convs[convId] || def(null);
+    const existing = s.convs[convId];
+    // Ignore stray late events for a conversation that was deleted or never loaded (a fresh conv always opens with message.start).
+    if (!existing && ev.type !== 'message.start') return s;
+    const c = existing || def(null);
     const reduce = (c: ConvState): ConvState => {
     switch (ev.type) {
       case 'message.start': return { ...c, status: 'busy', messages: [...c.messages, { id: ev.message.id, convId, role: 'assistant', status: 'streaming', parts: [], createdAt: ev.message.createdAt }] };

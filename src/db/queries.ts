@@ -49,6 +49,7 @@ export const q = {
   // ─── Settings / stats ───
   getSetting: (key: string) => getDb().prepare(`SELECT value FROM settings WHERE key=?`).get(key) as { value: string } | undefined,
   setSetting: (key: string, value: string) => getDb().prepare(`INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=?`).run(key, value, value),
+  deleteSetting: (key: string) => getDb().prepare(`DELETE FROM settings WHERE key=?`).run(key),
   isFirstLaunch: () => { const s = q.getSetting('firstLaunch'); return !s || s.value !== 'done'; },
   setFirstLaunchDone: () => q.setSetting('firstLaunch', 'done'),
   addLifetimeTokens: (count: number) => q.setSetting('lifetimeTokens', String(parseInt(q.getSetting('lifetimeTokens')?.value || '0', 10) + count)),

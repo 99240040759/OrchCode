@@ -48,6 +48,6 @@ const createWindow = () => {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) mainWindow.webContents.openDevTools();
   mainWindow.on('closed', () => { mainWindow = null; });
 };
-app.on('ready', () => { try { getDb(); registerHandlers(); createWindow(); } catch { app.quit(); } });
+app.on('ready', () => { try { getDb(); registerHandlers(); createWindow(); } catch (e) { console.error('[Startup] Fatal initialization error:', e); Sentry.captureException(e); app.quit(); } });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

@@ -1,288 +1,86 @@
----
-name: file-reading
-description: "Use this skill when a file has been uploaded and you need to read or inspect its contents inside the E2B sandbox. This skill is a router: it tells you which tool/approach to use for each file type (pdf, docx, xlsx, pptx, csv, json, images, archives, ebooks) so you read the right amount the right way. Trigger when the user asks about an uploaded file or when upload_attachment_to_sandbox has placed a file in the sandbox and you need to read it."
-license: Proprietary. LICENSE.txt has complete terms
----
-
-# Reading Files in the E2B Sandbox
+# Reading Files
 
 ## Why this skill exists
 
-When the user uploads a file, it is placed into the E2B sandbox (typically at `/home/user/<filename>`). You must go read it — it is not automatically in your context.
+You run on the user's own machine with full filesystem and shell access. When the user references a file (by path, or as a chat attachment), you must go read it the right way — `read_file` for text/code, and type-specific approaches for binary formats.
 
-The naive approach — `cat /home/user/whatever` — is wrong for most files:
+Two things to know about attachments:
+- Files the user attaches in chat are already extracted to text for you (pdf/docx/pptx/xlsx/odt/rtf via the built-in parser; everything else as UTF-8). You usually already have their content in the conversation.
+- Files on disk are read with `read_file` (text) or inspected with `run_command` (binary). `read_file` supports `start_line`/`end_line` for paging large files.
 
-- On a PDF it prints binary garbage.
-- On a 100MB CSV it floods your context with rows you will never use.
-- On a DOCX it prints the raw ZIP bytes.
-
-This skill tells you the right first move for each type.
+The naive move — dumping a binary file as text — is wrong: a PDF or .docx is binary (a ZIP, for Office formats) and prints garbage, and a 100MB CSV floods your context.
 
 ## General protocol
 
-1. **Look at the extension.** That is your dispatch key.
-2. **Check size before reading.** Large files need sampling, not slurping.
-   ```bash
-   ls -lh /home/user/report.pdf
-   ```
-3. **Read just enough to answer the user's question.**
-4. **If a dedicated skill exists, read it first.** The table below tells you when.
+1. **Look at the extension** — that is your dispatch key.
+2. **Check size before reading.** `run_command` → `ls -lh <file>` (or `Get-Item <file>` on Windows PowerShell).
+3. **Read just enough** to answer the question.
+4. **If a dedicated skill exists, load it first** with `read_skill`.
 
 ## Dispatch table
 
 | Extension | First move | Dedicated skill |
-|-----------|------------|----------------|
-| `.pdf` | Content inventory (see PDF section) | `read_skill_guide` with `pdf-reading` |
-| `.docx` | python-docx extract | `read_skill_guide` with `docx` |
-| `.doc` (legacy) | Convert to .docx first via soffice | `read_skill_guide` with `docx` |
-| `.xlsx` | openpyxl read_only | `read_skill_guide` with `xlsx` |
-| `.xlsm` | openpyxl read_only (same structure) | `read_skill_guide` with `xlsx` |
-| `.xls` (legacy) | `pd.read_excel(engine="xlrd")` | `read_skill_guide` with `xlsx` |
-| `.pptx` | python-pptx extract | `read_skill_guide` with `pptx` |
-| `.ppt` (legacy) | Convert to .pptx first via soffice | `read_skill_guide` with `pptx` |
-| `.csv`, `.tsv` | pandas with `nrows` | — (below) |
-| `.json`, `.jsonl` | head/Python parse | — (below) |
-| `.jpg`, `.png`, `.gif`, `.webp` | PIL for dimensions; analyze visually | — (below) |
-| `.zip`, `.tar`, `.tar.gz` | List contents, do **not** auto-extract | — (below) |
-| `.gz` (single file) | `zcat \| head` | — (below) |
-| `.epub`, `.odt` | pandoc to plain text | — (below) |
-| `.rtf` | pandoc to plain text | — (below) |
-| `.txt`, `.md`, `.log`, code files | size check then head/cat | — (below) |
-| Unknown | Python `imghdr` or read magic bytes | — |
+|-----------|------------|-----------------|
+| `.txt` `.md` `.log` code | `read_file` (use start_line/end_line if large) | — |
+| `.pdf` | `pdftotext` / pypdf peek | `read_skill('pdf')` |
+| `.docx` | `pandoc` or python-docx | `read_skill('docx')` |
+| `.xlsx` `.xlsm` | openpyxl read_only / pandas | `read_skill('xlsx')` |
+| `.xls` (legacy) | `pandas.read_excel(engine="xlrd")` | `read_skill('xlsx')` |
+| `.pptx` | python-pptx / markitdown | `read_skill('pptx')` |
+| `.csv` `.tsv` | pandas with `nrows` | — (below) |
+| `.json` `.jsonl` | `read_file` head / parse | — (below) |
+| images | inspect visually; OCR if needed | — (below) |
+| `.zip` `.tar` `.tar.gz` | list contents, don't auto-extract | — (below) |
+| `.epub` `.odt` `.rtf` | `pandoc … -t plain` | — (below) |
 
----
-
-## PDF
-
-**Never** `cat` a PDF — it prints binary garbage.
-
-Quick first move — get page count and check if text is extractable:
-
-```bash
-pdfinfo /home/user/report.pdf
-pdftotext -f 1 -l 1 /home/user/report.pdf - | head -20
-```
-
-Then peek at the text content:
-
-```python
-import subprocess
-subprocess.check_call(["pip", "install", "pypdf", "-q"])
-from pypdf import PdfReader
-r = PdfReader("/home/user/report.pdf")
-print(f"{len(r.pages)} pages")
-print(r.pages[0].extract_text()[:2000])
-```
-
-For anything beyond a quick peek — figures, tables, attachments, forms, scanned PDFs, visual inspection — call `read_skill_guide` with format `pdf-reading`.
-
----
-
-## DOCX / DOC
-
-```python
-import subprocess
-subprocess.check_call(["pip", "install", "python-docx", "-q"])
-from docx import Document
-doc = Document("/home/user/memo.docx")
-for p in doc.paragraphs:
-    if p.text.strip():
-        print(p.text)
-for table in doc.tables:
-    for row in table.rows:
-        print([cell.text for cell in row.cells])
-```
-
-Legacy `.doc` (not `.docx`) must be converted first:
-```bash
-soffice --headless --convert-to docx /home/user/document.doc --outdir /home/user/
-```
-
-For editing, creating, tracked changes, or images — call `read_skill_guide` with format `docx`.
-
----
-
-## XLSX / XLS / Spreadsheets
-
-```python
-import subprocess
-subprocess.check_call(["pip", "install", "openpyxl", "-q"])
-from openpyxl import load_workbook
-wb = load_workbook("/home/user/data.xlsx", read_only=True)
-print("Sheets:", wb.sheetnames)
-ws = wb.active
-for row in ws.iter_rows(max_row=5, values_only=True):
-    print(row)
-```
-
-`read_only=True` is important — without it, openpyxl loads the entire workbook into memory.
-
-**Legacy `.xls`** — openpyxl raises `InvalidFileException`. Use:
-```python
-import pandas as pd
-df = pd.read_excel("/home/user/old.xls", engine="xlrd", nrows=5)
-print(df)
-```
-
-For formulas, formatting, charts, editing, or creating — call `read_skill_guide` with format `xlsx`.
-
----
-
-## PPTX
-
-```python
-import subprocess
-subprocess.check_call(["pip", "install", "python-pptx", "-q"])
-from pptx import Presentation
-prs = Presentation("/home/user/deck.pptx")
-for i, slide in enumerate(prs.slides, 1):
-    print(f"\n## Slide {i}")
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            for para in shape.text_frame.paragraphs:
-                if para.text.strip():
-                    print(para.text)
-```
-
-For creating, editing, or anything beyond reading — call `read_skill_guide` with format `pptx`.
+Tooling note: Python (`pip`), Node (`npm`/`npx`), and CLI tools like `pandoc`, `pdftotext`, `qpdf`, `soffice`/`libreoffice` may or may not be installed. Probe with `run_command` (e.g. `pdftotext -v`) and install what you need before relying on it.
 
 ---
 
 ## CSV / TSV
 
-**Do not** `cat` these blindly. Use pandas with `nrows`:
-
+Don't read these whole. Sample with pandas:
 ```python
 import pandas as pd
-df = pd.read_csv("/home/user/data.csv", nrows=5)
-print(df)
-print()
-print(df.dtypes)
+df = pd.read_csv("data.csv", nrows=5)   # sep="\t" for TSV
+print(df); print(df.dtypes)
 ```
-
-Approximate row count without loading:
-```bash
-wc -l /home/user/data.csv
-```
-
-Full analysis only after you know the shape:
-```python
-df = pd.read_csv("/home/user/data.csv")
-print(df.describe())
-```
-
-TSV: same, with `sep="\t"`.
-
----
+Row count without loading: `wc -l data.csv` (or `(Get-Content data.csv).Length` on Windows). Full stats only once you know the shape: `df = pd.read_csv("data.csv"); print(df.describe())`.
 
 ## JSON / JSONL
 
+Small files: `read_file` directly. Large/odd ones, parse:
 ```python
 import json
-
-# Regular JSON
-with open("/home/user/data.json") as f:
-    data = json.load(f)
-print(type(data))
-if isinstance(data, list):
-    print(f"Array of {len(data)} items")
-    print(data[:2])
-elif isinstance(data, dict):
-    print("Keys:", list(data.keys())[:10])
+data = json.load(open("data.json"))
+print(type(data), len(data) if isinstance(data, list) else list(data)[:10])
 ```
+JSONL is one object per line — read the first line and parse it to learn the shape.
 
-JSONL (one object per line):
+## Images
+
+Attached images are shown to you directly if the model is multimodal. For images on disk, get dimensions and OCR when needed:
 ```python
-with open("/home/user/data.jsonl") as f:
-    lines = f.readlines()
-print(f"{len(lines)} records")
-print(json.loads(lines[0]))  # First record
-```
-
----
-
-## Images (JPG / PNG / GIF / WEBP)
-
-```python
-import subprocess
-subprocess.check_call(["pip", "install", "Pillow", "-q"])
 from PIL import Image
-img = Image.open("/home/user/photo.jpg")
-print(img.size, img.mode, img.format)
+img = Image.open("photo.jpg"); print(img.size, img.mode)
+import pytesseract; print(pytesseract.image_to_string(img))  # needs tesseract installed
 ```
 
-For OCR on an image:
-```python
-subprocess.check_call(["pip", "install", "pytesseract", "-q"])
-import pytesseract
-print(pytesseract.image_to_string(img))
-```
+## Archives
 
----
-
-## Archives (ZIP / TAR / TAR.GZ)
-
-**List first. Extract only if the user explicitly asks.**
-
+List first, extract only if asked.
 ```bash
-unzip -l /home/user/bundle.zip
-tar -tf /home/user/bundle.tar
+unzip -l bundle.zip        # tar -tf bundle.tar(.gz) for tarballs
+unzip -p bundle.zip path/inside/file.txt   # pull one file to stdout
 ```
 
-GNU tar auto-detects compression — `-tf` works on `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`.
+## EPUB / ODT / RTF
 
-If the user wants one file from inside:
+Convert to plain text with pandoc:
 ```bash
-unzip -p /home/user/bundle.zip path/inside/file.txt
+pandoc book.epub -t plain | head -200
 ```
-
-**Standalone `.gz`** (not a tar):
-```bash
-zcat /home/user/data.json.gz | head -50
-```
-
----
-
-## EPUB / ODT
-
-```bash
-# Convert to plain text for reading
-pandoc /home/user/book.epub -t plain | head -200
-pandoc /home/user/doc.odt -t plain | head -200
-```
-
----
-
-## RTF
-
-```bash
-pandoc /home/user/notes.rtf -t plain | head -200
-```
-
----
 
 ## Plain text / code / logs
 
-Check the size first:
-```bash
-wc -c /home/user/app.log
-```
-
-- **Under ~20KB**: `cat` is fine.
-- **Over ~20KB**: `head -100` and `tail -100` to orient, then `grep` for specifics.
-
-For log files, the user almost always cares about the end:
-```bash
-tail -200 /home/user/app.log
-```
-
----
-
-## Unknown extension
-
-```python
-with open("/home/user/mystery.bin", "rb") as f:
-    magic = f.read(16)
-print(magic.hex())
-# %PDF = PDF, PK = ZIP/DOCX/XLSX/PPTX, \xD0\xCF = old Office format
-```
+`read_file` is the tool. For very large files, page with `start_line`/`end_line`, or `run_command` → `grep`/`Select-String` for specifics. For logs the tail usually matters most (`tail -200 app.log`).

@@ -18,6 +18,7 @@ const api = {
   updateConversation: (id: string, patch: Partial<Conversation>): Promise<void> => ipcRenderer.invoke('db:updateConversation', id, patch),
   deleteConversation: (id: string): Promise<void> => ipcRenderer.invoke('db:deleteConversation', id),
   loadConversation: (convId: string): Promise<UIMessage[]> => ipcRenderer.invoke('db:loadConversation', convId),
+  getContextTokens: (convId: string): Promise<number> => ipcRenderer.invoke('db:getContextTokens', convId),
   getFirstLaunch: (): Promise<boolean> => ipcRenderer.invoke('db:getFirstLaunch'),
   setFirstLaunchDone: (): Promise<void> => ipcRenderer.invoke('db:setFirstLaunchDone'),
   onboardingClose: () => ipcRenderer.send('onboarding:close'),

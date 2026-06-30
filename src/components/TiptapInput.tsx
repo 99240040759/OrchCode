@@ -28,7 +28,7 @@ const MentionList = ({ items, command, selectedIndex, onHighlight }: any) => {
     <div className="bg-popover border border-border rounded-md shadow-lg p-1 text-xs z-50 max-h-52 overflow-y-auto w-full flex flex-col gap-px">
       {items.length === 0 ? <div className="px-2 py-1.5 text-foreground/40 text-center">No files found</div> : items.map((item: any, idx: number) => (
         <button key={item.id} ref={idx === selectedIndex ? activeRef : null} onMouseDown={(e) => { e.preventDefault(); command(item); }} onMouseEnter={() => onHighlight(idx)}
-          className={cn("w-full text-left px-2 py-1 rounded-sm flex items-center gap-2 outline-hidden transition-colors text-xs", idx === selectedIndex ? "bg-white/6 text-foreground" : "text-foreground/60 hover:bg-white/4 hover:text-foreground/90")}>
+          className={cn("w-full text-left px-2 py-1 rounded-sm flex items-center gap-2 outline-hidden transition-colors duration-100 text-xs", idx === selectedIndex ? "bg-white/6 text-foreground" : "text-foreground/60 hover:bg-white/4 hover:text-foreground/90")}>
           <span className="shrink-0 size-3.5 flex items-center justify-center"><FileIcon fileName={item.label} className="size-3.5" /></span>
           <span className="truncate flex-1 font-mono">{item.label}</span>
         </button>

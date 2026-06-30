@@ -110,7 +110,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
           <input type="text" placeholder="Find…" value={searchText} autoFocus
             onChange={e => onSearch(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') el.browserFindInPage(convId, searchText, { forward: !e.shiftKey, findNext: true }); }}
-            className="flex-1 bg-white/4 border border-border/50 rounded px-2 py-0.5 outline-none text-xs focus:border-border transition-colors" />
+            className="flex-1 bg-white/4 border border-border/50 rounded px-2 py-0.5 outline-none text-xs focus:border-border transition-colors duration-100" />
           <span className="text-[11px] text-foreground/25 shrink-0 w-10 text-right tabular-nums">{searchResult.total > 0 ? `${searchResult.active}/${searchResult.total}` : '0/0'}</span>
           <Tooltip><TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" onClick={() => el.browserFindInPage(convId, searchText, { forward: false, findNext: true })} className="text-foreground/35 hover:text-foreground/70"><VscChevronUp className="size-3" /></Button>

@@ -158,10 +158,13 @@ export async function executeTool(name: string, rawArgs: string | Record<string,
     case 'generate_image': {
       const { prompt, width, height } = args as z.infer<typeof GenerateImageParams>;
       if (!gcpConfig) throw new Error('gcpConfig required for generate_image');
+      // Clamp to the documented 512–1568 range and snap to the 16px grid the model expects.
+      const snap = (v: number | null | undefined, def: number) => Math.max(512, Math.min(1568, Math.round((v || def) / 16) * 16));
+      const w = snap(width, 1024), h = snap(height, 1024);
       const res = await fetch(`${gcpConfig.gcpBase}/generate-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': gcpConfig.anonKey, 'Authorization': `Bearer ${gcpConfig.jwt}` },
-        body: JSON.stringify({ prompt, width: width || 1024, height: height || 1024 }),
+        body: JSON.stringify({ prompt, width: w, height: h }),
         signal,
       });
       if (!res.ok) throw new Error(`Image generation failed: ${res.status} ${await res.text()}`);
@@ -170,7 +173,6 @@ export async function executeTool(name: string, rawArgs: string | Record<string,
       const b64 = data.artifacts?.[0]?.base64 || data.data?.[0]?.b64_json || '';
       if (!b64) throw new Error('No image data in response');
       const dataUrl = `data:image/png;base64,${b64}`;
-      const w = width || 1024, h = height || 1024;
       // Agent-generated artifacts live in the session directory, never the user's workspace.
       let savedPath: string | null = null;
       if (sessionDir) {

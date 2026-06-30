@@ -36,7 +36,7 @@ function DropdownMenuItem({ className, inset, variant = "default", ...props }: R
   return (
     <DropdownMenuPrimitive.Item data-slot="dropdown-menu-item" data-inset={inset} data-variant={variant}
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-hidden select-none transition-colors duration-100",
+        "relative flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-hidden select-none transition-colors duration-100",
         "text-foreground/70 focus:bg-white/5 focus:text-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-30",
         "data-[inset]:pl-7",
@@ -49,7 +49,7 @@ function DropdownMenuItem({ className, inset, variant = "default", ...props }: R
 function DropdownMenuCheckboxItem({ className, children, checked, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
   return (
     <DropdownMenuPrimitive.CheckboxItem data-slot="dropdown-menu-checkbox-item"
-      className={cn("relative flex cursor-default items-center gap-1.5 rounded-sm py-1 pr-2 pl-7 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3", className)}
+      className={cn("relative flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-2 pl-7 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3", className)}
       checked={checked} {...props}>
       <span className="pointer-events-none absolute left-2 flex size-3 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator><CheckIcon className="size-3" /></DropdownMenuPrimitive.ItemIndicator>
@@ -64,7 +64,7 @@ function DropdownMenuRadioGroup({ ...props }: React.ComponentProps<typeof Dropdo
 function DropdownMenuRadioItem({ className, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
   return (
     <DropdownMenuPrimitive.RadioItem data-slot="dropdown-menu-radio-item"
-      className={cn("relative flex cursor-default items-center gap-1.5 rounded-sm py-1 pr-2 pl-7 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3", className)}
+      className={cn("relative flex cursor-pointer items-center gap-1.5 rounded-sm py-1 pr-2 pl-7 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3", className)}
       {...props}>
       <span className="pointer-events-none absolute left-2 flex size-3 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator><CircleIcon className="size-2 fill-current" /></DropdownMenuPrimitive.ItemIndicator>
@@ -88,7 +88,7 @@ function DropdownMenuSub({ ...props }: React.ComponentProps<typeof DropdownMenuP
 function DropdownMenuSubTrigger({ className, inset, children, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & { inset?: boolean }) {
   return (
     <DropdownMenuPrimitive.SubTrigger data-slot="dropdown-menu-sub-trigger" data-inset={inset}
-      className={cn("flex cursor-default items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[state=open]:bg-white/5 data-[inset]:pl-7 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3 [&_svg:not([class*='text-'])]:text-foreground/35", className)}
+      className={cn("flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 text-xs outline-hidden select-none transition-colors duration-100 text-foreground/70 focus:bg-white/5 focus:text-foreground data-[state=open]:bg-white/5 data-[inset]:pl-7 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3 [&_svg:not([class*='text-'])]:text-foreground/35", className)}
       {...props}>
       {children}<ChevronRightIcon className="ml-auto size-3 text-foreground/30" />
     </DropdownMenuPrimitive.SubTrigger>

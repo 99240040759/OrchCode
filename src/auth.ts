@@ -49,10 +49,16 @@ async function refreshIfExpired(stored: StoredSession): Promise<StoredSession | 
   return refreshPromise;
 }
 export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null): void {
-  ipcMain.handle('auth:loadSession', async () => { const s = await loadSession(); return s ? refreshIfExpired(s) : null; });
-  ipcMain.handle('auth:saveSession', (_, s: StoredSession) => saveSession(s));
-  ipcMain.handle('auth:clearSession', () => clearSession());
-  ipcMain.handle('auth:startOAuth', async () => {
+  // Mirror the origin guard used by the main IPC handlers — reject calls from any non-app frame.
+  const checkOrigin = (wc: Electron.WebContents) => {
+    const u = wc.getURL(), devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : '';
+    if (!u.startsWith('file://') && (!devUrl || !u.startsWith(devUrl))) throw new Error('Unauthorized IPC');
+  };
+  const safe = (ch: string, fn: (e: Electron.IpcMainInvokeEvent, ...a: any[]) => any) => ipcMain.handle(ch, (e, ...a) => { checkOrigin(e.sender); return fn(e, ...a); });
+  safe('auth:loadSession', async () => { const s = await loadSession(); return s ? refreshIfExpired(s) : null; });
+  safe('auth:saveSession', (_, s: StoredSession) => saveSession(s));
+  safe('auth:clearSession', () => clearSession());
+  safe('auth:startOAuth', async () => {
     return new Promise<void>((resolve, reject) => {
       if (activeOAuthServer) { try { activeOAuthServer.close(); } catch {} activeOAuthServer = null; }
       const server = http.createServer(async (req, res) => {
@@ -92,7 +98,7 @@ export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null):
       server.on('error', (e) => { clearTimeout(timeout); reject(e); });
     });
   });
-  ipcMain.handle('auth:signOut', async () => {
+  safe('auth:signOut', async () => {
     await supabase.auth.signOut().catch(() => {});
     await clearSession();
   });

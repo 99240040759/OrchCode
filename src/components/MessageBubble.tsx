@@ -24,14 +24,14 @@ function ReasoningBlock({ text, isStreaming }: { text: string; isStreaming: bool
       <Button variant="ghost" onClick={() => setMOpen(!open)} className="text-foreground/35 hover:text-foreground/60 text-xs font-medium -ml-2 px-2 gap-1 h-6">
         <span>Thought</span><VscChevronRight className={cn("size-3 transition-transform duration-100", open && "rotate-90")} />
       </Button>
-      {open && <div ref={containerRef} className="mt-0.5 text-xs text-foreground/40 whitespace-pre-wrap leading-relaxed pl-0.5 max-h-[100px] overflow-y-auto">{text}</div>}
+      {open && <div ref={containerRef} className="mt-0.5 text-xs text-foreground/40 whitespace-pre-wrap leading-relaxed pl-0.5 max-h-[100px] overflow-y-auto select-text">{text}</div>}
     </div>
   ) : null;
 }
 
 function UserParts({ parts, convId }: { parts: UIPart[]; convId: string }) {
   return (
-    <div className="max-w-xl border border-border/60 rounded-xl rounded-br-sm bg-card px-3 py-2.5 text-sm text-foreground break-words flex flex-col gap-1">
+    <div className="max-w-xl border border-border/60 rounded-xl rounded-br-sm bg-card px-3 py-2.5 text-sm text-foreground break-words flex flex-col gap-1 select-text">
       <div className="whitespace-pre-wrap leading-relaxed">{parts.map(p => p.type === 'text' ? <span key={p.id}>{p.text}</span> : p.type === 'mention' ? <MentionChip key={p.id} convId={convId} path={p.path} /> : null)}</div>
       {parts.some(p => p.type === 'image') && <div className="flex flex-wrap gap-1.5 mt-1">{parts.map(p => p.type === 'image' ? <BubbleImage key={p.id} convId={convId} name={p.name} dataUrl={p.dataUrl} /> : null)}</div>}
       {parts.some(p => p.type === 'file') && <div className="flex flex-wrap gap-1.5 mt-1">{parts.map(p => p.type === 'file' ? <FilePill key={p.id} name={p.name} /> : null)}</div>}

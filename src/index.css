@@ -92,6 +92,10 @@
 }
 
 /* ─── RESET & BASE ───────────────────────────────────────────── */
+/* Root baseline pinned to the web/desktop standard 16px (matches VS Code / Cursor: 16px root →
+   13px UI chrome, 14px body). The whole UI is rem-based, so this is the one authoritative anchor —
+   left undeclared it depends on fragile UA defaults. This is a calibrated baseline, not a zoom. */
+html { font-size: 16px; }
 *, *::before, *::after {
   border-color: var(--color-border);
   -webkit-font-smoothing: antialiased;
@@ -115,7 +119,8 @@ code, kbd, samp, pre, .font-mono { font-feature-settings: 'liga' 0, 'calt' 1; le
 
 /* ─── INTERACTIVE UTILITY ────────────────────────────────────── */
 .interactive { transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast); }
-button, [role="button"], select, summary, [type="button"], [type="submit"], [type="reset"] { cursor: pointer; }
+button, [role="button"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], summary, label[for], a[href], select, [type="button"], [type="submit"], [type="reset"] { cursor: pointer; }
+button:disabled, [role="button"][aria-disabled="true"], [data-disabled], :disabled { cursor: not-allowed; }
 
 /* ─── LABEL UTILITY ──────────────────────────────────────────── */
 /* Use on section headers in sidebar, menus, etc */
@@ -164,6 +169,8 @@ button, [role="button"], select, summary, [type="button"], [type="submit"], [typ
 .prose-chat li { margin-top: 0.1em; margin-bottom: 0.1em; }
 .prose-chat pre { margin-top: 0.5em; margin-bottom: 0.5em; border-radius: var(--radius); white-space: pre-wrap; word-break: break-word; border: 1px solid var(--color-border); }
 .prose-chat code:not(pre code) { padding: 0.1em 0.3em; border-radius: var(--radius-sm); background: rgba(255,255,255,0.08); font-size: 0.9em; }
+/* Tailwind Typography wraps inline code in literal backtick quotes via ::before/::after — strip them. */
+.prose-chat code::before, .prose-chat code::after { content: none; }
 .prose-chat blockquote { border-left-width: 2px; border-color: var(--color-border-strong); padding-left: 0.75em; font-style: normal; color: var(--color-foreground-muted); }
 .prose-chat hr { margin-top: 0.75em; margin-bottom: 0.75em; border-color: var(--color-border); }
 .prose-chat table { font-size: var(--text-xs); }
