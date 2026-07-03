@@ -6,11 +6,11 @@ import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming
 import type { HistoryMessage, HistoryPart } from '../ipc/types';
 import { secureResolve } from '../lib/securePath';
 const enc = getEncoding('cl100k_base');
-// Bounded memo: the same message strings get re-encoded across every compaction check each round.
+
 const _tokCache = new Map<string, number>();
 export const countText = (t: string): number => {
   const s = t || '';
-  if (s.length > 2000) return enc.encode(s).length; // skip caching large one-off blobs
+  if (s.length > 2000) return enc.encode(s).length; 
   let n = _tokCache.get(s);
   if (n === undefined) { if (_tokCache.size > 4000) _tokCache.clear(); n = enc.encode(s).length; _tokCache.set(s, n); }
   return n;

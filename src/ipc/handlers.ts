@@ -11,15 +11,15 @@ import type { Workspace, Conversation, AgentRunConfig, AgentEvent, HistoryMessag
 import { secureResolve } from '../lib/securePath';
 import { extractText } from '../lib/extractText';
 const now = () => Date.now();
-// ─── Agent runtime state (main is the single authority) ─────────────────────
+
 type Proc = ReturnType<typeof utilityProcess.fork>;
 interface WorkerBox { proc: Proc; ready: boolean; queue: any[]; idleTimer: ReturnType<typeof setTimeout> | null; }
 const workers = new Map<string, WorkerBox>();
-const active = new Map<string, string>(); // convId → in-flight assistant messageId (presence = busy guard)
-const startedAssistant = new Map<string, string>(); // convId → assistant messageId, set once message.start lands
-const textBuffers = new Map<string, { convId: string; text: string; dirty: boolean }>(); // partId → buffer
-const WORKER_IDLE_MS = 5 * 60_000; // reap idle worker processes so conversations don't leak Node procs forever
-// ─── PTY / Browser ──────────────────────────────────────────────────────────
+const active = new Map<string, string>(); 
+const startedAssistant = new Map<string, string>(); 
+const textBuffers = new Map<string, { convId: string; text: string; dirty: boolean }>(); 
+const WORKER_IDLE_MS = 5 * 60_000; 
+
 const ptyInstances = new Map<string, ReturnType<typeof pty.spawn>>();
 const ptyScrollback = new Map<string, string[]>();
 const ptySubscribers = new Map<string, Electron.WebContents>();
@@ -32,7 +32,7 @@ function send(channel: string, ...args: any[]) {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
   win?.webContents.send(channel, ...args);
 }
-// On a crashed/killed worker, any tool part still marked 'running' must be resolved so the UI doesn't spin forever.
+
 function finalizeRunningTools(convId: string, messageId: string, reason: string) {
   for (const p of q.getPartsForMessage(messageId)) {
     if (p.type === 'tool' && p.toolStatus === 'running') {

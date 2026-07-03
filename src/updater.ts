@@ -33,7 +33,7 @@ function checkWindows() {
   autoUpdater.on('error', (err) => { console.error('[Updater]', err.message); _send?.('error', err.message); });
   try { autoUpdater.checkForUpdates(); } catch (e: any) { console.error('[Updater] checkForUpdates failed:', e.message); }
 }
-// ─── Mac — GitHub API version check, open browser for download ───────────
+
 function checkMac() {
   _send?.('checking');
   const req = net.request({ url: `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, headers: { 'User-Agent': `OrchCode/${app.getVersion()}` } });

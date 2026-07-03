@@ -34,8 +34,8 @@ const config: ForgeConfig = {
           const p = path.join(dest, entry);
           if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
         }
-        // Recurse into hoisted transitive dependencies so externalized packages resolve at runtime.
-        try { const pkg = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')); for (const dep of Object.keys(pkg.dependencies ?? {})) inject(dep); } catch { /* no package.json */ }
+        
+        try { const pkg = JSON.parse(fs.readFileSync(path.join(src, 'package.json'), 'utf8')); for (const dep of Object.keys(pkg.dependencies ?? {})) inject(dep); } catch {  }
         console.log(`[forge] Injected ${mod}`);
       };
       for (const mod of ['node-pty', 'better-sqlite3', 'bindings', 'file-uri-to-path', 'web-tree-sitter', 'tree-sitter-wasms', 'officeparser']) inject(mod);

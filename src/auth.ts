@@ -49,7 +49,7 @@ async function refreshIfExpired(stored: StoredSession): Promise<StoredSession | 
   return refreshPromise;
 }
 export function registerAuthHandlers(getMainWindow: () => BrowserWindow | null): void {
-  // Mirror the origin guard used by the main IPC handlers — reject calls from any non-app frame.
+  
   const checkOrigin = (wc: Electron.WebContents) => {
     const u = wc.getURL(), devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : '';
     if (!u.startsWith('file://') && (!devUrl || !u.startsWith(devUrl))) throw new Error('Unauthorized IPC');

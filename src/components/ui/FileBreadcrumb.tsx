@@ -14,7 +14,7 @@ export function FileBreadcrumb({ filePath }: { filePath: string }) {
   const normFile = filePath.replace(/\\/g, '/');
   const isAbs = normFile.startsWith('/') || /^[a-zA-Z]:/.test(normFile);
 
-  // Agent session artifacts live outside any workspace — show just the filename, no folder trail.
+  
   if (activeConvId && normFile.includes(`/sessions/${activeConvId}/`)) {
     const name = normFile.split('/').pop() || normFile;
     return (

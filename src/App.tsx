@@ -106,7 +106,7 @@ export default function App() {
   const sidebarOpen = useUIStore(s => s.sidebarOpen), setSidebarOpen = useUIStore(s => s.setSidebarOpen), setArtifactOpen = useUIStore(s => s.setArtifactOpen);
   const activeConvId = useConversationsStore(s => s.activeConvId);
   const conv = useConversationsStore(s => s.activeConvId ? s.convs[s.activeConvId] : undefined);
-  // Narrow selector — only re-renders when THIS conv's UI changes
+  
   const activeConvUI = useUIStore(s => activeConvId ? (s.convUI[activeConvId] ?? DEFAULT_CONV_UI) : DEFAULT_CONV_UI);
   const { artifactOpen, artifactMaximized } = activeConvUI;
   useEffect(() => {

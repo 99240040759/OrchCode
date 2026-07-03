@@ -36,7 +36,7 @@ export default function ToolCallRow({ tc, convId }: { tc: UIToolPart; convId: st
   };
 
   const filePath = meta.path || args.path;
-  /* verb — very muted label */
+  
   const verb = (v: string) => <span className={`${errored ? 'text-destructive/50' : 'text-foreground/30'} text-xs shrink-0 font-normal`}>{v}</span>;
   /* mono — prominent filename */
   const mono = (t: string) => <span className={`${errored ? 'text-destructive/80' : 'text-foreground/70'} font-medium text-xs truncate`}>{t}</span>;

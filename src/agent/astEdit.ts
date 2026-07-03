@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { getLang } from '../lib/langMap';
-// AST-backed file editing via web-tree-sitter + tree-sitter-wasms grammars.
-// Used to disambiguate multi-occurrence targets at node boundaries and to validate syntax post-edit.
+
+
 const req = createRequire(__filename);
 const GRAMMAR: Record<string, string> = { typescript: 'typescript', javascript: 'javascript', python: 'python', c: 'c', cpp: 'cpp', csharp: 'c_sharp', java: 'java', go: 'go', rust: 'rust', ruby: 'ruby', php: 'php', css: 'css', html: 'html', json: 'json', yaml: 'yaml', toml: 'toml', kotlin: 'kotlin', swift: 'swift', scala: 'scala', lua: 'lua', dart: 'dart', elixir: 'elixir', ocaml: 'ocaml', sol: 'solidity', shell: 'bash', 'objective-c': 'objc' };
 let _Parser: any = null, _ready: Promise<any> | null = null;

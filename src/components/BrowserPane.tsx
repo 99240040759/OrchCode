@@ -13,34 +13,34 @@ export default function BrowserPane({ convId }: { convId: string }) {
   const [searchText, setSearchText] = useState('');
   const [searchResult, setSearchResult] = useState({ active: 0, total: 0 });
   const sidebarOpen = useUIStore(s => s.sidebarOpen);
-  // Update inputUrl from state only when user isn't focused on it
+  
   const inputFocused = useRef(false);
   useEffect(() => { if (!inputFocused.current) setInputUrl(state.url); }, [state.url]);
-  // Position the WebContentsView over our div
+  
   const updateBounds = useCallback(() => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     el.browserSetBounds(convId, { x: rect.left, y: rect.top, width: rect.width, height: Math.max(rect.height, 100) });
   }, [convId]);
-  // Re-sync bounds whenever sidebar/panel layout shifts
+  
   useEffect(() => { requestAnimationFrame(updateBounds); }, [sidebarOpen, updateBounds]);
   useEffect(() => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     el.browserShow(convId, { x: rect.left, y: rect.top, width: rect.width, height: Math.max(rect.height, 100) });
-    // Listen for browser state from main
+    
     const cleanup = el.onBrowserState((s) => {
       if (s.convId !== convId) return;
       setState(s);
     });
-    // Listen for find-in-page results
+    
     const cleanupFind = el.onBrowserFindResult?.((cId, active, total) => {
       if (cId === convId) setSearchResult({ active, total });
     });
-    // Track resize — repositions the view
+    
     const ro = new ResizeObserver(updateBounds);
     ro.observe(containerRef.current);
-    // Track scroll/layout shifts
+    
     window.addEventListener('resize', updateBounds);
     return () => {
       el.browserHide(convId);
@@ -50,7 +50,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
       window.removeEventListener('resize', updateBounds);
     };
   }, [convId, updateBounds]);
-  // Keyboard shortcuts
+  
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); setSearchOpen(v => !v); }
@@ -73,7 +73,7 @@ export default function BrowserPane({ convId }: { convId: string }) {
   }, [convId]);
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      {/* Toolbar */}
+      {}
       <div className="h-8 min-h-8 px-2 border-b border-border/60 flex items-center gap-1.5 bg-sidebar shrink-0 select-none">
         <Tooltip><TooltipTrigger asChild>
           <Button variant="ghost" size="icon-xs" disabled={!state.canGoBack} onClick={() => el.browserBack(convId)} className="text-foreground/35 hover:text-foreground/70"><VscArrowLeft className="size-3" /></Button>
@@ -98,13 +98,13 @@ export default function BrowserPane({ convId }: { convId: string }) {
           <Button variant="ghost" size="icon-xs" onClick={() => setSearchOpen(v => !v)} className={searchOpen ? 'bg-white/8 text-foreground/80' : 'text-foreground/35 hover:text-foreground/70'}><VscSearch className="size-3" /></Button>
         </TooltipTrigger><TooltipContent side="bottom">Find in page</TooltipContent></Tooltip>
       </div>
-      {/* Loading bar */}
+      {}
       {state.loading && (
         <div className="h-0.5 w-full bg-muted/20 shrink-0 overflow-hidden">
           <div className="h-full bg-primary" style={{ animation: 'loadbar 1.5s ease-in-out infinite', width: '35%' }} />
         </div>
       )}
-      {/* Find bar */}
+      {}
       {searchOpen && (
         <div className="h-8 px-2 border-b border-border/60 flex items-center gap-1.5 bg-sidebar shrink-0">
           <input type="text" placeholder="Find…" value={searchText} autoFocus

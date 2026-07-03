@@ -11,12 +11,12 @@ export type Attachment = { name: string; dataUrl: string; mimeType: string };
 let cachedDataPath: string | null = null;
 const dataPath = async () => (cachedDataPath ??= await el.getUserDataPath());
 export async function sendMessage(convId: string, workspacePath: string | null, editorParts: EditorPart[], attachments: Attachment[] = []) {
-  if (useConversationsStore.getState().convs[convId]?.status === 'busy') return; // single source of truth for the busy guard
+  if (useConversationsStore.getState().convs[convId]?.status === 'busy') return; 
   const { accessToken } = useAuthStore.getState();
   const model = useModelsStore.getState().selectedModel();
   if (!accessToken || !model) return;
   const allowImages = model.multimodal;
-  // Build persisted input parts + optimistic UI parts (same order)
+  
   const inputParts: InputPart[] = [];
   const uiParts: UIPart[] = [];
   for (const p of editorParts) {

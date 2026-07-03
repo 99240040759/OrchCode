@@ -6,11 +6,11 @@ const msgRow = (r: any): DBMessage => ({ id: r.id, convId: r.conv_id, role: r.ro
 const partRow = (r: any): DBPart => ({ id: r.id, messageId: r.message_id, convId: r.conv_id, seq: r.seq, type: r.type, text: r.text, toolCallId: r.tool_call_id, toolName: r.tool_name, toolArgs: r.tool_args, toolResult: r.tool_result, toolStatus: r.tool_status, toolMeta: r.tool_meta, artifactId: r.artifact_id, path: r.path, createdAt: r.created_at, updatedAt: r.updated_at });
 const artRow = (r: any): DBArtifact => ({ id: r.id, convId: r.conv_id, messageId: r.message_id, partId: r.part_id, kind: r.kind, mime: r.mime, name: r.name, data: r.data, createdAt: r.created_at });
 export const q = {
-  // ─── Workspaces ─────────────────────────────────────────────────────────────
+  
   getWorkspaces: () => getDb().prepare(`SELECT * FROM workspaces ORDER BY created_at ASC`).all().map((r: any) => ({ id: r.id, name: r.name, path: r.path, createdAt: r.created_at })) as Workspace[],
   createWorkspace: (w: Workspace) => getDb().prepare(`INSERT INTO workspaces (id,name,path,created_at) VALUES (?,?,?,?)`).run(w.id, w.name, w.path, w.createdAt),
   deleteWorkspace: (id: string) => getDb().prepare(`DELETE FROM workspaces WHERE id=?`).run(id),
-  // ─── Conversations ──────────────────────────────────────────────────────────
+  
   getConversations: (workspaceId: string | null) => (workspaceId === null
     ? getDb().prepare(`SELECT * FROM conversations WHERE workspace_id IS NULL ORDER BY updated_at DESC`).all()
     : getDb().prepare(`SELECT * FROM conversations WHERE workspace_id=? ORDER BY updated_at DESC`).all(workspaceId)
@@ -28,7 +28,7 @@ export const q = {
     db.prepare(`DELETE FROM messages WHERE conv_id=?`).run(id);
     db.prepare(`DELETE FROM conversations WHERE id=?`).run(id);
   })(),
-  // ─── Messages ───
+  
   nextSeq: (convId: string): number => (getDb().prepare(`SELECT COALESCE(MAX(seq),-1)+1 AS n FROM messages WHERE conv_id=?`).get(convId) as any).n,
   insertMessage: (m: DBMessage) => getDb().prepare(`INSERT INTO messages (id,conv_id,role,seq,status,error,model,compacted,created_at,updated_at) VALUES (@id,@convId,@role,@seq,@status,@error,@model,@compacted,@createdAt,@updatedAt) ON CONFLICT(id) DO UPDATE SET status=@status, error=@error, updated_at=@updatedAt`).run(m as any),
   setMessageStatus: (id: string, status: string, error?: string | null) => getDb().prepare(`UPDATE messages SET status=?, error=?, updated_at=? WHERE id=?`).run(status, error ?? null, now(), id),

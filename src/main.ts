@@ -3,13 +3,13 @@ Sentry.init({ dsn: process.env.SENTRY_DSN, enabled: !!process.env.SENTRY_DSN });
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 
-// --- Visual & Performance Optimizations ---
-// Force high DPI support and advanced GPU rasterization for crisp 4K/Retina displays
+
+
 app.commandLine.appendSwitch('enable-features', 'HighDPISupport');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('enable-smooth-scrolling');
-app.commandLine.appendSwitch('ignore-gpu-blocklist'); // Ensures hardware acceleration kicks in on all 4K monitors
+app.commandLine.appendSwitch('ignore-gpu-blocklist'); 
 
 import started from 'electron-squirrel-startup';
 import { registerHandlers, setMainWindow } from './ipc/handlers';

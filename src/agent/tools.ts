@@ -8,7 +8,7 @@ import { computeDiff } from './diff';
 import { applyEdits } from './astEdit';
 import { secureResolve } from '../lib/securePath';
 const SKILLS_DIR = path.join(__dirname, 'skills');
-// ── Zod schemas for tool parameters ──────────────────────────────────────────
+
 const ReadFileParams = z.object({
   path: z.string().describe('File path relative to workspace or absolute'),
   start_line: z.coerce.number().nullable().optional().describe('1-indexed start line (inclusive)'),
@@ -49,7 +49,7 @@ const SearchWorkspaceParams = z.object({
   include: z.string().nullable().optional().describe('Glob pattern to filter files, e.g. "*.ts"'),
   case_sensitive: z.boolean().nullable().optional().describe('Case sensitive search. Default false'),
 });
-// ── Tool definitions via OpenAI SDK's zodFunction (built once, single source) ─
+
 let _toolDefs: any[] | null = null;
 export function buildToolDefs() {
   return _toolDefs ??= [
@@ -64,7 +64,7 @@ export function buildToolDefs() {
     zodFunction({ name: 'search_workspace', parameters: SearchWorkspaceParams, description: 'Search workspace files using ripgrep. Returns matching lines with file paths and line numbers.' }),
   ];
 }
-// ── Schema map for runtime arg parsing ───────────────────────────────────────
+
 const PARAM_SCHEMAS: Record<string, z.ZodType> = {
   read_file: ReadFileParams, write_file: WriteFileParams, edit_file: EditFileParams,
   list_dir: ListDirParams, run_command: RunCommandParams, search_web: SearchWebParams,

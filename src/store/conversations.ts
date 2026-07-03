@@ -29,7 +29,7 @@ export const useConversationsStore = create<Store>((set, get) => ({
   setTokenCount: (convId, n) => set(s => ({ convs: upd(s.convs, convId, c => ({ ...c, tokenCount: n })) })),
   apply: (convId, ev) => set(s => {
     const existing = s.convs[convId];
-    // Ignore stray late events for a conversation that was deleted or never loaded (a fresh conv always opens with message.start).
+    
     if (!existing && ev.type !== 'message.start') return s;
     const c = existing || def(null);
     const reduce = (c: ConvState): ConvState => {

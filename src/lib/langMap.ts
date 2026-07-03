@@ -1,11 +1,11 @@
 export const LANG_MAP: Record<string, string> = {
-  // Web
+  
   ts:'typescript',tsx:'typescript',mts:'typescript',cts:'typescript',
   js:'javascript',jsx:'javascript',mjs:'javascript',cjs:'javascript',
   html:'html',htm:'html',xhtml:'html',
   css:'css',scss:'scss',less:'less',
   json:'json',jsonc:'json',json5:'json',
-  // Systems
+  
   c:'c',h:'c',
   cpp:'cpp',cc:'cpp',cxx:'cpp',hpp:'cpp',hxx:'cpp',hh:'cpp',
   cs:'csharp',
@@ -15,7 +15,7 @@ export const LANG_MAP: Record<string, string> = {
   kt:'kotlin',kts:'kotlin',
   swift:'swift',
   m:'objective-c',mm:'objective-c',
-  // Scripting
+  
   py:'python',pyw:'python',pyi:'python',
   rb:'ruby',rake:'ruby',gemspec:'ruby',
   php:'php',phtml:'php',php3:'php',php4:'php',php5:'php',
@@ -25,11 +25,11 @@ export const LANG_MAP: Record<string, string> = {
   dart:'dart',
   groovy:'groovy',gvy:'groovy',gy:'groovy',gsh:'groovy',
   scala:'scala',sc:'scala',
-  // Shell
+  
   sh:'shell',bash:'shell',zsh:'shell',fish:'shell',
   ps1:'powershell',psm1:'powershell',psd1:'powershell',
   bat:'bat',cmd:'bat',
-  // Data / Config
+  
   yaml:'yaml',yml:'yaml',
   toml:'toml',
   xml:'xml',xsl:'xml',xslt:'xml',svg:'xml',plist:'xml',csproj:'xml',vbproj:'xml',
@@ -38,25 +38,25 @@ export const LANG_MAP: Record<string, string> = {
   proto:'protobuf',
   ini:'ini',cfg:'ini',conf:'ini',
   env:'ini',
-  // Markup / Docs
+  
   md:'markdown',mdx:'markdown',markdown:'markdown',
   tex:'latex',sty:'latex',cls:'latex',
   rst:'restructuredtext',
-  // JVM / Functional
+  
   clj:'clojure',cljs:'clojure',cljc:'clojure',
   ex:'elixir',exs:'elixir',
   erl:'erlang',hrl:'erlang',
   fs:'fsharp',fsi:'fsharp',fsx:'fsharp',
   hs:'haskell',lhs:'haskell',
   ml:'ocaml',mli:'mli',
-  // Other
+  
   vb:'vb',vbs:'vb',
   pas:'pascal',pp:'pascal',
   asm:'asm',s:'asm',
   coffee:'coffeescript',
   tf:'hcl',hcl:'hcl',
   dockerfile:'dockerfile',
-  // ABAP / special
+  
   abap:'abap',
   apex:'apex',
   azcli:'azcli',

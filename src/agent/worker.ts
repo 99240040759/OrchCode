@@ -9,7 +9,7 @@ const COMPACT_AT = 0.80;
 const KEEP_TAIL = 6;
 const parent = (process as any).parentPort;
 if (!parent) throw new Error('Must run as UtilityProcess');
-// Surface fatal worker errors to main's stderr logger (the utility process has no Sentry of its own).
+
 process.on('uncaughtException', (e) => console.error('[Worker] uncaughtException', e));
 process.on('unhandledRejection', (e) => console.error('[Worker] unhandledRejection', e));
 const now = () => Date.now();
@@ -68,7 +68,7 @@ async function streamOnce(messages: ChatCompletionMessageParam[], asstId: string
       reasoning += rc; emit({ type: 'part.delta', messageId: asstId, partId: reasonId, text: rc });
     }
     if (delta.tool_calls) for (const tc of delta.tool_calls) {
-      const idx = tc.index ?? pending.length; // native OpenAI always indexes; fall back to append so a call is never silently dropped
+      const idx = tc.index ?? pending.length; 
       if (!pending[idx]) pending[idx] = { id: tc.id || nanoid(), name: '', args: '' };
       if (tc.id) pending[idx].id = tc.id;
       if (tc.function?.name) pending[idx].name = tc.function.name;
@@ -77,7 +77,7 @@ async function streamOnce(messages: ChatCompletionMessageParam[], asstId: string
   }
   return { text, reasoning, toolCalls: pending.filter(Boolean), usage };
 }
-// Pre-run compaction: summarize all-but-tail, emit summary message, return trimmed history.
+
 async function maybeCompact(history: HistoryMessage[], cfg: AgentRunConfig): Promise<HistoryMessage[]> {
   if (countHistory(history) <= COMPACT_AT * cfg.contextWindow) return history;
   const live = history.filter(h => !h.message.compacted);
@@ -94,12 +94,12 @@ async function maybeCompact(history: HistoryMessage[], cfg: AgentRunConfig): Pro
     return [{ message: summaryMessage, parts: [summaryPart as HistoryPart] }, ...kept];
   } catch { return history; }
 }
-// Mid-loop compaction: when the live message array nears the window, summarize the middle and keep system + recent tail.
+
 async function compactInPlace(messages: ChatCompletionMessageParam[], cfg: AgentRunConfig): Promise<ChatCompletionMessageParam[]> {
   if (estimateMessages(messages) <= COMPACT_AT * cfg.contextWindow) return messages;
   if (messages.length <= KEEP_TAIL + 2) return messages;
   let cut = messages.length - KEEP_TAIL;
-  while (cut > 1 && messages[cut].role === 'tool') cut--; // never orphan tool replies from their assistant tool_calls
+  while (cut > 1 && messages[cut].role === 'tool') cut--; 
   if (cut <= 1) return messages;
   const summary = await summarize(messages.slice(1, cut), cfg.gcpBase, cfg.jwt, cfg.anonKey);
   if (!summary) return messages;

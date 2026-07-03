@@ -9,7 +9,7 @@ const api = {
   getUserDataPath: (): Promise<string> => ipcRenderer.invoke('app:getUserDataPath'),
   gcpBase: GCP_BASE,
   anonKey: ANON_KEY,
-  // ─── DB ───
+  
   getWorkspaces: (): Promise<Workspace[]> => ipcRenderer.invoke('db:getWorkspaces'),
   createWorkspace: (w: Workspace): Promise<Workspace> => ipcRenderer.invoke('db:createWorkspace', w),
   deleteWorkspace: (id: string): Promise<void> => ipcRenderer.invoke('db:deleteWorkspace', id),
@@ -26,21 +26,21 @@ const api = {
   openWorkspaceDialog: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:open'),
   listWorkspaceFiles: (dirPath: string, query: string): Promise<string[]> => ipcRenderer.invoke('workspace:listFiles', { dirPath, query }),
   readWorkspaceFile: (roots: string | string[], filePath: string): Promise<string> => ipcRenderer.invoke('workspace:readFile', { roots: Array.isArray(roots) ? roots : [roots], filePath }),
-  // ─── Auth ───
+  
   loadStoredSession: (): Promise<StoredSession | null> => ipcRenderer.invoke('auth:loadSession'),
   saveSession: (s: StoredSession): Promise<void> => ipcRenderer.invoke('auth:saveSession', s),
   startOAuth: (): Promise<void> => ipcRenderer.invoke('auth:startOAuth'),
   signOut: (): Promise<void> => ipcRenderer.invoke('auth:signOut'),
   onSessionReceived: (cb: (s: StoredSession) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, s: StoredSession) => cb(s); ipcRenderer.on('auth:sessionReceived', h); return () => ipcRenderer.removeListener('auth:sessionReceived', h); },
-  // ─── Models & Budget ───
+  
   fetchModels: (jwt: string): Promise<Record<string, ModelDef>> => ipcRenderer.invoke('models:get', { gcpBase: GCP_BASE, jwt, anonKey: ANON_KEY }),
   getBudget: (jwt: string): Promise<BudgetInfo> => ipcRenderer.invoke('budget:get', { gcpBase: GCP_BASE, jwt, anonKey: ANON_KEY }),
-  // ─── Agent ───
+  
   agentSend: (config: AgentRunConfig, message: { id: string; parts: InputPart[] }): Promise<{ ok: boolean; busy?: boolean }> => ipcRenderer.invoke('agent:send', { config, message }),
   agentAbort: (convId: string): Promise<void> => ipcRenderer.invoke('agent:abort', convId),
   onAgentEvent: (cb: (convId: string, ev: AgentEvent) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, convId: string, ev: AgentEvent) => cb(convId, ev); ipcRenderer.on('agent:event', h); return () => ipcRenderer.removeListener('agent:event', h); },
   onConvTitleUpdated: (cb: (convId: string, title: string) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, convId: string, title: string) => cb(convId, title); ipcRenderer.on('conv:titleUpdated', h); return () => ipcRenderer.removeListener('conv:titleUpdated', h); },
-  // ─── Browser ───
+  
   browserShow: (convId: string, bounds: Bounds): Promise<void> => ipcRenderer.invoke('browser:show', { convId, bounds }),
   browserHide: (convId?: string): Promise<void> => ipcRenderer.invoke('browser:hide', convId),
   browserSetBounds: (convId: string, bounds: Bounds): Promise<void> => ipcRenderer.invoke('browser:setBounds', { convId, bounds }),
@@ -54,7 +54,7 @@ const api = {
   browserStopFind: (convId: string): Promise<void> => ipcRenderer.invoke('browser:stopFind', convId),
   onBrowserState: (cb: (state: BrowserState) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, state: BrowserState) => cb(state); ipcRenderer.on('browser:state', h); return () => ipcRenderer.removeListener('browser:state', h); },
   onBrowserFindResult: (cb: (convId: string, active: number, total: number) => void): (() => void) => { const h = (_: Electron.IpcRendererEvent, data: any) => cb(data.convId, data.active, data.total); ipcRenderer.on('browser:find-result', h); return () => ipcRenderer.removeListener('browser:find-result', h); },
-  // ─── PTY ───
+  
   ptyEnsure: (convId: string, cwd?: string): Promise<void> => ipcRenderer.invoke('pty:ensure', { convId, cwd }),
   ptyAttach: (convId: string, cols: number, rows: number): Promise<string> => ipcRenderer.invoke('pty:attach', { convId, cols, rows }),
   ptyDetach: (convId: string): Promise<void> => ipcRenderer.invoke('pty:detach', convId),

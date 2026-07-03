@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
-// Native extraction of non-image attachments (pdf/docx/pptx/xlsx/…) → Markdown text for the model.
-// Binary office/pdf formats go through officeparser; text formats are decoded as utf8.
+
+
 const req = createRequire(__filename);
 const OFFICE: Record<string, string> = { pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx', odt: 'odt', odp: 'odp', ods: 'ods', rtf: 'rtf' };
 const MAX = 200_000;

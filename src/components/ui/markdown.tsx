@@ -8,7 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { VscCopy, VscCheck } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 
-/* Warm earth syntax palette — matches the Monaco orchTheme tokens */
+
 const c = (color: string) => ({ color });
 const warmCode: any = {
   'code[class*="language-"]': { color: '#f0e0cf', fontFamily: 'var(--font-mono)', background: 'none' },

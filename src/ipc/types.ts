@@ -1,11 +1,11 @@
-// ─── Core domain ─────────────────────────────────────────────────────────────
+
 export interface Workspace { id: string; name: string; path: string; createdAt: number; }
 export interface Conversation { id: string; workspaceId: string | null; title: string; createdAt: number; updatedAt: number; }
 export type Role = 'user' | 'assistant' | 'system';
 export type MessageStatus = 'streaming' | 'complete' | 'aborted' | 'error';
 export type PartType = 'text' | 'reasoning' | 'tool' | 'image' | 'mention' | 'file';
 export type ToolStatus = 'running' | 'done' | 'error';
-// ─── DB rows ──────────────────────────────────────────────────────────────────
+
 export interface DBMessage { id: string; convId: string; role: Role; seq: number; status: MessageStatus; error: string | null; model: string | null; compacted: number; createdAt: number; updatedAt: number; }
 export interface DBPart {
   id: string; messageId: string; convId: string; seq: number; type: PartType;
@@ -15,7 +15,7 @@ export interface DBPart {
   createdAt: number; updatedAt: number;
 }
 export interface DBArtifact { id: string; convId: string; messageId: string | null; partId: string | null; kind: string; mime: string; name: string; data: string; createdAt: number; }
-// ─── UI projection (renderer) ─────────────────────────────────────────────────
+
 export interface UITextPart { type: 'text' | 'reasoning'; id: string; text: string; }
 export interface UIToolPart { type: 'tool'; id: string; toolCallId: string; name: string; args: string; result?: string; status: ToolStatus; meta?: Record<string, any>; }
 export interface UIImagePart { type: 'image'; id: string; artifactId: string | null; mime: string; name: string; dataUrl?: string; }
@@ -23,7 +23,7 @@ export interface UIMentionPart { type: 'mention'; id: string; path: string; }
 export interface UIFilePart { type: 'file'; id: string; artifactId: string | null; name: string; mime: string; }
 export type UIPart = UITextPart | UIToolPart | UIImagePart | UIMentionPart | UIFilePart;
 export interface UIMessage { id: string; convId: string; role: Role; status: MessageStatus; error?: string | null; parts: UIPart[]; createdAt: number; }
-// Build UI messages from flat DB rows (artifacts inlined into image/file parts as dataUrl)
+
 export function buildUIMessages(messages: DBMessage[], parts: DBPart[], artifacts: DBArtifact[]): UIMessage[] {
   const artMap = new Map(artifacts.map(a => [a.id, a]));
   const partsByMsg = new Map<string, DBPart[]>();
@@ -32,7 +32,7 @@ export function buildUIMessages(messages: DBMessage[], parts: DBPart[], artifact
     id: m.id, convId: m.convId, role: m.role, status: m.status, error: m.error, createdAt: m.createdAt,
     parts: (partsByMsg.get(m.id) || []).sort((a, b) => a.seq - b.seq).map(p => {
       const ui = dbPartToUI(p, artMap);
-      // A finished message can't have a live tool — coerce orphaned 'running' rows so they don't spin forever.
+      
       if (ui.type === 'tool' && ui.status === 'running' && m.status !== 'streaming') { ui.status = 'error'; if (!ui.result) ui.result = 'Interrupted'; }
       return ui;
     }),
