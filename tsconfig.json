@@ -1,18 +1,10 @@
 {
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }],
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "allowJs": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "noImplicitAny": true,
-    "strict": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "jsx": "react-jsx",
-    "paths": { "@/*": ["./src/*"] },
-    "types": ["@electron-forge/plugin-vite/forge-vite-env"]
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["renderer/*"]
+    }
   }
 }

@@ -1,66 +1,28 @@
 name: Build & Release
-
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
-
-permissions:
-  contents: write
-
 env:
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-  RELEASE_REPO: sameer786ss/OrchCode
-
+  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 jobs:
-  release-mac-silicon:
-    name: macOS ARM64
+  release-mac:
+    name: Build & Publish macOS
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch arm64
-      - run: npm run make -- --arch arm64 --targets @electron-forge/maker-dmg
-        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
-      - run: mv out/make/*.dmg out/make/OrchCode-macOS-ARM64.dmg
-      - uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
-          repository: ${{ env.RELEASE_REPO }}
-          draft: true
-          files: out/make/OrchCode-macOS-ARM64.dmg
-
-  release-mac-intel:
-    name: macOS x64
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - name: Install x64 ripgrep binary
-        run: |
-          VER=$(node -p "require('./node_modules/@vscode/ripgrep/package.json').optionalDependencies['@vscode/ripgrep-darwin-x64']")
-          npm install --no-save --force "@vscode/ripgrep-darwin-x64@${VER}"
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
-      - run: npm run make -- --arch x64 --targets @electron-forge/maker-dmg
-        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
-      - run: mv out/make/*.dmg out/make/OrchCode-macOS-Intel.dmg
-      - uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
-          repository: ${{ env.RELEASE_REPO }}
-          draft: true
-          files: out/make/OrchCode-macOS-Intel.dmg
+      - run: npm run build
+      - run: npx electron-builder --mac --arm64 --x64 --publish always
 
   release-windows:
-    name: Windows x64
+    name: Build & Publish Windows
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -70,36 +32,5 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx electron-rebuild -f -w node-pty,better-sqlite3 --arch x64
-      - run: npm run make -- --arch x64 --targets @electron-forge/maker-squirrel
-        env: { GITHUB_TOKEN: '${{ secrets.RELEASE_PAT }}' }
-      - name: Rename installer
-        shell: bash
-        run: mv out/make/squirrel.windows/x64/*etup*.exe out/make/squirrel.windows/x64/OrchCode-Windows-Setup.exe 2>/dev/null || true
-      - uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
-          repository: ${{ env.RELEASE_REPO }}
-          draft: true
-          files: |
-            out/make/squirrel.windows/x64/OrchCode-Windows-Setup.exe
-            out/make/squirrel.windows/x64/*.nupkg
-            out/make/squirrel.windows/x64/RELEASES
-
-  publish-release:
-    name: Publish Release
-    needs: [release-windows, release-mac-silicon, release-mac-intel]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.RELEASE_PAT }}
-          script: |
-            const tag = process.env.GITHUB_REF.replace('refs/tags/', '');
-            const [owner, repo] = process.env.RELEASE_REPO.split('/');
-            const { data: releases } = await github.rest.repos.listReleases({ owner, repo, per_page: 100 });
-            const release = releases.find(r => r.tag_name === tag);
-            if (!release) throw new Error(`Release ${tag} not found in ${owner}/${repo}`);
-            await github.rest.repos.updateRelease({ owner, repo, release_id: release.id, draft: false });
-        env:
-          RELEASE_REPO: ${{ env.RELEASE_REPO }}
+      - run: npm run build
+      - run: npx electron-builder --win --x64 --publish always

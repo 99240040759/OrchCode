@@ -1,0 +1,9 @@
+# Custom Agent Skills
+
+You have access to specialized skill guides in the `skills/` directory of the workspace. When asked to read, write, edit, or process any of the following file types, you MUST read the corresponding skill guide file using the file-reading tools first to follow best practices:
+
+- **File Router / Decision Tree**: Read `skills/file-reading.md` first to determine the optimal package or tool to use.
+- **PDF Documents**: Read `skills/pdf.md` for extraction, merging, split, rotate, and OCR rules.
+- **Word Documents (.docx)**: Read `skills/docx.md` for generation and XML-based modifications.
+- **Excel Spreadsheets (.xlsx)**: Read `skills/xlsx.md` for openpyxl, formulas, and verification.
+- **PowerPoint Presentations (.pptx)**: Read `skills/pptx.md` for pptxgenjs and design rules.

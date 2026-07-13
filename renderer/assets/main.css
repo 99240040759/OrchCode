@@ -1,0 +1,194 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* ── Layout ─────────────────────────────── */
+    --titlebar-height: 38px;
+    --topbar-height: 40px;
+    --sidebar-width: 240px;
+    --chat-max-width: 680px;
+    --artifact-min-width: 340px;
+    --radius: 0.5rem;
+    /* ── Sidebar tokens ──────────────────────── */
+    --nav-item-py: 4.5px;
+    --repo-item-py: 3px;
+    --agent-item-py: 4px;
+    --agent-indent: 26px;
+    --avatar-size: 22px;
+    --nav-item-gap: 3px;
+    --section-gap: 12px;
+    --folder-child-mt: 3px;
+    --folder-item-gap: 3px;
+
+    /* ── Palette — premium neutral charcoal ─── */
+    --oc-base: #121212;
+    /* deep dark app base, titlebar, topbar */
+    --oc-surface: #1e1e1e;
+    /* sidebar bg, panels bg */
+    --oc-raised: #242426;
+    /* input bar, elevated cards */
+    --oc-hover: #26262b;
+    /* hover background */
+    --oc-active: #2f2f35;
+    /* active / selected background */
+    --oc-border: #2d2d31;
+    /* primary boundaries/borders */
+    --oc-border-sub: #1e1e21;
+    /* divider lines */
+
+    /* ── Text tiers — pure neutral charcoal grays ── */
+    --tx-dim: #6c6c74;
+    /* disabled text, placeholder icons */
+    --tx-muted: #8e8e96;
+    /* folder tags, time stamps */
+    --tx-sub: #b0b0ba;
+    /* nav options, secondary details */
+    --tx-main: #e2e2e9;
+    /* primary active reading text */
+    --tx-bright: #ffffff;
+    /* high contrast headings, active */
+
+    /* ── shadcn HSL compat ───────────────────── */
+    --background: 240 5% 4%;
+    --foreground: 240 10% 90%;
+    --card: 240 5% 7%;
+    --card-foreground: 240 10% 90%;
+    --popover: 240 5% 11%;
+    --popover-foreground: 240 10% 90%;
+    --primary: 240 10% 90%;
+    --primary-foreground: 240 5% 4%;
+    --secondary: 240 5% 11%;
+    --secondary-foreground: 240 10% 90%;
+    --muted: 240 5% 11%;
+    --muted-foreground: 240 4% 57%;
+    --accent: 240 4% 15%;
+    --accent-foreground: 240 10% 90%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 92%;
+    --border: 240 4% 18%;
+    --input: 240 4% 18%;
+    --ring: 240 4% 57%;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border-color: var(--oc-border);
+    scrollbar-color: var(--tx-dim) transparent;
+    scrollbar-width: thin;
+  }
+
+  body {
+    background-color: var(--oc-base);
+    color: var(--tx-main);
+    font-family: 'Sora', sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .selectable {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  #root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .app-region-drag {
+    -webkit-app-region: drag;
+  }
+
+  .app-region-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .scrollbar-stable {
+    scrollbar-gutter: stable;
+  }
+
+  .highlighter-line {
+    display: block;
+    padding-left: 3.2rem;
+    text-indent: -3.2rem;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@keyframes text-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-text-shimmer {
+  background: linear-gradient(90deg,
+      var(--tx-dim) 20%,
+      var(--tx-bright) 50%,
+      var(--tx-dim) 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: text-shimmer 2s linear infinite;
+}
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--oc-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--tx-dim);
+}
+
+[data-panel-group-resizing] webview {
+  pointer-events: none !important;
+}
+
+/* Custom CSS counter for syntax highlighter line numbers to ensure 100% uniform rendering across all files */
+.code-line-with-counter::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  text-align: right;
+  color: var(--tx-dim);
+  user-select: none;
+}
+
