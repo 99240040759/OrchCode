@@ -2,7 +2,7 @@ import * as React from 'react'
 import { TbX } from 'react-icons/tb'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { cn } from '../lib/utils'
-import { UiButton } from './button'
+import { Button } from './button'
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>): React.JSX.Element {
@@ -95,7 +95,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <UiButton variant="outline">Close</UiButton>
+          <Button variant="outline">Close</Button>
         </DialogPrimitive.Close>
       )}
     </div>

@@ -26,13 +26,12 @@ export interface UsageSummary {
   totalCost?: number
 }
 
-export interface ModelConfig {
-  id: string
-  name: string
+import type { ModelInfo } from '@cline/shared'
+
+export interface ModelConfig extends ModelInfo {
   provider: string
   reasoningEffort?: string
   badge?: string
-  contextWindow?: number
 }
 
 
@@ -59,6 +58,10 @@ export interface IpcContracts {
   'session:update-title': { args: { sessionId: string; title: string }; result: boolean }
   'session:update-model': {
     args: { sessionId: string; modelKey: string }
+    result: { success?: boolean; error?: string }
+  }
+  'session:update-reasoning': {
+    args: { sessionId: string; reasoningEffort: string | null }
     result: { success?: boolean; error?: string }
   }
   'queue:update': {

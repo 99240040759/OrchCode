@@ -4,7 +4,8 @@
     "renderer/env.d.ts",
     "renderer/**/*",
     "renderer/**/*.tsx",
-    "preload/*.d.ts"
+    "preload/*.d.ts",
+    "shared/**/*"
   ],
   "compilerOptions": {
     "composite": true,

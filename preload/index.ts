@@ -36,11 +36,17 @@ const api = {
   fileRead: (args: IpcArgs<'file:read'>) => invoke('file:read', args),
   fileList: (args: IpcArgs<'file:list'>) => invoke('file:list', args),
 
-  audioTranscribe: (args: IpcArgs<'audio:transcribe'>) => invoke('audio:transcribe', args),
+  audioTranscribe: async (args: IpcArgs<'audio:transcribe'>) => {
+    const res = await invoke('audio:transcribe', args)
+    if (res.error) throw new Error(res.error)
+    return res.text ?? ''
+  },
   modelsList: () => invoke('models:list'),
   budgetGet: () => invoke('budget:get'),
   sessionUpdateModel: (args: IpcArgs<'session:update-model'>) =>
     invoke('session:update-model', args),
+  sessionUpdateReasoning: (args: IpcArgs<'session:update-reasoning'>) =>
+    invoke('session:update-reasoning', args),
   queueUpdate: (args: IpcArgs<'queue:update'>) => invoke('queue:update', args),
   queueDelete: (args: IpcArgs<'queue:delete'>) => invoke('queue:delete', args),
   queueList: (args: IpcArgs<'queue:list'>) => invoke('queue:list', args),

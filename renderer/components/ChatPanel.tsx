@@ -16,13 +16,13 @@ import { TbChevronDown, TbChevronRight, TbTrash, TbPencil, TbCheck, TbX } from '
 import { ToolCallDisplay } from './ToolCallDisplay'
 import { FileTab } from './tabs'
 import { FileIcon } from './FileIcon'
-import { StreamBlockRenderer } from './StreamBlockRenderer'
+import { Markdown } from './Markdown'
 import { Tooltip, TooltipTrigger, TooltipContent } from './tooltip'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './dialog'
 import { cn } from '../lib/utils'
 import { IconButton } from './button'
 import { toast } from '../lib/toast'
-import { getRelativePath, getAbsolutePath } from '../lib/pathHelpers'
+import { getRelativePath, getAbsolutePath, normalizePath, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT } from '../../shared/pathHelpers'
 
 function QueueList({
   queue,
@@ -175,9 +175,6 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }): Rea
   )
 }
 
-const MENTION_REGEX = /(@\[[^\]]+\]|@[^\s]+)/g
-const TRAILING_PUNCT = /[),.:;!?`'"]+$/
-const LEADING_PUNCT = /^[(`'"]+/
 
 function HistoryMessage({
   msg,
@@ -208,13 +205,13 @@ function HistoryMessage({
       const seen = new Set<string>()
       const mentions = rawText?.match(MENTION_REGEX) ?? []
       return fileAttachments.filter((a) => {
-        const key = a.path.replace(/\\/g, '/').toLowerCase()
+        const key = normalizePath(a.path).toLowerCase()
         if (seen.has(key)) return false
         seen.add(key)
         return !mentions.some((m) => {
           let typed = m.slice(1)
           if (typed.startsWith('[') && typed.endsWith(']')) typed = typed.slice(1, -1)
-          typed = typed.replace(/\\/g, '/').toLowerCase()
+          typed = normalizePath(typed).toLowerCase()
           return key === typed || key.endsWith('/' + typed)
         })
       })
@@ -236,7 +233,7 @@ function HistoryMessage({
             <React.Fragment key={i}>
               {leading}
               <FileTab
-                name={filePath.replace(/\\/g, '/')}
+                name={normalizePath(filePath)}
                 path={absolutePath}
                 active={true}
                 onClick={() => onFileClick(absolutePath)}
@@ -308,7 +305,7 @@ function HistoryMessage({
       <div className="text-tx-main text-left w-full flex flex-col gap-3">
         {blocks.map((part, i) => {
           if (part.type === 'text' && part.text)
-            return <StreamBlockRenderer key={i} content={part.text} />
+            return <Markdown key={i} content={part.text} />
           if (part.type === 'thinking')
             return <ThinkingBlock key={i} text={part.thinking} active={false} />
           if (part.type === 'redacted_thinking')
@@ -389,7 +386,7 @@ function StreamingAssistant({
           <div className="text-xs text-tx-dim italic">{stream.statusNotice}</div>
         )}
         <StreamingTools tools={stream.tools} onFileClick={onFileClick} />
-        {stream.text && <StreamBlockRenderer content={stream.text} />}
+        {stream.text && <Markdown content={stream.text} />}
       </div>
     </div>
   )

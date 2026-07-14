@@ -18,7 +18,8 @@ import { useThreadStore } from '../lib/threadStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useAuthStore } from '../lib/authStore'
 import { toast } from '../lib/toast'
-import { Button, IconButton, UiButton } from './button'
+import { normalizePath } from '../../shared/pathHelpers'
+import { Button, IconButton } from './button'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -212,10 +213,10 @@ function SessionItem({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <UiButton variant="outline" onClick={() => setShowConfirmDelete(false)}>
+            <Button variant="outline" onClick={() => setShowConfirmDelete(false)}>
               Cancel
-            </UiButton>
-            <UiButton
+            </Button>
+            <Button
               variant="destructive"
               onClick={() => {
                 setShowConfirmDelete(false)
@@ -223,7 +224,7 @@ function SessionItem({
               }}
             >
               Delete
-            </UiButton>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -318,8 +319,8 @@ export function Sidebar(): React.JSX.Element {
     const map = new Map<string, typeof sortedSessions>()
     const orphans: typeof sortedSessions = []
     for (const session of sortedSessions) {
-      const root = session.workspaceRoot ? session.workspaceRoot.replace(/\\/g, '/').toLowerCase() : ''
-      const matched = openFolders.find((f) => f.path.replace(/\\/g, '/').toLowerCase() === root)
+      const root = session.workspaceRoot ? normalizePath(session.workspaceRoot).toLowerCase() : ''
+      const matched = openFolders.find((f) => normalizePath(f.path).toLowerCase() === root)
       if (root && matched) {
         const p = matched.path
         if (!map.has(p)) map.set(p, [])
@@ -398,7 +399,7 @@ export function Sidebar(): React.JSX.Element {
               <span className="ml-0.5">Home</span>
             </button>
             {homeExpanded && (
-              <div className="flex flex-col gap-folder-gap pl-5 pr-1">
+              <div className="flex flex-col gap-folder-gap pl-agent-indent pr-1">
                 {wsSessionsMap.orphans.map((s) => (
                   <SessionItem
                     key={s.sessionId}
@@ -458,7 +459,7 @@ export function Sidebar(): React.JSX.Element {
                   <span className="truncate ml-0.5">{folder.name}</span>
                 </button>
                 {isExp && (
-                  <div className="flex flex-col gap-folder-gap pl-5 pr-1">
+                  <div className="flex flex-col gap-folder-gap pl-agent-indent pr-1">
                     {wsSessionsMap.map.get(folder.path)?.map((s) => (
                       <SessionItem
                         key={s.sessionId}

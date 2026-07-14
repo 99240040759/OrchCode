@@ -15,7 +15,7 @@ import {
 
 import { FileIcon } from './FileIcon'
 
-import { getRelativePath, getAbsolutePath } from '../lib/pathHelpers'
+import { getRelativePath, getAbsolutePath } from '../../shared/pathHelpers'
 
 function getDisplayPath(file: string, workspacePath?: string | undefined): string {
   return getRelativePath(file, workspacePath)
@@ -99,7 +99,8 @@ function useWorkspacePath(): string | undefined {
   return useThreadStore(
     useShallow((s) => {
       const session = s.sessions.find((sess) => sess.sessionId === s.currentSessionId)
-      return session?.workspaceRoot || session?.cwd || s.activeFolderPath || undefined
+      if (session) return session.workspaceRoot || session.cwd || undefined
+      return s.activeFolderPath || undefined
     })
   )
 }

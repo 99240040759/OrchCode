@@ -24,3 +24,6 @@ export function getAbsolutePath(p: string, workspacePath?: string): string {
   }
   return np
 }
+export const MENTION_REGEX = /@\[([^\]]+)\]|@([^\s]+)/g
+export const TRAILING_PUNCT = /[),.:;!?`'"]+$/
+export const LEADING_PUNCT = /^[(`'"]+/

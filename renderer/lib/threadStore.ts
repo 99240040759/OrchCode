@@ -13,14 +13,25 @@ import type { AgentEvent } from '@cline/shared'
 import type { ModelConfig } from '../../shared/ipc-contracts'
 import * as Sentry from '@sentry/electron/renderer'
 import { toast } from './toast'
-
+import { UiSlice, createUiSlice } from './slices/uiSlice'
+import { normalizePath } from '../../shared/pathHelpers'
 const portMap = new Map<string, MessagePort>()
 const streamTextBuffers = new Map<string, string>()
 const streamReasoningBuffers = new Map<string, string>()
 const scheduledFrames = new Map<string, number>()
 function pathsEqual(p1: string | undefined, p2: string | undefined): boolean {
   if (!p1 || !p2) return p1 === p2
-  return p1.replace(/\\/g, '/').toLowerCase() === p2.replace(/\\/g, '/').toLowerCase()
+  return normalizePath(p1).toLowerCase() === normalizePath(p2).toLowerCase()
+}
+function matchModelKey(models: Record<string, ModelConfig>, modelId: string | undefined): string | undefined {
+  if (!modelId) return undefined
+  const targetId = modelId.split('/').pop()
+  if (!targetId) return undefined
+  return Object.keys(models).find((k) => {
+    const mid = models[k]?.id
+    if (!mid) return false
+    return mid === modelId || mid.split('/').pop() === targetId
+  })
 }
 const defaultStream = (): StreamState => ({
   isLoading: false,
@@ -96,24 +107,20 @@ function eventError(value: unknown): string {
 
 
 
-interface ThreadStore {
+export interface ThreadStoreState extends UiSlice {
   sessions: SessionHistoryRecord[]
   currentSessionId: string | undefined
   messagesMap: Record<string, MessageWithMetadata[]>
   streamStates: Record<string, StreamState>
   openFolders: WorkspaceFolder[]
   activeFolderPath: string | undefined
-  activeNav: 'new' | 'Search' | undefined
-  artifactOpen: boolean
   activeFilePath: string | undefined
   activeFileContent: string | undefined
   openFiles: string[]
   fileTree: string[] | undefined
-  showBrowser: boolean
   initialized: boolean
   models: Record<string, ModelConfig>
   selectedModelKey: string | undefined
-  activeQuestion: { id: string; sessionId: string; question: string; options: string[] } | undefined
   queuesMap: Record<string, SessionPendingPrompt[]>
   init: () => Promise<void>
   createSession: (title: string, workspacePath?: string) => Promise<string | undefined>
@@ -126,9 +133,6 @@ interface ThreadStore {
     delivery?: 'queue' | 'steer'
   ) => Promise<boolean>
   abortSession: (sessionId: string) => Promise<void>
-  setActiveNav: (nav: 'new' | 'Search' | undefined) => void
-  setArtifactOpen: (open: boolean) => void
-  setShowBrowser: (show: boolean) => void
   setActiveFile: (filePath: string | undefined) => Promise<void>
   closeFile: (filePath: string) => void
   loadFileTree: (dirPath: string) => Promise<void>
@@ -136,7 +140,7 @@ interface ThreadStore {
   workspaceRemoveFolder: (path: string) => Promise<void>
   setActiveFolderPath: (path: string | undefined) => void
   changeSessionModel: (modelKey: string) => Promise<void>
-  submitAnswer: (answer: string) => Promise<void>
+  changeSessionReasoning: (reasoningEffort: string | null) => Promise<void>
   updateQueuePrompt: (
     promptId: string,
     text: string,
@@ -147,7 +151,8 @@ interface ThreadStore {
   renameSession: (sessionId: string, newTitle: string) => Promise<void>
 }
 
-export const useThreadStore = create<ThreadStore>((set, get) => ({
+export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
+  ...createUiSlice(set, get, api),
   sessions: [],
   currentSessionId: undefined,
   messagesMap: {},
@@ -163,8 +168,6 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   initialized: false,
   models: {},
   selectedModelKey: undefined,
-  activeQuestion: undefined,
-  showBrowser: false,
   queuesMap: {},
   init: async () => {
     if (get().initialized) return
@@ -199,11 +202,8 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
               : latest,
           undefined
         )
-        const matched = lastSession?.model
-          ? Object.keys(models).find((k) => models[k].id === lastSession.model || models[k].id.split('/').pop() === lastSession.model.split('/').pop())
-          : undefined
         set(
-          produce<ThreadStore>((d) => {
+          produce<ThreadStoreState>((d) => {
             d.sessions = sessions
             d.openFolders = folders.map((f) => ({
               path: f.rootPath,
@@ -213,7 +213,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
               latestGitBranchName: f.latestGitBranchName
             }))
             d.models = models
-            d.selectedModelKey = matched ?? Object.keys(models)[0]
+            d.selectedModelKey = Object.keys(models)[0]
             d.queuesMap = {} // TS-10
           })
         )
@@ -221,7 +221,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
           if (version !== lifecycleVersion) return
           const resolvedWorkspace = lastSession.workspaceRoot || undefined
           set(
-            produce<ThreadStore>((d) => {
+            produce<ThreadStoreState>((d) => {
               d.currentSessionId = lastSession.sessionId
               d.activeFolderPath = resolvedWorkspace
             })
@@ -231,10 +231,10 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
           setupSessionPort(lastSession.sessionId)
           if (resolvedWorkspace) void get().loadFileTree(resolvedWorkspace)
         }
-        if (version === lifecycleVersion) set({ initialized: true }) // TS-01
       } catch (err: unknown) {
         toast.error('Failed to initialize session manager.', err)
-        if (version === lifecycleVersion) set({ initialized: true }) // TS-09
+      } finally {
+        if (version === lifecycleVersion) set({ initialized: true })
       }
     })()
     try {
@@ -280,7 +280,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     }
 
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.sessions = rawSessions.some((s) => s.sessionId === sessionId)
           ? rawSessions
           : [...d.sessions, newSession]
@@ -297,11 +297,11 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   selectSession: async (sessionId) => {
     const session = get().sessions.find((s) => s.sessionId === sessionId)
     const rawPath = session?.workspaceRoot || undefined
-    const openFolderPaths = new Set(get().openFolders.map((f) => f.path.replace(/\\/g, '/').toLowerCase()))
-    const wsNormalized = rawPath ? rawPath.replace(/\\/g, '/').toLowerCase() : ''
+    const openFolderPaths = new Set(get().openFolders.map((f) => normalizePath(f.path).toLowerCase()))
+    const wsNormalized = rawPath ? normalizePath(rawPath).toLowerCase() : ''
     const workspacePath = rawPath && openFolderPaths.has(wsNormalized) ? rawPath : undefined
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.currentSessionId = sessionId
         d.activeFolderPath = workspacePath
         d.openFiles = []
@@ -321,7 +321,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     try {
       const queues = await window.api.queueList({ sessionId })
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.queuesMap[sessionId] = queues
         })
       )
@@ -332,15 +332,13 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     if (workspacePath) get().loadFileTree(workspacePath)
     else
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.fileTree = undefined
         })
       )
-    const matched = session?.model
-      ? Object.keys(get().models).find((k) => get().models[k].id === session.model || get().models[k].id.split('/').pop() === session.model.split('/').pop())
-      : undefined
+    const matched = matchModelKey(get().models, session?.model)
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.selectedModelKey = matched ?? Object.keys(get().models)[0]
       })
     )
@@ -355,7 +353,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     let nextSessionId: string | undefined = undefined
     let isCurrent = false
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.sessions = d.sessions.filter((s) => s.sessionId !== sessionId)
         delete d.messagesMap[sessionId]
         delete d.streamStates[sessionId]
@@ -372,7 +370,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     } else if (isCurrent) {
       // No next session — clear all artifact/file panel state
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.currentSessionId = undefined
           d.activeFolderPath = undefined
           d.openFiles = []
@@ -389,7 +387,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     try {
       await window.api.sessionUpdateTitle({ sessionId, title: newTitle })
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           const session = d.sessions.find((s) => s.sessionId === sessionId)
           if (session) {
             if (!session.metadata) session.metadata = {}
@@ -412,7 +410,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       try {
         await window.api.workspaceAddFolder({ path: workspacePath, name: '' })
         set(
-          produce<ThreadStore>((d) => {
+          produce<ThreadStoreState>((d) => {
             if (!d.openFolders.find((f) => pathsEqual(f.path, workspacePath)))
               d.openFolders.push({ path: workspacePath, name: '' })
           })
@@ -441,7 +439,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
         ts: Date.now()
       }
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           if (!d.messagesMap[sessionId]) d.messagesMap[sessionId] = []
           d.messagesMap[sessionId].push(userMsg)
           d.streamStates[sessionId] = { ...defaultStream(), isLoading: true }
@@ -490,13 +488,10 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   abortSession: async (sessionId) => {
     await window.api.sessionAbort({ sessionId })
   },
-  setActiveNav: (nav) => set({ activeNav: nav }),
-  setArtifactOpen: (open) => set({ artifactOpen: open }),
-  setShowBrowser: (show) => set({ showBrowser: show }),
   setActiveFile: async (filePath) => {
     const request = ++activeFileRequest
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.activeFilePath = filePath
         d.activeFileContent = undefined
         if (filePath) {
@@ -510,7 +505,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       const content = await window.api.fileRead({ filePath })
       if (request !== activeFileRequest || get().activeFilePath !== filePath) return
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.activeFileContent = content ?? undefined
         })
       )
@@ -524,7 +519,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     const nextFile =
       needsSwitch && openFiles.length > 0 ? openFiles[openFiles.length - 1] : undefined
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.openFiles = openFiles
         if (needsSwitch && !nextFile) {
           d.activeFilePath = undefined
@@ -540,7 +535,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       const tree = await window.api.fileList({ dirPath })
       if (request !== fileTreeRequest) return
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.fileTree = tree ?? []
         })
       )
@@ -553,7 +548,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       const folder = await window.api.workspaceOpenDialog()
       if (folder)
         set(
-          produce<ThreadStore>((d) => {
+          produce<ThreadStoreState>((d) => {
             const path = folder.rootPath
             if (!d.openFolders.find((f) => f.path === path))
               d.openFolders.push({
@@ -588,7 +583,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     })
     let nextSessionId: string | undefined = undefined
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.sessions = d.sessions.filter((s) => !pathsEqual(s.workspaceRoot ?? s.cwd, path))
         for (const id of relatedIds) {
           delete d.messagesMap[id]
@@ -610,7 +605,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   },
   setActiveFolderPath: (path) =>
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.activeFolderPath = path
       })
     ),
@@ -619,13 +614,14 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     if (!sessionId) return
     const prevKey = get().selectedModelKey
     set(
-      produce<ThreadStore>((d) => {
+      produce<ThreadStoreState>((d) => {
         d.selectedModelKey = modelKey
       })
     )
     let ok = false
     try {
-      ok = await window.api.sessionUpdateModel({ sessionId, modelKey })
+      const res = await window.api.sessionUpdateModel({ sessionId, modelKey })
+      ok = !!res.success
       if (!ok) {
         toast.error('Failed to change session model.')
       }
@@ -635,7 +631,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     }
     if (ok) {
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           const s = d.sessions.find((x) => x.sessionId === sessionId)
           if (s) {
             s.model = d.models[modelKey]?.id ?? ''
@@ -645,20 +641,32 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       )
     } else {
       set(
-        produce<ThreadStore>((d) => {
+        produce<ThreadStoreState>((d) => {
           d.selectedModelKey = prevKey
         })
       )
     }
   },
-  submitAnswer: async (answer) => {
-    const q = get().activeQuestion
-    if (!q) return
-    set({ activeQuestion: undefined })
-    await window.api.submitAnswer({ id: q.id, answer }).catch((err: unknown) => {
-      toast.error('Failed to submit answer.', err)
-    })
+  changeSessionReasoning: async (reasoningEffort: string | null) => {
+    const sessionId = get().currentSessionId
+    if (!sessionId) return
+    const prevSessions = get().sessions
+    set(produce<ThreadStoreState>((d) => {
+      const s = d.sessions.find((x) => x.sessionId === sessionId)
+      if (s) s.metadata = { ...s.metadata, reasoningEffort }
+    }))
+    try {
+      const res = await window.api.sessionUpdateReasoning({ sessionId, reasoningEffort })
+      if (!res.success) {
+        toast.error('Failed to change reasoning effort.')
+        set(produce<ThreadStoreState>((d) => { d.sessions = prevSessions }))
+      }
+    } catch (err: unknown) {
+      toast.error('Failed to update reasoning effort.', err)
+      set(produce<ThreadStoreState>((d) => { d.sessions = prevSessions }))
+    }
   },
+
   updateQueuePrompt: async (promptId, text, delivery) => {
     const sessionId = get().currentSessionId
     if (!sessionId) return false
@@ -725,7 +733,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   }
 }))
 
-function upd(recipe: (draft: ThreadStore) => void): void {
+function upd(recipe: (draft: ThreadStoreState) => void): void {
   useThreadStore.setState(produce(recipe))
 }
 

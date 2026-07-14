@@ -8,12 +8,18 @@ export function isPathAllowedPure(
   allowedFolders: string[]
 ): boolean {
   try {
-    const resolved = pathResolve(filePath)
-    const relToUserData = pathRelative(userDataDir, resolved)
+    let resolved = pathResolve(filePath)
+    let userDir = userDataDir
+    let folders = allowedFolders
+    if (process.platform === 'win32') {
+      resolved = resolved.toLowerCase()
+      userDir = userDir.toLowerCase()
+      folders = folders.map(f => pathResolve(f).toLowerCase())
+    }
+    const relToUserData = pathRelative(userDir, resolved)
     if (!relToUserData.startsWith('..') && !isAbsolute(relToUserData)) return true
-    return allowedFolders.some((f) => {
-      const folderResolved = pathResolve(f)
-      const rel = pathRelative(folderResolved, resolved)
+    return folders.some((f) => {
+      const rel = pathRelative(f, resolved)
       return !rel.startsWith('..') && !isAbsolute(rel)
     })
   } catch {

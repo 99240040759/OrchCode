@@ -133,7 +133,7 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
         if (!b64) throw new Error('No image data returned.')
         return [
           { type: 'text', text: `Generated image for: "${prompt}"` },
-          { type: 'image', data: b64, mimeType: 'image/png' }
+          { type: 'image', data: b64, mediaType: 'image/png' }
         ] as any
       }
     },
@@ -149,9 +149,12 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
         const url = typeof args.url === 'string' ? args.url.trim() : ''
         if (!url) throw new Error('URL is required.')
         const page = await getWebviewPage()
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-          // Fallback if network doesn't completely idle out in 30s
-        })
+        try {
+          await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
+        } catch (err: any) {
+          const msg = err?.message || String(err)
+          if (!msg.toLowerCase().includes('timeout')) throw new Error(`Navigation failed: ${msg}`)
+        }
         return `Navigated to ${url}`
       }
     },
@@ -263,7 +266,7 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
           encoding: 'base64'
         })) as string
         return [
-          { type: 'image', data: b64, mimeType: 'image/jpeg' }
+          { type: 'image', data: b64, mediaType: 'image/jpeg' }
         ] as any
       }
     }

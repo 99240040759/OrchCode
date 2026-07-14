@@ -23,7 +23,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import chromeLogo from '../assets/chrome.svg'
 import { ScrollableTabBar } from './tabs'
-import { getRelativePath, getAbsolutePath } from '../lib/pathHelpers'
+import { getRelativePath, getAbsolutePath } from '../../shared/pathHelpers'
 import { Tree, NodeRendererProps } from 'react-arborist'
 
 type TreeNodeData = {

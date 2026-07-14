@@ -34,7 +34,8 @@ export interface AppAPI {
   audioTranscribe: (args: { buffer: Uint8Array }) => Promise<string>
   modelsList: () => Promise<Record<string, ModelConfig>>
   budgetGet: () => Promise<BudgetInfo | undefined>
-  sessionUpdateModel: (args: { sessionId: string; modelKey: string }) => Promise<boolean>
+  sessionUpdateModel: (args: { sessionId: string; modelKey: string }) => Promise<{ success?: boolean; error?: string }>
+  sessionUpdateReasoning: (args: { sessionId: string; reasoningEffort: string | null }) => Promise<{ success?: boolean; error?: string }>
   queueUpdate: (args: {
     sessionId: string
     promptId: string

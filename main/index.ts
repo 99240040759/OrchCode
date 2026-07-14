@@ -271,7 +271,7 @@ interface PortEntry {
 const sessionPorts = new Map<string, PortEntry>()
 const draftSessions = new Map<
   string,
-  { title: string; workspacePath?: string; modelKey?: string }
+  { title: string; workspacePath?: string; modelKey?: string; reasoningEffort?: string | null }
 >()
 const pendingQuestions = new Map<
   string,
@@ -605,35 +605,8 @@ let cachedModelsAt = 0
 const MODELS_TTL = 5 * 60 * 1000
 
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
 function normalizeModels(value: unknown): Record<string, ModelConfig> {
-  if (!isRecord(value)) return {}
-  const models: Record<string, ModelConfig> = {}
-  for (const [key, model] of Object.entries(value)) {
-    if (
-      !isRecord(model) ||
-      typeof model.id !== 'string' ||
-      typeof model.name !== 'string' ||
-      typeof model.provider !== 'string'
-    )
-      continue
-    models[key] = {
-      id: model.id,
-      name: model.name,
-      provider: model.provider,
-      ...(typeof model.reasoningEffort === 'string'
-        ? { reasoningEffort: model.reasoningEffort }
-        : {}),
-      ...(typeof model.badge === 'string' ? { badge: model.badge } : {}),
-      ...(typeof model.contextWindow === 'number' && Number.isFinite(model.contextWindow)
-        ? { contextWindow: model.contextWindow }
-        : {})
-    }
-  }
-  return models
+  return (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, ModelConfig>
 }
 
 async function fetchModelsList(): Promise<Record<string, ModelConfig> | undefined> {
@@ -670,12 +643,14 @@ async function buildSessionConfig(
   sessionId: string,
   workspacePath: string | undefined,
   model: ModelConfig,
-  session: AuthSession
+  session: AuthSession,
+  metadata?: any
 ): Promise<CoreSessionConfig> {
   const baseUrl = serviceUrl(`${model.provider}/v1`)
   const anonKey = process.env.SUPABASE_ANON_KEY
   if (!baseUrl || !anonKey) throw new Error('The application server configuration is incomplete.')
-  const reasoningEffort = getReasoningEffort(model.reasoningEffort)
+  const rawEffort = metadata && metadata.reasoningEffort !== undefined ? metadata.reasoningEffort : model.reasoningEffort
+  const reasoningEffort = getReasoningEffort(rawEffort)
   let workspaceMetadata: string | undefined
   if (workspacePath) {
     try {
@@ -1038,15 +1013,42 @@ function registerIpcHandlers(): void {
       try {
         const core = await ensureSessionIsActive(sessionId)
         await core.updateSessionModel(sessionId, strippedId)
+        const record = await core.get(sessionId)
         return {
           success: (
             await core.update(sessionId, {
-              metadata: { modelId: mCfg.id, providerId: mCfg.provider }
+              metadata: { ...record?.metadata, modelId: mCfg.id, providerId: mCfg.provider }
             })
           ).updated
         }
       } catch (err: unknown) {
         console.error('[Models] Update model failed:', err)
+        if (sentryInitialized) Sentry.captureException(err)
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    { error: 'Unknown error' }
+  )
+  safeIpc(
+    'session:update-reasoning',
+    async (_, { sessionId, reasoningEffort }) => {
+      const draft = draftSessions.get(sessionId)
+      if (draft) {
+        draft.reasoningEffort = reasoningEffort
+        return { success: true }
+      }
+      try {
+        const core = await ensureSessionIsActive(sessionId)
+        const record = await core.get(sessionId)
+        return {
+          success: (
+            await core.update(sessionId, {
+              metadata: { ...record?.metadata, reasoningEffort: reasoningEffort || undefined }
+            })
+          ).updated
+        }
+      } catch (err: unknown) {
+        console.error('[Models] Update reasoning failed:', err)
         if (sentryInitialized) Sentry.captureException(err)
         return { error: err instanceof Error ? err.message : String(err) }
       }
@@ -1262,13 +1264,14 @@ function registerIpcHandlers(): void {
               draftSessions.delete(sessionId)
               try {
                 await core.start({
-                  config: await buildSessionConfig(sessionId, draft.workspacePath, mCfg, session),
+                  config: await buildSessionConfig(sessionId, draft.workspacePath, mCfg, session, { reasoningEffort: draft.reasoningEffort }),
                   interactive: true,
                   sessionMetadata: {
                     title: draft.title,
                     workspacePath: draft.workspacePath || undefined,
                     modelId: mCfg.id,
-                    providerId: mCfg.provider
+                    providerId: mCfg.provider,
+                    reasoningEffort: draft.reasoningEffort || undefined
                   }
                 })
               } catch (err: unknown) {
