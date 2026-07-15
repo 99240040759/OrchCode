@@ -2,13 +2,14 @@ name: Build & Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
+permissions:
+  contents: write
 env:
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 jobs:
   release-mac:
     name: Build & Publish macOS
