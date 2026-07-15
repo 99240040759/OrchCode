@@ -14,7 +14,6 @@ asarUnpack:
 win:
   executableName: Orch
   icon: logo.ico
-  publisherName: Orch Labs Inc.
   legalTrademarks: Orch Workspace
 nsis:
   artifactName: Orch-Windows-Setup.exe
