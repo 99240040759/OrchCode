@@ -24,6 +24,7 @@ jobs:
   release-windows:
     name: Build & Publish Windows
     runs-on: windows-2022
+    needs: release-mac
     steps:
       - uses: actions/checkout@v4
       - name: Disable Defender
