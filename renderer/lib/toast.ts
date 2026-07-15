@@ -6,7 +6,18 @@ export const toast = {
     sonnerToast.success(message)
   },
   error: (userMessage: string, err?: unknown) => {
-    if (err !== undefined) Sentry.captureException(err)
+    if (err instanceof Error) {
+      const msg = err.message.toLowerCase()
+      if (
+        !msg.includes('abort') &&
+        !msg.includes('cancel') &&
+        !msg.includes('network') &&
+        !msg.includes('offline') &&
+        !msg.includes('timeout')
+      ) {
+        Sentry.captureException(err)
+      }
+    }
     sonnerToast.error(userMessage)
   },
   info: (message: string) => {

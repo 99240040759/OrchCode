@@ -1,4 +1,5 @@
 import type { SessionHistoryRecord, MessageWithMetadata, SessionPendingPrompt, WorkspaceInfo } from '@cline/sdk'
+import type { ModelInfo } from '@cline/shared'
 
 export interface BudgetInfo {
   cost_usd: number
@@ -12,28 +13,11 @@ export interface AuthSession {
   refreshToken: string
   expiresAt: number
 }
-export interface FileNode {
-  name: string
-  path: string
-  isDir: boolean
-  children?: FileNode[]
-}
-export interface UsageSummary {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens?: number
-  cacheWriteTokens?: number
-  totalCost?: number
-}
-
-import type { ModelInfo } from '@cline/shared'
-
 export interface ModelConfig extends ModelInfo {
   provider: string
   reasoningEffort?: string
   badge?: string
 }
-
 
 export interface IpcContracts {
   'session:list': { args: void; result: SessionHistoryRecord[] }
@@ -54,7 +38,6 @@ export interface IpcContracts {
   }
   'session:abort': { args: { sessionId: string }; result: boolean }
   'session:messages': { args: { sessionId: string }; result: MessageWithMetadata[] }
-
   'session:update-title': { args: { sessionId: string; title: string }; result: boolean }
   'session:update-model': {
     args: { sessionId: string; modelKey: string }
@@ -79,7 +62,6 @@ export interface IpcContracts {
   'window:quit': { args: void; result: boolean }
   'file:read': { args: { filePath: string }; result: string | undefined }
   'file:list': { args: { dirPath: string }; result: string[] }
-
   'audio:transcribe': { args: { buffer: Uint8Array }; result: { text?: string; error?: string } }
   'models:list': { args: void; result: Record<string, ModelConfig> }
   'budget:get': { args: void; result: BudgetInfo | undefined }

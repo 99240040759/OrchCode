@@ -1,3 +1,9 @@
+import type { WorkspaceInfo } from '@cline/shared'
+
+export type WorkspaceFolder = Pick<WorkspaceInfo, 'associatedRemoteUrls' | 'latestGitCommitHash' | 'latestGitBranchName'> & {
+  path: string
+  name: string
+}
 
 export interface StreamTool {
   toolCallId: string
@@ -16,13 +22,6 @@ export interface StreamState {
   statusNotice?: string
   error?: string
 }
-export interface WorkspaceFolder {
-  path: string
-  name: string
-  associatedRemoteUrls?: string[]
-  latestGitCommitHash?: string
-  latestGitBranchName?: string
-}
 export function extractFilePath(toolName: string, input: unknown): string | undefined {
   if (!input || typeof input !== 'object') return undefined
   const inp = input as Record<string, unknown>
@@ -34,14 +33,12 @@ export function extractFilePath(toolName: string, input: unknown): string | unde
     )
   )
     return undefined
-
   const p = inp.path
   if (typeof p === 'string') return p
-
   if (Array.isArray(inp.files) && inp.files.length > 0) {
     const f0 = inp.files[0]
     if (typeof f0 === 'string') return f0
-    if (f0 && typeof f0 === 'object' && typeof f0.path === 'string') return f0.path
+    if (f0 && typeof f0 === 'object' && typeof (f0 as any).path === 'string') return (f0 as any).path
   }
   return undefined
 }

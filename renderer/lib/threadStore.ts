@@ -159,8 +159,6 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
   streamStates: {},
   openFolders: [],
   activeFolderPath: undefined,
-  activeNav: undefined,
-  artifactOpen: false,
   activeFilePath: undefined,
   activeFileContent: undefined,
   openFiles: [],
@@ -202,30 +200,26 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
               : latest,
           undefined
         )
-        set(
-          produce<ThreadStoreState>((d) => {
-            d.sessions = sessions
-            d.openFolders = folders.map((f) => ({
-              path: f.rootPath,
-              name: f.hint || '',
-              associatedRemoteUrls: f.associatedRemoteUrls,
-              latestGitCommitHash: f.latestGitCommitHash,
-              latestGitBranchName: f.latestGitBranchName
-            }))
-            d.models = models
-            d.selectedModelKey = Object.keys(models)[0]
-            d.queuesMap = {} // TS-10
-          })
-        )
+        upd((d) => {
+          d.sessions = sessions
+          d.openFolders = folders.map((f) => ({
+            path: f.rootPath,
+            name: f.hint || '',
+            associatedRemoteUrls: f.associatedRemoteUrls,
+            latestGitCommitHash: f.latestGitCommitHash,
+            latestGitBranchName: f.latestGitBranchName
+          }))
+          d.models = models
+          d.selectedModelKey = Object.keys(models)[0]
+          d.queuesMap = {} // TS-10
+        })
         if (lastSession) {
           if (version !== lifecycleVersion) return
           const resolvedWorkspace = lastSession.workspaceRoot || undefined
-          set(
-            produce<ThreadStoreState>((d) => {
-              d.currentSessionId = lastSession.sessionId
-              d.activeFolderPath = resolvedWorkspace
-            })
-          )
+          upd((d) => {
+            d.currentSessionId = lastSession.sessionId
+            d.activeFolderPath = resolvedWorkspace
+          })
           await doRefreshMessages(lastSession.sessionId)
           if (version !== lifecycleVersion) return
           setupSessionPort(lastSession.sessionId)
@@ -260,8 +254,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     }
     const { sessionId, title: actualTitle } = res as { sessionId: string; title: string }
 
-    const rawSessions = await window.api.sessionList()
-    const newSession = rawSessions.find((s) => s.sessionId === sessionId) || {
+    const newSession: SessionHistoryRecord = {
       sessionId,
       metadata: { title: actualTitle },
       workspaceRoot: workspacePath ?? '',
@@ -278,18 +271,13 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       provider: modelKey ? (get().models[modelKey]?.provider ?? '') : '',
       source: 'local'
     }
-
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.sessions = rawSessions.some((s) => s.sessionId === sessionId)
-          ? rawSessions
-          : [...d.sessions, newSession]
-        d.currentSessionId = sessionId
-        d.messagesMap[sessionId] = []
-        d.streamStates[sessionId] = defaultStream()
-        if (workspacePath) d.activeFolderPath = workspacePath
-      })
-    )
+    upd((d) => {
+      if (!d.sessions.some((s) => s.sessionId === sessionId)) d.sessions.push(newSession)
+      d.currentSessionId = sessionId
+      d.messagesMap[sessionId] = []
+      d.streamStates[sessionId] = defaultStream()
+      if (workspacePath) d.activeFolderPath = workspacePath
+    })
     if (workspacePath) get().loadFileTree(workspacePath)
     setupSessionPort(sessionId)
     return sessionId
@@ -300,16 +288,14 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const openFolderPaths = new Set(get().openFolders.map((f) => normalizePath(f.path).toLowerCase()))
     const wsNormalized = rawPath ? normalizePath(rawPath).toLowerCase() : ''
     const workspacePath = rawPath && openFolderPaths.has(wsNormalized) ? rawPath : undefined
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.currentSessionId = sessionId
-        d.activeFolderPath = workspacePath
-        d.openFiles = []
-        d.activeFilePath = undefined
-        d.activeFileContent = undefined
-        d.showBrowser = false
-      })
-    )
+    upd((d) => {
+      d.currentSessionId = sessionId
+      d.activeFolderPath = workspacePath
+      d.openFiles = []
+      d.activeFilePath = undefined
+      d.activeFileContent = undefined
+      d.showBrowser = false
+    })
     setupSessionPort(sessionId)
     const existingMsgs = get().messagesMap[sessionId]
     if (get().streamStates[sessionId]?.isLoading && existingMsgs && existingMsgs.length > 0) {
@@ -320,28 +306,22 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     if (!existingMsgs) refreshMessages(sessionId)
     try {
       const queues = await window.api.queueList({ sessionId })
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.queuesMap[sessionId] = queues
-        })
-      )
+      upd((d) => {
+        d.queuesMap[sessionId] = queues
+      })
     } catch (e) {
       console.error('Failed to list queue', e)
       Sentry.captureException(e)
     }
     if (workspacePath) get().loadFileTree(workspacePath)
     else
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.fileTree = undefined
-        })
-      )
-    const matched = matchModelKey(get().models, session?.model)
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.selectedModelKey = matched ?? Object.keys(get().models)[0]
+      upd((d) => {
+        d.fileTree = undefined
       })
-    )
+    const matched = matchModelKey(get().models, session?.model)
+    upd((d) => {
+      d.selectedModelKey = matched ?? Object.keys(get().models)[0]
+    })
   },
   deleteSession: async (sessionId) => {
     const ok = await window.api.sessionDelete({ sessionId }).catch((err: unknown) => {
@@ -352,49 +332,43 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     cleanupSessionPort(sessionId)
     let nextSessionId: string | undefined = undefined
     let isCurrent = false
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.sessions = d.sessions.filter((s) => s.sessionId !== sessionId)
-        delete d.messagesMap[sessionId]
-        delete d.streamStates[sessionId]
-        delete d.queuesMap[sessionId]
-        if (d.currentSessionId === sessionId) {
-          isCurrent = true
-          const next = d.sessions[d.sessions.length - 1]
-          nextSessionId = next?.sessionId
-        }
-      })
-    )
+    upd((d) => {
+      d.sessions = d.sessions.filter((s) => s.sessionId !== sessionId)
+      delete d.messagesMap[sessionId]
+      delete d.streamStates[sessionId]
+      delete d.queuesMap[sessionId]
+      if (d.currentSessionId === sessionId) {
+        isCurrent = true
+        const next = d.sessions[d.sessions.length - 1]
+        nextSessionId = next?.sessionId
+      }
+    })
     if (nextSessionId) {
       await get().selectSession(nextSessionId)
     } else if (isCurrent) {
       // No next session — clear all artifact/file panel state
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.currentSessionId = undefined
-          d.activeFolderPath = undefined
-          d.openFiles = []
-          d.activeFilePath = undefined
-          d.activeFileContent = undefined
-          d.artifactOpen = false
-          d.showBrowser = false
-          d.fileTree = undefined
-        })
-      )
+      upd((d) => {
+        d.currentSessionId = undefined
+        d.activeFolderPath = undefined
+        d.openFiles = []
+        d.activeFilePath = undefined
+        d.activeFileContent = undefined
+        d.artifactOpen = false
+        d.showBrowser = false
+        d.fileTree = undefined
+      })
     }
   },
   renameSession: async (sessionId, newTitle) => {
     try {
       await window.api.sessionUpdateTitle({ sessionId, title: newTitle })
-      set(
-        produce<ThreadStoreState>((d) => {
-          const session = d.sessions.find((s) => s.sessionId === sessionId)
-          if (session) {
-            if (!session.metadata) session.metadata = {}
-            session.metadata.title = newTitle
-          }
-        })
-      )
+      upd((d) => {
+        const session = d.sessions.find((s) => s.sessionId === sessionId)
+        if (session) {
+          if (!session.metadata) session.metadata = {}
+          session.metadata.title = newTitle
+        }
+      })
     } catch (err: unknown) {
       toast.error('Failed to rename session.', err)
     }
@@ -409,12 +383,10 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     if (currentSession && !currentSession.workspaceRoot && workspacePath) {
       try {
         await window.api.workspaceAddFolder({ path: workspacePath, name: '' })
-        set(
-          produce<ThreadStoreState>((d) => {
-            if (!d.openFolders.find((f) => pathsEqual(f.path, workspacePath)))
-              d.openFolders.push({ path: workspacePath, name: '' })
-          })
-        )
+        upd((d) => {
+          if (!d.openFolders.find((f) => pathsEqual(f.path, workspacePath)))
+            d.openFolders.push({ path: workspacePath, name: '' })
+        })
       } catch (err: unknown) {
         Sentry.captureException(err)
       }
@@ -438,13 +410,11 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
         content: [{ type: 'text', text }, ...optimisticAttachments],
         ts: Date.now()
       }
-      set(
-        produce<ThreadStoreState>((d) => {
-          if (!d.messagesMap[sessionId]) d.messagesMap[sessionId] = []
-          d.messagesMap[sessionId].push(userMsg)
-          d.streamStates[sessionId] = { ...defaultStream(), isLoading: true }
-        })
-      )
+      upd((d) => {
+        if (!d.messagesMap[sessionId]) d.messagesMap[sessionId] = []
+        d.messagesMap[sessionId].push(userMsg)
+        d.streamStates[sessionId] = { ...defaultStream(), isLoading: true }
+      })
     }
     // Track if this was a draft session — we'll refresh after promotion
     const wasDraft = sessionId.startsWith('draft_')
@@ -490,25 +460,21 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
   },
   setActiveFile: async (filePath) => {
     const request = ++activeFileRequest
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.activeFilePath = filePath
-        d.activeFileContent = undefined
-        if (filePath) {
-          d.artifactOpen = true
-          if (!d.openFiles.includes(filePath)) d.openFiles.push(filePath)
-        }
-      })
-    )
+    upd((d) => {
+      d.activeFilePath = filePath
+      d.activeFileContent = undefined
+      if (filePath) {
+        d.artifactOpen = true
+        if (!d.openFiles.includes(filePath)) d.openFiles.push(filePath)
+      }
+    })
     if (!filePath) return
     try {
       const content = await window.api.fileRead({ filePath })
       if (request !== activeFileRequest || get().activeFilePath !== filePath) return
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.activeFileContent = content ?? undefined
-        })
-      )
+      upd((d) => {
+        d.activeFileContent = content ?? undefined
+      })
     } catch (err: unknown) {
       toast.error('Failed to read file contents.', err)
     }
@@ -518,15 +484,13 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const needsSwitch = get().activeFilePath === filePath
     const nextFile =
       needsSwitch && openFiles.length > 0 ? openFiles[openFiles.length - 1] : undefined
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.openFiles = openFiles
-        if (needsSwitch && !nextFile) {
-          d.activeFilePath = undefined
-          d.activeFileContent = undefined
-        }
-      })
-    )
+    upd((d) => {
+      d.openFiles = openFiles
+      if (needsSwitch && !nextFile) {
+        d.activeFilePath = undefined
+        d.activeFileContent = undefined
+      }
+    })
     if (nextFile) void get().setActiveFile(nextFile)
   },
   loadFileTree: async (dirPath) => {
@@ -534,11 +498,9 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     try {
       const tree = await window.api.fileList({ dirPath })
       if (request !== fileTreeRequest) return
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.fileTree = tree ?? []
-        })
-      )
+      upd((d) => {
+        d.fileTree = tree ?? []
+      })
     } catch (err: unknown) {
       Sentry.captureException(err)
     }
@@ -547,19 +509,17 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     try {
       const folder = await window.api.workspaceOpenDialog()
       if (folder)
-        set(
-          produce<ThreadStoreState>((d) => {
-            const path = folder.rootPath
-            if (!d.openFolders.find((f) => f.path === path))
-              d.openFolders.push({
-                path,
-                name: folder.hint || '',
-                associatedRemoteUrls: folder.associatedRemoteUrls,
-                latestGitCommitHash: folder.latestGitCommitHash,
-                latestGitBranchName: folder.latestGitBranchName
-              })
-          })
-        )
+        upd((d) => {
+          const path = folder.rootPath
+          if (!d.openFolders.find((f) => f.path === path))
+            d.openFolders.push({
+              path,
+              name: folder.hint || '',
+              associatedRemoteUrls: folder.associatedRemoteUrls,
+              latestGitCommitHash: folder.latestGitCommitHash,
+              latestGitBranchName: folder.latestGitBranchName
+            })
+        })
     } catch (err: unknown) {
       toast.error('Failed to open directory dialog.', err)
     }
@@ -582,42 +542,40 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       }
     })
     let nextSessionId: string | undefined = undefined
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.sessions = d.sessions.filter((s) => !pathsEqual(s.workspaceRoot ?? s.cwd, path))
-        for (const id of relatedIds) {
-          delete d.messagesMap[id]
-          delete d.streamStates[id]
+    upd((d) => {
+      d.sessions = d.sessions.filter((s) => !pathsEqual(s.workspaceRoot ?? s.cwd, path))
+      for (const id of relatedIds) {
+        delete d.messagesMap[id]
+        delete d.streamStates[id]
+        delete d.queuesMap[id]
+      }
+      d.openFolders = d.openFolders.filter((f) => !pathsEqual(f.path, path))
+      if (pathsEqual(d.activeFolderPath, path)) {
+        d.activeFolderPath = undefined
+        if (d.currentSessionId && relatedIds.includes(d.currentSessionId)) {
+          const next = d.sessions[d.sessions.length - 1]
+          d.currentSessionId = next?.sessionId
+          d.activeFolderPath = next?.workspaceRoot ?? next?.cwd ?? undefined
+          nextSessionId = next?.sessionId
         }
-        d.openFolders = d.openFolders.filter((f) => !pathsEqual(f.path, path))
-        if (pathsEqual(d.activeFolderPath, path)) {
-          d.activeFolderPath = undefined
-          if (d.currentSessionId && relatedIds.includes(d.currentSessionId)) {
-            const next = d.sessions[d.sessions.length - 1]
-            d.currentSessionId = next?.sessionId
-            d.activeFolderPath = next?.workspaceRoot ?? next?.cwd ?? undefined
-            nextSessionId = next?.sessionId
-          }
-        }
-      })
-    )
+      }
+    })
     if (nextSessionId) await get().selectSession(nextSessionId)
   },
-  setActiveFolderPath: (path) =>
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.activeFolderPath = path
-      })
-    ),
+  setActiveFolderPath: (path) => {
+    upd((d) => {
+      d.activeFolderPath = path
+      if (!path) d.fileTree = undefined
+    })
+    if (path) get().loadFileTree(path)
+  },
   changeSessionModel: async (modelKey: string) => {
     const sessionId = get().currentSessionId
     if (!sessionId) return
     const prevKey = get().selectedModelKey
-    set(
-      produce<ThreadStoreState>((d) => {
-        d.selectedModelKey = modelKey
-      })
-    )
+    upd((d) => {
+      d.selectedModelKey = modelKey
+    })
     let ok = false
     try {
       const res = await window.api.sessionUpdateModel({ sessionId, modelKey })
@@ -630,40 +588,36 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       ok = false
     }
     if (ok) {
-      set(
-        produce<ThreadStoreState>((d) => {
-          const s = d.sessions.find((x) => x.sessionId === sessionId)
-          if (s) {
-            s.model = d.models[modelKey]?.id ?? ''
-            s.provider = d.models[modelKey]?.provider ?? ''
-          }
-        })
-      )
+      upd((d) => {
+        const s = d.sessions.find((x) => x.sessionId === sessionId)
+        if (s) {
+          s.model = d.models[modelKey]?.id ?? ''
+          s.provider = d.models[modelKey]?.provider ?? ''
+        }
+      })
     } else {
-      set(
-        produce<ThreadStoreState>((d) => {
-          d.selectedModelKey = prevKey
-        })
-      )
+      upd((d) => {
+        d.selectedModelKey = prevKey
+      })
     }
   },
   changeSessionReasoning: async (reasoningEffort: string | null) => {
     const sessionId = get().currentSessionId
     if (!sessionId) return
     const prevSessions = get().sessions
-    set(produce<ThreadStoreState>((d) => {
+    upd((d) => {
       const s = d.sessions.find((x) => x.sessionId === sessionId)
       if (s) s.metadata = { ...s.metadata, reasoningEffort }
-    }))
+    })
     try {
       const res = await window.api.sessionUpdateReasoning({ sessionId, reasoningEffort })
       if (!res.success) {
         toast.error('Failed to change reasoning effort.')
-        set(produce<ThreadStoreState>((d) => { d.sessions = prevSessions }))
+        upd((d) => { d.sessions = prevSessions })
       }
     } catch (err: unknown) {
       toast.error('Failed to update reasoning effort.', err)
-      set(produce<ThreadStoreState>((d) => { d.sessions = prevSessions }))
+      upd((d) => { d.sessions = prevSessions })
     }
   },
 
@@ -797,7 +751,7 @@ function flushBuffersImmediately(sessionId: string, finalUpdates?: Partial<Strea
 
 function refreshMessages(sessionId: string): void {
   const existing = refreshTimers.get(sessionId)
-  if (existing) return // TS-06: trailing debounce without resetting
+  if (existing) clearTimeout(existing)
   refreshTimers.set(
     sessionId,
     setTimeout(() => {

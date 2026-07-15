@@ -34,36 +34,32 @@ type TreeNodeData = {
 
 function buildTree(paths: string[], workspacePath: string): TreeNodeData[] {
   const root: TreeNodeData[] = []
-  
+  const levelMaps: Map<string, TreeNodeData>[] = [new Map()]
   for (const path of paths) {
     const rel = getRelativePath(path, workspacePath)
     if (!rel) continue
-    
     const parts = rel.split('/')
     let currentLevel = root
-    
+    let currentMap = levelMaps[0]
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
       const isLeaf = i === parts.length - 1
       const id = parts.slice(0, i + 1).join('/')
       const absPath = getAbsolutePath(id, workspacePath)
-      
-      let existing = currentLevel.find(n => n.name === part)
+      let existing = currentMap.get(part)
       if (!existing) {
-        existing = {
-          id: absPath,
-          name: part,
-          ...(isLeaf ? {} : { children: [] })
-        }
+        existing = { id: absPath, name: part, ...(isLeaf ? {} : { children: [] }) }
         currentLevel.push(existing)
+        currentMap.set(part, existing)
       }
       if (!isLeaf) {
         if (!existing.children) existing.children = []
+        if (!levelMaps[i + 1]) levelMaps[i + 1] = new Map()
         currentLevel = existing.children
+        currentMap = levelMaps[i + 1]
       }
     }
   }
-  
   const sortNodes = (nodes: TreeNodeData[]) => {
     nodes.sort((a, b) => {
       const aIsFolder = !!a.children
@@ -77,7 +73,6 @@ function buildTree(paths: string[], workspacePath: string): TreeNodeData[] {
     }
   }
   sortNodes(root)
-  
   return root
 }
 
@@ -239,7 +234,7 @@ export function ArtifactPanel({ onClose }: { onClose: () => void }): React.JSX.E
   )
   const currentSession = sessions.find((s) => s.sessionId === currentSessionId)
   const workspacePath = currentSession?.workspaceRoot || currentSession?.cwd
-  const [showTree, setShowTree] = useState(true)
+  const [showTree, setShowTree] = useState(() => localStorage.getItem('ap:showTree') !== 'false')
   const [browserUrl, setBrowserUrl] = useState('https://google.com')
   const [inputUrl, setInputUrl] = useState('https://google.com')
   const [isLoading, setIsLoading] = useState(false)
@@ -381,7 +376,11 @@ export function ArtifactPanel({ onClose }: { onClose: () => void }): React.JSX.E
         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
           <IconButton
             size="sm"
-            onClick={() => setShowTree((s) => !s)}
+            onClick={() => {
+              const next = !showTree
+              setShowTree(next)
+              localStorage.setItem('ap:showTree', String(next))
+            }}
             tooltip={showTree ? 'Hide File Tree' : 'Show File Tree'}
             tooltipSide="bottom"
           >

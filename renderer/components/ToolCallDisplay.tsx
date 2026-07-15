@@ -17,9 +17,6 @@ import { FileIcon } from './FileIcon'
 
 import { getRelativePath, getAbsolutePath } from '../../shared/pathHelpers'
 
-function getDisplayPath(file: string, workspacePath?: string | undefined): string {
-  return getRelativePath(file, workspacePath)
-}
 
 function FileLinkButton({
   file,
@@ -191,7 +188,7 @@ export function ToolCallDisplay({
               <FileLinkButton
                 key={idx}
                 file={file}
-                displayPath={getDisplayPath(file, workspacePath)}
+                displayPath={getRelativePath(file, workspacePath)}
                 onFileClick={onFileClick}
                 workspacePath={workspacePath}
               />
@@ -211,7 +208,7 @@ export function ToolCallDisplay({
       detailNode = file ? (
         <FileLinkButton
           file={file}
-          displayPath={getDisplayPath(file, workspacePath)}
+          displayPath={getRelativePath(file, workspacePath)}
           onFileClick={onFileClick}
           workspacePath={workspacePath}
         />
@@ -224,7 +221,7 @@ export function ToolCallDisplay({
     icon = <TbFolderOpen size={15} />
     detailNode = (
       <span className="font-mono text-tx-bright font-semibold">
-        {getDisplayPath(inp.path ?? '', workspacePath)}
+        {getRelativePath(inp.path ?? '', workspacePath)}
       </span>
     )
   } else if (n === 'grep_search' || n === 'search_codebase') {

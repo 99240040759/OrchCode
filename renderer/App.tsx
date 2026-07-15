@@ -69,7 +69,7 @@ export default function App(): React.JSX.Element {
 
   if (!authInitialized)
     return (
-      <div className="flex flex-col h-screen bg-oc-base text-tx-main overflow-hidden select-none relative">
+      <div className="flex flex-col h-screen bg-black text-tx-main overflow-hidden select-none relative">
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <img src={logo} className="w-12 h-12 opacity-80" alt="" />
           <TbLoader2 size={32} className="text-tx-sub animate-spin" />
@@ -80,7 +80,7 @@ export default function App(): React.JSX.Element {
 
   if (!session)
     return (
-      <div className="flex h-screen bg-oc-base text-tx-main overflow-hidden select-none relative">
+      <div className="flex h-screen bg-black text-tx-main overflow-hidden select-none relative">
         <TitleBar />
         <Onboarding />
       </div>

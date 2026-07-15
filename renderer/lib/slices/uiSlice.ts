@@ -24,9 +24,10 @@ export const createUiSlice: StateCreator<ThreadStoreState, [], [], UiSlice> = (s
   submitAnswer: async (answer) => {
     const q = get().activeQuestion
     if (!q) return
-    set({ activeQuestion: undefined })
-    await window.api.submitAnswer({ id: q.id, answer }).catch((err: unknown) => {
+    const ok = await window.api.submitAnswer({ id: q.id, answer }).catch((err: unknown) => {
       toast.error('Failed to submit answer.', err)
+      return false
     })
+    if (ok !== false) set({ activeQuestion: undefined })
   }
 })

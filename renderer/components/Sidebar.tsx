@@ -305,17 +305,11 @@ export function Sidebar(): React.JSX.Element {
 
   const handleNewAgent = async (): Promise<void> => {
     setActiveNav(undefined)
-    const existing = sessions.filter((s) => s.metadata?.title?.startsWith('Chat '))
-    let max = 0
-    existing.forEach((s) => {
-      const num = parseInt(s.metadata?.title?.replace('Chat ', '') || '0', 10)
-      if (!isNaN(num) && num > max) max = num
-    })
-    const idx = max + 1
+    const idx = sessions.length + 1
     await createSession(`Chat ${idx}`, activeFolderPath || undefined)
   }
 
-  const wsSessionsMap = (() => {
+  const wsSessionsMap = React.useMemo(() => {
     const map = new Map<string, typeof sortedSessions>()
     const orphans: typeof sortedSessions = []
     for (const session of sortedSessions) {
@@ -330,7 +324,7 @@ export function Sidebar(): React.JSX.Element {
       }
     }
     return { map, orphans }
-  })()
+  }, [sortedSessions, openFolders])
 
   return (
     <div className="flex flex-col h-full w-sidebar flex-shrink-0">
@@ -359,7 +353,6 @@ export function Sidebar(): React.JSX.Element {
                 size="sm"
                 onClick={() => {
                   workspaceRemoveFolder(activeFolderPath)
-                  setActiveFolderPath(undefined)
                 }}
                 tooltip="Remove Active Workspace"
               >

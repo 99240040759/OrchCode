@@ -2,7 +2,7 @@ process.env.AI_SDK_LOG_WARNINGS = 'true'
 process.env.CLINE_LOG_LEVEL = 'info'
 import { app, shell, BrowserWindow, ipcMain, dialog, safeStorage, Menu } from 'electron'
 import * as Sentry from '@sentry/electron/main'
-import { createHash } from 'crypto'
+
 
 let sentryInitialized = false
 if (process.env.SENTRY_DSN && app.isPackaged) {
@@ -39,9 +39,9 @@ import type { WorkspaceInfo, WorkspaceManifest } from '@cline/shared'
 import { emptyWorkspaceManifest, upsertWorkspaceInfo } from '@cline/shared'
 import dotenv from 'dotenv'
 import { isPathAllowedPure, writeAtomic, serviceUrl } from './utils/fs'
+import { MAX_ATTACHMENTS } from '../shared/pathHelpers'
 const MAX_VIEWABLE_FILE_BYTES = 5 * 1024 * 1024
 const MAX_PROMPT_LENGTH = 200_000
-const MAX_ATTACHMENTS = 20
 const REQUEST_TIMEOUT_MS = 30_000
 const stripPrefix = (id: string): string =>
   id.includes('/') ? id.substring(id.indexOf('/') + 1) : id
@@ -127,25 +127,11 @@ async function saveAuthSession(session: AuthSession): Promise<boolean> {
     return true
   } catch (err: unknown) {
     console.error('[Auth] Save error:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
     return false
   }
 }
 
-async function getAuthSession(): Promise<AuthSession | undefined> {
-  const result = await _readEncryptedSession()
-  if (!result) return undefined
-  try {
-    const session = JSON.parse(result.json)
-    if (!isAuthSession(session)) return undefined
-    if (session.expiresAt <= Date.now() + 5 * 60 * 1000) return undefined
-    return session
-  } catch (err: unknown) {
-    console.error('[Auth] Parse error:', err)
-    if (sentryInitialized) Sentry.captureException(err)
-    return undefined
-  }
-}
 
 async function getRawAuthSession(): Promise<AuthSession | undefined> {
   const result = await _readEncryptedSession()
@@ -561,7 +547,11 @@ async function initClineCore(): Promise<ClineCore> {
       logger: console,
       capabilities: {
         toolExecutors: {
-          ...createDefaultExecutors(),
+          ...createDefaultExecutors({
+            bash: {
+              shell: 'powershell'
+            }
+          }),
           askQuestion: async (question, options, context) =>
             new Promise<string>((resolve) => {
               const id = randomUUID()
@@ -639,6 +629,14 @@ function getReasoningEffort(
   return value === 'low' || value === 'medium' || value === 'high' ? value : undefined
 }
 
+const getSandboxFallbackPath = (): string => {
+  const path = join(app.getPath('userData'), 'sandbox')
+  if (!existsSync(path)) {
+    mkdirSync(path, { recursive: true })
+  }
+  return path
+}
+
 async function buildSessionConfig(
   sessionId: string,
   workspacePath: string | undefined,
@@ -663,7 +661,7 @@ async function buildSessionConfig(
   let extraTools: any[] = []
   try {
     const { getExtraTools } = await import('./extraTools')
-    extraTools = getExtraTools(session.accessToken)
+    extraTools = getExtraTools(session.accessToken, sessionId)
   } catch (err: unknown) {
     console.error('[SessionConfig] Failed to load extra tools:', err)
   }
@@ -686,7 +684,7 @@ async function buildSessionConfig(
     execution: { maxConsecutiveMistakes: 6, loopDetection: { softThreshold: 3, hardThreshold: 5 } },
     compaction: { enabled: true, thresholdRatio: 0.8, strategy: 'agentic' },
     sessionId,
-    cwd: workspacePath || process.cwd(),
+    cwd: workspacePath || getSandboxFallbackPath(),
     workspaceRoot: workspacePath,
     workspaceMetadata,
     extraTools
@@ -764,7 +762,7 @@ function sanitizeUserImages(images: string[] | undefined): string[] | undefined 
       if (typeof image !== 'string') return false
       if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(image)) return false
       if (image.length > 15 * 1024 * 1024) return false
-      const key = createHash('sha256').update(image).digest('hex')
+      const key = `${image.length}:${image.slice(0, 64)}`
       if (seen.has(key)) return false
       seen.add(key)
       return true
@@ -889,44 +887,40 @@ function registerIpcHandlers(): void {
       if (!q) return []
       const core = await initClineCore()
       const raw = await core.list(500)
-      const matches = await Promise.all(
+      const results: { sessionId: string; title: string; role: string; text: string }[] = []
+      await Promise.all(
         raw
           .filter((s) => s.status !== 'idle')
           .map(async (s) => {
             try {
               const msgs = await core.readMessages(s.sessionId)
-              const res: { sessionId: string; title: string; role: string; text: string }[] = []
               for (const m of msgs) {
-                const text =
-                  typeof m.content === 'string'
-                    ? m.content
-                    : Array.isArray(m.content)
-                      ? m.content
-                          .map((part) => {
-                            if (part.type === 'text') return part.text
-                            if (part.type === 'thinking') return part.thinking
-                            if (part.type === 'tool_result')
-                              return typeof part.content === 'string' ? part.content : ''
-                            return ''
-                          })
-                          .join(' ')
-                      : ''
-                if (text.toLowerCase().includes(q)) {
-                  res.push({
+                if (results.length >= 200) return
+                let text = ''
+                if (typeof m.content === 'string') {
+                  text = m.content
+                } else if (Array.isArray(m.content)) {
+                  for (const part of m.content) {
+                    if (part.type === 'text') text += part.text
+                    else if (part.type === 'thinking') text += part.thinking
+                    else if (part.type === 'tool_result' && typeof part.content === 'string') text += part.content
+                    if (text.length > 4000) break
+                  }
+                }
+                if (text && text.toLowerCase().includes(q)) {
+                  results.push({
                     sessionId: s.sessionId,
                     title: s.metadata?.title || 'Untitled',
                     role: m.role || 'assistant',
-                    text
+                    text: text.slice(0, 300)
                   })
                 }
               }
-              return res
             } catch {
-              return []
             }
           })
       )
-      return matches.flat().slice(0, 200)
+      return results
     },
     []
   )
@@ -1351,7 +1345,6 @@ if (is.dev) app.commandLine.appendSwitch('remote-debugging-port', '9222')
 
 app.whenReady().then(async () => {
   await loadEnv()
-  await getAuthSession()
   electronApp.setAppUserModelId('live.orch.app')
   app.on('browser-window-created', (_, win) => optimizer.watchWindowShortcuts(win))
   setupAutoUpdater()

@@ -7,17 +7,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent
 } from './dropdownMenu'
 import { useThreadStore } from '../lib/threadStore'
 import { useShallow } from 'zustand/react/shallow'
 import { FileIcon } from './FileIcon'
 import * as Sentry from '@sentry/electron/renderer'
 import { toast } from '../lib/toast'
-import { getAbsolutePath, normalizePath, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT } from '../../shared/pathHelpers'
+import { getAbsolutePath, normalizePath, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT, MAX_ATTACHMENTS } from '../../shared/pathHelpers'
 
 const MAX_INPUT_HEIGHT = 200
-const MAX_ATTACHMENTS = 20
 const CIRCLE_RADIUS = 7
 const CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS
 const WHITESPACE_RE = /\s/
@@ -81,7 +84,8 @@ export function InputBar({
     changeSessionModel,
     sessions,
     currentSessionId,
-    changeSessionReasoning
+    changeSessionReasoning,
+    fileTree
   } = useThreadStore(
     useShallow((s) => ({
       activeFolderPath: s.activeFolderPath,
@@ -92,10 +96,10 @@ export function InputBar({
       changeSessionModel: s.changeSessionModel,
       sessions: s.sessions,
       currentSessionId: s.currentSessionId,
-      changeSessionReasoning: s.changeSessionReasoning
+      changeSessionReasoning: s.changeSessionReasoning,
+      fileTree: s.fileTree
     }))
   )
-  const [allFiles, setAllFiles] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [filteredFiles, setFilteredFiles] = useState<string[]>([])
   const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(0)
@@ -217,30 +221,7 @@ export function InputBar({
     ta.style.height = `${Math.min(Math.max(ta.scrollHeight, 48), MAX_INPUT_HEIGHT)}px`
   }, [value, loading])
 
-  const [prevFolder, setPrevFolder] = useState(activeFolderPath)
-  if (activeFolderPath !== prevFolder) {
-    setPrevFolder(activeFolderPath)
-    if (!activeFolderPath) setAllFiles([])
-  }
 
-  useEffect(() => {
-    let cancelled = false
-    if (!activeFolderPath) {
-      return
-    }
-    window.api
-      .fileList({ dirPath: activeFolderPath })
-      .then((files) => {
-        if (!cancelled) setAllFiles(files)
-      })
-      .catch((err: unknown) => {
-        Sentry.captureException(err)
-        if (!cancelled) setAllFiles([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [activeFolderPath])
 
   const getMentionQuery = (text: string, cursorIndex: number): string | undefined => {
     const pre = text.slice(0, cursorIndex)
@@ -261,13 +242,14 @@ export function InputBar({
     if (query !== undefined) {
       setMentionStartIdx(val.slice(0, cursorIdx).lastIndexOf('@'))
       let suggestions: string[] = []
+      const files = fileTree ?? []
       if (!query) {
-        suggestions = allFiles.slice(0, 15)
+        suggestions = files.slice(0, 15)
       } else {
         const lowerQ = query.toLowerCase()
-        for (let i = 0; i < allFiles.length; i++) {
-          if (allFiles[i].toLowerCase().includes(lowerQ)) {
-            suggestions.push(allFiles[i])
+        for (let i = 0; i < files.length; i++) {
+          if (files[i].toLowerCase().includes(lowerQ)) {
+            suggestions.push(files[i])
             if (suggestions.length >= 15) break
           }
         }
@@ -312,10 +294,8 @@ export function InputBar({
     const matches = Array.from(value.matchAll(MENTION_REGEX)) ?? []
     const normalize = (p: string): string => normalizePath(p).toLowerCase()
     matches.forEach((m) => {
-      let rawPath = m[1] || m[2]
+      const rawPath = m[1] || m[2]
       if (rawPath) {
-        rawPath = rawPath.replace(TRAILING_PUNCT, '').replace(LEADING_PUNCT, '')
-        if (rawPath.startsWith('[') && rawPath.endsWith(']')) rawPath = rawPath.slice(1, -1)
         const cleanPath = rawPath.replace(TRAILING_PUNCT, '').replace(LEADING_PUNCT, '')
         if (cleanPath) {
           const absPath = getAbsolutePath(cleanPath, activeFolderPath)
@@ -550,9 +530,10 @@ export function InputBar({
                       ? models[selectedModelKey]?.name || selectedModelKey
                       : 'Select Model'}
                   </span>
-                  {selectedModelKey && models[selectedModelKey]?.reasoningEffort ? (
-                    <span className="text-3xs px-1 py-0.5 bg-oc-active text-tx-bright rounded font-bold uppercase tracking-wide">
-                      {models[selectedModelKey].reasoningEffort}
+                  {selectedModelKey && (activeReasoningEffort || models[selectedModelKey]?.reasoningEffort) ? (
+                    <span className="text-3xs px-1 py-0.5 bg-oc-active text-tx-bright rounded font-bold uppercase tracking-wide flex items-center gap-0.5">
+                      <TbBrain size={9} />
+                      <span>{activeReasoningEffort || models[selectedModelKey]?.reasoningEffort}</span>
                     </span>
                   ) : selectedModelKey && models[selectedModelKey]?.badge ? (
                     <span className="text-3xs px-1 py-0.5 bg-oc-surface text-tx-main rounded font-bold uppercase tracking-wide border border-oc-border">
@@ -587,45 +568,40 @@ export function InputBar({
                     )}
                   </DropdownMenuItem>
                 ))}
+                {supportsReasoning && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <TbBrain size={14} className="flex-shrink-0" />
+                        <span>Reasoning ({activeReasoningEffort ? activeReasoningEffort : 'Disabled'})</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-[150px] z-[60]">
+                        {supportsReasoningEffort ? (
+                          <>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning(null)} className={cn(!activeReasoningEffort && 'bg-oc-hover text-tx-bright font-semibold')}>
+                              <span>Disabled</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('low')} className={cn(activeReasoningEffort === 'low' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                              <span>Low</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('medium')} className={cn(activeReasoningEffort === 'medium' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                              <span>Medium</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('high')} className={cn(activeReasoningEffort === 'high' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                              <span>High</span>
+                            </DropdownMenuItem>
+                          </>
+                        ) : (
+                          <DropdownMenuItem onClick={() => changeSessionReasoning(activeReasoningEffort ? null : 'high')}>
+                            <span>{activeReasoningEffort ? 'Disable' : 'Enable'}</span>
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </>
+                )}
               </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {supportsReasoning && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className={cn(
-                  "flex items-center gap-1.5 text-xs border border-oc-border outline-none rounded-md px-2 py-1 font-sans font-semibold cursor-pointer transition-colors select-none",
-                  activeReasoningEffort 
-                    ? "bg-oc-active text-tx-bright" 
-                    : "bg-oc-hover hover:bg-oc-active text-tx-sub hover:text-tx-bright"
-                )}>
-                  <TbBrain size={13} className={cn("flex-shrink-0", !activeReasoningEffort && "opacity-70")} />
-                  <span>{activeReasoningEffort ? `Reasoning: ${activeReasoningEffort.charAt(0).toUpperCase() + activeReasoningEffort.slice(1)}` : 'No Reasoning'}</span>
-                  {supportsReasoningEffort && <TbChevronDown size={12} className="opacity-70 flex-shrink-0" />}
-                </button>
-              </DropdownMenuTrigger>
-              {supportsReasoningEffort ? (
-                <DropdownMenuContent className="w-[150px] z-[60]">
-                  <DropdownMenuItem onClick={() => changeSessionReasoning(null)} className={cn(!activeReasoningEffort && 'bg-oc-hover text-tx-bright font-semibold')}>
-                    <span>Disabled</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => changeSessionReasoning('low')} className={cn(activeReasoningEffort === 'low' && 'bg-oc-hover text-tx-bright font-semibold')}>
-                    <span>Low</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => changeSessionReasoning('medium')} className={cn(activeReasoningEffort === 'medium' && 'bg-oc-hover text-tx-bright font-semibold')}>
-                    <span>Medium</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => changeSessionReasoning('high')} className={cn(activeReasoningEffort === 'high' && 'bg-oc-hover text-tx-bright font-semibold')}>
-                    <span>High</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              ) : (
-                <DropdownMenuContent className="w-[150px] z-[60]">
-                  <DropdownMenuItem onClick={() => changeSessionReasoning(activeReasoningEffort ? null : 'high')}>
-                    <span>{activeReasoningEffort ? 'Disable' : 'Enable'}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              )}
             </DropdownMenu>
           )}
         </div>

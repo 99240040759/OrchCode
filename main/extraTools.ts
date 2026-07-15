@@ -2,37 +2,49 @@ import type { AgentTool } from '@cline/shared'
 import puppeteer from 'puppeteer-core'
 import { serviceUrl } from './utils/fs'
 
-let browserCache: import('puppeteer-core').Browser | undefined = undefined
-let connectPromise: Promise<import('puppeteer-core').Browser> | undefined = undefined
-
-function onBrowserDisconnected(): void {
-  browserCache = undefined
-  connectPromise = undefined
+interface TavilyResult {
+  title: string
+  url: string
+  content: string
 }
 
-async function getOrConnectBrowser(): Promise<import('puppeteer-core').Browser> {
-  if (browserCache?.connected) return browserCache
-  if (!connectPromise) {
-    connectPromise = puppeteer
-      .connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null })
-      .then((b) => {
-        browserCache = b
-        b.once('disconnected', onBrowserDisconnected)
-        return b
-      })
-      .catch((err: unknown) => {
-        connectPromise = undefined
-        browserCache = undefined
-        throw err
-      })
-  }
-  return connectPromise
+interface ImageArtifact {
+  base64?: string
 }
 
-async function getWebviewPage(): Promise<import('puppeteer-core').Page> {
+const browserCache = new Map<string, import('puppeteer-core').Browser>()
+const connectPromises = new Map<string, Promise<import('puppeteer-core').Browser>>()
+
+function onBrowserDisconnected(sessionId: string): void {
+  browserCache.delete(sessionId)
+  connectPromises.delete(sessionId)
+}
+
+async function getOrConnectBrowser(sessionId: string): Promise<import('puppeteer-core').Browser> {
+  const cached = browserCache.get(sessionId)
+  if (cached?.connected) return cached
+  const existing = connectPromises.get(sessionId)
+  if (existing) return existing
+  const promise = puppeteer
+    .connect({ browserURL: 'http://127.0.0.1:9222', defaultViewport: null })
+    .then((b) => {
+      browserCache.set(sessionId, b)
+      b.once('disconnected', () => onBrowserDisconnected(sessionId))
+      return b
+    })
+    .catch((err: unknown) => {
+      connectPromises.delete(sessionId)
+      browserCache.delete(sessionId)
+      throw err
+    })
+  connectPromises.set(sessionId, promise)
+  return promise
+}
+
+async function getWebviewPage(sessionId: string): Promise<import('puppeteer-core').Page> {
   let browser: import('puppeteer-core').Browser
   try {
-    browser = await getOrConnectBrowser()
+    browser = await getOrConnectBrowser(sessionId)
   } catch {
     throw new Error('Electron IDE CDP not available. Is the app running with remote debugging?')
   }
@@ -46,14 +58,13 @@ async function getWebviewPage(): Promise<import('puppeteer-core').Page> {
   return page
 }
 
-
 function boundedNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(256, Math.min(2_048, Math.floor(value)))
     : fallback
 }
 
-export function getExtraTools(sessionToken: string): AgentTool[] {
+export function getExtraTools(sessionToken: string, sessionId: string): AgentTool[] {
   return [
     {
       name: 'search_web',
@@ -69,7 +80,6 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
         const tavilyUrl = serviceUrl('tavily')
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!tavilyUrl || !anonKey || !sessionToken) throw new Error('Auth or server config missing.')
-
         const response = await fetch(tavilyUrl, {
           method: 'POST',
           headers: {
@@ -81,11 +91,6 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
           signal: AbortSignal.timeout(30000)
         })
         if (!response.ok) throw new Error(`Search failed: ${response.statusText}`)
-        interface TavilyResult {
-          title: string
-          url: string
-          content: string
-        }
         const data = (await response.json()) as { results?: TavilyResult[] }
         const formatted = (data.results ?? [])
           .map((r: TavilyResult) => `[${r.title}](${r.url})\n${r.content}`)
@@ -113,7 +118,6 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
         const imageUrl = serviceUrl('generate-image')
         const anonKey = process.env.SUPABASE_ANON_KEY
         if (!imageUrl || !anonKey || !sessionToken) throw new Error('Auth or server config missing.')
-
         const response = await fetch(imageUrl, {
           method: 'POST',
           headers: {
@@ -122,12 +126,9 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
             Authorization: `Bearer ${sessionToken}`
           },
           body: JSON.stringify({ prompt, width, height }),
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(60000)
         })
         if (!response.ok) throw new Error(`Image generation failed: ${response.statusText}`)
-        interface ImageArtifact {
-          base64?: string
-        }
         const data = (await response.json()) as { artifacts?: ImageArtifact[] }
         const b64 = data.artifacts?.[0]?.base64 ?? ''
         if (!b64) throw new Error('No image data returned.')
@@ -148,7 +149,7 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
       execute: async (args: any) => {
         const url = typeof args.url === 'string' ? args.url.trim() : ''
         if (!url) throw new Error('URL is required.')
-        const page = await getWebviewPage()
+        const page = await getWebviewPage(sessionId)
         try {
           await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 })
         } catch (err: any) {
@@ -169,10 +170,8 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
       execute: async (args: any) => {
         const selector = typeof args.selector === 'string' ? args.selector : ''
         if (!selector) throw new Error('selector is required.')
-        const page = await getWebviewPage()
-        await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => {
-          // Ignore timeout, let click attempt fail with standard error if still missing
-        })
+        const page = await getWebviewPage(sessionId)
+        await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => {})
         await page.click(selector)
         return `Clicked ${selector}`
       }
@@ -192,9 +191,8 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
         const selector = typeof args.selector === 'string' ? args.selector : ''
         const value = typeof args.value === 'string' ? args.value : ''
         if (!selector) throw new Error('selector is required.')
-        const page = await getWebviewPage()
+        const page = await getWebviewPage(sessionId)
         await page.waitForSelector(selector, { visible: true, timeout: 5000 }).catch(() => {})
-        await page.click(selector)
         await page.evaluate((sel) => {
           const el = document.querySelector(sel) as HTMLInputElement | HTMLTextAreaElement
           if (el) {
@@ -224,34 +222,26 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
       execute: async (args: any) => {
         const script = typeof args.script === 'string' ? args.script.trim() : ''
         if (!script) throw new Error('script is required.')
-        const page = await getWebviewPage()
-        let timer: NodeJS.Timeout | undefined
-        const timeoutPromise = new Promise((_, rej) => {
-          timer = setTimeout(() => rej(new Error('Evaluation timed out')), 15000)
-        })
-        try {
-          const res = await Promise.race([
-            page.evaluate(async (scriptToRun) => {
+        const page = await getWebviewPage(sessionId)
+        const res = await page.evaluate(
+          async (scriptToRun) => {
+            try {
+              let result
               try {
-                let res;
-                try {
-                  const fnExpr = new Function(`return (async () => { return (${scriptToRun}); })()`);
-                  res = await fnExpr();
-                } catch {
-                  const fnStmt = new Function(`return (async () => { ${scriptToRun} })()`);
-                  res = await fnStmt();
-                }
-                return JSON.stringify(res, null, 2);
-              } catch (err: any) {
-                return JSON.stringify({ error: err.message || String(err) })
+                const fnExpr = new Function(`return (async () => { return (${scriptToRun}); })()`)
+                result = await fnExpr()
+              } catch {
+                const fnStmt = new Function(`return (async () => { ${scriptToRun} })()`)
+                result = await fnStmt()
               }
-            }, script),
-            timeoutPromise
-          ])
-          return res !== undefined ? String(res) : 'undefined'
-        } finally {
-          if (timer) clearTimeout(timer)
-        }
+              return JSON.stringify(result, null, 2)
+            } catch (err: any) {
+              return JSON.stringify({ error: err.message || String(err) })
+            }
+          },
+          script
+        )
+        return res !== undefined ? String(res) : 'undefined'
       }
     },
     {
@@ -259,15 +249,13 @@ export function getExtraTools(sessionToken: string): AgentTool[] {
       description: 'Take a screenshot of the embedded browser.',
       inputSchema: { type: 'object', properties: {}, required: [] },
       execute: async () => {
-        const page = await getWebviewPage()
+        const page = await getWebviewPage(sessionId)
         const b64 = (await page.screenshot({
           type: 'jpeg',
           quality: 75,
           encoding: 'base64'
         })) as string
-        return [
-          { type: 'image', data: b64, mediaType: 'image/jpeg' }
-        ] as any
+        return [{ type: 'image', data: b64, mediaType: 'image/jpeg' }] as any
       }
     }
   ]

@@ -103,3 +103,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     await get().init()
   }
 }))
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    _authUnsub?.()
+    _authUnsub = undefined
+    _authVersion++
+  })
+}

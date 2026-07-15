@@ -46,8 +46,10 @@ export function TitleBar({
     }
   }, [])
 
+  const checkRunRef = React.useRef(false)
   useEffect(() => {
-    if (session) {
+    if (session && !checkRunRef.current) {
+      checkRunRef.current = true
       void window.api.appCheckForUpdates().catch((err: unknown) => {
         Sentry.captureException(err)
       })

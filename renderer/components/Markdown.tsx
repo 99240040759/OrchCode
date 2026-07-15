@@ -71,23 +71,18 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node, ...props }) => {
-            void node
-            return (
-              <a
-                {...props}
-                className="text-tx-bright underline hover:text-tx-bright transition-colors"
-                target="_blank"
-                rel="noopener noreferrer"
-              />
-            )
-          },
-          code: ({ node, className, children, ...props }) => {
-            void node
-            const isInline =
-              (props as Record<string, unknown>).inline ||
-              (!className && !String(children).includes('\n'))
-            return !isInline ? (
+          pre: ({ children }) => <>{children}</>,
+          a: ({ ...props }) => (
+            <a
+              {...props}
+              className="text-tx-bright underline hover:text-tx-bright transition-colors"
+              target="_blank"
+              rel="noopener noreferrer"
+            />
+          ),
+          code: ({ className, children, ...props }) => {
+            const isBlock = !!className?.startsWith('language-') || String(children).includes('\n')
+            return isBlock ? (
               <CodeBlock className={className} {...props}>
                 {children}
               </CodeBlock>
@@ -100,68 +95,32 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
               </code>
             )
           },
-          ul: ({ node, ...props }) => {
-            void node
-            return <ul {...props} className="list-disc pl-5 mt-4 mb-4 space-y-1.5 last:mb-0" />
-          },
-          ol: ({ node, ...props }) => {
-            void node
-            return <ol {...props} className="list-decimal pl-5 mt-4 mb-4 space-y-1.5 last:mb-0" />
-          },
-          li: ({ node, ...props }) => {
-            void node
-            return <li {...props} className="my-0.5" />
-          },
-          table: ({ node, ...props }) => {
-            void node
-            return (
-              <div className="overflow-x-auto border border-oc-border rounded-md bg-oc-surface shadow-md mt-4 mb-4 last:mb-0">
-                <table {...props} className="min-w-full text-xs" />
-              </div>
-            )
-          },
-          thead: ({ node, ...props }) => {
-            void node
-            return <thead {...props} className="bg-oc-base border-b border-oc-border" />
-          },
-          th: ({ node, ...props }) => {
-            void node
-            return (
-              <th
-                {...props}
-                className="px-3.5 py-2 text-left font-semibold text-tx-bright uppercase tracking-wider text-3xs select-none"
-              />
-            )
-          },
-          td: ({ node, ...props }) => {
-            void node
-            return (
-              <td
-                {...props}
-                className="px-3.5 py-2 border-t border-oc-border text-tx-main font-mono text-2xs"
-              />
-            )
-          },
-          h1: ({ node, ...props }) => {
-            void node
-            return <h1 {...props} className="font-bold text-tx-bright text-xl mt-6 mb-4 last:mb-0" />
-          },
-          h2: ({ node, ...props }) => {
-            void node
-            return <h2 {...props} className="font-bold text-tx-bright text-lg mt-5 mb-3 last:mb-0" />
-          },
-          h3: ({ node, ...props }) => {
-            void node
-            return <h3 {...props} className="font-bold text-tx-bright text-base mt-4 mb-2 last:mb-0" />
-          },
-          p: ({ node, ...props }) => {
-            void node
-            return <p {...props} className="mb-4 last:mb-0" />
-          },
-          hr: ({ node, ...props }) => {
-            void node
-            return <hr {...props} className="mt-4 mb-4 border-t border-oc-border/60 last:mb-0" />
-          }
+          ul: ({ ...props }) => <ul {...props} className="list-disc pl-5 mt-4 mb-4 space-y-1.5 last:mb-0" />,
+          ol: ({ ...props }) => <ol {...props} className="list-decimal pl-5 mt-4 mb-4 space-y-1.5 last:mb-0" />,
+          li: ({ ...props }) => <li {...props} className="my-0.5" />,
+          table: ({ ...props }) => (
+            <div className="overflow-x-auto border border-oc-border rounded-md bg-oc-surface shadow-md mt-4 mb-4 last:mb-0">
+              <table {...props} className="min-w-full text-xs" />
+            </div>
+          ),
+          thead: ({ ...props }) => <thead {...props} className="bg-oc-base border-b border-oc-border" />,
+          th: ({ ...props }) => (
+            <th
+              {...props}
+              className="px-3.5 py-2 text-left font-semibold text-tx-bright uppercase tracking-wider text-3xs select-none"
+            />
+          ),
+          td: ({ ...props }) => (
+            <td
+              {...props}
+              className="px-3.5 py-2 border-t border-oc-border text-tx-main font-mono text-2xs"
+            />
+          ),
+          h1: ({ ...props }) => <h1 {...props} className="font-bold text-tx-bright text-xl mt-6 mb-4 last:mb-0" />,
+          h2: ({ ...props }) => <h2 {...props} className="font-bold text-tx-bright text-lg mt-5 mb-3 last:mb-0" />,
+          h3: ({ ...props }) => <h3 {...props} className="font-bold text-tx-bright text-base mt-4 mb-2 last:mb-0" />,
+          p: ({ ...props }) => <p {...props} className="mb-4 last:mb-0" />,
+          hr: ({ ...props }) => <hr {...props} className="mt-4 mb-4 border-t border-oc-border/60 last:mb-0" />
         }}
       >
         {content}

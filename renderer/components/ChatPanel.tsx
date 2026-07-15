@@ -350,7 +350,7 @@ function StreamingTools({
   )
 }
 
-function StreamingAssistant({
+const StreamingAssistant = React.memo(function StreamingAssistant({
   stream,
   onFileClick
 }: {
@@ -390,7 +390,8 @@ function StreamingAssistant({
       </div>
     </div>
   )
-}
+})
+StreamingAssistant.displayName = 'StreamingAssistant'
 
 export function ChatPanel(): React.JSX.Element {
   const {
@@ -465,7 +466,7 @@ export function ChatPanel(): React.JSX.Element {
         bottomRef.current?.scrollIntoView({ behavior: isLoading ? 'auto' : 'smooth' })
       })
     }
-  }, [messages, messages.length, stream?.text, stream?.tools.length, isLoading])
+  }, [messages, stream?.text, stream?.tools.length, isLoading])
 
   const toolResultMap = useMemo(() => {
     const map = new Map<string, ToolResultContent>()
@@ -483,7 +484,7 @@ export function ChatPanel(): React.JSX.Element {
   }, [messages])
 
   const groupedMessages = useMemo(() => {
-    const grouped: MessageWithMetadata[] = []
+    const grouped: (MessageWithMetadata & { key: string })[] = []
     for (const msg of messages) {
       if (
         msg.role === 'user' &&
@@ -492,6 +493,7 @@ export function ChatPanel(): React.JSX.Element {
       )
         continue
       const last = grouped[grouped.length - 1]
+      const msgKey = msg.id || (msg.ts ? String(msg.ts) : '') || Math.random().toString()
       if (last && last.role === 'assistant' && msg.role === 'assistant') {
         const lastContent = Array.isArray(last.content)
           ? [...last.content]
@@ -499,13 +501,18 @@ export function ChatPanel(): React.JSX.Element {
         const newContent = Array.isArray(msg.content)
           ? [...msg.content]
           : [{ type: 'text', text: String(msg.content) } as TextContent]
-        grouped[grouped.length - 1] = { ...last, content: [...lastContent, ...newContent] }
+        grouped[grouped.length - 1] = {
+          ...last,
+          content: [...lastContent, ...newContent],
+          key: last.key + '_' + msgKey
+        }
       } else {
         grouped.push({
           ...msg,
           content: Array.isArray(msg.content)
             ? [...msg.content]
-            : [{ type: 'text', text: String(msg.content) } as TextContent]
+            : [{ type: 'text', text: String(msg.content) } as TextContent],
+          key: msgKey
         })
       }
     }
@@ -576,9 +583,9 @@ export function ChatPanel(): React.JSX.Element {
             className="flex-1 overflow-y-auto py-4 flex flex-col transform-gpu will-change-scroll"
           >
             <div className="flex flex-col gap-6">
-              {groupedMessages.map((msg, i) => (
+              {groupedMessages.map((msg) => (
                 <div
-                  key={msg.id || msg.ts || i}
+                  key={msg.key}
                   className="w-full max-w-chat mx-auto pl-4 pr-2 select-text"
                 >
                   <HistoryMessage

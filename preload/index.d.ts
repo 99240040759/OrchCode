@@ -1,58 +1,29 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type {
-  BudgetInfo,
-  AuthSession,
-  ModelConfig
-} from '../shared/ipc-contracts'
-import type { SessionHistoryRecord, MessageWithMetadata } from '@cline/sdk'
+import type { IpcArgs, IpcResult, BudgetInfo, AuthSession, ModelConfig } from '../shared/ipc-contracts'
+import type { SessionHistoryRecord, MessageWithMetadata, SessionPendingPrompt } from '@cline/sdk'
 import type { WorkspaceInfo } from '@cline/shared'
 export interface AppAPI {
   sessionList: () => Promise<SessionHistoryRecord[]>
-  sessionCreate: (args: {
-    title: string
-    workspacePath?: string
-    modelKey?: string
-  }) => Promise<{ sessionId: string; title: string } | { error: string } | undefined>
-  sessionDelete: (args: { sessionId: string }) => Promise<boolean>
-  sessionSend: (args: {
-    sessionId: string
-    prompt: string
-    userImages?: string[]
-    userFiles?: string[]
-    delivery?: 'queue' | 'steer'
-  }) => Promise<boolean>
-  sessionAbort: (args: { sessionId: string }) => Promise<boolean>
-  sessionMessages: (args: { sessionId: string }) => Promise<MessageWithMetadata[]>
-  sessionUpdateTitle: (args: { sessionId: string; title: string }) => Promise<boolean>
+  sessionCreate: (args: IpcArgs<'session:create'>) => Promise<IpcResult<'session:create'>>
+  sessionDelete: (args: IpcArgs<'session:delete'>) => Promise<boolean>
+  sessionSend: (args: IpcArgs<'session:send'>) => Promise<boolean>
+  sessionAbort: (args: IpcArgs<'session:abort'>) => Promise<boolean>
+  sessionMessages: (args: IpcArgs<'session:messages'>) => Promise<MessageWithMetadata[]>
+  sessionUpdateTitle: (args: IpcArgs<'session:update-title'>) => Promise<boolean>
   workspaceGetFolders: () => Promise<WorkspaceInfo[]>
-  workspaceAddFolder: (args: { path: string; name: string }) => Promise<boolean>
-  workspaceRemoveFolder: (args: { path: string }) => Promise<boolean>
+  workspaceAddFolder: (args: IpcArgs<'workspace:add-folder'>) => Promise<boolean>
+  workspaceRemoveFolder: (args: IpcArgs<'workspace:remove-folder'>) => Promise<boolean>
   workspaceOpenDialog: () => Promise<WorkspaceInfo | undefined>
-  fileRead: (args: { filePath: string }) => Promise<string | undefined>
-  fileList: (args: { dirPath: string }) => Promise<string[]>
-
+  fileRead: (args: IpcArgs<'file:read'>) => Promise<string | undefined>
+  fileList: (args: IpcArgs<'file:list'>) => Promise<string[]>
   audioTranscribe: (args: { buffer: Uint8Array }) => Promise<string>
   modelsList: () => Promise<Record<string, ModelConfig>>
   budgetGet: () => Promise<BudgetInfo | undefined>
-  sessionUpdateModel: (args: { sessionId: string; modelKey: string }) => Promise<{ success?: boolean; error?: string }>
-  sessionUpdateReasoning: (args: { sessionId: string; reasoningEffort: string | null }) => Promise<{ success?: boolean; error?: string }>
-  queueUpdate: (args: {
-    sessionId: string
-    promptId: string
-    prompt: string
-    delivery: 'queue' | 'steer'
-  }) => Promise<boolean>
-  queueDelete: (args: { sessionId: string; promptId: string }) => Promise<boolean>
-  queueList: (args: { sessionId: string }) => Promise<
-    {
-      id: string
-      prompt: string
-      delivery: 'queue' | 'steer'
-      attachmentCount: number
-      userImages?: string[]
-      userFiles?: string[]
-    }[]
-  >
+  sessionUpdateModel: (args: IpcArgs<'session:update-model'>) => Promise<IpcResult<'session:update-model'>>
+  sessionUpdateReasoning: (args: IpcArgs<'session:update-reasoning'>) => Promise<IpcResult<'session:update-reasoning'>>
+  queueUpdate: (args: IpcArgs<'queue:update'>) => Promise<boolean>
+  queueDelete: (args: IpcArgs<'queue:delete'>) => Promise<boolean>
+  queueList: (args: IpcArgs<'queue:list'>) => Promise<SessionPendingPrompt[]>
   authStart: () => Promise<void>
   authGetSession: () => Promise<AuthSession | undefined>
   authSignOut: () => Promise<void>
@@ -60,18 +31,11 @@ export interface AppAPI {
   appCheckForUpdates: () => Promise<boolean>
   appRestartAndUpdate: () => Promise<void>
   appOpenReleases: () => Promise<void>
-  onUpdateStatus: (
-    cb: (info: {
-      status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
-      version?: string
-    }) => void
-  ) => () => void
-  onAskQuestion: (
-    cb: (info: { id: string; sessionId: string; question: string; options: string[] }) => void
-  ) => () => void
+  onUpdateStatus: (cb: (info: { status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'; version?: string }) => void) => () => void
+  onAskQuestion: (cb: (info: { id: string; sessionId: string; question: string; options: string[] }) => void) => () => void
   onAskQuestionDismiss: (cb: (info: { id: string }) => void) => () => void
-  submitAnswer: (args: { id: string; answer: string }) => Promise<boolean>
-  sessionSearch: (args: { query: string }) => Promise<{ sessionId: string; title: string; role: string; text: string }[]>
+  submitAnswer: (args: IpcArgs<'ask-question:response'>) => Promise<boolean>
+  sessionSearch: (args: IpcArgs<'session:search'>) => Promise<IpcResult<'session:search'>>
   windowMinimize: () => Promise<boolean>
   windowMaximize: () => Promise<boolean>
   windowQuit: () => Promise<boolean>
