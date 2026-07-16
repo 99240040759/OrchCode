@@ -15,6 +15,9 @@ win:
   executableName: Orch
   icon: logo.ico
   legalTrademarks: Orch Workspace
+  target:
+    - target: nsis
+      arch: [x64]
 nsis:
   artifactName: Orch-Windows-Setup.exe
   shortcutName: Orch
@@ -23,10 +26,15 @@ nsis:
   createStartMenuShortcut: true
   allowToChangeInstallationDirectory: true
   oneClick: false
+  differentialPackage: true
+
 mac:
   category: public.app-category.productivity
   entitlementsInherit: build/entitlements.mac.plist
   icon: logo.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
   extendInfo:
     - NSCameraUsageDescription: Orch requests access to the camera to support image attachments and visual agent capabilities.
     - NSMicrophoneUsageDescription: Orch requests access to the microphone to enable voice transcription and speech-to-text messaging.

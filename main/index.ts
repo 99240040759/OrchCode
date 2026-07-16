@@ -268,13 +268,17 @@ const SYSTEM_PROMPT =
   'You are Orch AI, a premium AI coding assistant. Help developers plan, build, and debug software. You have access to filesystem tools: read, write, edit files, run terminal commands, search the web. Be precise, concise, and always prefer working code over explanations.'
 
 function setupAutoUpdater(): void {
-  autoUpdater.autoDownload = true
+  const isMac = process.platform === 'darwin'
+  autoUpdater.autoDownload = !isMac
   autoUpdater.setFeedURL({ provider: 'github', owner: 'sameer786ss', repo: 'OrchCode' })
   autoUpdater.on('checking-for-update', () =>
     sendToRenderer('update:status', { status: 'checking' })
   )
   autoUpdater.on('update-available', (info) =>
-    sendToRenderer('update:status', { status: 'available', version: info.version })
+    sendToRenderer('update:status', {
+      status: isMac ? 'mac-available' : 'available',
+      version: info.version
+    })
   )
   autoUpdater.on('update-not-available', () =>
     sendToRenderer('update:status', { status: 'not-available' })
@@ -1357,15 +1361,6 @@ app.whenReady().then(async () => {
       console.error('[Main] ClineCore init failed:', err)
       Sentry.captureException(err)
     })
-
-    setTimeout(
-      () =>
-        autoUpdater.checkForUpdates().catch((err: unknown) => {
-          console.error('[Main] Startup update check failed:', err)
-          Sentry.captureException(err)
-        }),
-      3000
-    )
   }, 100)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

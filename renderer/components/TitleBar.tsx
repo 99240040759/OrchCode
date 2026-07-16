@@ -13,7 +13,14 @@ interface TitleBarProps {
 }
 
 type UpdateStatus =
-  'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | undefined
+  | 'checking'
+  | 'available'
+  | 'mac-available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | undefined
 
 const updateState = { status: undefined as UpdateStatus, version: '' }
 const updateListeners = new Set<() => void>()
@@ -58,7 +65,13 @@ export function TitleBar({
 
   const handleUpdateClick = (): void => {
     if (updateStatus === 'downloaded') void window.api.appRestartAndUpdate()
+    else if (updateStatus === 'mac-available') void window.api.appOpenReleases()
   }
+
+  const showUpdateBanner =
+    updateStatus &&
+    updateStatus !== 'not-available' &&
+    updateStatus !== 'checking'
 
   return (
     <div
@@ -80,7 +93,7 @@ export function TitleBar({
         )}
       </div>
       <div className="h-full flex items-center gap-1.5 app-region-no-drag pointer-events-auto ml-auto">
-        {updateStatus && updateStatus !== 'not-available' && updateStatus !== 'checking' && (
+        {showUpdateBanner && (
           <div className="flex items-center mr-2">
             {updateStatus === 'downloading' && (
               <span className="text-3xs text-tx-sub flex items-center gap-1 font-sans animate-pulse">
@@ -88,7 +101,13 @@ export function TitleBar({
                 <span>Downloading Update...</span>
               </span>
             )}
-            {updateStatus === 'downloaded' && (
+            {updateStatus === 'available' && (
+              <span className="text-3xs text-tx-sub flex items-center gap-1 font-sans animate-pulse">
+                <TbRefresh size={13} className="animate-spin" />
+                <span>Preparing Update {updateVersion && `(${updateVersion})`}</span>
+              </span>
+            )}
+            {(updateStatus === 'downloaded' || updateStatus === 'mac-available') && (
               <Button
                 onClick={handleUpdateClick}
                 variant="bright"
@@ -96,14 +115,10 @@ export function TitleBar({
                 className="gap-1 px-1.5 h-5 text-3xs"
               >
                 <TbArrowUpCircle size={13} />
-                <span>Restart to Update {updateVersion && `(${updateVersion})`}</span>
+                {updateStatus === 'downloaded'
+                  ? <span>Restart to Update {updateVersion && `(${updateVersion})`}</span>
+                  : <span>Update Available {updateVersion && `(${updateVersion})`} ↗</span>}
               </Button>
-            )}
-            {updateStatus === 'available' && (
-              <span className="text-3xs text-tx-sub flex items-center gap-1 font-sans animate-pulse">
-                <TbRefresh size={13} className="animate-spin" />
-                <span>Preparing Update {updateVersion && `(${updateVersion})`}</span>
-              </span>
             )}
             {updateStatus === 'error' && (
               <span className="text-3xs text-destructive flex items-center gap-1 font-sans font-medium">
