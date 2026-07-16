@@ -46,3 +46,5 @@ dmg:
 npmRebuild: true
 publish:
   provider: github
+  owner: sameer786ss
+  repo: OrchCode
