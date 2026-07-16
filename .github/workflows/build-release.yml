@@ -10,9 +10,24 @@ env:
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+
   release-mac:
     name: Build & Publish macOS
     runs-on: macos-15
+    needs: create-release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,11 +35,17 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx electron-builder --mac --publish always
+      - name: Remove Mac blockmap files from release
+        run: |
+          gh release delete-asset "${{ github.ref_name }}" "Orch-macOS-arm64.dmg.blockmap" --yes || true
+          gh release delete-asset "${{ github.ref_name }}" "Orch-macOS-x64.dmg.blockmap" --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 
   release-windows:
     name: Build & Publish Windows
     runs-on: windows-2022
-    needs: release-mac
+    needs: create-release
     steps:
       - uses: actions/checkout@v4
       - name: Disable Defender
