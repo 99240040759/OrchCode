@@ -21,14 +21,11 @@
   },
   "dependencies": {
     "@cline/sdk": "^0.0.54",
-    "@modelcontextprotocol/server-github": "^2025.4.8",
     "@sentry/electron": "^7.15.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
     "electron-updater": "^6.3.9",
-    "puppeteer-core": "^25.3.0",
-    "react-arborist": "^3.13.2",
-    "sonner": "^2.0.7"
+    "puppeteer-core": "^25.3.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -61,12 +58,14 @@
     "prettier": "^3.7.4",
     "radix-ui": "^1.6.1",
     "react": "^19.2.1",
+    "react-arborist": "^3.13.2",
     "react-dom": "^19.2.1",
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.9",
     "react-syntax-highlighter": "^15.6.1",
     "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7",
