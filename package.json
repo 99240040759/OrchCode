@@ -1,6 +1,6 @@
 {
   "name": "orchcode",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Orch - The Agentic Workspace Orchestrator. Seamlessly orchestrate, compile, and run AI agents in unified local and cloud workspaces.",
   "main": "./out/main/index.js",
   "author": "Sameer",
@@ -17,22 +17,21 @@
     "postinstall": "electron-builder install-app-deps && node scripts/patch-limits.js",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac"
+    "build:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
     "@cline/sdk": "^0.0.54",
     "@sentry/electron": "^7.15.0",
     "better-sqlite3": "^12.11.1",
-    "dotenv": "^17.4.2",
-    "electron-updater": "^6.3.9",
-    "puppeteer-core": "^25.3.0"
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
-    "@electron-toolkit/utils": "^4.0.0",
     "@fontsource/sora": "^5.2.8",
     "@react-symbols/icons": "^1.4.1",
     "@types/node": "^22.19.1",

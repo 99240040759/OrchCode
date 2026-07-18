@@ -9,6 +9,7 @@ import { toast } from '../lib/toast'
 interface MarkdownProps {
   content: string
 }
+const MAX_HIGHLIGHT_LENGTH = 100_000
 
 export function CodeBlock({
   className,
@@ -38,6 +39,12 @@ export function CodeBlock({
       toast.error('Failed to copy code to clipboard.', err)
     }
   }
+  if (code.length > MAX_HIGHLIGHT_LENGTH)
+    return (
+      <div className="border border-oc-border rounded-md overflow-auto bg-oc-surface font-mono text-xs shadow-md mt-4 mb-4 last:mb-0">
+        <pre className="m-0 p-4 whitespace-pre-wrap break-words text-[13px] leading-relaxed">{code}</pre>
+      </div>
+    )
   return (
     <div className="border border-oc-border rounded-md overflow-hidden bg-oc-surface font-mono text-xs shadow-md mt-4 mb-4 last:mb-0">
       <div className="flex items-center justify-between px-3 py-1.5 bg-oc-base border-b border-oc-border text-tx-sub select-none">
@@ -80,10 +87,21 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
               rel="noopener noreferrer"
             />
           ),
-          code: ({ className, children, ...props }) => {
+          code: ({
+            node,
+            inline,
+            className,
+            children,
+            ...props
+          }: {
+            node?: any
+            inline?: boolean
+            className?: string
+            children?: React.ReactNode
+          }) => {
             const isBlock = !!className?.startsWith('language-') || String(children).includes('\n')
             return isBlock ? (
-              <CodeBlock className={className} {...props}>
+              <CodeBlock className={className}>
                 {children}
               </CodeBlock>
             ) : (

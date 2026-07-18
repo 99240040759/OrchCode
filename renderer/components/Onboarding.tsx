@@ -24,6 +24,8 @@ export function Onboarding(): React.JSX.Element {
     }, 300_000)
     try {
       await login()
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = undefined
     } catch (err: unknown) {
       toast.error('Could not initiate the sign-in process. Please try again.', err)
       if (timeoutRef.current) clearTimeout(timeoutRef.current)

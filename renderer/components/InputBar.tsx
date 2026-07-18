@@ -21,6 +21,7 @@ import { toast } from '../lib/toast'
 import { getAbsolutePath, normalizePath, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT, MAX_ATTACHMENTS } from '../../shared/pathHelpers'
 
 const MAX_INPUT_HEIGHT = 200
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const CIRCLE_RADIUS = 7
 const CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS
 const WHITESPACE_RE = /\s/
@@ -108,6 +109,10 @@ export function InputBar({
   const mediaRecorderRef = useRef<MediaRecorder | undefined>(undefined)
   const streamRef = useRef<MediaStream | undefined>(undefined)
   const audioChunksRef = useRef<BlobPart[]>([])
+  const audioBytesRef = useRef(0)
+  const pendingAttachmentCountRef = useRef(0)
+  const pendingAttachmentBytesRef = useRef(0)
+  const submittingRef = useRef(false)
   const isMountedRef = useRef(true)
   const valueRef = useRef(value)
   const recordingStateRef = useRef<'idle' | 'starting' | 'recording'>('idle')
@@ -162,8 +167,15 @@ export function InputBar({
         ? new MediaRecorder(recordingStream, { mimeType })
         : new MediaRecorder(recordingStream)
       audioChunksRef.current = []
+      audioBytesRef.current = 0
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+        if (e.data.size <= 0) return
+        audioBytesRef.current += e.data.size
+        if (audioBytesRef.current > 15 * 1024 * 1024) {
+          mediaRecorder.stop()
+          return
+        }
+        audioChunksRef.current.push(e.data)
       }
       mediaRecorder.onstart = () => {
         recordingStateRef.current = 'recording'
@@ -177,7 +189,7 @@ export function InputBar({
         setIsListening(false)
         if (audioChunksRef.current.length === 0) return
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
-        if (audioBlob.size > 15 * 1024 * 1024) {
+        if (audioBytesRef.current > 15 * 1024 * 1024 || audioBlob.size > 15 * 1024 * 1024) {
           setInlineError('Audio recording is too large.')
           return
         }
@@ -286,13 +298,17 @@ export function InputBar({
   }
 
   const triggerSubmit = async (): Promise<void> => {
-    if (!onSubmit) return
+    if (!onSubmit || submittingRef.current) return
+    submittingRef.current = true
     const userImages = attachments.flatMap((a) =>
       a.type === 'image' && a.dataUrl ? [a.dataUrl] : []
     )
     const userFiles = attachments.flatMap((a) => (a.type === 'file' && a.path ? [a.path] : []))
     const matches = Array.from(value.matchAll(MENTION_REGEX)) ?? []
-    const normalize = (p: string): string => normalizePath(p).toLowerCase()
+    const normalize = (p: string): string => {
+      const normalized = normalizePath(p)
+      return window.api.platform === 'linux' ? normalized : normalized.toLowerCase()
+    }
     matches.forEach((m) => {
       const rawPath = m[1] || m[2]
       if (rawPath) {
@@ -303,8 +319,12 @@ export function InputBar({
         }
       }
     })
-    const submitted = await onSubmit(userImages, userFiles)
-    if (submitted !== false) setAttachments([])
+    try {
+      const submitted = await onSubmit(userImages, userFiles)
+      if (submitted !== false) setAttachments([])
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -356,8 +376,22 @@ export function InputBar({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     if (!e.target.files) return
-    const files = Array.from(e.target.files).slice(0, MAX_ATTACHMENTS - attachments.length)
+    const selected = Array.from(e.target.files)
+    const availableSlots = Math.max(0, MAX_ATTACHMENTS - attachments.length - pendingAttachmentCountRef.current)
+    const currentBytes = attachments.reduce(
+      (total, attachment) => total + (attachment.dataUrl?.length ?? 0),
+      pendingAttachmentBytesRef.current
+    )
+    const files: File[] = []
+    let nextBytes = currentBytes
+    for (const file of selected) {
+      if (files.length >= availableSlots || nextBytes + file.size > MAX_TOTAL_ATTACHMENT_BYTES) continue
+      files.push(file)
+      nextBytes += file.size
+    }
     e.target.value = ''
+    pendingAttachmentCountRef.current += files.length
+    pendingAttachmentBytesRef.current += files.reduce((total, file) => total + file.size, 0)
     void Promise.allSettled(
       Array.from(files).map(
         async (f) =>
@@ -381,6 +415,8 @@ export function InputBar({
           })
       )
     ).then((results) => {
+      pendingAttachmentCountRef.current -= files.length
+      pendingAttachmentBytesRef.current -= files.reduce((total, file) => total + file.size, 0)
       if (!isMountedRef.current) return
       const successful: Attachment[] = []
       const errors: string[] = []
@@ -391,7 +427,8 @@ export function InputBar({
             result.reason instanceof Error ? result.reason.message : 'Could not add attachment.'
           )
       }
-      if (successful.length > 0) setAttachments((prev) => [...prev, ...successful])
+      if (successful.length > 0)
+        setAttachments((prev) => [...prev, ...successful].slice(0, MAX_ATTACHMENTS))
       if (errors.length > 0) setInlineError(errors.join('\n'))
     })
   }
@@ -530,17 +567,16 @@ export function InputBar({
                       ? models[selectedModelKey]?.name || selectedModelKey
                       : 'Select Model'}
                   </span>
-                  {selectedModelKey && (activeReasoningEffort || models[selectedModelKey]?.reasoningEffort) ? (
+                  {selectedModelKey && activeReasoningEffort && (
                     <span className="text-3xs px-1 py-0.5 bg-oc-active text-tx-bright rounded font-bold uppercase tracking-wide flex items-center gap-0.5">
                       <TbBrain size={9} />
-                      <span>{activeReasoningEffort || models[selectedModelKey]?.reasoningEffort}</span>
+                      <span>{activeReasoningEffort}</span>
                     </span>
-                  ) : selectedModelKey && models[selectedModelKey]?.badge ? (
+                  )}
+                  {selectedModelKey && models[selectedModelKey]?.badge && (
                     <span className="text-3xs px-1 py-0.5 bg-oc-surface text-tx-main rounded font-bold uppercase tracking-wide border border-oc-border">
                       {models[selectedModelKey].badge}
                     </span>
-                  ) : (
-                    <></>
                   )}
                   <TbChevronDown size={14} className="opacity-70 flex-shrink-0" />
                 </button>
@@ -555,16 +591,11 @@ export function InputBar({
                     )}
                   >
                     <span className="truncate flex-1">{models[key].name || key}</span>
-                    {models[key].reasoningEffort ? (
-                      <span className="text-3xs px-1 bg-oc-active text-tx-bright rounded font-bold uppercase tracking-wide flex-shrink-0">
-                        {models[key].reasoningEffort}
-                      </span>
-                    ) : models[key].badge ? (
+
+                    {models[key].badge && (
                       <span className="text-3xs px-1 bg-oc-surface text-tx-main rounded font-bold uppercase tracking-wide border border-oc-border flex-shrink-0">
                         {models[key].badge}
                       </span>
-                    ) : (
-                      <></>
                     )}
                   </DropdownMenuItem>
                 ))}
@@ -574,13 +605,13 @@ export function InputBar({
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger>
                         <TbBrain size={14} className="flex-shrink-0" />
-                        <span>Reasoning ({activeReasoningEffort ? activeReasoningEffort : 'Disabled'})</span>
+                        <span>Reasoning ({activeReasoningEffort ? activeReasoningEffort : (selectedModelKey && models[selectedModelKey]?.reasoningEffort ? 'Default' : 'Disabled')})</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent className="w-[150px] z-[60]">
                         {supportsReasoningEffort ? (
                           <>
                             <DropdownMenuItem onClick={() => changeSessionReasoning(null)} className={cn(!activeReasoningEffort && 'bg-oc-hover text-tx-bright font-semibold')}>
-                              <span>Disabled</span>
+                              <span>{selectedModelKey && models[selectedModelKey]?.reasoningEffort ? 'Default' : 'Disabled'}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => changeSessionReasoning('low')} className={cn(activeReasoningEffort === 'low' && 'bg-oc-hover text-tx-bright font-semibold')}>
                               <span>Low</span>

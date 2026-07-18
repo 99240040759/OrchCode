@@ -3,6 +3,8 @@
   "include": ["electron.vite.config.*", "main/**/*", "preload/**/*", "shared/**/*"],
   "compilerOptions": {
     "composite": true,
-    "types": ["electron-vite/node"]
+    "types": ["electron-vite/node"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   }
 }

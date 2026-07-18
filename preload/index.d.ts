@@ -31,9 +31,11 @@ export interface AppAPI {
   appCheckForUpdates: () => Promise<boolean>
   appRestartAndUpdate: () => Promise<void>
   appOpenReleases: () => Promise<void>
+  browserRegister: (args: IpcArgs<'browser:register'>) => Promise<boolean>
   onUpdateStatus: (cb: (info: { status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'; version?: string }) => void) => () => void
   onAskQuestion: (cb: (info: { id: string; sessionId: string; question: string; options: string[] }) => void) => () => void
   onAskQuestionDismiss: (cb: (info: { id: string }) => void) => () => void
+  onCoreInitFailed: (cb: (info: { message: string }) => void) => () => void
   submitAnswer: (args: IpcArgs<'ask-question:response'>) => Promise<boolean>
   sessionSearch: (args: IpcArgs<'session:search'>) => Promise<IpcResult<'session:search'>>
   windowMinimize: () => Promise<boolean>

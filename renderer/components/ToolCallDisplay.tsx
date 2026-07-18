@@ -2,336 +2,118 @@ import React from 'react'
 import type { ToolUseContent, ToolResultContent } from '@cline/sdk'
 import { useThreadStore } from '../lib/threadStore'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  TbTerminal,
-  TbBolt,
-  TbSearch,
-  TbGlobe,
-  TbHelpCircle,
-  TbDatabase,
-  TbFolderOpen,
-  TbPhoto
-} from 'react-icons/tb'
-
+import { TbTerminal, TbBolt, TbSearch, TbGlobe, TbHelpCircle, TbDatabase, TbFolderOpen, TbPhoto } from 'react-icons/tb'
 import { FileIcon } from './FileIcon'
-
 import { getRelativePath, getAbsolutePath } from '../../shared/pathHelpers'
-
-
-function FileLinkButton({
-  file,
-  displayPath,
-  rangeSuffix = '',
-  onFileClick,
-  workspacePath
-}: {
-  file: string
-  displayPath: string
-  rangeSuffix?: React.ReactNode
-  onFileClick?: (p: string) => void
-  workspacePath?: string
-}): React.JSX.Element {
-  const fName = displayPath.split(/[/\\]/).pop() || displayPath
+function FileLinkButton({ file, displayPath, rangeSuffix = '', onFileClick, workspacePath }: { file: string; displayPath: string; rangeSuffix?: React.ReactNode; onFileClick?: (p: string) => void; workspacePath?: string }): React.JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={() => onFileClick?.(getAbsolutePath(file, workspacePath))}
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-oc-base hover:bg-oc-hover text-tx-sub hover:text-tx-bright transition-colors text-[13px] border border-oc-border/40 font-medium cursor-pointer"
-    >
+    <button type="button" onClick={() => onFileClick?.(getAbsolutePath(file, workspacePath))} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-oc-base hover:bg-oc-hover text-tx-sub hover:text-tx-bright transition-colors text-[13px] border border-oc-border/40 font-medium cursor-pointer">
       <FileIcon path={file} size={14} className="flex-shrink-0 text-tx-dim" />
-      <span className="truncate max-w-[150px]">{fName}</span>
-      {rangeSuffix}
+      <span className="truncate max-w-[150px]">{displayPath.split(/[/\\]/).pop() || displayPath}</span>{rangeSuffix}
     </button>
   )
 }
-
 interface ToolInput {
-  path?: string
-  paths?: string | string[]
-  files?: (
-    | string
-    | {
-        path: string
-        startLine?: number
-        endLine?: number
-        start_line?: number
-        end_line?: number
-        StartLine?: number
-        EndLine?: number
-      }
-  )[]
-  commands?: (string | Record<string, unknown>)[]
-  query?: string
-  url?: string
-  question?: string
-  options?: string[]
-  selector?: string
-  owner?: string
-  repo?: string
-  pull_number?: number
-  issue_number?: number
-  element?: string
-  target?: string
-  prompt?: string
-  task?: string
-  StartLine?: number
-  EndLine?: number
-  startLine?: number
-  endLine?: number
-  start_line?: number
-  end_line?: number
-  ReplacementChunks?: Record<string, unknown>[]
-  old_text?: string
-  new_text?: string
-  insert_line?: number
-  patch?: string
-  input?: string
+  path?: string; paths?: string | string[]; files?: (string | { path: string; startLine?: number; endLine?: number; start_line?: number; end_line?: number; StartLine?: number; EndLine?: number })[]; commands?: (string | Record<string, unknown>)[]; query?: string; url?: string; question?: string; options?: string[]; selector?: string; owner?: string; repo?: string; pull_number?: number; issue_number?: number; element?: string; target?: string; prompt?: string; task?: string; StartLine?: number; EndLine?: number; startLine?: number; endLine?: number; start_line?: number; end_line?: number; ReplacementChunks?: Record<string, unknown>[]; old_text?: string; new_text?: string; insert_line?: number; patch?: string; input?: string
 }
-
-
 const FILE_READ_TOOLS = new Set(['read_files'])
 const FILE_WRITE_TOOLS = new Set(['editor', 'apply_patch'])
-
 function useWorkspacePath(): string | undefined {
-  return useThreadStore(
-    useShallow((s) => {
-      const session = s.sessions.find((sess) => sess.sessionId === s.currentSessionId)
-      if (session) return session.workspaceRoot || session.cwd || undefined
-      return s.activeFolderPath || undefined
-    })
-  )
+  return useThreadStore(useShallow((s) => {
+    const session = s.sessions.find((sess) => sess.sessionId === s.currentSessionId)
+    return session ? session.workspaceRoot || session.cwd || undefined : s.activeFolderPath || undefined
+  }))
 }
-
-export function ToolCallDisplay({
-  toolUse,
-  toolResult,
-  filePath,
-  onFileClick,
-  isError: propIsError
-}: {
-  toolUse: ToolUseContent
-  toolResult?: ToolResultContent
-  filePath?: string
-  onFileClick?: (p: string) => void
-  isError?: boolean
-}): React.ReactElement {
+export function ToolCallDisplay({ toolUse, toolResult, filePath, onFileClick, isError: propIsError, isFinished: propIsFinished }: { toolUse: ToolUseContent; toolResult?: ToolResultContent; filePath?: string; onFileClick?: (p: string) => void; isError?: boolean; isFinished?: boolean }): React.ReactElement {
   const workspacePath = useWorkspacePath()
   const name = toolUse.name
   const n = name.toLowerCase().replace(/^[^_]+__/, '')
   const inp = toolUse.input && typeof toolUse.input === 'object' ? (toolUse.input as ToolInput) : {}
-
-  const isFinished = !!toolResult
-  const isError =
-    propIsError ?? !!(toolResult as ToolResultContent & { is_error?: boolean })?.is_error
-  let actionText = 'Executed'
+  const isFinished = propIsFinished ?? !!toolResult
+  const isError = propIsError ?? !!(toolResult as ToolResultContent & { is_error?: boolean })?.is_error
+  let actionText = 'Executed', isBlock = false
   let detailNode: React.ReactNode = <span className="text-tx-bright font-semibold">{name}</span>
   let icon: React.ReactNode = <TbBolt size={15} />
-  let isBlock = false
-
- if (n.startsWith('browser_') || n.startsWith('playwright_')) {
-    actionText = 'Browser'
-    icon = <TbGlobe size={15} />
+  if (n.startsWith('browser_') || n.startsWith('playwright_')) {
+    actionText = 'Browser'; icon = <TbGlobe size={15} />
     const actionName = n.replace('browser_', '').replace('playwright_', '').replace(/_/g, ' ')
-    if (n === 'browser_navigate' || n === 'playwright_navigate')
-      detailNode = (
-        <span>
-          Navigate to{' '}
-          <span className="text-tx-bright font-mono font-semibold select-text">
-            {inp.url || 'URL'}
-          </span>
-        </span>
-      )
-    else if (inp.element || inp.target || inp.selector)
-      detailNode = (
-        <span>
-          {actionName}{' '}
-          <span className="text-tx-bright font-semibold">
-            &quot;{inp.element || inp.target || inp.selector}&quot;
-          </span>
-        </span>
-      )
+    if (n === 'browser_navigate' || n === 'playwright_navigate') detailNode = <span>Navigate to <span className="text-tx-bright font-mono font-semibold select-text">{inp.url || 'URL'}</span></span>
+    else if (inp.element || inp.target || inp.selector) detailNode = <span>{actionName} <span className="text-tx-bright font-semibold">"{inp.element || inp.target || inp.selector}"</span></span>
     else detailNode = <span className="capitalize">{actionName}</span>
   } else if (n === 'search_web') {
-    actionText = 'Searched Web'
-    icon = <TbGlobe size={15} />
-    detailNode = (
-      <span>
-        for <span className="text-tx-bright font-semibold">&quot;{inp.query}&quot;</span>
-      </span>
-    )
+    actionText = 'Searched Web'; icon = <TbGlobe size={15} />
+    detailNode = <span>for <span className="text-tx-bright font-semibold">"{inp.query}"</span></span>
   } else if (n === 'generate_image') {
-    actionText = 'Generated Image'
-    icon = <TbPhoto size={15} />
-    detailNode = (
-      <span>
-        with prompt <span className="text-tx-bright font-semibold">&quot;{inp.prompt}&quot;</span>
-      </span>
-    )
+    actionText = 'Generated Image'; icon = <TbPhoto size={15} />
+    detailNode = <span>with prompt <span className="text-tx-bright font-semibold">"{inp.prompt}"</span></span>
   } else if (FILE_READ_TOOLS.has(n) || FILE_WRITE_TOOLS.has(n)) {
-    actionText = FILE_WRITE_TOOLS.has(n) ? 'Edited' : 'Read'
-    icon = undefined
-    const files = Array.isArray(inp.files)
-      ? inp.files
-      : inp.path
-        ? [inp.path]
-        : filePath
-          ? [filePath]
-          : []
+    actionText = FILE_WRITE_TOOLS.has(n) ? 'Edited' : 'Read'; icon = undefined
+    const files = Array.isArray(inp.files) ? inp.files : inp.path ? [inp.path] : filePath ? [filePath] : []
     if (files.length > 1) {
       isBlock = true
       detailNode = (
         <div className="flex flex-wrap gap-1.5 w-full mt-1.5">
           {files.map((f, idx) => {
             const file = typeof f === 'string' ? f : f && typeof f === 'object' ? f.path : ''
-            if (!file) return <React.Fragment key={idx} />
-            return (
-              <FileLinkButton
-                key={idx}
-                file={file}
-                displayPath={getRelativePath(file, workspacePath)}
-                onFileClick={onFileClick}
-                workspacePath={workspacePath}
-              />
-            )
+            return file ? <FileLinkButton key={idx} file={file} displayPath={getRelativePath(file, workspacePath)} onFileClick={onFileClick} workspacePath={workspacePath} /> : <React.Fragment key={idx} />
           })}
         </div>
       )
     } else {
       const f0 = files[0]
-      const file = f0
-        ? typeof f0 === 'string'
-          ? f0
-          : f0 && typeof f0 === 'object'
-            ? f0.path
-            : ''
-        : ''
-      detailNode = file ? (
-        <FileLinkButton
-          file={file}
-          displayPath={getRelativePath(file, workspacePath)}
-          onFileClick={onFileClick}
-          workspacePath={workspacePath}
-        />
-      ) : (
-        <span className="font-mono">file</span>
-      )
+      const file = f0 ? (typeof f0 === 'string' ? f0 : f0 && typeof f0 === 'object' ? f0.path : '') : ''
+      detailNode = file ? <FileLinkButton file={file} displayPath={getRelativePath(file, workspacePath)} onFileClick={onFileClick} workspacePath={workspacePath} /> : <span className="font-mono">file</span>
     }
   } else if (n === 'list_dir') {
-    actionText = 'Listed Directory'
-    icon = <TbFolderOpen size={15} />
-    detailNode = (
-      <span className="font-mono text-tx-bright font-semibold">
-        {getRelativePath(inp.path ?? '', workspacePath)}
-      </span>
-    )
+    actionText = 'Listed Directory'; icon = <TbFolderOpen size={15} />
+    detailNode = <span className="font-mono text-tx-bright font-semibold">{getRelativePath(inp.path ?? '', workspacePath)}</span>
   } else if (n === 'grep_search' || n === 'search_codebase') {
-    actionText = 'Searched Codebase'
-    icon = <TbSearch size={15} />
-    detailNode = (
-      <span>
-        for <span className="text-tx-bright font-semibold">&quot;{inp.query}&quot;</span>
-      </span>
-    )
+    actionText = 'Searched Codebase'; icon = <TbSearch size={15} />
+    detailNode = <span>for <span className="text-tx-bright font-semibold">"{inp.query}"</span></span>
   } else if (n === 'fetch_web_content') {
-    actionText = 'Fetched Web'
-    icon = <TbGlobe size={15} />
-    detailNode = (
-      <span>
-        url <span className="text-tx-bright font-semibold select-text">{inp.url}</span>
-      </span>
-    )
+    actionText = 'Fetched Web'; icon = <TbGlobe size={15} />
+    detailNode = <span>url <span className="text-tx-bright font-semibold select-text">{inp.url}</span></span>
   } else if (n === 'skills') {
-    actionText = 'Run Skill'
-    icon = <TbBolt size={15} />
+    actionText = 'Run Skill'; icon = <TbBolt size={15} />
     detailNode = <span className="text-tx-bright font-semibold">{inp.prompt}</span>
   } else if (n === 'run_commands') {
-    actionText = 'Ran Command'
+    actionText = 'Ran Command'; icon = <TbTerminal size={15} />
     const firstCmd = Array.isArray(inp.commands) ? inp.commands[0] : undefined
-    const rawCmd =
-      typeof firstCmd === 'string'
-        ? firstCmd
-        : firstCmd && typeof firstCmd === 'object'
-          ? (firstCmd as Record<string, unknown>).command
-          : ''
+    const rawCmd = typeof firstCmd === 'string' ? firstCmd : firstCmd && typeof firstCmd === 'object' ? (firstCmd as Record<string, unknown>).command : ''
     const cmd = rawCmd ? String(rawCmd) : ''
-    icon = <TbTerminal size={15} />
-    detailNode = (
-      <span className="text-tx-bright font-mono font-semibold">
-        {cmd ? (cmd.length > 50 ? `${cmd.substring(0, 50)}...` : cmd) : 'command'}
-      </span>
-    )
+    detailNode = <span className="text-tx-bright font-mono font-semibold">{cmd ? (cmd.length > 50 ? `${cmd.substring(0, 50)}...` : cmd) : 'command'}</span>
   } else if (n === 'ask_question' || n === 'ask_permission') {
-    actionText = 'Asked User'
-    isBlock = true
-    icon = <TbHelpCircle size={15} />
-    const q = inp.question
+    actionText = 'Asked User'; isBlock = true; icon = <TbHelpCircle size={15} />
     const options = Array.isArray(inp.options) ? inp.options : []
     detailNode = (
       <div className="flex flex-col gap-2 mt-1 w-full max-w-chat">
-        <span className="text-tx-bright font-semibold text-sm leading-relaxed whitespace-pre-wrap select-text">
-          {q}
-        </span>
+        <span className="text-tx-bright font-semibold text-sm leading-relaxed whitespace-pre-wrap select-text">{inp.question}</span>
         {!isFinished && options.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-1.5">
-            {options.map((opt, i) => (
-              <span
-                key={i}
-                className="px-3 py-1.5 rounded-lg border border-oc-border bg-oc-raised text-tx-sub text-xs font-semibold select-text"
-              >
-                {opt}
-              </span>
-            ))}
+            {options.map((opt, i) => <span key={i} className="px-3 py-1.5 rounded-lg border border-oc-border bg-oc-raised text-tx-sub text-xs font-semibold select-text">{opt}</span>)}
           </div>
         )}
       </div>
     )
-  } else if (
-    n.includes('sqlite') ||
-    n.includes('postgres') ||
-    n.includes('database') ||
-    n.includes('sql') ||
-    n.includes('db')
-  ) {
-    actionText = 'Database'
-    icon = <TbDatabase size={15} />
+  } else if (n.includes('sqlite') || n.includes('postgres') || n.includes('database') || n.includes('sql') || n.includes('db')) {
+    actionText = 'Database'; icon = <TbDatabase size={15} />
     detailNode = <span className="text-tx-bright font-semibold">{name}</span>
   } else if (n === 'compact') {
-    actionText = 'Compacting'
-    icon = <TbBolt size={15} />
+    actionText = 'Compacting'; icon = <TbBolt size={15} />
     detailNode = <span>context...</span>
   }
-
-  const spinner = !isFinished && (
-    <span className="inline-block w-3 h-3 rounded-full border-2 border-oc-active/30 border-t-oc-active animate-spin ml-1" />
-  )
-  const failBadge = isFinished && isError && (
-    <span className="text-destructive font-semibold ml-1">(failed)</span>
-  )
-
-  if (isBlock) {
-    return (
-      <div
-        className={`flex flex-col gap-1 py-1.5 text-xs text-tx-muted select-none ${!isFinished ? 'opacity-80' : ''}`}
-      >
-        <div className="flex items-center gap-1.5">
-          <span>{actionText}</span>
-          {icon && <span className="flex-shrink-0 text-tx-dim flex items-center">{icon}</span>}
-          {spinner}
-          {failBadge}
-        </div>
-        <div className="pl-4">{detailNode}</div>
+  const spinner = !isFinished && <span className="inline-block w-3 h-3 rounded-full border-2 border-oc-active/30 border-t-oc-active animate-spin ml-1" />
+  const failBadge = isFinished && isError && <span className="text-destructive font-semibold ml-1">(failed)</span>
+  return isBlock ? (
+    <div className={`flex flex-col gap-1 py-1.5 text-xs text-tx-muted select-none ${!isFinished ? 'opacity-80' : ''}`}>
+      <div className="flex items-center gap-1.5">
+        <span>{actionText}</span>{icon && <span className="flex-shrink-0 text-tx-dim flex items-center">{icon}</span>}{spinner}{failBadge}
       </div>
-    )
-  }
-  return (
-    <div
-      className={`flex items-center gap-1.5 text-xs text-tx-muted py-0.5 select-none ${!isFinished ? 'opacity-80' : ''}`}
-    >
-      <span>{actionText}</span>
-      {icon && <span className="flex-shrink-0 text-tx-dim flex items-center">{icon}</span>}
-      {detailNode}
-      {spinner}
-      {failBadge}
+      <div className="pl-4">{detailNode}</div>
+    </div>
+  ) : (
+    <div className={`flex items-center gap-1.5 text-xs text-tx-muted py-0.5 select-none ${!isFinished ? 'opacity-80' : ''}`}>
+      <span>{actionText}</span>{icon && <span className="flex-shrink-0 text-tx-dim flex items-center">{icon}</span>}{detailNode}{spinner}{failBadge}
     </div>
   )
 }

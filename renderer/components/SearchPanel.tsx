@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { TbSearch } from 'react-icons/tb'
 import { useThreadStore } from '../lib/threadStore'
 import * as Sentry from '@sentry/electron/renderer'
-
+import { toast } from '../lib/toast'
 
 export function SearchPanel(): React.JSX.Element {
   const selectSession = useThreadStore((s) => s.selectSession)
@@ -13,6 +13,7 @@ export function SearchPanel(): React.JSX.Element {
     { sessionId: string; title: string; role: string; text: string }[]
   >([])
   const [searching, setSearching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const handleQueryChange = (val: string): void => {
@@ -34,9 +35,11 @@ export function SearchPanel(): React.JSX.Element {
     if (!normalizedQuery) {
       setResults([])
       setSearching(false)
+      setError(null)
       return
     }
     setSearching(true)
+    setError(null)
     ;(async () => {
       try {
         const matches = await window.api.sessionSearch({ query: debouncedQuery })
@@ -45,7 +48,11 @@ export function SearchPanel(): React.JSX.Element {
         setSearching(false)
       } catch (err: unknown) {
         Sentry.captureException(err)
-        if (!cancelled) setSearching(false)
+        toast.error('Search failed.', err)
+        if (!cancelled) {
+          setError('Failed to query message history.')
+          setSearching(false)
+        }
       }
     })()
     return () => {
@@ -91,6 +98,8 @@ export function SearchPanel(): React.JSX.Element {
           ))
         ) : searching ? (
           <p className="text-center text-sm text-tx-dim py-8">Searching conversations...</p>
+        ) : error ? (
+          <p className="text-center text-sm text-destructive py-8">{error}</p>
         ) : query.trim() ? (
           <p className="text-center text-sm text-tx-dim py-8">No results found.</p>
         ) : (

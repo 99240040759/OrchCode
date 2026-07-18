@@ -21,15 +21,16 @@ process.on('unhandledRejection', (reason, promise) => {
 
 import type {
   AuthSession,
+  StoredAuthSession,
   IpcArgs,
   IpcChannel,
   IpcResult,
   ModelConfig
 } from '../shared/ipc-contracts'
 import { join, basename, resolve } from 'path'
-import { existsSync, mkdirSync } from 'fs'
-import { readFile, unlink, readdir, copyFile, stat } from 'fs/promises'
-import { randomUUID } from 'crypto'
+import { pathToFileURL } from 'url'
+import { mkdir, readFile, unlink, cp, readdir, stat, realpath } from 'fs/promises'
+import { createHash, randomBytes, randomUUID } from 'crypto'
 import { autoUpdater } from 'electron-updater'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../resources/icon.png?asset'
@@ -37,12 +38,15 @@ import type { ClineCore, CoreSessionEvent, Message } from '@cline/sdk'
 import type { CoreSessionConfig } from '@cline/core'
 import type { WorkspaceInfo, WorkspaceManifest } from '@cline/shared'
 import { emptyWorkspaceManifest, upsertWorkspaceInfo } from '@cline/shared'
-import dotenv from 'dotenv'
 import { isPathAllowedPure, writeAtomic, serviceUrl } from './utils/fs'
+import { registerBrowserWebContents, unregisterBrowserWebContents, getExtraTools } from './extraTools'
 import { MAX_ATTACHMENTS } from '../shared/pathHelpers'
 const MAX_VIEWABLE_FILE_BYTES = 5 * 1024 * 1024
 const MAX_PROMPT_LENGTH = 200_000
 const REQUEST_TIMEOUT_MS = 30_000
+const MAX_USER_FILE_BYTES = 15 * 1024 * 1024
+const MAX_TOTAL_USER_FILE_BYTES = 50 * 1024 * 1024
+const MAX_TOTAL_IMAGE_BYTES = 25 * 1024 * 1024
 const stripPrefix = (id: string): string =>
   id.includes('/') ? id.substring(id.indexOf('/') + 1) : id
 
@@ -88,22 +92,27 @@ const userData = (): string => {
 }
 const encAuthPath = (): string => join(userData(), 'auth.enc')
 
-function isAuthSession(value: unknown): value is AuthSession {
+function isAuthSession(value: unknown): value is StoredAuthSession {
   return (
     !!value &&
     typeof value === 'object' &&
-    typeof (value as AuthSession).accessToken === 'string' &&
-    typeof (value as AuthSession).refreshToken === 'string' &&
-    typeof (value as AuthSession).expiresAt === 'number' &&
-    Number.isFinite((value as AuthSession).expiresAt)
+    typeof (value as StoredAuthSession).accessToken === 'string' &&
+    typeof (value as StoredAuthSession).refreshToken === 'string' &&
+    typeof (value as StoredAuthSession).expiresAt === 'number' &&
+    Number.isFinite((value as StoredAuthSession).expiresAt)
   )
 }
 
 async function _readEncryptedSession(): Promise<{ json: string } | undefined> {
   try {
     const p = encAuthPath()
-    if (!existsSync(p)) return undefined
-    const raw = await readFile(p, 'utf-8')
+    let raw: string
+    try {
+      raw = await readFile(p, 'utf-8')
+    } catch (readErr: any) {
+      if (readErr?.code === 'ENOENT') return undefined
+      throw readErr
+    }
     if (!raw) return undefined
     const buf = Buffer.from(raw, 'base64')
     const json = safeStorage.isEncryptionAvailable()
@@ -116,9 +125,9 @@ async function _readEncryptedSession(): Promise<{ json: string } | undefined> {
   }
 }
 
-async function saveAuthSession(session: AuthSession): Promise<boolean> {
+async function saveAuthSession(session: StoredAuthSession): Promise<boolean> {
   try {
-    mkdirSync(userData(), { recursive: true })
+    await mkdir(userData(), { recursive: true })
     const json = JSON.stringify(session)
     const data = safeStorage.isEncryptionAvailable()
       ? safeStorage.encryptString(json).toString('base64')
@@ -133,7 +142,7 @@ async function saveAuthSession(session: AuthSession): Promise<boolean> {
 }
 
 
-async function getRawAuthSession(): Promise<AuthSession | undefined> {
+async function getRawAuthSession(): Promise<StoredAuthSession | undefined> {
   const result = await _readEncryptedSession()
   if (!result) return undefined
   try {
@@ -145,12 +154,47 @@ async function getRawAuthSession(): Promise<AuthSession | undefined> {
   }
 }
 
+function toPublicAuthSession(session: StoredAuthSession | undefined): AuthSession | undefined {
+  if (!session) return undefined
+  let user: AuthSession['user']
+  try {
+    const payloadPart = session.accessToken.split('.')[1]
+    if (payloadPart) {
+      const payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf-8')) as Record<string, unknown>
+      const metadata = payload.user_metadata
+      const data = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+      const email = typeof payload.email === 'string' ? payload.email : ''
+      const name =
+        typeof data.full_name === 'string'
+          ? data.full_name
+          : typeof data.name === 'string'
+            ? data.name
+            : email.includes('@')
+              ? email.split('@')[0]
+              : 'User'
+      const avatarUrl =
+        typeof data.avatar_url === 'string'
+          ? data.avatar_url
+          : typeof data.picture === 'string'
+            ? data.picture
+            : ''
+      user = { name, email, avatarUrl }
+    }
+  } catch {
+  }
+  return { expiresAt: session.expiresAt, user }
+}
+
 async function clearAuthSession(): Promise<void> {
   try {
-    if (existsSync(encAuthPath())) await unlink(encAuthPath())
+    try {
+      await unlink(encAuthPath())
+    } catch (unlinkErr: any) {
+      if (unlinkErr?.code !== 'ENOENT') throw unlinkErr
+    }
   } catch (err: unknown) {
     console.error('[Auth] Clear auth.enc failed:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
   }
 }
 
@@ -159,15 +203,58 @@ interface AuthResponse {
   refresh_token?: string
   expires_in?: number
 }
-let _refreshPromise: Promise<AuthSession | undefined> | undefined = undefined
-async function refreshAuthSessionIfNeeded(): Promise<AuthSession | undefined> {
+interface PendingAuthRequest {
+  verifier: string
+  expiresAt: number
+}
+const pendingAuthRequests = new Map<string, PendingAuthRequest>()
+
+function clearExpiredAuthRequests(): void {
+  const now = Date.now()
+  for (const [state, request] of pendingAuthRequests)
+    if (request.expiresAt <= now) pendingAuthRequests.delete(state)
+}
+
+async function acceptAuthResponse(data: AuthResponse): Promise<StoredAuthSession | undefined> {
+  if (!data.access_token || !data.refresh_token) return undefined
+  const expiresIn = data.expires_in
+  const ttl = typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : 3600
+  const session = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt: Math.floor(Date.now() + Math.min(ttl, 60 * 60 * 24 * 30) * 1000)
+  }
+  if (!(await saveAuthSession(session))) return undefined
+  cachedModels = undefined
+  cachedModelsAt = 0
+  sendToRenderer('auth:change', toPublicAuthSession(session))
+  return session
+}
+
+async function exchangeAuthCode(code: string, verifier: string): Promise<StoredAuthSession | undefined> {
+  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
+  const anonKey = process.env.SUPABASE_ANON_KEY
+  if (!supabaseUrl || !anonKey) return undefined
+  const parsed = new URL(supabaseUrl)
+  if (parsed.protocol !== 'https:') return undefined
+  const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: anonKey },
+    body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  })
+  if (!response.ok) return undefined
+  return acceptAuthResponse((await response.json()) as AuthResponse)
+}
+let _refreshPromise: Promise<StoredAuthSession | undefined> | undefined = undefined
+async function refreshAuthSessionIfNeeded(): Promise<StoredAuthSession | undefined> {
   if (_refreshPromise) return _refreshPromise
   _refreshPromise = _doRefresh().finally(() => {
     _refreshPromise = undefined
   })
   return _refreshPromise
 }
-async function _doRefresh(): Promise<AuthSession | undefined> {
+async function _doRefresh(): Promise<StoredAuthSession | undefined> {
   const session = await getRawAuthSession()
   if (!session || !session.refreshToken) return undefined
   if (session.expiresAt - Date.now() > 5 * 60 * 1000) return session
@@ -195,18 +282,7 @@ async function _doRefresh(): Promise<AuthSession | undefined> {
       console.error('[Auth] Refresh failed:', response.status)
       return undefined
     }
-    const data = (await response.json()) as AuthResponse
-    if (!data.access_token || !data.refresh_token) return undefined
-    const expiresIn = data.expires_in
-    const ttl = typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : 3600
-    const newSession = {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      expiresAt: Math.floor(Date.now() + Math.min(ttl, 60 * 60 * 24 * 30) * 1000)
-    }
-    if (!(await saveAuthSession(newSession))) return undefined
-    sendToRenderer('auth:change', newSession)
-    return newSession
+    return acceptAuthResponse((await response.json()) as AuthResponse)
   } catch (err: unknown) {
     console.error('[Auth] Refresh error:', err)
     if (sentryInitialized) Sentry.captureException(err)
@@ -226,21 +302,17 @@ async function handleAuthCallback(urlStr: string): Promise<void> {
     const params = new URLSearchParams(parsed.search)
     if (parsed.hash.length > 1)
       for (const [key, value] of new URLSearchParams(parsed.hash.slice(1))) params.set(key, value)
-    const accessToken = params.get('access_token')
-    const refreshToken = params.get('refresh_token')
-    const rawExpiresIn = Number(params.get('expires_in'))
-    if (accessToken && refreshToken) {
-      const expiresIn = Number.isFinite(rawExpiresIn) && rawExpiresIn > 0 ? rawExpiresIn : 3600
-      const expiresAt = Math.floor(Date.now() + Math.min(expiresIn, 60 * 60 * 24 * 30) * 1000)
-      const session = { accessToken, refreshToken, expiresAt }
-      if (!(await saveAuthSession(session))) return
-      cachedModels = undefined
-      cachedModelsAt = 0
-      sendToRenderer('auth:change', session)
-    }
+    const state = params.get('state')
+    const code = params.get('code')
+    if (!state || !code) return
+    clearExpiredAuthRequests()
+    const request = pendingAuthRequests.get(state)
+    if (!request) return
+    pendingAuthRequests.delete(state)
+    await exchangeAuthCode(code, request.verifier)
   } catch (err: unknown) {
     console.error('[Auth] Deep link parse failed:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
   }
 }
 
@@ -249,6 +321,7 @@ let mainWindow: BrowserWindow | undefined = undefined
 let clineInitPromise: Promise<ClineCore> | undefined = undefined
 let isQuitting = false
 const activeClineSessions = new Set<string>()
+const cancelledSessions = new Set<string>()
 
 interface PortEntry {
   port: Electron.MessagePortMain
@@ -261,8 +334,30 @@ const draftSessions = new Map<
 >()
 const pendingQuestions = new Map<
   string,
-  { resolve: (answer: string) => void; timer: NodeJS.Timeout; sessionId: string }
+  { resolve: (answer: string) => void; timer?: NodeJS.Timeout; sessionId: string }
 >()
+
+function unregisterSessionPort(sessionId: string, expected?: PortEntry): void {
+  const entry = sessionPorts.get(sessionId)
+  if (!entry || (expected && entry !== expected)) return
+  sessionPorts.delete(sessionId)
+  try {
+    entry.unsub()
+  } catch (err: unknown) {
+    console.error('[SessionPort] unsubscribe failed:', err)
+    if (sentryInitialized) Sentry.captureException(err)
+  }
+  try {
+    entry.port.close()
+  } catch (err: unknown) {
+    console.error('[SessionPort] close failed:', err)
+    if (sentryInitialized) Sentry.captureException(err)
+  }
+}
+
+function unregisterAllSessionPorts(): void {
+  for (const sessionId of Array.from(sessionPorts.keys())) unregisterSessionPort(sessionId)
+}
 
 const SYSTEM_PROMPT =
   'You are Orch AI, a premium AI coding assistant. Help developers plan, build, and debug software. You have access to filesystem tools: read, write, edit files, run terminal commands, search the web. Be precise, concise, and always prefer working code over explanations.'
@@ -284,7 +379,7 @@ function setupAutoUpdater(): void {
     sendToRenderer('update:status', { status: 'not-available' })
   )
   autoUpdater.on('error', (err) => {
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
     sendToRenderer('update:status', { status: 'error' })
   })
   autoUpdater.on('download-progress', () =>
@@ -305,37 +400,41 @@ function isSafeExternalUrl(value: string): boolean {
 }
 
 function isRendererUrl(value: string): boolean {
-  if (!is.dev) return value.startsWith('file://')
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (!rendererUrl) return false
   try {
-    return new URL(value).origin === new URL(rendererUrl).origin
+    if (is.dev) {
+      const rendererUrl = process.env.ELECTRON_RENDERER_URL
+      if (!rendererUrl) return false
+      const expected = new URL(rendererUrl)
+      const actual = new URL(value)
+      return actual.origin === expected.origin && actual.pathname === expected.pathname
+    }
+    return value === pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
   } catch {
     return false
   }
 }
 
-async function loadEnv(): Promise<void> {
-  const base = app.getAppPath()
-  const p = join(base, '.env')
-  if (!existsSync(p)) return
-  try {
-    dotenv.config({ path: p })
-  } catch (err: unknown) {
-    console.error('[Env] Load failed:', err)
-    Sentry.captureException(err)
-  }
-}
+
 
 const wpPath = (): string => join(userData(), 'workspaces.json')
 async function loadManifest(): Promise<WorkspaceManifest> {
   try {
-    if (!existsSync(wpPath())) return emptyWorkspaceManifest()
-    const parsed = JSON.parse(await readFile(wpPath(), 'utf-8'))
-    return parsed && typeof parsed === 'object' && parsed.workspaces ? parsed as WorkspaceManifest : emptyWorkspaceManifest()
+    let raw: string
+    try {
+      raw = await readFile(wpPath(), 'utf-8')
+    } catch (readErr: any) {
+      if (readErr?.code === 'ENOENT') return emptyWorkspaceManifest()
+      throw readErr
+    }
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyWorkspaceManifest()
+    const workspaces = (parsed as { workspaces?: unknown }).workspaces
+    if (!workspaces || typeof workspaces !== 'object' || Array.isArray(workspaces))
+      return emptyWorkspaceManifest()
+    return parsed as WorkspaceManifest
   } catch (err: unknown) {
     console.error('[Workspaces] Load manifest failed:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
     return emptyWorkspaceManifest()
   }
 }
@@ -344,34 +443,78 @@ async function saveManifest(manifest: WorkspaceManifest): Promise<void> {
     await writeAtomic(wpPath(), JSON.stringify(manifest))
   } catch (err: unknown) {
     console.error('[Workspaces] Save manifest failed:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
   }
+}
+let resolvedFoldersCache: string[] | null = null
+
+async function getResolvedWorkspaceRoots(): Promise<string[]> {
+  if (resolvedFoldersCache !== null) return resolvedFoldersCache
+  try {
+    const folders = await loadFolders()
+    const resolved = await Promise.all(
+      folders.map(async (folder) => {
+        try {
+          return await realpath(folder.rootPath)
+        } catch {
+          return undefined
+        }
+      })
+    )
+    resolvedFoldersCache = resolved.filter((r): r is string => r !== undefined)
+    return resolvedFoldersCache
+  } catch (err: unknown) {
+    console.error('[Workspaces] Failed to resolve workspace roots:', err)
+    return []
+  }
+}
+
+let manifestMutationQueue: Promise<void> = Promise.resolve()
+async function mutateManifest<T>(
+  operation: (manifest: WorkspaceManifest) => Promise<T>
+): Promise<T> {
+  const operationPromise = manifestMutationQueue.then(async () => {
+    const res = await operation(await loadManifest())
+    resolvedFoldersCache = null
+    return res
+  })
+  manifestMutationQueue = operationPromise.then(
+    () => undefined,
+    (err) => {
+      console.error('[ManifestQueue] Mutation error:', err)
+      resolvedFoldersCache = null
+      return undefined
+    }
+  )
+  return operationPromise
 }
 async function loadFolders(): Promise<WorkspaceInfo[]> {
   const manifest = await loadManifest()
   return Object.values(manifest.workspaces).map((w) => ({ ...w, rootPath: resolve(w.rootPath) }))
 }
-async function addWorkspaceFolder(fp: string, name: string): Promise<boolean> {
+async function addWorkspaceFolder(fp: string, name: string): Promise<{ ok: boolean; resolvedPath: string }> {
   try {
-    if (!(await stat(fp)).isDirectory()) return false
-    const manifest = await loadManifest()
+    const workspacePath = await realpath(fp)
+    if (!(await stat(workspacePath)).isDirectory()) return { ok: false, resolvedPath: '' }
     const { generateWorkspaceInfo } = await import('@cline/core')
-    const info = await generateWorkspaceInfo(fp)
-    info.hint = name.trim() || basename(fp)
-    const updated = upsertWorkspaceInfo(manifest, info)
-    await saveManifest(updated)
-    return true
+    const info = await generateWorkspaceInfo(workspacePath)
+    info.hint = name.trim().slice(0, 120) || basename(workspacePath)
+    await mutateManifest(async (manifest) => {
+      await saveManifest(upsertWorkspaceInfo(manifest, info))
+    })
+    return { ok: true, resolvedPath: workspacePath }
   } catch (err: unknown) {
     console.error('[Workspaces] Add folder failed:', err)
-    Sentry.captureException(err)
-    return false
+    if (sentryInitialized) Sentry.captureException(err)
+    return { ok: false, resolvedPath: '' }
   }
 }
 
 async function listDir(dir: string): Promise<string[]> {
   try {
+    if (!(await isPathAllowed(dir))) return []
     const { getFileIndex } = await import('@cline/sdk')
-    const index = await getFileIndex(dir)
+    const index = await getFileIndex(dir, { ttlMs: 2_000 })
     return Array.from(index)
   } catch (err: unknown) {
     console.error('[listDir] Failed:', err)
@@ -383,29 +526,23 @@ async function listDir(dir: string): Promise<string[]> {
 
 
 async function isPathAllowed(filePath: string): Promise<boolean> {
-  const folders = await loadFolders()
-  return isPathAllowedPure(
-    filePath,
-    userData(),
-    folders.map((f) => f.rootPath)
-  )
+  try {
+    const [resolvedPath, roots] = await Promise.all([
+      realpath(filePath),
+      getResolvedWorkspaceRoots()
+    ])
+    return isPathAllowedPure(resolvedPath, undefined, roots)
+  } catch {
+    return false
+  }
 }
 
 function registerSessionPort(sessionId: string, port: Electron.MessagePortMain): void {
-  const existing = sessionPorts.get(sessionId)
-  if (existing) {
-    existing.unsub()
-    try {
-      existing.port.close()
-    } catch (err: unknown) {
-      console.error('[SessionPort] Port close failed:', err)
-      if (sentryInitialized) Sentry.captureException(err)
-    }
-    sessionPorts.delete(sessionId)
-  }
+  unregisterSessionPort(sessionId)
   port.start()
   const entry: PortEntry = { port, unsub: () => {} }
   sessionPorts.set(sessionId, entry)
+  port.on('close', () => unregisterSessionPort(sessionId, entry))
 
   const subscribeToCore = (core: ClineCore): void => {
     if (sessionPorts.get(sessionId) !== entry) return
@@ -417,8 +554,7 @@ function registerSessionPort(sessionId: string, port: Electron.MessagePortMain):
         } catch (err: unknown) {
           console.error('[SessionPort] postMessage failed:', err)
           if (sentryInitialized) Sentry.captureException(err)
-          entry.unsub()
-          if (sessionPorts.get(sessionId) === entry) sessionPorts.delete(sessionId)
+          unregisterSessionPort(sessionId, entry)
         }
       },
       { sessionId }
@@ -441,7 +577,7 @@ function registerSessionPort(sessionId: string, port: Electron.MessagePortMain):
           console.error('[SessionPort] postMessage error failed:', postErr)
           if (sentryInitialized) Sentry.captureException(postErr)
         }
-        sessionPorts.delete(sessionId)
+        unregisterSessionPort(sessionId, entry)
         console.error('[Session port] Initialization failed:', error)
         if (sentryInitialized) Sentry.captureException(error)
       })
@@ -471,6 +607,7 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => {
     resolvePendingQuestions('The application window was closed.')
+    unregisterAllSessionPorts()
     mainWindow = undefined
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -502,18 +639,23 @@ function createWindow(): void {
 async function copySkillsToGlobalFolder(): Promise<void> {
   try {
     const srcDir = join(app.getAppPath(), 'skills')
-    if (!existsSync(srcDir)) return
+    let entries: import('fs').Dirent[] = []
+    try {
+      entries = await readdir(srcDir, { withFileTypes: true })
+    } catch (readErr: any) {
+      if (readErr?.code === 'ENOENT') return
+      throw readErr
+    }
     const destDir = join(app.getPath('home'), '.cline', 'skills')
-    mkdirSync(destDir, { recursive: true })
-    const entries = await readdir(srcDir, { withFileTypes: true })
+    await mkdir(destDir, { recursive: true })
     await Promise.all(
-      entries
-        .filter((entry) => entry.isFile())
-        .map(async (entry) => {
-          const srcFile = join(srcDir, entry.name)
-          const destFile = join(destDir, entry.name)
-          await copyFile(srcFile, destFile)
+      entries.map((entry) =>
+        cp(join(srcDir, entry.name), join(destDir, entry.name), {
+          recursive: entry.isDirectory(),
+          force: false,
+          errorOnExist: false
         })
+      )
     )
   } catch (err: unknown) {
     console.error('[Skills] Global copy failed:', err)
@@ -553,28 +695,32 @@ async function initClineCore(): Promise<ClineCore> {
         toolExecutors: {
           ...createDefaultExecutors({
             bash: {
-              shell: 'powershell'
+              shell: 'powershell',
+              timeoutMs: 120000
             }
           }),
           askQuestion: async (question, options, context) =>
             new Promise<string>((resolve) => {
               const id = randomUUID()
               const sessionId = context?.sessionId ?? ''
+              let timer: NodeJS.Timeout | undefined = undefined
               const settle = (answer: string): void => {
                 const pending = pendingQuestions.get(id)
                 if (!pending) return
-                clearTimeout(pending.timer)
+                if (pending.timer) clearTimeout(pending.timer)
                 pendingQuestions.delete(id)
                 pending.resolve(answer)
               }
-              const timer = setTimeout(
+              pendingQuestions.set(id, { resolve, timer: undefined, sessionId })
+              timer = setTimeout(
                 () => {
                   settle('No response was provided.')
                   sendToRenderer('ask-question:dismiss', { id })
                 },
                 10 * 60 * 1000
               )
-              pendingQuestions.set(id, { resolve, timer, sessionId })
+              const pending = pendingQuestions.get(id)
+              if (pending) pending.timer = timer
               if (!mainWindow || mainWindow.isDestroyed()) settle('No response was provided.')
               else sendToRenderer('ask-question', { id, sessionId, question, options })
             })
@@ -582,6 +728,7 @@ async function initClineCore(): Promise<ClineCore> {
       }
     })
     cline = core
+    clineInitPromise = undefined
     console.log('[Main] ClineCore ready')
     return core
   })()
@@ -589,7 +736,7 @@ async function initClineCore(): Promise<ClineCore> {
     return await clineInitPromise
   } catch (err: unknown) {
     clineInitPromise = undefined
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
     throw err
   }
 }
@@ -621,7 +768,7 @@ async function fetchModelsList(): Promise<Record<string, ModelConfig> | undefine
     }
   } catch (err: unknown) {
     console.error('[Models] Fetch failed:', err)
-    Sentry.captureException(err)
+    if (sentryInitialized) Sentry.captureException(err)
   }
   return undefined
 }
@@ -634,25 +781,30 @@ function getReasoningEffort(
 }
 
 const getSandboxFallbackPath = (): string => {
-  const path = join(app.getPath('userData'), 'sandbox')
-  if (!existsSync(path)) {
-    mkdirSync(path, { recursive: true })
-  }
-  return path
+  return join(app.getPath('userData'), 'sandbox')
+}
+
+interface SessionMetadata {
+  reasoningEffort?: string | null
+  title?: string
+  workspacePath?: string
+  modelId?: string
+  providerId?: string
+  [key: string]: unknown
 }
 
 async function buildSessionConfig(
   sessionId: string,
   workspacePath: string | undefined,
   model: ModelConfig,
-  session: AuthSession,
-  metadata?: any
+  session: StoredAuthSession,
+  metadata?: SessionMetadata
 ): Promise<CoreSessionConfig> {
   const baseUrl = serviceUrl(`${model.provider}/v1`)
   const anonKey = process.env.SUPABASE_ANON_KEY
   if (!baseUrl || !anonKey) throw new Error('The application server configuration is incomplete.')
-  const rawEffort = metadata && metadata.reasoningEffort !== undefined ? metadata.reasoningEffort : model.reasoningEffort
-  const reasoningEffort = getReasoningEffort(rawEffort)
+  const rawEffort = metadata?.reasoningEffort !== undefined ? metadata.reasoningEffort : model.reasoningEffort
+  const reasoningEffort = getReasoningEffort(rawEffort as string | undefined)
   let workspaceMetadata: string | undefined
   if (workspacePath) {
     try {
@@ -662,10 +814,12 @@ async function buildSessionConfig(
       console.error('[SessionConfig] Failed to build workspace metadata:', err)
     }
   }
-  let extraTools: any[] = []
+  let extraTools: ReturnType<typeof getExtraTools> = []
   try {
-    const { getExtraTools } = await import('./extraTools')
     extraTools = getExtraTools(session.accessToken, sessionId)
+    if (!model.capabilities?.includes('images')) {
+      extraTools = extraTools.filter(t => t.name !== 'playwright_screenshot')
+    }
   } catch (err: unknown) {
     console.error('[SessionConfig] Failed to load extra tools:', err)
   }
@@ -683,8 +837,8 @@ async function buildSessionConfig(
     disableMcpSettingsTools: true,
     enableSpawnAgent: false,
     enableAgentTeams: false,
-    yolo: true,
-    maxIterations: 100,
+    yolo: false,
+    maxIterations: 50,
     execution: { maxConsecutiveMistakes: 6, loopDetection: { softThreshold: 3, hardThreshold: 5 } },
     compaction: { enabled: true, thresholdRatio: 0.8, strategy: 'agentic' },
     sessionId,
@@ -747,6 +901,10 @@ async function ensureSessionIsActive(sessionId: string): Promise<ClineCore> {
         }),
         sessionMetadata: record.metadata
       })
+      if (cancelledSessions.has(sessionId)) {
+        await core.delete(sessionId)
+        throw new Error('This session was deleted while it was starting.')
+      }
       activeClineSessions.add(sessionId)
       return core
     } catch (err: unknown) {
@@ -761,30 +919,42 @@ async function ensureSessionIsActive(sessionId: string): Promise<ClineCore> {
 
 function sanitizeUserImages(images: string[] | undefined): string[] | undefined {
   const seen = new Set<string>()
-  const sanitized = (images ?? [])
-    .filter((image) => {
-      if (typeof image !== 'string') return false
-      if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(image)) return false
-      if (image.length > 15 * 1024 * 1024) return false
-      const key = `${image.length}:${image.slice(0, 64)}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .slice(0, MAX_ATTACHMENTS)
+  let totalBytes = 0
+  const sanitized: string[] = []
+  for (const image of images ?? []) {
+    if (sanitized.length >= MAX_ATTACHMENTS || typeof image !== 'string') continue
+    if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(image)) continue
+    if (image.length > 15 * 1024 * 1024 || seen.has(image)) continue
+    if (totalBytes + image.length > MAX_TOTAL_IMAGE_BYTES) continue
+    seen.add(image)
+    totalBytes += image.length
+    sanitized.push(image)
+  }
   return sanitized.length ? sanitized : undefined
 }
 
 async function sanitizeUserFiles(files: string[] | undefined): Promise<string[] | undefined> {
-  const candidates = (files ?? [])
+  const candidates = Array.from(
+    new Set(
+      (files ?? [])
     .filter((file) => typeof file === 'string' && file.trim().length > 0 && file.length <= 4_096)
     .map((file) => file.trim())
-    .slice(0, MAX_ATTACHMENTS)
-  const dedupe = Array.from(new Set(candidates))
-  const allowed = await Promise.all(
-    dedupe.map(async (file) => ((await isPathAllowed(file)) ? file : null))
+    )
   )
-  const sanitized = allowed.filter((f): f is string => f !== null)
+  const sanitized: string[] = []
+  let totalBytes = 0
+  for (const file of candidates) {
+    if (sanitized.length >= MAX_ATTACHMENTS) break
+    try {
+      if (!(await isPathAllowed(file))) continue
+      const info = await stat(file)
+      if (!info.isFile() || info.size > MAX_USER_FILE_BYTES) continue
+      if (totalBytes + info.size > MAX_TOTAL_USER_FILE_BYTES) continue
+      totalBytes += info.size
+      sanitized.push(file)
+    } catch {
+    }
+  }
   return sanitized.length ? sanitized : undefined
 }
 
@@ -794,9 +964,10 @@ async function readViewableFile(filePath: string): Promise<string | undefined> {
       console.error('[FileRead] Path not allowed:', filePath)
       return undefined
     }
-    const info = await stat(filePath)
+    const resolvedPath = await realpath(filePath)
+    const info = await stat(resolvedPath)
     if (!info.isFile() || info.size > MAX_VIEWABLE_FILE_BYTES) return undefined
-    const content = await readFile(filePath, 'utf-8')
+    const content = await readFile(resolvedPath, 'utf-8')
     return content.includes('\0') ? undefined : content
   } catch (err: unknown) {
     if (sentryInitialized) Sentry.captureException(err)
@@ -804,11 +975,129 @@ async function readViewableFile(filePath: string): Promise<string | undefined> {
   }
 }
 
+async function resolveWorkspacePath(workspacePath: string | undefined): Promise<string | undefined> {
+  if (!workspacePath) return undefined
+  const resolvedPath = await realpath(workspacePath)
+  if (!(await stat(resolvedPath)).isDirectory() || !(await isPathAllowed(resolvedPath)))
+    throw new Error('Workspace is not an approved directory.')
+  return resolvedPath
+}
+
 
 function isTrustedSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean {
   const win = mainWindow
   if (!win || win.isDestroyed()) return false
-  return event.sender === win.webContents && isRendererUrl(event.senderFrame?.url ?? '')
+  return (
+    event.sender === win.webContents &&
+    event.senderFrame?.parent === null &&
+    isRendererUrl(event.senderFrame?.url ?? '')
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isString(value: unknown, maxLength = 4_096): value is string {
+  return typeof value === 'string' && value.length <= maxLength
+}
+
+function isSessionId(value: unknown): value is string {
+  return isString(value, 200) && value.length > 0
+}
+
+function hasNoArgs(value: unknown): boolean {
+  return value === undefined || value === null
+}
+
+function isDelivery(value: unknown): value is 'queue' | 'steer' | undefined {
+  return value === undefined || value === 'queue' || value === 'steer'
+}
+
+function hasValidIpcArgs(channel: IpcChannel, args: unknown): boolean {
+  if (
+    channel === 'session:list' ||
+    channel === 'workspace:get-folders' ||
+    channel === 'workspace:open-dialog' ||
+    channel === 'window:minimize' ||
+    channel === 'window:maximize' ||
+    channel === 'window:quit' ||
+    channel === 'models:list' ||
+    channel === 'budget:get' ||
+    channel === 'auth:start' ||
+    channel === 'auth:get-session' ||
+    channel === 'auth:sign-out' ||
+    channel === 'app:check-for-updates' ||
+    channel === 'app:restart-and-update' ||
+    channel === 'app:open-releases'
+  )
+    return hasNoArgs(args)
+  if (!isRecord(args)) return false
+  if (channel === 'session:create')
+    return (
+      isString(args.title, 120) &&
+      (args.workspacePath === undefined || isString(args.workspacePath, 4_096)) &&
+      (args.modelKey === undefined || isString(args.modelKey, 512))
+    )
+  if (
+    channel === 'session:delete' ||
+    channel === 'session:abort' ||
+    channel === 'session:messages'
+  )
+    return isSessionId(args.sessionId)
+  if (channel === 'session:update-title')
+    return isSessionId(args.sessionId) && isString(args.title, 120)
+  if (channel === 'session:update-model')
+    return isSessionId(args.sessionId) && isString(args.modelKey, 512)
+  if (channel === 'session:update-reasoning')
+    return (
+      isSessionId(args.sessionId) &&
+      (args.reasoningEffort === null ||
+        args.reasoningEffort === 'low' ||
+        args.reasoningEffort === 'medium' ||
+        args.reasoningEffort === 'high' ||
+        args.reasoningEffort === 'xhigh' ||
+        args.reasoningEffort === 'max')
+    )
+  if (channel === 'session:send')
+    return (
+      isSessionId(args.sessionId) &&
+      isString(args.prompt, MAX_PROMPT_LENGTH) &&
+      isDelivery(args.delivery) &&
+      (args.userImages === undefined ||
+        (Array.isArray(args.userImages) &&
+          args.userImages.length <= MAX_ATTACHMENTS &&
+          args.userImages.every((image) => isString(image, 15 * 1024 * 1024)))) &&
+      (args.userFiles === undefined ||
+        (Array.isArray(args.userFiles) &&
+          args.userFiles.length <= MAX_ATTACHMENTS &&
+          args.userFiles.every((file) => isString(file, 4_096))))
+    )
+  if (channel === 'queue:update')
+    return (
+      isSessionId(args.sessionId) &&
+      isString(args.promptId, 200) &&
+      isString(args.prompt, MAX_PROMPT_LENGTH) &&
+      (args.delivery === 'queue' || args.delivery === 'steer')
+    )
+  if (channel === 'queue:delete') return isSessionId(args.sessionId) && isString(args.promptId, 200)
+  if (channel === 'queue:list') return isSessionId(args.sessionId)
+  if (channel === 'workspace:add-folder') return isString(args.path, 4_096) && isString(args.name, 120)
+  if (channel === 'workspace:remove-folder') return isString(args.path, 4_096)
+  if (channel === 'file:read' || channel === 'file:list')
+    return isString(channel === 'file:read' ? args.filePath : args.dirPath, 4_096)
+  if (channel === 'audio:transcribe') return args.buffer instanceof Uint8Array
+  if (channel === 'browser:register')
+    return (
+      isSessionId(args.sessionId) &&
+      typeof args.webContentsId === 'number' &&
+      Number.isSafeInteger(args.webContentsId) &&
+      args.webContentsId > 0
+    )
+  if (channel === 'ask-question:response')
+    return isString(args.id, 200) && isString(args.answer, 4_000)
+  if (channel === 'session:search') return isString(args.query, 2_000)
+  return false
 }
 
 function registerIpcHandlers(): void {
@@ -821,7 +1110,7 @@ function registerIpcHandlers(): void {
     defaultVal?: IpcResult<C>
   ): void => {
     ipcMain.handle(channel, async (event, args) => {
-      if (!isTrustedSender(event)) return defaultVal
+      if (!isTrustedSender(event) || !hasValidIpcArgs(channel, args)) return defaultVal
       try {
         return await fn(event, args as IpcArgs<C>)
       } catch (e: unknown) {
@@ -869,18 +1158,20 @@ function registerIpcHandlers(): void {
     false
   )
   safeIpc('workspace:get-folders', async () => loadFolders(), [])
-  safeIpc('workspace:add-folder', async (_, { path: fp, name }) => addWorkspaceFolder(fp, name), false)
+  safeIpc('workspace:add-folder', async (_, { path: fp, name }) => {
+    const { ok } = await addWorkspaceFolder(fp, name)
+    return ok
+  }, false)
   safeIpc(
     'workspace:remove-folder',
     async (_, { path: fp }) => {
-      const manifest = await loadManifest()
-      if (manifest.workspaces[fp]) {
+      return mutateManifest(async (manifest) => {
+        if (!manifest.workspaces[fp]) return false
         delete manifest.workspaces[fp]
         if (manifest.currentWorkspacePath === fp) delete manifest.currentWorkspacePath
         await saveManifest(manifest)
         return true
-      }
-      return false
+      })
     },
     false
   )
@@ -891,40 +1182,50 @@ function registerIpcHandlers(): void {
       if (!q) return []
       const core = await initClineCore()
       const raw = await core.list(500)
+      const sessions = raw
+        .sort((a, b) => {
+          const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0
+          const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0
+          return tb - ta
+        })
+        .slice(0, 50)
       const results: { sessionId: string; title: string; role: string; text: string }[] = []
-      await Promise.all(
-        raw
-          .filter((s) => s.status !== 'idle')
-          .map(async (s) => {
+      const BATCH = 10
+      for (let i = 0; i < sessions.length && results.length < 50; i += BATCH) {
+        const batch = sessions.slice(i, i + BATCH)
+        const batchResults = await Promise.all(
+          batch.map(async (session) => {
+            const found: typeof results = []
             try {
-              const msgs = await core.readMessages(s.sessionId)
-              for (const m of msgs) {
-                if (results.length >= 200) return
+              const messages = await core.readMessages(session.sessionId)
+              for (const message of messages) {
+                if (found.length >= 5) break
                 let text = ''
-                if (typeof m.content === 'string') {
-                  text = m.content
-                } else if (Array.isArray(m.content)) {
-                  for (const part of m.content) {
+                if (typeof message.content === 'string') text = message.content
+                else if (Array.isArray(message.content)) {
+                  for (const part of message.content) {
                     if (part.type === 'text') text += part.text
                     else if (part.type === 'thinking') text += part.thinking
-                    else if (part.type === 'tool_result' && typeof part.content === 'string') text += part.content
-                    if (text.length > 4000) break
+                    else if (part.type === 'tool_result' && typeof part.content === 'string')
+                      text += part.content
+                    if (text.length > 4_000) break
                   }
                 }
-                if (text && text.toLowerCase().includes(q)) {
-                  results.push({
-                    sessionId: s.sessionId,
-                    title: s.metadata?.title || 'Untitled',
-                    role: m.role || 'assistant',
+                if (text && text.toLowerCase().includes(q))
+                  found.push({
+                    sessionId: session.sessionId,
+                    title: session.metadata?.title || 'Untitled',
+                    role: message.role || 'assistant',
                     text: text.slice(0, 300)
                   })
-                }
               }
-            } catch {
-            }
+            } catch {}
+            return found
           })
-      )
-      return results
+        )
+        for (const batchHits of batchResults) results.push(...batchHits)
+      }
+      return results.slice(0, 50)
     },
     []
   )
@@ -962,18 +1263,36 @@ function registerIpcHandlers(): void {
   safeIpc('auth:start', async () => {
     const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
     if (!supabaseUrl) throw new Error('Authentication is not configured.')
+    const supabase = new URL(supabaseUrl)
+    if (supabase.protocol !== 'https:') throw new Error('Authentication must use HTTPS.')
+    clearExpiredAuthRequests()
+    const state = randomUUID()
+    const verifier = randomBytes(32).toString('base64url')
+    const challenge = createHash('sha256').update(verifier).digest('base64url')
+    pendingAuthRequests.set(state, { verifier, expiresAt: Date.now() + 10 * 60 * 1000 })
     const url = new URL(`${supabaseUrl}/auth/v1/authorize`)
     url.searchParams.set('provider', 'google')
     url.searchParams.set('redirect_to', 'orchcode://auth-callback')
+    url.searchParams.set('response_type', 'code')
+    url.searchParams.set('code_challenge', challenge)
+    url.searchParams.set('code_challenge_method', 'S256')
+    url.searchParams.set('state', state)
     await shell.openExternal(url.toString())
   })
-  safeIpc('auth:get-session', () => refreshAuthSessionIfNeeded(), undefined)
+  safeIpc('auth:get-session', async () => toPublicAuthSession(await refreshAuthSessionIfNeeded()), undefined)
   safeIpc('auth:sign-out', async () => {
     await clearAuthSession()
     cachedModels = undefined
     cachedModelsAt = 0
     sendToRenderer('auth:change', undefined)
   })
+  safeIpc(
+    'browser:register',
+    async (_, { sessionId, webContentsId }) =>
+      (activeClineSessions.has(sessionId) || draftSessions.has(sessionId)) &&
+      registerBrowserWebContents(sessionId, webContentsId as number),
+    false
+  )
   safeIpc('models:list', async () => (await fetchModelsList()) || {}, {})
   safeIpc(
     'budget:get',
@@ -990,7 +1309,7 @@ function registerIpcHandlers(): void {
         if (response.ok) return await response.json()
       } catch (err: unknown) {
         console.error('[Budget] Fetch failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
       }
       return undefined
     },
@@ -1061,9 +1380,16 @@ function registerIpcHandlers(): void {
         return {
           error:
             'You have too many open chats. Please send a message or delete an existing chat first.'
-        }
+      }
       const sessionId = `draft_${randomUUID()}`
-      draftSessions.set(sessionId, { title: normalizedTitle, workspacePath, modelKey })
+      cancelledSessions.delete(sessionId)
+      let approvedWorkspacePath: string | undefined
+      try {
+        approvedWorkspacePath = await resolveWorkspacePath(workspacePath)
+      } catch (err: unknown) {
+        return { error: err instanceof Error ? err.message : 'Workspace is not available.' }
+      }
+      draftSessions.set(sessionId, { title: normalizedTitle, workspacePath: approvedWorkspacePath, modelKey })
       return { sessionId, title: normalizedTitle }
     },
     undefined
@@ -1085,23 +1411,19 @@ function registerIpcHandlers(): void {
   safeIpc(
     'session:delete',
     async (_, { sessionId }) => {
-      if (draftSessions.delete(sessionId)) return true
+      cancelledSessions.add(sessionId)
+      if (draftSessions.delete(sessionId)) {
+        unregisterSessionPort(sessionId)
+        unregisterBrowserWebContents(sessionId)
+        return true
+      }
       const deleted = await (await initClineCore()).delete(sessionId)
       if (!deleted) return false
       activeClineSessions.delete(sessionId)
       sessionStartLocks.delete(sessionId)
       resolvePendingQuestionsForSession(sessionId, 'Session was deleted.')
-      const e = sessionPorts.get(sessionId)
-      if (e) {
-        e.unsub()
-        try {
-          e.port.close()
-        } catch (err: unknown) {
-          console.error('[SessionDelete] Port close failed:', err)
-          Sentry.captureException(err)
-        }
-        sessionPorts.delete(sessionId)
-      }
+      unregisterSessionPort(sessionId)
+      unregisterBrowserWebContents(sessionId)
       return true
     },
     false
@@ -1110,6 +1432,7 @@ function registerIpcHandlers(): void {
     'session:abort',
     async (_, { sessionId }) => {
       if (draftSessions.has(sessionId)) {
+        cancelledSessions.add(sessionId)
         draftSessions.delete(sessionId)
         return true
       }
@@ -1118,7 +1441,7 @@ function registerIpcHandlers(): void {
         return true
       } catch (err: unknown) {
         console.error('[SessionAbort] Abort failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
         return false
       }
     },
@@ -1134,7 +1457,7 @@ function registerIpcHandlers(): void {
           .then((res) => !!res.updated)
       } catch (err: unknown) {
         console.error('[QueueUpdate] Failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
         return false
       }
     },
@@ -1148,7 +1471,7 @@ function registerIpcHandlers(): void {
         return core.pendingPrompts.delete({ sessionId, promptId }).then((res) => !!res.removed)
       } catch (err: unknown) {
         console.error('[QueueDelete] Failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
         return false
       }
     },
@@ -1162,7 +1485,7 @@ function registerIpcHandlers(): void {
         return await core.pendingPrompts.list({ sessionId })
       } catch (err: unknown) {
         console.error('[QueueList] Failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
         return []
       }
     },
@@ -1175,11 +1498,11 @@ function registerIpcHandlers(): void {
       if (!win) return undefined
       const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
       if (result.canceled || !result.filePaths.length) return undefined
-      const fp = result.filePaths[0], name = basename(fp)
-      const ok = await addWorkspaceFolder(fp, name)
+      const fp = result.filePaths[0]
+      const { ok, resolvedPath } = await addWorkspaceFolder(fp, basename(fp))
       if (ok) {
         const manifest = await loadManifest()
-        return manifest.workspaces[fp]
+        return manifest.workspaces[resolvedPath]
       }
       return undefined
     },
@@ -1193,7 +1516,7 @@ function registerIpcHandlers(): void {
         return true
       } catch (err: unknown) {
         console.error('[AutoUpdate] Check failed:', err)
-        Sentry.captureException(err)
+        if (sentryInitialized) Sentry.captureException(err)
         return false
       }
     },
@@ -1240,7 +1563,7 @@ function registerIpcHandlers(): void {
       const normalizedPrompt = prompt.trim()
       if (normalizedPrompt.length > MAX_PROMPT_LENGTH) return false
       if (!normalizedPrompt && !userImages?.length && !userFiles?.length) return false
-      let core!: ClineCore
+      let core: ClineCore
       const draft = draftSessions.get(sessionId)
       if (draft) {
         const existing = draftStartLocks.get(sessionId)
@@ -1249,43 +1572,47 @@ function registerIpcHandlers(): void {
           if (!ok) return false
           core = await ensureSessionIsActive(sessionId)
         } else {
-          const draftStartPromise = (async (): Promise<boolean> => {
+          const draftStartPromise = (async (): Promise<ClineCore | null> => {
             try {
               const models = await fetchModelsList()
-              if (!models || Object.keys(models).length === 0) return false
+              if (!models || Object.keys(models).length === 0) return null
               const modelKey = draft.modelKey || Object.keys(models)[0]
               const mCfg = models[modelKey]
-              if (!mCfg) return false
+              if (!mCfg) return null
               const session = await refreshAuthSessionIfNeeded()
-              if (!session) return false
-              core = await initClineCore()
-              draftSessions.delete(sessionId)
-              try {
-                await core.start({
-                  config: await buildSessionConfig(sessionId, draft.workspacePath, mCfg, session, { reasoningEffort: draft.reasoningEffort }),
-                  interactive: true,
-                  sessionMetadata: {
-                    title: draft.title,
-                    workspacePath: draft.workspacePath || undefined,
-                    modelId: mCfg.id,
-                    providerId: mCfg.provider,
-                    reasoningEffort: draft.reasoningEffort || undefined
-                  }
-                })
-              } catch (err: unknown) {
-                console.error('[SessionSend] Draft start failed:', err)
-                if (sentryInitialized) Sentry.captureException(err)
-                return false
+              if (!session) return null
+              const initedCore = await initClineCore()
+              if (cancelledSessions.has(sessionId)) return null
+              await initedCore.start({
+                config: await buildSessionConfig(sessionId, draft.workspacePath, mCfg, session, { reasoningEffort: draft.reasoningEffort }),
+                interactive: true,
+                sessionMetadata: {
+                  title: draft.title,
+                  workspacePath: draft.workspacePath || undefined,
+                  modelId: mCfg.id,
+                  providerId: mCfg.provider,
+                  reasoningEffort: draft.reasoningEffort || undefined
+                }
+              })
+              if (cancelledSessions.has(sessionId)) {
+                await initedCore.delete(sessionId)
+                return null
               }
+              draftSessions.delete(sessionId)
               activeClineSessions.add(sessionId)
-              return true
+              return initedCore
+            } catch (err: unknown) {
+              console.error('[SessionSend] Draft start failed:', err)
+              if (sentryInitialized) Sentry.captureException(err)
+              return null
             } finally {
               draftStartLocks.delete(sessionId)
             }
           })()
-          draftStartLocks.set(sessionId, draftStartPromise)
-          const ok = await draftStartPromise
-          if (!ok) return false
+          draftStartLocks.set(sessionId, draftStartPromise.then((c) => c !== null))
+          const startedCore = await draftStartPromise
+          if (!startedCore) return false
+          core = startedCore
         }
       } else {
         core = await ensureSessionIsActive(sessionId)
@@ -1323,7 +1650,8 @@ function registerIpcHandlers(): void {
     },
     false
   )
-  ipcMain.on('session:register-port', (event, { sessionId }: { sessionId: string }) => {
+  ipcMain.on('session:register-port', (event, args: unknown) => {
+    const sessionId = isRecord(args) ? args.sessionId : undefined
     if (
       !isTrustedSender(event) ||
       typeof sessionId !== 'string' ||
@@ -1341,15 +1669,17 @@ function registerIpcHandlers(): void {
     const port = event.ports[0]
     if (port) registerSessionPort(sessionId, port)
   })
+  ipcMain.on('session:unregister-port', (event, args: unknown) => {
+    const sessionId = isRecord(args) ? args.sessionId : undefined
+    if (isTrustedSender(event) && isSessionId(sessionId)) unregisterSessionPort(sessionId)
+  })
 }
 
 
 
-if (is.dev) app.commandLine.appendSwitch('remote-debugging-port', '9222')
-
 app.whenReady().then(async () => {
-  await loadEnv()
   electronApp.setAppUserModelId('live.orch.app')
+  await mkdir(getSandboxFallbackPath(), { recursive: true })
   app.on('browser-window-created', (_, win) => optimizer.watchWindowShortcuts(win))
   setupAutoUpdater()
   registerIpcHandlers()
@@ -1359,7 +1689,8 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     initClineCore().catch((err: unknown) => {
       console.error('[Main] ClineCore init failed:', err)
-      Sentry.captureException(err)
+      if (sentryInitialized) Sentry.captureException(err)
+      sendToRenderer('core:init-failed', { message: 'AI core failed to initialize. Please restart the application.' })
     })
   }, 100)
   app.on('activate', () => {
@@ -1375,29 +1706,15 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   const forceExit = setTimeout(() => app.exit(1), 8000)
   void (async () => {
-    for (const entry of sessionPorts.values()) {
-      try {
-        entry.unsub()
-      } catch (err: unknown) {
-        console.error('[Quit] unsub failed:', err)
-        Sentry.captureException(err)
-      }
-      try {
-        entry.port.close()
-      } catch (err: unknown) {
-        console.error('[Quit] port close failed:', err)
-        Sentry.captureException(err)
-      }
-    }
-    sessionPorts.clear()
+    unregisterAllSessionPorts()
     try {
       await Promise.race([
-        cline?.dispose(),
+        cline.dispose(),
         new Promise<void>((resolve) => setTimeout(resolve, 6000))
       ])
     } catch (err: unknown) {
       console.error('[Quit] Cline dispose failed:', err)
-      Sentry.captureException(err)
+      if (sentryInitialized) Sentry.captureException(err)
     } finally {
       clearTimeout(forceExit)
       app.exit(0)

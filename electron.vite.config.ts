@@ -37,7 +37,15 @@ export default defineConfig({
     root: resolve(__dirname, 'renderer'),
     build: {
       rollupOptions: {
-        input: resolve(__dirname, 'renderer/index.html')
+        input: resolve(__dirname, 'renderer/index.html'),
+        output: {
+          manualChunks(id) {
+            if (id.includes('react-syntax-highlighter')) return 'syntax-highlighter'
+            if (id.includes('react-arborist')) return 'file-tree'
+            if (id.includes('@sentry')) return 'telemetry'
+            return undefined
+          }
+        }
       }
     },
     define: {

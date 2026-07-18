@@ -1,6 +1,5 @@
 import type { SessionHistoryRecord, MessageWithMetadata, SessionPendingPrompt, WorkspaceInfo } from '@cline/sdk'
 import type { ModelInfo } from '@cline/shared'
-
 export interface BudgetInfo {
   cost_usd: number
   limit_usd: number
@@ -9,6 +8,14 @@ export interface BudgetInfo {
   allowed: boolean
 }
 export interface AuthSession {
+  expiresAt: number
+  user?: {
+    name: string
+    email: string
+    avatarUrl: string
+  }
+}
+export interface StoredAuthSession {
   accessToken: string
   refreshToken: string
   expiresAt: number
@@ -18,7 +25,6 @@ export interface ModelConfig extends ModelInfo {
   reasoningEffort?: string
   badge?: string
 }
-
 export interface IpcContracts {
   'session:list': { args: void; result: SessionHistoryRecord[] }
   'session:create': {
@@ -71,10 +77,10 @@ export interface IpcContracts {
   'app:check-for-updates': { args: void; result: boolean }
   'app:restart-and-update': { args: void; result: void }
   'app:open-releases': { args: void; result: void }
+  'browser:register': { args: { sessionId: string; webContentsId: number }; result: boolean }
   'ask-question:response': { args: { id: string; answer: string }; result: boolean }
   'session:search': { args: { query: string }; result: { sessionId: string; title: string; role: string; text: string }[] }
 }
-
 export type IpcChannel = keyof IpcContracts
 export type IpcArgs<C extends IpcChannel> = IpcContracts[C]['args']
 export type IpcResult<C extends IpcChannel> = IpcContracts[C]['result']

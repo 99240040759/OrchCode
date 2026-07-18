@@ -22,12 +22,6 @@ type UpdateStatus =
   | 'error'
   | undefined
 
-const updateState = { status: undefined as UpdateStatus, version: '' }
-const updateListeners = new Set<() => void>()
-function notifyUpdateListeners(): void {
-  updateListeners.forEach((fn) => fn())
-}
-
 export function TitleBar({
   sidebarOpen,
   artifactOpen,
@@ -35,20 +29,16 @@ export function TitleBar({
   onToggleArtifact
 }: TitleBarProps): React.JSX.Element {
   const isMac = window.api.platform === 'darwin'
-  const [, forceUpdate] = useState(0)
-  const { status: updateStatus, version: updateVersion } = updateState
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(undefined)
+  const [updateVersion, setUpdateVersion] = useState('')
   const session = useAuthStore((s) => s.session)
 
   useEffect(() => {
-    const rerender = (): void => forceUpdate((n) => n + 1)
-    updateListeners.add(rerender)
     const unsub = window.api.onUpdateStatus((info) => {
-      updateState.status = info.status as UpdateStatus
-      if (info.version) updateState.version = info.version
-      notifyUpdateListeners()
+      setUpdateStatus(info.status as UpdateStatus)
+      if (info.version) setUpdateVersion(info.version)
     })
     return () => {
-      updateListeners.delete(rerender)
       unsub()
     }
   }, [])

@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { AuthSession } from '../../shared/ipc-contracts'
-import * as Sentry from '@sentry/electron/renderer'
 import { toast } from './toast'
 import { useThreadStore } from './threadStore'
 
@@ -19,29 +18,8 @@ interface AuthStore {
   logout: () => Promise<void>
 }
 
-function decodeUser(session: AuthSession | undefined): UserProfile | undefined {
-  if (!session) return undefined
-  try {
-    const parts = session.accessToken.split('.')
-    if (parts.length !== 3) return undefined
-    const encoded = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-    const padLen = (4 - (encoded.length % 4)) % 4
-    const padded = encoded + '='.repeat(padLen)
-    const bytes = Uint8Array.from(window.atob(padded), (char) => char.charCodeAt(0))
-    const payload = JSON.parse(new TextDecoder().decode(bytes))
-    const emailRaw = payload?.email
-    const email = typeof emailRaw === 'string' ? emailRaw : ''
-    const nameFallback =
-      typeof email === 'string' && email.includes('@') ? email.split('@')[0] : 'User'
-    return {
-      name: payload?.user_metadata?.full_name || payload?.user_metadata?.name || nameFallback,
-      email,
-      avatarUrl: payload?.user_metadata?.avatar_url || payload?.user_metadata?.picture || ''
-    }
-  } catch (err: unknown) {
-    Sentry.captureException(err)
-    return undefined
-  }
+function getUser(session: AuthSession | undefined): UserProfile | undefined {
+  return session?.user
 }
 
 let _authUnsub: (() => void) | undefined = undefined
@@ -57,30 +35,31 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (initPromise) return initPromise
     const version = ++_authVersion
     initPromise = (async () => {
-      let receivedChange = false
+      let initialFetched = false
       _authUnsub?.()
       _authUnsub = window.api.onAuthChange((session) => {
         if (version !== _authVersion) return
-        receivedChange = true
-        set({
-          session: session ?? undefined,
-          user: decodeUser(session ?? undefined),
-          initialized: true
-        })
+        if (initialFetched) {
+          set({
+            session: session ?? undefined,
+            user: getUser(session ?? undefined)
+          })
+        }
       })
       try {
         const session = await window.api.authGetSession()
         if (version !== _authVersion) return
-        if (!receivedChange)
-          set({
-            session: session ?? undefined,
-            user: decodeUser(session ?? undefined),
-            initialized: true
-          })
+        initialFetched = true
+        set({
+          session: session ?? undefined,
+          user: getUser(session ?? undefined),
+          initialized: true
+        })
       } catch (err: unknown) {
         toast.error('Failed to restore authentication session.', err)
         if (version !== _authVersion) return
-        if (!receivedChange) set({ session: undefined, user: undefined, initialized: true })
+        initialFetched = true
+        set({ session: undefined, user: undefined, initialized: true })
       }
     })()
     try {

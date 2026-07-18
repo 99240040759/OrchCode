@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { cn } from '../lib/utils'
 import { IconButton } from './button'
 import { toast } from '../lib/toast'
-import { getRelativePath, getAbsolutePath, normalizePath, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT } from '../../shared/pathHelpers'
+import { getRelativePath, getAbsolutePath, normalizePath, normalizePathForComparison, MENTION_REGEX, TRAILING_PUNCT, LEADING_PUNCT } from '../../shared/pathHelpers'
 
 function QueueList({
   queue,
@@ -204,14 +204,16 @@ function HistoryMessage({
     const uniqueFiles = (() => {
       const seen = new Set<string>()
       const mentions = rawText?.match(MENTION_REGEX) ?? []
+      const normalize = (path: string): string =>
+        normalizePathForComparison(path, window.api.platform)
       return fileAttachments.filter((a) => {
-        const key = normalizePath(a.path).toLowerCase()
+        const key = normalize(a.path)
         if (seen.has(key)) return false
         seen.add(key)
         return !mentions.some((m) => {
           let typed = m.slice(1)
           if (typed.startsWith('[') && typed.endsWith(']')) typed = typed.slice(1, -1)
-          typed = normalizePath(typed).toLowerCase()
+          typed = normalize(typed)
           return key === typed || key.endsWith('/' + typed)
         })
       })
@@ -344,7 +346,16 @@ function StreamingTools({
           name: tool.name,
           input: tool.input as Record<string, unknown>
         }
-        return <ToolCallDisplay key={tool.toolCallId} toolUse={toolUse} onFileClick={onFileClick} />
+        return (
+          <ToolCallDisplay
+            key={tool.toolCallId}
+            toolUse={toolUse}
+            filePath={tool.filePath}
+            isFinished={tool.isFinished}
+            isError={tool.isError}
+            onFileClick={onFileClick}
+          />
+        )
       })}
     </>
   )
@@ -401,7 +412,7 @@ export function ChatPanel(): React.JSX.Element {
     sendMessage,
     abortSession,
     setActiveFile,
-    activeQuestion,
+    activeQuestions,
     submitAnswer,
     sessions,
     activeFolderPath,
@@ -417,7 +428,7 @@ export function ChatPanel(): React.JSX.Element {
       sendMessage: s.sendMessage,
       abortSession: s.abortSession,
       setActiveFile: s.setActiveFile,
-      activeQuestion: s.activeQuestion,
+      activeQuestions: s.activeQuestions,
       submitAnswer: s.submitAnswer,
       sessions: s.sessions,
       activeFolderPath: s.activeFolderPath,
@@ -428,6 +439,9 @@ export function ChatPanel(): React.JSX.Element {
     }))
   )
   const [text, setText] = useState('')
+  const [questionAnswer, setQuestionAnswer] = useState('')
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({})
+  const visibleMessageCount = currentSessionId ? (visibleCounts[currentSessionId] ?? 100) : 100
   const containerRef = useRef<HTMLDivElement | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const messages = useMemo(
@@ -437,7 +451,12 @@ export function ChatPanel(): React.JSX.Element {
   const contextTokens = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
-      const t = m.metrics?.inputTokens ?? m.metadata?.inputTokens ?? (m as any).meta?.inputTokens
+      const t =
+        m.metrics?.inputTokens ??
+        m.metadata?.inputTokens ??
+        (typeof m === 'object' && m !== null && 'meta' in m
+          ? (m as { meta?: { inputTokens?: number } }).meta?.inputTokens
+          : undefined)
       if (typeof t === 'number' && t > 0) return t
     }
     return 0
@@ -447,6 +466,11 @@ export function ChatPanel(): React.JSX.Element {
   const isLoading = !!stream?.isLoading
   const currentSession = sessions.find((s) => s.sessionId === currentSessionId)
   const workspacePath = currentSession?.workspaceRoot || currentSession?.cwd || activeFolderPath
+  const activeQuestion = activeQuestions[0]
+
+  useEffect(() => {
+    setQuestionAnswer('')
+  }, [activeQuestion?.id])
 
   const lastMsgCountRef = useRef(messages.length)
   const userWasAtBottomRef = useRef(true)
@@ -464,20 +488,22 @@ export function ChatPanel(): React.JSX.Element {
     if ((msgCountChanged && lastMsgIsUser) || userWasAtBottomRef.current) {
       const el = containerRef.current
       if (el) {
-        if (isLoading) {
-          el.scrollTop = el.scrollHeight
-        } else {
-          bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-        }
+        el.scrollTop = el.scrollHeight
       }
     }
   }, [messages, stream?.text, stream?.tools.length, isLoading])
 
+  const toolResultMapRef = useRef<Map<string, ToolResultContent>>(new Map())
   const toolResultMap = useMemo(() => {
+    const userMessages = messages.filter((m) => m.role === 'user')
+    const userMessagesKey = userMessages.map((m) => m.id || m.ts).join(',')
+    if (toolResultMapRef.current && (toolResultMapRef.current as any).key === userMessagesKey) {
+      return toolResultMapRef.current
+    }
     const map = new Map<string, ToolResultContent>()
     let anonIndex = 0
-    for (const m of messages) {
-      if (m.role === 'user' && Array.isArray(m.content)) {
+    for (const m of userMessages) {
+      if (Array.isArray(m.content)) {
         for (const c of m.content) {
           if (c.type === 'tool_result') {
             map.set(c.tool_use_id || `anon_${anonIndex++}`, c as ToolResultContent)
@@ -485,6 +511,8 @@ export function ChatPanel(): React.JSX.Element {
         }
       }
     }
+    ;(map as any).key = userMessagesKey
+    toolResultMapRef.current = map
     return map
   }, [messages])
 
@@ -500,17 +528,14 @@ export function ChatPanel(): React.JSX.Element {
       const last = grouped[grouped.length - 1]
       const msgKey = msg.id || (msg.ts ? String(msg.ts) : '') || Math.random().toString()
       if (last && last.role === 'assistant' && msg.role === 'assistant') {
-        const lastContent = Array.isArray(last.content)
-          ? [...last.content]
-          : [{ type: 'text', text: String(last.content) } as TextContent]
         const newContent = Array.isArray(msg.content)
-          ? [...msg.content]
+          ? msg.content
           : [{ type: 'text', text: String(msg.content) } as TextContent]
-        grouped[grouped.length - 1] = {
-          ...last,
-          content: [...lastContent, ...newContent],
-          key: last.key + '_' + msgKey
+        const contentArr = last.content as any[]
+        for (let idx = 0; idx < newContent.length; idx++) {
+          contentArr.push(newContent[idx])
         }
+        last.key = last.key + '_' + msgKey
       } else {
         grouped.push({
           ...msg,
@@ -523,6 +548,10 @@ export function ChatPanel(): React.JSX.Element {
     }
     return grouped
   }, [messages])
+  const visibleGroupedMessages = useMemo(
+    () => groupedMessages.slice(-visibleMessageCount),
+    [groupedMessages, visibleMessageCount]
+  )
 
   const handleSend = async (
     userImages?: string[],
@@ -577,6 +606,27 @@ export function ChatPanel(): React.JSX.Element {
                 {opt}
               </button>
             ))}
+            {activeQuestion && activeQuestion.options.length === 0 && (
+              <div className="flex gap-2">
+                <input
+                  value={questionAnswer}
+                  onChange={(event) => setQuestionAnswer(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && questionAnswer.trim())
+                      void submitAnswer(questionAnswer.trim())
+                  }}
+                  className="flex-1 bg-oc-raised border border-oc-border rounded-lg px-3 py-2 text-sm text-tx-main outline-none focus:border-oc-active"
+                  autoFocus
+                />
+                <button
+                  disabled={!questionAnswer.trim()}
+                  onClick={() => void submitAnswer(questionAnswer.trim())}
+                  className="px-4 py-2 rounded-lg bg-tx-bright text-oc-base text-sm font-semibold disabled:opacity-50"
+                >
+                  Submit
+                </button>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -588,7 +638,24 @@ export function ChatPanel(): React.JSX.Element {
             className="flex-1 overflow-y-auto py-4 flex flex-col transform-gpu will-change-scroll"
           >
             <div className="flex flex-col gap-6">
-              {groupedMessages.map((msg) => (
+               {groupedMessages.length > visibleGroupedMessages.length && (
+                 <div className="w-full max-w-chat mx-auto px-[18px]">
+                   <button
+                     onClick={() => {
+                       if (currentSessionId) {
+                         setVisibleCounts((prev) => ({
+                           ...prev,
+                           [currentSessionId]: (prev[currentSessionId] ?? 100) + 100
+                         }))
+                       }
+                     }}
+                     className="text-xs text-tx-sub hover:text-tx-bright underline"
+                   >
+                     Load earlier messages
+                   </button>
+                 </div>
+               )}
+               {visibleGroupedMessages.map((msg) => (
                 <div
                   key={msg.key}
                   className="w-full max-w-chat mx-auto px-[18px] select-text"

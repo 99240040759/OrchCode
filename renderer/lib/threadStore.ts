@@ -14,14 +14,21 @@ import type { ModelConfig } from '../../shared/ipc-contracts'
 import * as Sentry from '@sentry/electron/renderer'
 import { toast } from './toast'
 import { UiSlice, createUiSlice } from './slices/uiSlice'
-import { normalizePath } from '../../shared/pathHelpers'
+import { normalizePathForComparison } from '../../shared/pathHelpers'
+
 const portMap = new Map<string, MessagePort>()
 const streamTextBuffers = new Map<string, string>()
 const streamReasoningBuffers = new Map<string, string>()
 const scheduledFrames = new Map<string, number>()
+const MAX_STREAM_TEXT_LENGTH = 2 * 1024 * 1024
+const MAX_TOOL_OUTPUT_LENGTH = 128 * 1024
+const fileTreeCache = new Map<string, { tree: string[]; at: number }>()
+const fileTreeLoads = new Map<string, Promise<string[]>>()
+const modelChangeVersions = new Map<string, number>()
+const reasoningChangeVersions = new Map<string, number>()
 function pathsEqual(p1: string | undefined, p2: string | undefined): boolean {
   if (!p1 || !p2) return p1 === p2
-  return normalizePath(p1).toLowerCase() === normalizePath(p2).toLowerCase()
+  return normalizePathForComparison(p1, window.api.platform) === normalizePathForComparison(p2, window.api.platform)
 }
 function matchModelKey(models: Record<string, ModelConfig>, modelId: string | undefined): string | undefined {
   if (!modelId) return undefined
@@ -52,6 +59,7 @@ function cleanupSessionPort(sessionId: string): void {
       Sentry.captureException(err)
     }
     portMap.delete(sessionId)
+    window.postMessage({ type: 'session:unregister-port-transfer', sessionId }, window.location.origin)
   }
   compactionActive.delete(sessionId)
   const timer = refreshTimers.get(sessionId)
@@ -71,10 +79,12 @@ function cleanupSessionPort(sessionId: string): void {
 
 let _askQuestionUnsub: (() => void) | undefined = undefined
 let _askQuestionDismissUnsub: (() => void) | undefined = undefined
+let _coreInitFailedUnsub: (() => void) | undefined = undefined
 
 type PortEvent = CoreSessionEvent | { type: 'error'; payload: { error: string } }
 
 let initPromise: Promise<void> | undefined = undefined
+let sessionCreationPromise: Promise<string | undefined> | undefined = undefined
 let lifecycleVersion = 0
 let activeFileRequest = 0
 let fileTreeRequest = 0
@@ -92,9 +102,10 @@ function asText(value: unknown): string {
   if (typeof value === 'string') return value
   if (value === undefined || value === null) return ''
   try {
-    return JSON.stringify(value)
+    const serialized = JSON.stringify(value)
+    return serialized === undefined ? '' : serialized.slice(0, MAX_TOOL_OUTPUT_LENGTH)
   } catch {
-    return String(value)
+    return String(value).slice(0, MAX_TOOL_OUTPUT_LENGTH)
   }
 }
 
@@ -173,13 +184,23 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const version = ++lifecycleVersion
     _askQuestionUnsub?.()
     _askQuestionDismissUnsub?.()
+    _coreInitFailedUnsub?.()
+    _coreInitFailedUnsub = window.api.onCoreInitFailed(({ message }) => {
+      if (version === lifecycleVersion) toast.error(message)
+    })
     _askQuestionUnsub = window.api.onAskQuestion((info) => {
-      if (version === lifecycleVersion) set({ activeQuestion: info })
+      if (version === lifecycleVersion)
+        set((state) => ({
+          activeQuestions: state.activeQuestions.some((question) => question.id === info.id)
+            ? state.activeQuestions
+            : [...state.activeQuestions, info]
+        }))
     })
     _askQuestionDismissUnsub = window.api.onAskQuestionDismiss(({ id }) => {
       if (version !== lifecycleVersion) return
-      const q = useThreadStore.getState().activeQuestion
-      if (q && q.id === id) set({ activeQuestion: undefined })
+      set((state) => ({
+        activeQuestions: state.activeQuestions.filter((question) => question.id !== id)
+      }))
     })
     initPromise = (async () => {
       try {
@@ -226,67 +247,76 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
           if (resolvedWorkspace) void get().loadFileTree(resolvedWorkspace)
         }
       } catch (err: unknown) {
-        toast.error('Failed to initialize session manager.', err)
-      } finally {
-        if (version === lifecycleVersion) set({ initialized: true })
+        console.error('[ThreadStore] init failed:', err)
+        throw err
       }
     })()
     try {
       await initPromise
+      if (version === lifecycleVersion) set({ initialized: true })
+    } catch (err: unknown) {
+      toast.error('Failed to initialize session manager.', err)
     } finally {
       if (version === lifecycleVersion) initPromise = undefined
     }
   },
   createSession: async (title, workspacePath) => {
-    const modelKey = get().selectedModelKey || Object.keys(get().models)[0]
-    let res
-    try {
-      res = await window.api.sessionCreate({ title, workspacePath, modelKey })
-    } catch (err: unknown) {
-      toast.error('Failed to create session.', err)
-      return undefined
-    }
-    if (!res || 'error' in res) {
-      if (res && 'error' in res) {
-        toast.error('Failed to create new session.', new Error(res.error as string))
+    if (sessionCreationPromise) return sessionCreationPromise
+    sessionCreationPromise = (async () => {
+      const modelKey = get().selectedModelKey || Object.keys(get().models)[0]
+      let res
+      try {
+        res = await window.api.sessionCreate({ title, workspacePath, modelKey })
+      } catch (err: unknown) {
+        toast.error('Failed to create session.', err)
+        return undefined
       }
-      return undefined
+      if (!res || 'error' in res) {
+        if (res && 'error' in res)
+          toast.error('Failed to create new session.', new Error(res.error as string))
+        return undefined
+      }
+      const { sessionId, title: actualTitle } = res as { sessionId: string; title: string }
+      const modelCfg = modelKey ? get().models[modelKey] : undefined
+      const newSession: SessionHistoryRecord = {
+        sessionId,
+        metadata: { title: actualTitle },
+        workspaceRoot: workspacePath ?? '',
+        status: 'idle',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        interactive: true,
+        enableTools: true,
+        enableSpawn: false,
+        enableTeams: false,
+        isSubagent: false,
+        cwd: workspacePath ?? '',
+        model: modelCfg?.id ?? '',
+        provider: modelCfg?.provider ?? '',
+        source: 'local'
+      }
+      upd((d) => {
+        if (!d.sessions.some((s) => s.sessionId === sessionId)) d.sessions.push(newSession)
+        d.currentSessionId = sessionId
+        d.messagesMap[sessionId] = []
+        d.streamStates[sessionId] = defaultStream()
+        if (workspacePath) d.activeFolderPath = workspacePath
+      })
+      if (workspacePath) void get().loadFileTree(workspacePath)
+      setupSessionPort(sessionId)
+      return sessionId
+    })()
+    try {
+      return await sessionCreationPromise
+    } finally {
+      sessionCreationPromise = undefined
     }
-    const { sessionId, title: actualTitle } = res as { sessionId: string; title: string }
-
-    const newSession: SessionHistoryRecord = {
-      sessionId,
-      metadata: { title: actualTitle },
-      workspaceRoot: workspacePath ?? '',
-      status: 'idle',
-      startedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      interactive: true,
-      enableTools: true,
-      enableSpawn: true,
-      enableTeams: true,
-      isSubagent: false,
-      cwd: workspacePath ?? '',
-      model: modelKey ? (get().models[modelKey]?.id ?? '') : '',
-      provider: modelKey ? (get().models[modelKey]?.provider ?? '') : '',
-      source: 'local'
-    }
-    upd((d) => {
-      if (!d.sessions.some((s) => s.sessionId === sessionId)) d.sessions.push(newSession)
-      d.currentSessionId = sessionId
-      d.messagesMap[sessionId] = []
-      d.streamStates[sessionId] = defaultStream()
-      if (workspacePath) d.activeFolderPath = workspacePath
-    })
-    if (workspacePath) get().loadFileTree(workspacePath)
-    setupSessionPort(sessionId)
-    return sessionId
   },
   selectSession: async (sessionId) => {
     const session = get().sessions.find((s) => s.sessionId === sessionId)
     const rawPath = session?.workspaceRoot || undefined
-    const openFolderPaths = new Set(get().openFolders.map((f) => normalizePath(f.path).toLowerCase()))
-    const wsNormalized = rawPath ? normalizePath(rawPath).toLowerCase() : ''
+    const openFolderPaths = new Set(get().openFolders.map((f) => normalizePathForComparison(f.path, window.api.platform)))
+    const wsNormalized = rawPath ? normalizePathForComparison(rawPath, window.api.platform) : ''
     const workspacePath = rawPath && openFolderPaths.has(wsNormalized) ? rawPath : undefined
     upd((d) => {
       d.currentSessionId = sessionId
@@ -297,6 +327,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       d.showBrowser = false
     })
     setupSessionPort(sessionId)
+    if (workspacePath) void get().loadFileTree(workspacePath)
     const existingMsgs = get().messagesMap[sessionId]
     if (get().streamStates[sessionId]?.isLoading && existingMsgs && existingMsgs.length > 0) {
       useThreadStore.setState((s) => ({
@@ -313,8 +344,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       console.error('Failed to list queue', e)
       Sentry.captureException(e)
     }
-    if (workspacePath) get().loadFileTree(workspacePath)
-    else
+    if (!workspacePath)
       upd((d) => {
         d.fileTree = undefined
       })
@@ -361,7 +391,11 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
   },
   renameSession: async (sessionId, newTitle) => {
     try {
-      await window.api.sessionUpdateTitle({ sessionId, title: newTitle })
+      const updated = await window.api.sessionUpdateTitle({ sessionId, title: newTitle })
+      if (!updated) {
+        toast.error('Failed to rename session.')
+        return
+      }
       upd((d) => {
         const session = d.sessions.find((s) => s.sessionId === sessionId)
         if (session) {
@@ -496,10 +530,28 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
   loadFileTree: async (dirPath) => {
     const request = ++fileTreeRequest
     try {
-      const tree = await window.api.fileList({ dirPath })
+      const key = normalizePathForComparison(dirPath, window.api.platform)
+      const cached = fileTreeCache.get(key)
+      let tree: string[]
+      if (cached && Date.now() - cached.at < 2_000) tree = cached.tree
+      else {
+        let load = fileTreeLoads.get(key)
+        if (!load) {
+          load = window.api
+            .fileList({ dirPath })
+            .then((result) => {
+              const next = result ?? []
+              fileTreeCache.set(key, { tree: next, at: Date.now() })
+              return next
+            })
+            .finally(() => fileTreeLoads.delete(key))
+          fileTreeLoads.set(key, load)
+        }
+        tree = await load
+      }
       if (request !== fileTreeRequest) return
       upd((d) => {
-        d.fileTree = tree ?? []
+        d.fileTree = tree
       })
     } catch (err: unknown) {
       Sentry.captureException(err)
@@ -525,22 +577,28 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     }
   },
   workspaceRemoveFolder: async (path) => {
-    const ok = await window.api.workspaceRemoveFolder({ path }).catch((err: unknown) => {
+    const related = get().sessions.filter((s) => pathsEqual(s.workspaceRoot ?? s.cwd, path))
+    const relatedIds = related.map((s) => s.sessionId)
+    const deletionResults = await Promise.all(
+      relatedIds.map(async (id) => {
+        try {
+          return await window.api.sessionDelete({ sessionId: id })
+        } catch (err: unknown) {
+          Sentry.captureException(err, { extra: { sessionId: id } })
+          return false
+        }
+      })
+    )
+    if (deletionResults.some((deleted) => !deleted)) {
+      toast.error('Could not remove every session in this workspace.')
+      return
+    }
+    const removed = await window.api.workspaceRemoveFolder({ path }).catch((err: unknown) => {
       toast.error('Failed to remove repository folder.', err)
       return false
     })
-    if (!ok) return
-    const related = get().sessions.filter((s) => pathsEqual(s.workspaceRoot ?? s.cwd, path))
-    const relatedIds = related.map((s) => s.sessionId)
-    for (const id of relatedIds) cleanupSessionPort(id) // TS-08
-    const results = await Promise.allSettled(
-      relatedIds.map((id) => window.api.sessionDelete({ sessionId: id }))
-    )
-    results.forEach((result, idx) => {
-      if (result.status === 'rejected') {
-        Sentry.captureException(result.reason, { extra: { sessionId: relatedIds[idx] } })
-      }
-    })
+    if (!removed) return
+    for (const id of relatedIds) cleanupSessionPort(id)
     let nextSessionId: string | undefined = undefined
     upd((d) => {
       d.sessions = d.sessions.filter((s) => !pathsEqual(s.workspaceRoot ?? s.cwd, path))
@@ -558,6 +616,11 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
           d.activeFolderPath = next?.workspaceRoot ?? next?.cwd ?? undefined
           nextSessionId = next?.sessionId
         }
+        d.openFiles = []
+        d.activeFilePath = undefined
+        d.activeFileContent = undefined
+        d.fileTree = undefined
+        d.showBrowser = false
       }
     })
     if (nextSessionId) await get().selectSession(nextSessionId)
@@ -573,6 +636,8 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const sessionId = get().currentSessionId
     if (!sessionId) return
     const prevKey = get().selectedModelKey
+    const version = (modelChangeVersions.get(sessionId) ?? 0) + 1
+    modelChangeVersions.set(sessionId, version)
     upd((d) => {
       d.selectedModelKey = modelKey
     })
@@ -587,6 +652,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       toast.error('Failed to update session model.', err)
       ok = false
     }
+    if (modelChangeVersions.get(sessionId) !== version) return
     if (ok) {
       upd((d) => {
         const s = d.sessions.find((x) => x.sessionId === sessionId)
@@ -596,28 +662,33 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
         }
       })
     } else {
-      upd((d) => {
-        d.selectedModelKey = prevKey
-      })
+      if (get().currentSessionId === sessionId) upd((d) => { d.selectedModelKey = prevKey })
     }
   },
   changeSessionReasoning: async (reasoningEffort: string | null) => {
     const sessionId = get().currentSessionId
     if (!sessionId) return
-    const prevSessions = get().sessions
+    const previousReasoning = get().sessions.find((session) => session.sessionId === sessionId)?.metadata
+      ?.reasoningEffort as string | null | undefined
+    const version = (reasoningChangeVersions.get(sessionId) ?? 0) + 1
+    reasoningChangeVersions.set(sessionId, version)
     upd((d) => {
       const s = d.sessions.find((x) => x.sessionId === sessionId)
       if (s) s.metadata = { ...s.metadata, reasoningEffort }
     })
+    let updated = false
     try {
       const res = await window.api.sessionUpdateReasoning({ sessionId, reasoningEffort })
-      if (!res.success) {
-        toast.error('Failed to change reasoning effort.')
-        upd((d) => { d.sessions = prevSessions })
-      }
+      updated = !!res.success
+      if (!updated) toast.error('Failed to change reasoning effort.')
     } catch (err: unknown) {
       toast.error('Failed to update reasoning effort.', err)
-      upd((d) => { d.sessions = prevSessions })
+    }
+    if (!updated && reasoningChangeVersions.get(sessionId) === version) {
+      upd((d) => {
+        const session = d.sessions.find((item) => item.sessionId === sessionId)
+        if (session) session.metadata = { ...session.metadata, reasoningEffort: previousReasoning ?? null }
+      })
     }
   },
 
@@ -625,7 +696,16 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const sessionId = get().currentSessionId
     if (!sessionId) return false
     try {
-      return await window.api.queueUpdate({ sessionId, promptId, prompt: text, delivery })
+      const updated = await window.api.queueUpdate({ sessionId, promptId, prompt: text, delivery })
+      if (updated)
+        upd((d) => {
+          const item = d.queuesMap[sessionId]?.find((queue) => queue.id === promptId)
+          if (item) {
+            item.prompt = text
+            item.delivery = delivery
+          }
+        })
+      return updated
     } catch (err: unknown) {
       toast.error('Failed to update queued prompt.', err)
       return false
@@ -635,7 +715,14 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     const sessionId = get().currentSessionId
     if (!sessionId) return false
     try {
-      return await window.api.queueDelete({ sessionId, promptId })
+      const deleted = await window.api.queueDelete({ sessionId, promptId })
+      if (deleted)
+        upd((d) => {
+          d.queuesMap[sessionId] = (d.queuesMap[sessionId] ?? []).filter(
+            (queue) => queue.id !== promptId
+          )
+        })
+      return deleted
     } catch (err: unknown) {
       toast.error('Failed to delete queued prompt.', err)
       return false
@@ -650,12 +737,20 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     _askQuestionUnsub = undefined
     _askQuestionDismissUnsub?.()
     _askQuestionDismissUnsub = undefined
+    _coreInitFailedUnsub?.()
+    _coreInitFailedUnsub = undefined
     compactionActive.clear()
     messageRequestVersions.clear()
     scheduledFrames.forEach((frame) => clearTimeout(frame))
     scheduledFrames.clear()
     streamTextBuffers.clear()
     streamReasoningBuffers.clear()
+    refreshTimers.forEach((timer) => clearTimeout(timer))
+    refreshTimers.clear()
+    fileTreeCache.clear()
+    fileTreeLoads.clear()
+    modelChangeVersions.clear()
+    reasoningChangeVersions.clear()
     portMap.forEach((p) => {
       try {
         p.onmessage = null
@@ -680,7 +775,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
       initialized: false,
       models: {},
       selectedModelKey: undefined,
-      activeQuestion: undefined,
+      activeQuestions: [],
       openFiles: [],
       queuesMap: {}
     })
@@ -704,7 +799,7 @@ function setStream(
 
 function scheduleBufferFlush(sessionId: string): void {
   if (scheduledFrames.has(sessionId)) return
-  const frameId = window.setTimeout(() => {
+  const frameId = window.requestAnimationFrame(() => {
     scheduledFrames.delete(sessionId)
     const nextText = streamTextBuffers.get(sessionId)
     const nextReasoning = streamReasoningBuffers.get(sessionId)
@@ -721,14 +816,14 @@ function scheduleBufferFlush(sessionId: string): void {
       }
       return { streamStates: { ...s.streamStates, [sessionId]: { ...ss, ...updates } } }
     })
-  }, 100)
+  })
   scheduledFrames.set(sessionId, frameId)
 }
 
 function flushBuffersImmediately(sessionId: string, finalUpdates?: Partial<StreamState>): void {
   const frame = scheduledFrames.get(sessionId)
   if (frame) {
-    clearTimeout(frame)
+    cancelAnimationFrame(frame)
     scheduledFrames.delete(sessionId)
   }
   const textVal = streamTextBuffers.get(sessionId)
@@ -738,13 +833,10 @@ function flushBuffersImmediately(sessionId: string, finalUpdates?: Partial<Strea
   useThreadStore.setState((s) => {
     const ss = s.streamStates[sessionId] ?? defaultStream()
     const updates: Partial<StreamState> = { ...finalUpdates }
-    // TS-07
     if ('text' in updates && updates.text === undefined) updates.text = ''
     else if (textVal !== undefined) updates.text = textVal
-
     if ('reasoning' in updates && updates.reasoning === undefined) updates.reasoning = ''
     else if (reasoningVal !== undefined) updates.reasoning = reasoningVal
-
     return { streamStates: { ...s.streamStates, [sessionId]: { ...ss, ...updates } } }
   })
 }
@@ -761,6 +853,21 @@ function refreshMessages(sessionId: string): void {
   )
 }
 
+function limitStreamText(value: string): string {
+  return value.length <= MAX_STREAM_TEXT_LENGTH ? value : value.slice(0, MAX_STREAM_TEXT_LENGTH)
+}
+
+function refreshCurrentWorkspace(sessionId: string): void {
+  const state = useThreadStore.getState()
+  if (state.currentSessionId !== sessionId) return
+  const session = state.sessions.find((item) => item.sessionId === sessionId)
+  const workspacePath = session?.workspaceRoot || session?.cwd || state.activeFolderPath
+  if (!workspacePath) return
+  const key = normalizePathForComparison(workspacePath, window.api.platform)
+  fileTreeCache.delete(key)
+  void state.loadFileTree(workspacePath)
+}
+
 async function doRefreshMessages(sessionId: string): Promise<void> {
   const version = (messageRequestVersions.get(sessionId) ?? 0) + 1
   messageRequestVersions.set(sessionId, version)
@@ -775,8 +882,8 @@ async function doRefreshMessages(sessionId: string): Promise<void> {
       const optimistic = existing.filter((m) => m.id && m.id.startsWith('optimistic-'))
       const toNum = (v: unknown): number =>
         typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : 0
-      const lastTs = fetched.length > 0 ? toNum(fetched[fetched.length - 1].ts) : 0
-      const pendingOptimistic = optimistic.filter((m) => toNum(m.ts) > lastTs)
+      const lastFetchedTs = fetched.length > 0 ? toNum(fetched[fetched.length - 1].ts) : 0
+      const pendingOptimistic = optimistic.filter((m) => toNum(m.ts) > lastFetchedTs + 500)
       d.messagesMap[sessionId] = [...fetched, ...pendingOptimistic]
       const ss = d.streamStates[sessionId]
       if (ss && !ss.isLoading) {
@@ -792,8 +899,6 @@ async function doRefreshMessages(sessionId: string): Promise<void> {
     Sentry.captureException(err)
   }
 }
-
-
 
 function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
   if (
@@ -819,14 +924,17 @@ function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
         streamTextBuffers.get(sessionId) ??
         useThreadStore.getState().streamStates[sessionId]?.text ??
         ''
-      streamTextBuffers.set(sessionId, ae.accumulated || current + (ae.text ?? ''))
+      streamTextBuffers.set(sessionId, limitStreamText(ae.accumulated || current + (ae.text ?? '')))
       scheduleBufferFlush(sessionId)
     } else if (ae.contentType === 'reasoning') {
       const current =
         streamReasoningBuffers.get(sessionId) ??
         useThreadStore.getState().streamStates[sessionId]?.reasoning ??
         ''
-      streamReasoningBuffers.set(sessionId, ae.accumulated || current + (ae.reasoning ?? ''))
+      streamReasoningBuffers.set(
+        sessionId,
+        limitStreamText(ae.accumulated || current + (ae.reasoning ?? ''))
+      )
       scheduleBufferFlush(sessionId)
     } else if (ae.contentType === 'tool') {
       const fp = extractFilePath(ae.toolName ?? '', ae.input)
@@ -854,9 +962,9 @@ function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
             isFinished: false
           })
         d.streamStates[sessionId].isLoading = true
-        const isEdit = ae.toolName === 'editor'
-        if (fp && sessionId === currentSessionId && isEdit) {
-          d.activeFilePath = fp
+        const isBrowser = ae.toolName?.startsWith('playwright_')
+        if (sessionId === currentSessionId && isBrowser) {
+          d.showBrowser = true
           if (!d.artifactOpen) d.artifactOpen = true
         }
       })
@@ -869,12 +977,12 @@ function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
   } else if (ae.type === 'content_end') {
     if (ae.contentType === 'text') {
       if (ae.text !== undefined) {
-        streamTextBuffers.set(sessionId, ae.text)
+        streamTextBuffers.set(sessionId, limitStreamText(ae.text))
         scheduleBufferFlush(sessionId)
       }
     } else if (ae.contentType === 'reasoning') {
       if (ae.reasoning !== undefined) {
-        streamReasoningBuffers.set(sessionId, ae.reasoning)
+        streamReasoningBuffers.set(sessionId, limitStreamText(ae.reasoning))
         scheduleBufferFlush(sessionId)
       }
     } else if (ae.contentType === 'tool') {
@@ -887,6 +995,7 @@ function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
         }
       })
       refreshMessages(sessionId)
+      refreshCurrentWorkspace(sessionId)
     }
   } else if (ae.type === 'notice') {
     if (
@@ -910,10 +1019,12 @@ function handleAgentEvent(sessionId: string, ae: AgentEvent): void {
       setStream(sessionId, { statusNotice: ae.message })
     }
   } else if (ae.type === 'done') {
-    flushBuffersImmediately(sessionId, { text: ae.text, isLoading: false })
+    flushBuffersImmediately(sessionId, { text: limitStreamText(ae.text ?? ''), isLoading: false })
     refreshMessages(sessionId)
+    refreshCurrentWorkspace(sessionId)
   } else if (ae.type === 'error') {
     flushBuffersImmediately(sessionId, { isLoading: false, error: eventError(ae.error) })
+    refreshCurrentWorkspace(sessionId)
   }
 }
 
@@ -961,7 +1072,7 @@ function handlePortEvent(sessionId: string, event: PortEvent): void {
 }
 
 function setupSessionPort(sessionId: string): void {
-  cleanupSessionPort(sessionId) // TS-04
+  cleanupSessionPort(sessionId)
   const channel = new MessageChannel()
   portMap.set(sessionId, channel.port2)
   channel.port2.onmessage = (ev) => {
@@ -975,7 +1086,6 @@ function setupSessionPort(sessionId: string): void {
   )
 }
 
-// TS-12
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     useThreadStore.getState().reset()
