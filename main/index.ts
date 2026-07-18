@@ -453,7 +453,7 @@ function createWindow(): void {
     width: 1280,
     height: 800,
     show: false,
-    backgroundColor: '#000000',
+    backgroundColor: '#17171a',
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#00000000', symbolColor: '#9c9c9f', height: 40 },
     autoHideMenuBar: true,

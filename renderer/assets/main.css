@@ -26,7 +26,7 @@
     --folder-item-gap: 3px;
 
     /* ── Palette — premium neutral charcoal ─── */
-    --oc-base: #121212;
+    --oc-base: #17171a;
     /* deep dark app base, titlebar, topbar */
     --oc-surface: #1e1e1e;
     /* sidebar bg, panels bg */
@@ -82,8 +82,6 @@
     margin: 0;
     padding: 0;
     border-color: var(--oc-border);
-    scrollbar-color: var(--tx-dim) transparent;
-    scrollbar-width: thin;
   }
 
   body {
@@ -161,18 +159,21 @@
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-button {
+  display: none;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: var(--oc-border);
-  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--tx-dim);
+  background-color: rgba(255, 255, 255, 0.32);
 }
 
 [data-panel-group-resizing] webview {

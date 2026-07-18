@@ -11,7 +11,6 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useThreadStore } from './lib/threadStore'
 import { useAuthStore } from './lib/authStore'
 import { TooltipProvider } from './components/tooltip'
-import logo from './assets/logo.png'
 import { useShallow } from 'zustand/react/shallow'
 import { TbLoader2 } from 'react-icons/tb'
 
@@ -69,18 +68,16 @@ export default function App(): React.JSX.Element {
 
   if (!authInitialized)
     return (
-      <div className="flex flex-col h-screen bg-black text-tx-main overflow-hidden select-none relative">
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <img src={logo} className="w-12 h-12 opacity-80" alt="" />
-          <TbLoader2 size={32} className="text-tx-sub animate-spin" />
-          <span className="text-sm text-tx-muted font-medium">Initializing Orch...</span>
+      <div className="flex flex-col h-screen bg-oc-base text-tx-main overflow-hidden select-none relative">
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <TbLoader2 size={48} className="text-tx-sub animate-spin" />
         </div>
       </div>
     )
 
   if (!session)
     return (
-      <div className="flex h-screen bg-black text-tx-main overflow-hidden select-none relative">
+      <div className="flex h-screen bg-oc-base text-tx-main overflow-hidden select-none relative">
         <TitleBar />
         <Onboarding />
       </div>
@@ -88,18 +85,18 @@ export default function App(): React.JSX.Element {
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-screen bg-black text-tx-main overflow-hidden select-none relative">
+      <div className="flex flex-col h-screen bg-oc-base text-tx-main overflow-hidden select-none relative">
         <TitleBar
           sidebarOpen={sidebarOpen}
           artifactOpen={artifactOpen}
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
           onToggleArtifact={() => setArtifactOpen(!artifactOpen)}
         />
-        <div className="flex-1 flex gap-1 w-full overflow-hidden p-1 min-h-0">
+        <div className="flex-1 flex w-full overflow-hidden min-h-0">
           <div
             className={
               sidebarOpen
-                ? 'z-0 flex-shrink-0 rounded-lg overflow-hidden border border-oc-border shadow-lg bg-oc-surface flex flex-col'
+                ? 'z-0 flex-shrink-0 my-1 ml-1 mr-1 rounded-lg overflow-hidden border border-oc-border shadow-lg bg-oc-surface flex flex-col'
                 : 'hidden'
             }
           >
@@ -124,7 +121,7 @@ export default function App(): React.JSX.Element {
           </div>
           <PanelGroup direction="horizontal" className="flex-1 z-0" autoSaveId="orch-layout">
             <Panel id="main-panel" order={1} defaultSize={artifactOpen ? 60 : 100} minSize={30}>
-              <div className="h-full flex flex-col min-w-0 rounded-lg overflow-hidden border border-oc-border shadow-lg bg-oc-base relative">
+              <div className="h-full flex flex-col min-w-0 overflow-hidden bg-oc-base relative">
                 <div className="h-titlebar w-full flex-shrink-0 pointer-events-none" />
                 <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col">
                   <ErrorBoundary
@@ -148,11 +145,9 @@ export default function App(): React.JSX.Element {
             </Panel>
             {artifactOpen && (
               <>
-                <PanelResizeHandle className="w-1 flex-shrink-0 flex justify-center items-center cursor-col-resize group z-10">
-                  <div className="w-1 h-8 rounded-full bg-oc-border group-hover:bg-oc-active transition-colors" />
-                </PanelResizeHandle>
+                <PanelResizeHandle className="w-1 flex-shrink-0 cursor-col-resize z-10" />
                 <Panel id="artifact-panel" order={2} defaultSize={40} minSize={20}>
-                  <div className="h-full rounded-lg overflow-hidden border border-oc-border shadow-lg bg-oc-base flex flex-col relative z-0">
+                  <div className="h-[calc(100%-0.5rem)] my-1 ml-0 mr-1 rounded-lg overflow-hidden border border-oc-border shadow-lg bg-oc-base flex flex-col relative z-0">
                     <ErrorBoundary
                       fallback={({ error, reset }) => (
                         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-tx-main">

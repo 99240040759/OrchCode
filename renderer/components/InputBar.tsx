@@ -431,12 +431,12 @@ export function InputBar({
         </div>
       )}
       {inlineError && (
-        <div className="px-3 pt-2">
+        <div className="px-2 pt-2">
           <InlineError message={inlineError} onDismiss={() => setInlineError(undefined)} />
         </div>
       )}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-3 pt-3 pb-1 border-b border-oc-border/50 bg-oc-surface">
+        <div className="flex flex-wrap gap-2 px-2 pt-3 pb-1 border-b border-oc-border/50 bg-oc-surface">
           {attachments.map((att, i) => (
             <FileTab
               key={i}
@@ -450,7 +450,7 @@ export function InputBar({
           ))}
         </div>
       )}
-      <div className="px-3 pt-3 pb-2 flex flex-col gap-2 relative bg-oc-surface rounded-b-lg">
+      <div className="px-2 pt-3 pb-2 flex flex-col gap-2 relative bg-oc-surface rounded-b-lg">
         <div className="relative w-full text-base leading-relaxed overflow-hidden">
           <textarea
             ref={textareaRef}
@@ -463,7 +463,7 @@ export function InputBar({
           />
         </div>
       </div>
-      <div className="px-3 py-2 bg-oc-base border-t border-oc-border rounded-b-lg flex items-center justify-between gap-2">
+      <div className="px-2 py-2 bg-oc-base border-t border-oc-border rounded-b-lg flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <label className={cn(supportsVision ? 'cursor-pointer' : 'cursor-not-allowed')} title={!supportsVision ? 'This model does not support file attachments' : undefined}>
             <input

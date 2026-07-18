@@ -62,7 +62,7 @@ function cleanupSessionPort(sessionId: string): void {
   messageRequestVersions.delete(sessionId)
   const frame = scheduledFrames.get(sessionId)
   if (frame) {
-    cancelAnimationFrame(frame)
+    clearTimeout(frame)
     scheduledFrames.delete(sessionId)
   }
   streamTextBuffers.delete(sessionId)
@@ -652,7 +652,7 @@ export const useThreadStore = create<ThreadStoreState>((set, get, api) => ({
     _askQuestionDismissUnsub = undefined
     compactionActive.clear()
     messageRequestVersions.clear()
-    scheduledFrames.forEach((frame) => cancelAnimationFrame(frame))
+    scheduledFrames.forEach((frame) => clearTimeout(frame))
     scheduledFrames.clear()
     streamTextBuffers.clear()
     streamReasoningBuffers.clear()
@@ -704,7 +704,7 @@ function setStream(
 
 function scheduleBufferFlush(sessionId: string): void {
   if (scheduledFrames.has(sessionId)) return
-  const frameId = requestAnimationFrame(() => {
+  const frameId = window.setTimeout(() => {
     scheduledFrames.delete(sessionId)
     const nextText = streamTextBuffers.get(sessionId)
     const nextReasoning = streamReasoningBuffers.get(sessionId)
@@ -721,14 +721,14 @@ function scheduleBufferFlush(sessionId: string): void {
       }
       return { streamStates: { ...s.streamStates, [sessionId]: { ...ss, ...updates } } }
     })
-  })
+  }, 100)
   scheduledFrames.set(sessionId, frameId)
 }
 
 function flushBuffersImmediately(sessionId: string, finalUpdates?: Partial<StreamState>): void {
   const frame = scheduledFrames.get(sessionId)
   if (frame) {
-    cancelAnimationFrame(frame)
+    clearTimeout(frame)
     scheduledFrames.delete(sessionId)
   }
   const textVal = streamTextBuffers.get(sessionId)

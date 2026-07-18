@@ -462,9 +462,14 @@ export function ChatPanel(): React.JSX.Element {
     const lastMsgIsUser = messages.length > 0 && messages[messages.length - 1].role === 'user'
 
     if ((msgCountChanged && lastMsgIsUser) || userWasAtBottomRef.current) {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: isLoading ? 'auto' : 'smooth' })
-      })
+      const el = containerRef.current
+      if (el) {
+        if (isLoading) {
+          el.scrollTop = el.scrollHeight
+        } else {
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }
+      }
     }
   }, [messages, stream?.text, stream?.tools.length, isLoading])
 
@@ -586,7 +591,7 @@ export function ChatPanel(): React.JSX.Element {
               {groupedMessages.map((msg) => (
                 <div
                   key={msg.key}
-                  className="w-full max-w-chat mx-auto pl-4 pr-2 select-text"
+                  className="w-full max-w-chat mx-auto px-[18px] select-text"
                 >
                   <HistoryMessage
                     msg={msg}
@@ -603,7 +608,7 @@ export function ChatPanel(): React.JSX.Element {
                   stream.error ||
                   stream.statusNotice ||
                   stream.tools.length > 0) && (
-                  <div className="w-full max-w-chat mx-auto pl-4 pr-2 select-text">
+                  <div className="w-full max-w-chat mx-auto px-[18px] select-text">
                     <StreamingAssistant stream={stream} onFileClick={handleFileClick} />
                   </div>
                 )}
