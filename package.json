@@ -1,9 +1,9 @@
 {
   "name": "orchcode",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Orch - The Agentic Workspace Orchestrator. Seamlessly orchestrate, compile, and run AI agents in unified local and cloud workspaces.",
   "main": "./out/main/index.js",
-  "author": "sameer",
+  "author": "Sameer",
   "homepage": "https://orch.live",
   "scripts": {
     "format": "prettier --write .",
