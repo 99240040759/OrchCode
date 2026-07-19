@@ -1,39 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React from 'react'
 import { useAuthStore } from '../lib/authStore'
 import logo from '../assets/logo.png'
 import googleLogo from '../assets/google.svg'
-import { toast } from '../lib/toast'
 
 export function Onboarding(): React.JSX.Element {
-  const { login } = useAuthStore()
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | undefined>(undefined)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(
-    () => () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    },
-    []
-  )
-  const handleLogin = async (): Promise<void> => {
-    setPending(true)
-    setError(undefined)
-    timeoutRef.current = setTimeout(() => {
-      setPending(false)
-      setError('Sign-in timed out. Please try again.')
-    }, 300_000)
-    try {
-      await login()
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-      timeoutRef.current = undefined
-    } catch (err: unknown) {
-      toast.error('Could not initiate the sign-in process. Please try again.', err)
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-      timeoutRef.current = undefined
-      setPending(false)
-      setError('Could not open the sign-in page. Please try again.')
-    }
-  }
+  const { login, pending, error } = useAuthStore()
+
   return (
     <div className="flex flex-col items-center justify-center flex-1 bg-background text-foreground p-6 font-sans select-none">
       <div className="w-full max-w-sm flex flex-col items-center">
@@ -48,7 +20,7 @@ export function Onboarding(): React.JSX.Element {
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            void handleLogin()
+            void login()
           }}
           className="w-full"
         >
@@ -60,7 +32,7 @@ export function Onboarding(): React.JSX.Element {
             {pending ? (
               <>
                 <span className="w-[18px] h-[18px] border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin flex-shrink-0" />
-                <span>Opening browser...</span>
+                <span>Complete sign-in in browser...</span>
               </>
             ) : (
               <>
@@ -72,7 +44,7 @@ export function Onboarding(): React.JSX.Element {
         </form>
         {pending && (
           <p className="text-xs text-muted-foreground mt-3 text-center">
-            Complete sign-in in the browser window that just opened.
+            After signing in, click &quot;Open&quot; when your browser asks to return to Orch.
           </p>
         )}
         {error && <p className="text-xs text-destructive mt-3 text-center">{error}</p>}

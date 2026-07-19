@@ -1,5 +1,9 @@
 appId: live.orch.app
 productName: Orch
+protocols:
+  - name: OrchCode
+    schemes:
+      - orchcode
 directories:
   buildResources: build
 files:

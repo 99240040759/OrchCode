@@ -28,6 +28,7 @@ import type {
   ModelConfig
 } from '../shared/ipc-contracts'
 import { join, basename, resolve } from 'path'
+import { existsSync, writeFileSync } from 'fs'
 import { pathToFileURL } from 'url'
 import { mkdir, readFile, unlink, cp, readdir, stat, realpath } from 'fs/promises'
 import { createHash, randomBytes, randomUUID } from 'crypto'
@@ -51,6 +52,15 @@ const stripPrefix = (id: string): string =>
   id.includes('/') ? id.substring(id.indexOf('/') + 1) : id
 
 app.name = 'OrchCode'
+try {
+  const flag = join(app.getPath('userData'), 'disable-gpu.flag')
+  if (existsSync(flag)) {
+    app.disableHardwareAcceleration()
+    console.warn('[GPU] Hardware acceleration disabled via flag.')
+  }
+} catch (e) {
+  console.error('[GPU] Check flag failed:', e)
+}
 if (process.defaultApp) {
   if (process.argv.length >= 2)
     app.setAsDefaultProtocolClient('orchcode', process.execPath, [
@@ -91,6 +101,38 @@ const userData = (): string => {
   return _userData
 }
 const encAuthPath = (): string => join(userData(), 'auth.enc')
+const encPkcePath = (): string => join(userData(), 'auth-pkce.enc')
+
+async function readEncryptedJsonFile(path: string): Promise<string | undefined> {
+  try {
+    let raw: string
+    try { raw = await readFile(path, 'utf-8') } catch (readErr: any) {
+      if (readErr?.code === 'ENOENT') return undefined
+      throw readErr
+    }
+    if (!raw) return undefined
+    const buf = Buffer.from(raw, 'base64')
+    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf-8')
+  } catch (err: unknown) {
+    if (sentryInitialized) Sentry.captureException(err)
+    return undefined
+  }
+}
+
+async function writeEncryptedJsonFile(path: string, json: string): Promise<boolean> {
+  try {
+    await mkdir(userData(), { recursive: true })
+    const data = safeStorage.isEncryptionAvailable()
+      ? safeStorage.encryptString(json).toString('base64')
+      : Buffer.from(json).toString('base64')
+    await writeAtomic(path, data)
+    return true
+  } catch (err: unknown) {
+    console.error('[Auth] Encrypted write failed:', err)
+    if (sentryInitialized) Sentry.captureException(err)
+    return false
+  }
+}
 
 function isAuthSession(value: unknown): value is StoredAuthSession {
   return (
@@ -103,50 +145,15 @@ function isAuthSession(value: unknown): value is StoredAuthSession {
   )
 }
 
-async function _readEncryptedSession(): Promise<{ json: string } | undefined> {
-  try {
-    const p = encAuthPath()
-    let raw: string
-    try {
-      raw = await readFile(p, 'utf-8')
-    } catch (readErr: any) {
-      if (readErr?.code === 'ENOENT') return undefined
-      throw readErr
-    }
-    if (!raw) return undefined
-    const buf = Buffer.from(raw, 'base64')
-    const json = safeStorage.isEncryptionAvailable()
-      ? safeStorage.decryptString(buf)
-      : buf.toString('utf-8')
-    return { json }
-  } catch (err: unknown) {
-    if (sentryInitialized) Sentry.captureException(err)
-    return undefined
-  }
-}
-
 async function saveAuthSession(session: StoredAuthSession): Promise<boolean> {
-  try {
-    await mkdir(userData(), { recursive: true })
-    const json = JSON.stringify(session)
-    const data = safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(json).toString('base64')
-      : Buffer.from(json).toString('base64')
-    await writeAtomic(encAuthPath(), data)
-    return true
-  } catch (err: unknown) {
-    console.error('[Auth] Save error:', err)
-    if (sentryInitialized) Sentry.captureException(err)
-    return false
-  }
+  return writeEncryptedJsonFile(encAuthPath(), JSON.stringify(session))
 }
-
 
 async function getRawAuthSession(): Promise<StoredAuthSession | undefined> {
-  const result = await _readEncryptedSession()
-  if (!result) return undefined
+  const json = await readEncryptedJsonFile(encAuthPath())
+  if (!json) return undefined
   try {
-    const session = JSON.parse(result.json)
+    const session = JSON.parse(json)
     return isAuthSession(session) ? session : undefined
   } catch (err: unknown) {
     if (sentryInitialized) Sentry.captureException(err)
@@ -164,37 +171,22 @@ function toPublicAuthSession(session: StoredAuthSession | undefined): AuthSessio
       const metadata = payload.user_metadata
       const data = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
       const email = typeof payload.email === 'string' ? payload.email : ''
-      const name =
-        typeof data.full_name === 'string'
-          ? data.full_name
-          : typeof data.name === 'string'
-            ? data.name
-            : email.includes('@')
-              ? email.split('@')[0]
-              : 'User'
-      const avatarUrl =
-        typeof data.avatar_url === 'string'
-          ? data.avatar_url
-          : typeof data.picture === 'string'
-            ? data.picture
-            : ''
+      const name = typeof data.full_name === 'string' ? data.full_name : typeof data.name === 'string' ? data.name : email.includes('@') ? email.split('@')[0] : 'User'
+      const avatarUrl = typeof data.avatar_url === 'string' ? data.avatar_url : typeof data.picture === 'string' ? data.picture : ''
       user = { name, email, avatarUrl }
     }
-  } catch {
-  }
+  } catch {}
   return { expiresAt: session.expiresAt, user }
 }
 
 async function clearAuthSession(): Promise<void> {
   try {
-    try {
-      await unlink(encAuthPath())
-    } catch (unlinkErr: any) {
-      if (unlinkErr?.code !== 'ENOENT') throw unlinkErr
+    await unlink(encAuthPath())
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') {
+      console.error('[Auth] Clear auth.enc failed:', err)
+      if (sentryInitialized) Sentry.captureException(err)
     }
-  } catch (err: unknown) {
-    console.error('[Auth] Clear auth.enc failed:', err)
-    if (sentryInitialized) Sentry.captureException(err)
   }
 }
 
@@ -203,16 +195,18 @@ interface AuthResponse {
   refresh_token?: string
   expires_in?: number
 }
-interface PendingAuthRequest {
-  verifier: string
-  expiresAt: number
-}
-const pendingAuthRequests = new Map<string, PendingAuthRequest>()
 
-function clearExpiredAuthRequests(): void {
-  const now = Date.now()
-  for (const [state, request] of pendingAuthRequests)
-    if (request.expiresAt <= now) pendingAuthRequests.delete(state)
+async function clearPendingAuthFile(): Promise<void> {
+  try {
+    await unlink(encPkcePath())
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') console.error('[Auth] Clear PKCE file failed:', err)
+  }
+}
+
+function sendAuthError(message: string): void {
+  console.error('[Auth]', message)
+  sendToRenderer('auth:error', { message })
 }
 
 async function acceptAuthResponse(data: AuthResponse): Promise<StoredAuthSession | undefined> {
@@ -234,24 +228,38 @@ async function acceptAuthResponse(data: AuthResponse): Promise<StoredAuthSession
 async function exchangeAuthCode(code: string, verifier: string): Promise<StoredAuthSession | undefined> {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
   const anonKey = process.env.SUPABASE_ANON_KEY
-  if (!supabaseUrl || !anonKey) return undefined
+  if (!supabaseUrl || !anonKey) {
+    console.error('[Auth] Token exchange failed: Supabase is not configured.')
+    return undefined
+  }
   const parsed = new URL(supabaseUrl)
-  if (parsed.protocol !== 'https:') return undefined
-  const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: anonKey },
-    body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-  })
-  if (!response.ok) return undefined
-  return acceptAuthResponse((await response.json()) as AuthResponse)
+  if (parsed.protocol !== 'https:') {
+    console.error('[Auth] Token exchange failed: Supabase URL must use HTTPS.')
+    return undefined
+  }
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=pkce`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: anonKey },
+      body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    })
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      console.error('[Auth] Token exchange failed:', response.status, body)
+      return undefined
+    }
+    return acceptAuthResponse((await response.json()) as AuthResponse)
+  } catch (err: unknown) {
+    console.error('[Auth] Token exchange error:', err)
+    if (sentryInitialized) Sentry.captureException(err)
+    return undefined
+  }
 }
 let _refreshPromise: Promise<StoredAuthSession | undefined> | undefined = undefined
 async function refreshAuthSessionIfNeeded(): Promise<StoredAuthSession | undefined> {
   if (_refreshPromise) return _refreshPromise
-  _refreshPromise = _doRefresh().finally(() => {
-    _refreshPromise = undefined
-  })
+  _refreshPromise = _doRefresh().finally(() => { _refreshPromise = undefined })
   return _refreshPromise
 }
 async function _doRefresh(): Promise<StoredAuthSession | undefined> {
@@ -275,9 +283,7 @@ async function _doRefresh(): Promise<StoredAuthSession | undefined> {
         cachedModelsAt = 0
         sendToRenderer('auth:change', undefined)
       } else {
-        sendToRenderer('auth:error', {
-          message: 'Network error during token refresh. Please check your connection.'
-        })
+        sendToRenderer('auth:error', { message: 'Network error during token refresh. Please check your connection.' })
       }
       console.error('[Auth] Refresh failed:', response.status)
       return undefined
@@ -292,7 +298,10 @@ async function _doRefresh(): Promise<StoredAuthSession | undefined> {
 }
 
 function sendToRenderer(channel: string, payload: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const send = (): void => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload) }
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', send)
+  else send()
 }
 
 async function handleAuthCallback(urlStr: string): Promise<void> {
@@ -300,19 +309,39 @@ async function handleAuthCallback(urlStr: string): Promise<void> {
     const parsed = new URL(urlStr)
     if (parsed.protocol !== 'orchcode:' || parsed.hostname !== 'auth-callback') return
     const params = new URLSearchParams(parsed.search)
-    if (parsed.hash.length > 1)
+    if (parsed.hash.length > 1) {
       for (const [key, value] of new URLSearchParams(parsed.hash.slice(1))) params.set(key, value)
-    const state = params.get('state')
+    }
+    const oauthError = params.get('error')
+    if (oauthError) {
+      sendAuthError(params.get('error_description') || oauthError || 'Sign-in was cancelled or denied.')
+      await clearPendingAuthFile()
+      return
+    }
     const code = params.get('code')
-    if (!state || !code) return
-    clearExpiredAuthRequests()
-    const request = pendingAuthRequests.get(state)
-    if (!request) return
-    pendingAuthRequests.delete(state)
-    await exchangeAuthCode(code, request.verifier)
+    if (!code) {
+      sendAuthError('Sign-in callback was incomplete. Please try again.')
+      return
+    }
+    const pkcePath = encPkcePath()
+    const json = await readEncryptedJsonFile(pkcePath)
+    if (!json) {
+      sendAuthError('Sign-in session expired or the app was restarted. Please try again from the app.')
+      return
+    }
+    const stored = JSON.parse(json)
+    if (!stored || typeof stored !== 'object' || typeof stored.verifier !== 'string' || typeof stored.expiresAt !== 'number' || stored.expiresAt <= Date.now()) {
+      await clearPendingAuthFile()
+      sendAuthError('Sign-in session expired or is invalid. Please try again.')
+      return
+    }
+    await clearPendingAuthFile()
+    const session = await exchangeAuthCode(code, stored.verifier)
+    if (!session) sendAuthError('Could not complete sign-in. Please try again.')
   } catch (err: unknown) {
     console.error('[Auth] Deep link parse failed:', err)
     if (sentryInitialized) Sentry.captureException(err)
+    sendAuthError('Sign-in failed unexpectedly. Please try again.')
   }
 }
 
@@ -1265,23 +1294,24 @@ function registerIpcHandlers(): void {
     if (!supabaseUrl) throw new Error('Authentication is not configured.')
     const supabase = new URL(supabaseUrl)
     if (supabase.protocol !== 'https:') throw new Error('Authentication must use HTTPS.')
-    clearExpiredAuthRequests()
-    const state = randomUUID()
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
-    pendingAuthRequests.set(state, { verifier, expiresAt: Date.now() + 10 * 60 * 1000 })
+    const expiresAt = Date.now() + 10 * 60 * 1000
+    const pkcePath = encPkcePath()
+    const pkceData = JSON.stringify({ verifier, expiresAt })
+    await writeEncryptedJsonFile(pkcePath, pkceData)
     const url = new URL(`${supabaseUrl}/auth/v1/authorize`)
     url.searchParams.set('provider', 'google')
-    url.searchParams.set('redirect_to', 'orchcode://auth-callback')
+    url.searchParams.set('redirect_to', 'https://orch.live/auth-callback')
     url.searchParams.set('response_type', 'code')
     url.searchParams.set('code_challenge', challenge)
     url.searchParams.set('code_challenge_method', 'S256')
-    url.searchParams.set('state', state)
     await shell.openExternal(url.toString())
   })
   safeIpc('auth:get-session', async () => toPublicAuthSession(await refreshAuthSessionIfNeeded()), undefined)
   safeIpc('auth:sign-out', async () => {
     await clearAuthSession()
+    await clearPendingAuthFile()
     cachedModels = undefined
     cachedModelsAt = 0
     sendToRenderer('auth:change', undefined)
@@ -1724,4 +1754,15 @@ app.on('before-quit', (event) => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+app.on('child-process-gone', (_, det) => {
+  console.error('[Main] Child process gone:', det)
+  if (det.type === 'GPU' && det.reason === 'crashed') {
+    try {
+      writeFileSync(join(app.getPath('userData'), 'disable-gpu.flag'), 'true')
+      console.warn('[GPU] GPU process crashed. Created disable-gpu.flag.')
+    } catch (err) {
+      console.error('[GPU] Flag write failed:', err)
+    }
+  }
 })

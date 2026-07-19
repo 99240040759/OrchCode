@@ -43,6 +43,7 @@ const api = {
   authGetSession: () => invoke('auth:get-session'),
   authSignOut: () => invoke('auth:sign-out'),
   onAuthChange: (cb: (session: IpcResult<'auth:get-session'>) => void) => makeListener<IpcResult<'auth:get-session'>>('auth:change', cb),
+  onAuthError: (cb: (info: { message: string }) => void) => makeListener<{ message: string }>('auth:error', cb),
   appCheckForUpdates: () => invoke('app:check-for-updates'),
   appRestartAndUpdate: () => invoke('app:restart-and-update'),
   appOpenReleases: () => invoke('app:open-releases'),

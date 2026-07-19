@@ -28,6 +28,7 @@ export interface AppAPI {
   authGetSession: () => Promise<AuthSession | undefined>
   authSignOut: () => Promise<void>
   onAuthChange: (cb: (session: AuthSession | undefined) => void) => () => void
+  onAuthError: (cb: (info: { message: string }) => void) => () => void
   appCheckForUpdates: () => Promise<boolean>
   appRestartAndUpdate: () => Promise<void>
   appOpenReleases: () => Promise<void>
