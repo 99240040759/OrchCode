@@ -446,9 +446,9 @@ export function InputBar({
   const pctString = pct > 0 && pct < 1 ? '<1%' : `${Math.round(pct)}%`
 
   return (
-    <div className="bg-oc-surface rounded-lg border border-oc-border focus-within:border-oc-active transition-colors flex flex-col relative max-w-[700px] w-full mx-auto shadow-md">
+    <div className="bg-popover rounded-xl border border-border/80 transition-all flex flex-col relative max-w-[700px] w-full mx-auto shadow-lg overflow-hidden">
       {showSuggestions && filteredFiles.length > 0 && (
-        <div className="absolute bottom-full left-0 w-full bg-oc-surface border border-oc-border rounded-md shadow-xl max-h-48 overflow-y-auto mb-1.5 z-50 flex flex-col p-1">
+        <div className="absolute bottom-full left-0 w-full bg-popover border border-border rounded-xl shadow-xl max-h-48 overflow-y-auto mb-1.5 z-50 flex flex-col p-1">
           {filteredFiles.map((file, idx) => (
             <button
               key={file}
@@ -457,11 +457,11 @@ export function InputBar({
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer text-left border-none bg-transparent',
                 idx === activeSuggestionIdx
-                  ? 'bg-oc-hover text-tx-bright'
-                  : 'text-tx-sub hover:bg-oc-hover hover:text-tx-main'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
               )}
             >
-              <FileIcon path={file} size={16} className="text-tx-muted flex-shrink-0" />
+              <FileIcon path={file} size={16} className="text-muted-foreground flex-shrink-0" />
               <span className="truncate">{file}</span>
             </button>
           ))}
@@ -473,7 +473,7 @@ export function InputBar({
         </div>
       )}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-2 pt-3 pb-1 border-b border-oc-border/50 bg-oc-surface">
+        <div className="flex flex-wrap gap-2 px-3 pt-2.5 pb-1 border-b border-border/40 bg-popover">
           {attachments.map((att, i) => (
             <FileTab
               key={i}
@@ -487,7 +487,7 @@ export function InputBar({
           ))}
         </div>
       )}
-      <div className="px-2 pt-3 pb-2 flex flex-col gap-2 relative bg-oc-surface rounded-b-lg">
+      <div className="px-3 pt-2.5 pb-1.5 flex flex-col gap-2 relative bg-popover">
         <div className="relative w-full text-base leading-relaxed overflow-hidden">
           <textarea
             ref={textareaRef}
@@ -496,11 +496,11 @@ export function InputBar({
             onKeyDown={handleKeyDown}
             placeholder={loading ? 'Agent is working... (Type to queue)' : placeholder}
             rows={1}
-            className="w-full bg-transparent border-none outline-none resize-none text-base text-tx-main placeholder:text-tx-muted leading-relaxed disabled:opacity-50 p-0 m-0 relative z-10 max-h-input min-h-[48px] overflow-y-auto"
+            className="w-full bg-transparent border-none outline-none resize-none text-base text-foreground placeholder:text-muted-foreground leading-relaxed disabled:opacity-50 p-0 m-0 relative z-10 max-h-input min-h-[44px] overflow-y-auto"
           />
         </div>
       </div>
-      <div className="px-2 py-2 bg-oc-base border-t border-oc-border rounded-b-lg flex items-center justify-between gap-2">
+      <div className="px-3 pb-2 pt-1 bg-popover flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <label className={cn(supportsVision ? 'cursor-pointer' : 'cursor-not-allowed')} title={!supportsVision ? 'This model does not support file attachments' : undefined}>
             <input
@@ -514,17 +514,17 @@ export function InputBar({
             <span className={cn(
               "flex items-center justify-center transition-colors rounded-full flex-shrink-0 w-6 h-6",
               supportsVision 
-                ? "cursor-pointer bg-oc-hover hover:bg-oc-active text-tx-sub hover:text-tx-bright" 
-                : "cursor-not-allowed opacity-40 bg-transparent text-tx-muted pointer-events-none"
+                ? "cursor-pointer bg-secondary/60 hover:bg-secondary text-foreground" 
+                : "cursor-not-allowed opacity-40 bg-transparent text-muted-foreground pointer-events-none"
             )}>
               <TbPlus size={16} strokeWidth={2.5} />
             </span>
           </label>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1.5 bg-oc-hover hover:bg-oc-active data-[state=open]:bg-oc-active text-tx-sub hover:text-tx-bright data-[state=open]:text-tx-bright text-xs border border-oc-border outline-none rounded-md px-2 py-1 font-sans font-semibold cursor-pointer transition-colors select-none max-w-[120px]">
+              <button className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary data-[state=open]:bg-secondary text-foreground text-xs border border-border/50 outline-none rounded-md px-2 py-1 font-sans font-medium cursor-pointer transition-colors select-none max-w-[120px]">
                 {activeFolderPath ? (
-                  <TbFolderFilled size={13} className="flex-shrink-0 text-amber-400" />
+                  <TbFolderFilled size={13} className="flex-shrink-0 text-primary" />
                 ) : (
                   <TbHome size={13} className="flex-shrink-0" />
                 )}
@@ -539,7 +539,7 @@ export function InputBar({
             <DropdownMenuContent className="w-[200px] z-[60]">
               <DropdownMenuItem
                 onClick={() => setActiveFolderPath(undefined)}
-                className={cn(!activeFolderPath && 'bg-oc-hover text-tx-bright font-semibold')}
+                className={cn(!activeFolderPath && 'bg-secondary text-foreground font-semibold')}
               >
                 <TbHome size={14} className="flex-shrink-0" />
                 <span className="truncate flex-1">Home</span>
@@ -548,9 +548,9 @@ export function InputBar({
                 <DropdownMenuItem
                   key={folder.path}
                   onClick={() => setActiveFolderPath(folder.path)}
-                  className={cn(activeFolderPath === folder.path && 'bg-oc-hover text-tx-bright font-semibold')}
+                  className={cn(activeFolderPath === folder.path && 'bg-secondary text-foreground font-semibold')}
                 >
-                  <TbFolderFilled size={14} className="flex-shrink-0 text-amber-400" />
+                  <TbFolderFilled size={14} className="flex-shrink-0 text-primary" />
                   <span className="truncate flex-1">
                     {folder.name || normalizePath(folder.path).split('/').filter(Boolean).pop()}
                   </span>
@@ -561,20 +561,20 @@ export function InputBar({
           {models && Object.keys(models).length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1.5 bg-oc-hover hover:bg-oc-active data-[state=open]:bg-oc-active text-tx-sub hover:text-tx-bright data-[state=open]:text-tx-bright text-xs border border-oc-border outline-none rounded-md px-2 py-1 font-sans font-semibold cursor-pointer transition-colors select-none">
+                <button className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary data-[state=open]:bg-secondary text-foreground text-xs border border-border/50 outline-none rounded-md px-2 py-1 font-sans font-medium cursor-pointer transition-colors select-none">
                   <span className="truncate max-w-[120px]">
                     {selectedModelKey
                       ? models[selectedModelKey]?.name || selectedModelKey
                       : 'Select Model'}
                   </span>
                   {selectedModelKey && activeReasoningEffort && (
-                    <span className="text-3xs px-1 py-0.5 bg-oc-active text-tx-bright rounded font-bold uppercase tracking-wide flex items-center gap-0.5">
+                    <span className="text-3xs px-1 py-0.5 bg-primary/20 text-primary rounded font-bold uppercase tracking-wide flex items-center gap-0.5">
                       <TbBrain size={9} />
                       <span>{activeReasoningEffort}</span>
                     </span>
                   )}
                   {selectedModelKey && models[selectedModelKey]?.badge && (
-                    <span className="text-3xs px-1 py-0.5 bg-oc-surface text-tx-main rounded font-bold uppercase tracking-wide border border-oc-border">
+                    <span className="text-3xs px-1 py-0.5 bg-secondary text-foreground rounded font-bold uppercase tracking-wide border border-border/40">
                       {models[selectedModelKey].badge}
                     </span>
                   )}
@@ -587,13 +587,13 @@ export function InputBar({
                     key={key}
                     onClick={() => changeSessionModel(key)}
                     className={cn(
-                      key === selectedModelKey && 'bg-oc-hover text-tx-bright font-semibold'
+                      key === selectedModelKey && 'bg-secondary text-foreground font-semibold'
                     )}
                   >
                     <span className="truncate flex-1">{models[key].name || key}</span>
 
                     {models[key].badge && (
-                      <span className="text-3xs px-1 bg-oc-surface text-tx-main rounded font-bold uppercase tracking-wide border border-oc-border flex-shrink-0">
+                      <span className="text-3xs px-1 bg-secondary text-foreground rounded font-bold uppercase tracking-wide border border-border/40 flex-shrink-0">
                         {models[key].badge}
                       </span>
                     )}
@@ -610,16 +610,16 @@ export function InputBar({
                       <DropdownMenuSubContent className="w-[150px] z-[60]">
                         {supportsReasoningEffort ? (
                           <>
-                            <DropdownMenuItem onClick={() => changeSessionReasoning(null)} className={cn(!activeReasoningEffort && 'bg-oc-hover text-tx-bright font-semibold')}>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning(null)} className={cn(!activeReasoningEffort && 'bg-secondary text-foreground font-semibold')}>
                               <span>{selectedModelKey && models[selectedModelKey]?.reasoningEffort ? 'Default' : 'Disabled'}</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => changeSessionReasoning('low')} className={cn(activeReasoningEffort === 'low' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('low')} className={cn(activeReasoningEffort === 'low' && 'bg-secondary text-foreground font-semibold')}>
                               <span>Low</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => changeSessionReasoning('medium')} className={cn(activeReasoningEffort === 'medium' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('medium')} className={cn(activeReasoningEffort === 'medium' && 'bg-secondary text-foreground font-semibold')}>
                               <span>Medium</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => changeSessionReasoning('high')} className={cn(activeReasoningEffort === 'high' && 'bg-oc-hover text-tx-bright font-semibold')}>
+                            <DropdownMenuItem onClick={() => changeSessionReasoning('high')} className={cn(activeReasoningEffort === 'high' && 'bg-secondary text-foreground font-semibold')}>
                               <span>High</span>
                             </DropdownMenuItem>
                           </>
@@ -639,7 +639,7 @@ export function InputBar({
         <div className="flex items-center gap-2 flex-shrink-0">
           {contextTokens !== undefined && contextTokens > 0 && (
             <div className="relative group flex items-center gap-1 select-none cursor-pointer z-20">
-              <span className="text-2xs font-bold text-tx-sub font-mono transition-colors group-hover:text-tx-bright">
+              <span className="text-2xs font-bold text-muted-foreground font-mono transition-colors group-hover:text-foreground">
                 {pctString}
               </span>
               <div className="relative flex items-center justify-center w-6 h-6">
@@ -648,32 +648,32 @@ export function InputBar({
                     cx="9"
                     cy="9"
                     r={CIRCLE_RADIUS}
-                    stroke="var(--oc-border)"
+                    stroke="var(--border)"
                     strokeWidth="2"
                     fill="transparent"
-                    className="transition-colors group-hover:stroke-oc-active"
+                    className="transition-colors group-hover:stroke-ring"
                   />
                   <circle
                     cx="9"
                     cy="9"
                     r={CIRCLE_RADIUS}
-                    stroke="var(--tx-sub)"
+                    stroke="var(--muted-foreground)"
                     strokeWidth="2"
                     fill="transparent"
                     strokeDasharray={CIRCUMFERENCE.toFixed(2)}
                     strokeDashoffset={(CIRCUMFERENCE * (1 - pct / 100)).toFixed(2)}
                     strokeLinecap="round"
-                    className="transition-all duration-300 group-hover:stroke-tx-bright"
+                    className="transition-all duration-300 group-hover:stroke-foreground"
                   />
                 </svg>
               </div>
-              <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-oc-raised border border-oc-border rounded-lg p-2.5 shadow-xl pointer-events-none text-2xs z-50 min-w-[190px] flex flex-col gap-1.5 font-sans">
-                <div className="font-bold text-tx-bright border-b border-oc-border pb-1">
+              <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-popover border border-border rounded-lg p-2.5 shadow-xl pointer-events-none text-2xs z-50 min-w-[190px] flex flex-col gap-1.5 font-sans">
+                <div className="font-bold text-foreground border-b border-border pb-1">
                   Context Window Usage
                 </div>
                 <div className="flex justify-between gap-4 font-semibold">
-                  <span className="text-tx-sub">Current:</span>
-                  <span className="text-tx-bright font-mono">
+                  <span className="text-muted-foreground">Current:</span>
+                  <span className="text-foreground font-mono">
                     {contextTokens.toLocaleString()} / {tokenLimit.toLocaleString()}
                   </span>
                 </div>
@@ -683,9 +683,9 @@ export function InputBar({
           {loading ? (
             <IconButton
               onClick={onCancel}
-              className="rounded-full bg-destructive text-white hover:bg-destructive/90 w-7 h-7 flex items-center justify-center flex-shrink-0 z-20"
+              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 w-7 h-7 flex items-center justify-center flex-shrink-0 z-20"
             >
-              <span className="w-2.5 h-2.5 bg-white rounded-xs" />
+              <span className="w-2.5 h-2.5 bg-destructive-foreground rounded-xs" />
             </IconButton>
           ) : (
             <IconButton
@@ -704,14 +704,14 @@ export function InputBar({
               className={cn(
                 'rounded-full w-7 h-7 flex items-center justify-center transition-all duration-200 flex-shrink-0 z-20',
                 isListening
-                  ? 'bg-destructive text-white animate-pulse cursor-pointer'
+                  ? 'bg-destructive text-destructive-foreground animate-pulse cursor-pointer'
                   : value.trim() || attachments.length > 0
-                    ? 'bg-tx-bright text-oc-base hover:opacity-90 cursor-pointer'
-                    : 'bg-oc-hover text-tx-sub hover:text-tx-bright cursor-pointer'
+                    ? 'bg-primary text-primary-foreground hover:opacity-90 cursor-pointer'
+                    : 'bg-secondary/60 text-foreground hover:bg-secondary cursor-pointer'
               )}
             >
               {isListening ? (
-                <span className="w-2.5 h-2.5 bg-white rounded-xs" />
+                <span className="w-2.5 h-2.5 bg-destructive-foreground rounded-xs" />
               ) : value.trim() || attachments.length > 0 ? (
                 <TbArrowUp size={16} strokeWidth={2.5} />
               ) : (

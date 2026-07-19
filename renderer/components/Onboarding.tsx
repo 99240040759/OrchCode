@@ -35,13 +35,13 @@ export function Onboarding(): React.JSX.Element {
     }
   }
   return (
-    <div className="flex flex-col items-center justify-center flex-1 bg-oc-base text-tx-main p-6 font-sans select-none">
+    <div className="flex flex-col items-center justify-center flex-1 bg-background text-foreground p-6 font-sans select-none">
       <div className="w-full max-w-sm flex flex-col items-center">
         <img src={logo} className="h-16 w-16 mb-6 object-contain" alt="OrchCode Logo" />
-        <h1 className="text-2xl font-bold text-tx-bright mb-2 tracking-tight">
+        <h1 className="text-2xl font-bold text-foreground mb-2 tracking-tight">
           Welcome to OrchCode
         </h1>
-        <p className="text-sm text-tx-sub text-center mb-8 leading-relaxed">
+        <p className="text-sm text-muted-foreground text-center mb-8 leading-relaxed">
           The agentic workspace orchestrator. Sign in with Google to sync your agentic workspaces
           and access tools.
         </p>
@@ -55,11 +55,11 @@ export function Onboarding(): React.JSX.Element {
           <button
             type="submit"
             disabled={pending}
-            className="w-full flex items-center justify-center gap-3 bg-tx-bright hover:bg-tx-main text-oc-base font-semibold py-3 px-4 rounded-lg transition-all duration-200 shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 outline-none focus-visible:ring-2 focus-visible:ring-tx-sub focus-visible:ring-offset-2 focus-visible:ring-offset-oc-base"
+            className="w-full flex items-center justify-center gap-3 bg-primary hover:opacity-90 text-primary-foreground font-semibold py-3 px-4 rounded-lg transition-all duration-200 shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {pending ? (
               <>
-                <span className="w-[18px] h-[18px] border-2 border-oc-base/30 border-t-oc-base rounded-full animate-spin flex-shrink-0" />
+                <span className="w-[18px] h-[18px] border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin flex-shrink-0" />
                 <span>Opening browser...</span>
               </>
             ) : (
@@ -71,7 +71,7 @@ export function Onboarding(): React.JSX.Element {
           </button>
         </form>
         {pending && (
-          <p className="text-xs text-tx-dim mt-3 text-center">
+          <p className="text-xs text-muted-foreground mt-3 text-center">
             Complete sign-in in the browser window that just opened.
           </p>
         )}

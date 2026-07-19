@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
+  :root, .dark {
     color-scheme: dark;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -25,54 +25,48 @@
     --folder-child-mt: 3px;
     --folder-item-gap: 3px;
 
-    /* ── Palette — premium neutral charcoal ─── */
-    --oc-base: #17171a;
-    /* deep dark app base, titlebar, topbar */
-    --oc-surface: #1e1e1e;
-    /* sidebar bg, panels bg */
-    --oc-raised: #242426;
-    /* input bar, elevated cards */
-    --oc-hover: #26262b;
-    /* hover background */
-    --oc-active: #2f2f35;
-    /* active / selected background */
-    --oc-border: #2d2d31;
-    /* primary boundaries/borders */
-    --oc-border-sub: #1e1e21;
-    /* divider lines */
-
-    /* ── Text tiers — pure neutral charcoal grays ── */
-    --tx-dim: #6c6c74;
-    /* disabled text, placeholder icons */
-    --tx-muted: #8e8e96;
-    /* folder tags, time stamps */
-    --tx-sub: #b0b0ba;
-    /* nav options, secondary details */
-    --tx-main: #e2e2e9;
-    /* primary active reading text */
-    --tx-bright: #ffffff;
-    /* high contrast headings, active */
-
-    /* ── shadcn HSL compat ───────────────────── */
-    --background: 240 5% 4%;
-    --foreground: 240 10% 90%;
-    --card: 240 5% 7%;
-    --card-foreground: 240 10% 90%;
-    --popover: 240 5% 11%;
-    --popover-foreground: 240 10% 90%;
-    --primary: 240 10% 90%;
-    --primary-foreground: 240 5% 4%;
-    --secondary: 240 5% 11%;
-    --secondary-foreground: 240 10% 90%;
-    --muted: 240 5% 11%;
-    --muted-foreground: 240 4% 57%;
-    --accent: 240 4% 15%;
-    --accent-foreground: 240 10% 90%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 0 0% 92%;
-    --border: 240 4% 18%;
-    --input: 240 4% 18%;
-    --ring: 240 4% 57%;
+    /* ── Pure Dark Claude Theme ───────────────── */
+    --background: oklch(0.27 0.00 106.64);
+    --foreground: oklch(0.81 0.01 93.01);
+    --card: oklch(0.27 0.00 106.64);
+    --card-foreground: oklch(0.98 0.01 95.10);
+    --popover: oklch(0.31 0.00 106.60);
+    --popover-foreground: oklch(0.92 0.00 106.48);
+    --primary: oklch(0.67 0.13 38.76);
+    --primary-foreground: oklch(1.00 0 0);
+    --secondary: oklch(0.21 0.01 95.42);
+    --secondary-foreground: oklch(0.97 0.01 98.88);
+    --muted: oklch(0.22 0.00 106.71);
+    --muted-foreground: oklch(0.77 0.02 99.07);
+    --accent: oklch(0.21 0.01 95.42);
+    --accent-foreground: oklch(0.97 0.01 98.88);
+    --destructive: oklch(0.64 0.21 25.33);
+    --destructive-foreground: oklch(1.0000 0 0);
+    --border: oklch(0.36 0.01 106.89);
+    --input: oklch(0.43 0.01 100.22);
+    --ring: oklch(0.67 0.13 38.76);
+    --chart-1: oklch(0.56 0.13 43.00);
+    --chart-2: oklch(0.69 0.16 290.41);
+    --chart-3: oklch(0.21 0.01 95.42);
+    --chart-4: oklch(0.31 0.05 289.32);
+    --chart-5: oklch(0.56 0.13 42.06);
+    --sidebar: oklch(0.24 0.00 67.71);
+    --sidebar-foreground: oklch(0.81 0.01 93.01);
+    --sidebar-primary: oklch(0.33 0 0);
+    --sidebar-primary-foreground: oklch(0.99 0 0);
+    --sidebar-accent: oklch(0.17 0.00 106.62);
+    --sidebar-accent-foreground: oklch(0.81 0.01 93.01);
+    --sidebar-border: oklch(0.94 0 0);
+    --sidebar-ring: oklch(0.77 0 0);
+    --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
+    --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+    --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
+    --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+    --tracking-normal: 0em;
   }
 
   *,
@@ -81,17 +75,18 @@
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    border-color: var(--oc-border);
+    border-color: var(--border);
   }
 
   body {
-    background-color: var(--oc-base);
-    color: var(--tx-main);
+    background-color: var(--background);
+    color: var(--foreground);
     font-family: 'Sora', sans-serif;
     font-feature-settings: 'rlig' 1, 'calt' 1;
     overflow: hidden;
     -webkit-user-select: none;
     user-select: none;
+    letter-spacing: var(--tracking-normal);
   }
 
   .selectable {
@@ -125,6 +120,15 @@
     word-break: normal;
     overflow-wrap: anywhere;
   }
+  .theme {
+    --radius: 0.5rem;
+    --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+    --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+    --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+    --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+    --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  }
+
 }
 
 @keyframes text-shimmer {
@@ -139,9 +143,9 @@
 
 .animate-text-shimmer {
   background: linear-gradient(90deg,
-      var(--tx-dim) 20%,
-      var(--tx-bright) 50%,
-      var(--tx-dim) 80%);
+      var(--muted-foreground) 20%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 80%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -191,7 +195,6 @@
   top: 0;
   width: 32px;
   text-align: right;
-  color: var(--tx-dim);
+  color: var(--muted-foreground);
   user-select: none;
 }
-

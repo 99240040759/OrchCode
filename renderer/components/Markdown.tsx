@@ -41,20 +41,20 @@ export function CodeBlock({
   }
   if (code.length > MAX_HIGHLIGHT_LENGTH)
     return (
-      <div className="border border-oc-border rounded-md overflow-auto bg-oc-surface font-mono text-xs shadow-md mt-4 mb-4 last:mb-0">
+      <div className="border border-border/80 rounded-xl overflow-auto bg-popover font-mono text-xs shadow-lg mt-4 mb-4 last:mb-0">
         <pre className="m-0 p-4 whitespace-pre-wrap break-words text-[13px] leading-relaxed">{code}</pre>
       </div>
     )
   return (
-    <div className="border border-oc-border rounded-md overflow-hidden bg-oc-surface font-mono text-xs shadow-md mt-4 mb-4 last:mb-0">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-oc-base border-b border-oc-border text-tx-sub select-none">
+    <div className="border border-border/80 rounded-xl overflow-hidden bg-popover font-mono text-xs shadow-lg mt-4 mb-4 last:mb-0">
+      <div className="flex items-center justify-between px-3.5 py-1.5 bg-muted/70 border-b border-border/60 text-muted-foreground select-none">
         <span className="font-semibold text-3xs uppercase tracking-wider">{lang}</span>
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="flex items-center gap-1 text-3xs hover:text-tx-bright transition-colors cursor-pointer bg-transparent border-none outline-none"
+          className="flex items-center gap-1 text-3xs hover:text-foreground transition-colors cursor-pointer bg-transparent border-none outline-none"
         >
-          {copied ? <TbCheck size={13} className="text-tx-bright" /> : <TbCopy size={13} />}
+          {copied ? <TbCheck size={13} className="text-foreground" /> : <TbCopy size={13} />}
           <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
@@ -64,7 +64,7 @@ export function CodeBlock({
         wrapLongLines={true}
         customStyle={{ margin: 0, padding: 0, background: 'transparent' }}
         codeTagProps={{ style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }}
-        className="!m-0 !bg-oc-surface overflow-x-hidden !p-4 text-[13px] leading-relaxed"
+        className="!m-0 !bg-popover overflow-x-hidden !p-4 text-[13px] leading-relaxed"
       >
         {code}
       </SyntaxHighlighter>
@@ -74,7 +74,7 @@ export function CodeBlock({
 
 export function Markdown({ content }: MarkdownProps): React.JSX.Element {
   return (
-    <div className="text-base text-tx-main leading-relaxed">
+    <div className="text-base text-foreground leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -82,7 +82,7 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
           a: ({ ...props }) => (
             <a
               {...props}
-              className="text-tx-bright underline hover:text-tx-bright transition-colors"
+              className="text-foreground underline hover:text-foreground transition-colors"
               target="_blank"
               rel="noopener noreferrer"
             />
@@ -106,7 +106,7 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
               </CodeBlock>
             ) : (
               <code
-                className="bg-oc-raised border border-oc-border px-1.5 py-0.5 rounded text-sm font-mono text-tx-muted"
+                className="bg-popover border border-border/80 px-1.5 py-0.5 rounded-md text-sm font-mono text-popover-foreground"
                 {...props}
               >
                 {children}
@@ -117,28 +117,34 @@ export function Markdown({ content }: MarkdownProps): React.JSX.Element {
           ol: ({ ...props }) => <ol {...props} className="list-decimal pl-5 mt-4 mb-4 space-y-1.5 last:mb-0" />,
           li: ({ ...props }) => <li {...props} className="my-0.5" />,
           table: ({ ...props }) => (
-            <div className="overflow-x-auto border border-oc-border rounded-md bg-oc-surface shadow-md mt-4 mb-4 last:mb-0">
+            <div className="overflow-x-auto border border-border/80 rounded-xl bg-popover shadow-lg mt-4 mb-4 last:mb-0 overflow-hidden">
               <table {...props} className="min-w-full text-xs" />
             </div>
           ),
-          thead: ({ ...props }) => <thead {...props} className="bg-oc-base border-b border-oc-border" />,
+          thead: ({ ...props }) => <thead {...props} className="bg-muted/70 border-b border-border/60" />,
           th: ({ ...props }) => (
             <th
               {...props}
-              className="px-3.5 py-2 text-left font-semibold text-tx-bright uppercase tracking-wider text-3xs select-none"
+              className="px-4 py-2.5 text-left font-semibold text-muted-foreground uppercase tracking-wider text-3xs select-none"
+            />
+          ),
+          tr: ({ ...props }) => (
+            <tr
+              {...props}
+              className="hover:bg-muted/40 transition-colors border-t border-border/40 first:border-t-0"
             />
           ),
           td: ({ ...props }) => (
             <td
               {...props}
-              className="px-3.5 py-2 border-t border-oc-border text-tx-main font-mono text-2xs"
+              className="px-4 py-2.5 text-foreground font-sans text-xs"
             />
           ),
-          h1: ({ ...props }) => <h1 {...props} className="font-bold text-tx-bright text-xl mt-6 mb-4 last:mb-0" />,
-          h2: ({ ...props }) => <h2 {...props} className="font-bold text-tx-bright text-lg mt-5 mb-3 last:mb-0" />,
-          h3: ({ ...props }) => <h3 {...props} className="font-bold text-tx-bright text-base mt-4 mb-2 last:mb-0" />,
+          h1: ({ ...props }) => <h1 {...props} className="font-bold text-foreground text-xl mt-6 mb-4 last:mb-0" />,
+          h2: ({ ...props }) => <h2 {...props} className="font-bold text-foreground text-lg mt-5 mb-3 last:mb-0" />,
+          h3: ({ ...props }) => <h3 {...props} className="font-bold text-foreground text-base mt-4 mb-2 last:mb-0" />,
           p: ({ ...props }) => <p {...props} className="mb-4 last:mb-0" />,
-          hr: ({ ...props }) => <hr {...props} className="mt-4 mb-4 border-t border-oc-border/60 last:mb-0" />
+          hr: ({ ...props }) => <hr {...props} className="mt-4 mb-4 border-t border-border/60 last:mb-0" />
         }}
       >
         {content}

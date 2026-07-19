@@ -39,7 +39,7 @@ function QueueList({
   if (queue.length === 0) return null
   return (
     <div className="flex flex-col gap-1.5 w-full max-w-chat mx-auto px-4 mb-2.5">
-      <div className="text-3xs text-tx-muted font-bold tracking-wider uppercase mb-1">
+      <div className="text-3xs text-muted-foreground font-bold tracking-wider uppercase mb-1">
         Next up in Queue ({queue.length} prompt{queue.length > 1 ? 's' : ''})
       </div>
       <div className="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto no-scrollbar">
@@ -48,15 +48,15 @@ function QueueList({
           return (
             <div
               key={item.id}
-              className="group bg-oc-surface/40 hover:bg-oc-surface border border-oc-border rounded-lg p-2 flex items-center justify-between gap-3 transition-colors"
+              className="group bg-card/40 hover:bg-card border border-border rounded-lg p-2 flex items-center justify-between gap-3 transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 <span
                   className={cn(
                     'text-3xs font-bold px-1.5 py-0.5 rounded border flex-shrink-0 uppercase tracking-wider select-none',
                     item.delivery === 'steer'
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
-                      : 'bg-oc-active border-oc-border text-tx-sub'
+                      ? 'bg-primary/10 border-primary/30 text-primary'
+                      : 'bg-secondary border-border text-muted-foreground'
                   )}
                 >
                   {item.delivery}
@@ -76,11 +76,11 @@ function QueueList({
                         setEditingPromptId(undefined)
                       }
                     }}
-                    className="flex-1 bg-oc-raised border border-oc-border rounded px-2 py-0.5 text-xs text-tx-main focus:outline-none focus:border-oc-active min-w-0"
+                    className="flex-1 bg-muted border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-ring min-w-0"
                     autoFocus
                   />
                 ) : (
-                  <span className="text-xs text-tx-main truncate flex-1 leading-relaxed select-text">
+                  <span className="text-xs text-foreground truncate flex-1 leading-relaxed select-text">
                     {item.prompt}
                   </span>
                 )}
@@ -154,7 +154,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }): Rea
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 text-xs text-tx-dim hover:text-tx-muted transition-colors cursor-pointer bg-transparent border-none outline-none select-none py-0.5"
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer bg-transparent border-none outline-none select-none py-0.5"
       >
         <span>Thought</span>
         {open ? (
@@ -166,7 +166,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }): Rea
       {open && (
         <div
           ref={containerRef}
-          className="mt-2 text-sm text-tx-muted whitespace-pre-wrap pl-4 leading-relaxed select-text font-sans max-h-[130px] overflow-y-auto"
+          className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap pl-4 leading-relaxed select-text font-sans max-h-[130px] overflow-y-auto"
         >
           {cleanText}
         </div>
@@ -256,7 +256,7 @@ function HistoryMessage({
     }
     return (
       <div className="flex w-full justify-end">
-        <div className="max-w-full w-full bg-oc-raised border border-oc-border rounded-xl px-4 py-2.5 text-tx-bright whitespace-pre-wrap break-words leading-relaxed text-base select-text flex flex-col gap-2.5">
+        <div className="max-w-full w-full bg-muted border border-border rounded-xl px-4 py-2.5 text-foreground whitespace-pre-wrap break-words leading-relaxed text-base select-text flex flex-col gap-2.5">
           {hasVisibleAttachments && (
             <div className="flex flex-col gap-2">
               {imageAttachments.map((att, i) => {
@@ -266,7 +266,7 @@ function HistoryMessage({
                     key={i}
                     src={src}
                     alt={'Attachment'}
-                    className="max-w-xs max-h-48 object-cover rounded-lg border border-oc-border bg-oc-base shadow-sm"
+                    className="max-w-xs max-h-48 object-cover rounded-lg border border-border bg-background shadow-sm"
                   />
                 ) : null
               })}
@@ -279,7 +279,7 @@ function HistoryMessage({
                         <TooltipTrigger asChild>
                           <button
                             onClick={() => onFileClick(getAbsolutePath(att.path, workspacePath))}
-                            className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-oc-raised border border-oc-border hover:border-oc-active text-tx-bright text-xs font-semibold transition-colors cursor-pointer select-text shadow-sm"
+                            className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-muted border border-border hover:border-ring text-foreground text-xs font-semibold transition-colors cursor-pointer select-text shadow-sm"
                           >
                             <FileIcon path={att.path} size={12} />
                             <span>{relativePath}</span>
@@ -304,7 +304,7 @@ function HistoryMessage({
     : [{ type: 'text', text: msg.content } as TextContent]
   return (
     <div className="flex w-full justify-start">
-      <div className="text-tx-main text-left w-full flex flex-col gap-3">
+      <div className="text-foreground text-left w-full flex flex-col gap-3">
         {blocks.map((part, i) => {
           if (part.type === 'text' && part.text)
             return <Markdown key={i} content={part.text} />
@@ -384,7 +384,7 @@ const StreamingAssistant = React.memo(function StreamingAssistant({
   if (!hasContent) return <></>
   return (
     <div className="flex w-full justify-start">
-      <div className="text-tx-main text-left w-full flex flex-col gap-3">
+      <div className="text-foreground text-left w-full flex flex-col gap-3">
         {stream.error && (
           <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2 select-text">
             {stream.error}
@@ -394,7 +394,7 @@ const StreamingAssistant = React.memo(function StreamingAssistant({
           <ThinkingBlock text={stream.reasoning} active={stream.isLoading && !stream.text} />
         )}
         {stream.statusNotice && !stream.text && (
-          <div className="text-xs text-tx-dim italic">{stream.statusNotice}</div>
+          <div className="text-xs text-muted-foreground italic">{stream.statusNotice}</div>
         )}
         <StreamingTools tools={stream.tools} onFileClick={onFileClick} />
         {stream.text && <Markdown content={stream.text} />}
@@ -580,7 +580,7 @@ export function ChatPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-oc-base">
+    <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-background">
       <Dialog open={!!activeQuestion}>
         <DialogContent
           className="max-w-md"
@@ -589,10 +589,10 @@ export function ChatPanel(): React.JSX.Element {
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader className="gap-1">
-            <DialogTitle className="text-base font-bold text-tx-bright">
+            <DialogTitle className="text-base font-bold text-foreground">
               Clarification Required
             </DialogTitle>
-            <DialogDescription className="text-sm text-tx-muted mt-2 whitespace-pre-wrap">
+            <DialogDescription className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
               {activeQuestion?.question}
             </DialogDescription>
           </DialogHeader>
@@ -601,7 +601,7 @@ export function ChatPanel(): React.JSX.Element {
               <button
                 key={opt}
                 onClick={() => submitAnswer(opt)}
-                className="w-full text-left bg-oc-raised border border-oc-border hover:border-oc-active rounded-lg px-4 py-2.5 text-sm text-tx-main hover:text-tx-bright hover:bg-oc-hover transition-colors font-medium cursor-pointer outline-none"
+                className="w-full text-left bg-muted border border-border hover:border-ring rounded-lg px-4 py-2.5 text-sm text-foreground hover:text-foreground hover:bg-accent transition-colors font-medium cursor-pointer outline-none"
               >
                 {opt}
               </button>
@@ -615,13 +615,13 @@ export function ChatPanel(): React.JSX.Element {
                     if (event.key === 'Enter' && questionAnswer.trim())
                       void submitAnswer(questionAnswer.trim())
                   }}
-                  className="flex-1 bg-oc-raised border border-oc-border rounded-lg px-3 py-2 text-sm text-tx-main outline-none focus:border-oc-active"
+                  className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
                   autoFocus
                 />
                 <button
                   disabled={!questionAnswer.trim()}
                   onClick={() => void submitAnswer(questionAnswer.trim())}
-                  className="px-4 py-2 rounded-lg bg-tx-bright text-oc-base text-sm font-semibold disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
                 >
                   Submit
                 </button>
@@ -631,11 +631,12 @@ export function ChatPanel(): React.JSX.Element {
         </DialogContent>
       </Dialog>
       {messages.length > 0 ? (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 relative overflow-hidden">
+          <div className="pointer-events-none absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-background to-transparent z-10" />
           <div
             ref={containerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto py-4 flex flex-col transform-gpu will-change-scroll"
+            className="absolute inset-0 overflow-y-auto pt-4 pb-44 flex flex-col transform-gpu will-change-scroll"
           >
             <div className="flex flex-col gap-6">
                {groupedMessages.length > visibleGroupedMessages.length && (
@@ -649,7 +650,7 @@ export function ChatPanel(): React.JSX.Element {
                          }))
                        }
                      }}
-                     className="text-xs text-tx-sub hover:text-tx-bright underline"
+                     className="text-xs text-muted-foreground hover:text-foreground underline"
                    >
                      Load earlier messages
                    </button>
@@ -681,11 +682,11 @@ export function ChatPanel(): React.JSX.Element {
                 )}
             </div>
 
-            <div className="h-[100px] flex-shrink-0 pointer-events-none" />
+            <div className="h-[95px] flex-shrink-0 pointer-events-none" />
             <div ref={bottomRef} className="h-px flex-shrink-0" />
           </div>
-          <div className="px-3 pb-2 pt-1 flex-shrink-0">
-            <div className="w-full mx-auto flex flex-col gap-1.5">
+          <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20 pt-16 pb-3 px-3 bg-gradient-to-t from-background via-background/90 to-transparent flex flex-col justify-end">
+            <div className="w-full mx-auto flex flex-col gap-1.5 pointer-events-auto">
               <QueueList
                 queue={queue}
                 updateQueuePrompt={updateQueuePrompt}
@@ -728,7 +729,7 @@ export function ChatPanel(): React.JSX.Element {
                 <button
                   key={s}
                   onClick={() => void handleSend(undefined, undefined, s)}
-                  className="px-3 py-1.5 rounded-full border border-oc-border bg-transparent hover:bg-oc-hover text-xs text-tx-sub hover:text-tx-main transition-colors cursor-pointer"
+                  className="px-3 py-1.5 rounded-full border border-border bg-transparent hover:bg-accent text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                 >
                   {s}
                 </button>

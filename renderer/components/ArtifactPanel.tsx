@@ -63,10 +63,10 @@ const FileTreeNode = ({ node, style, dragHandle, tree }: NodeRendererProps<TreeN
   const isActive = tree.props.selection === node.id || node.isSelected
   return (
     <div style={style} ref={dragHandle}>
-      <div onClick={(e) => { e.stopPropagation(); node.isInternal ? node.toggle() : node.activate() }} style={{ paddingLeft: `${node.level * 6 + 6}px` }} className={cn('flex items-center w-full h-full text-left hover:bg-oc-hover transition-colors cursor-pointer text-[13px] py-1 pr-1.5 rounded-sm truncate leading-tight font-normal select-none', isActive ? 'bg-oc-active text-tx-bright' : 'text-tx-muted hover:text-tx-main')}>
+      <div onClick={(e) => { e.stopPropagation(); node.isInternal ? node.toggle() : node.activate() }} style={{ paddingLeft: `${node.level * 6 + 6}px` }} className={cn('flex items-center w-full h-full text-left hover:bg-accent transition-colors cursor-pointer text-[13px] py-1 pr-1.5 rounded-sm truncate leading-tight font-normal select-none', isActive ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground')}>
         <FileIcon path={node.data.name} isFolder={node.isInternal} size={14} className="flex-shrink-0 mr-1.5 pointer-events-none" />
         <span className="truncate min-w-0 shrink text-left pointer-events-none">{node.data.name}</span>
-        {node.isInternal && <div className="w-4 h-4 flex items-center justify-center text-tx-dim ml-1 flex-shrink-0 pointer-events-none">{node.isOpen ? <TbChevronDown size={14} /> : <TbChevronRight size={14} />}</div>}
+        {node.isInternal && <div className="w-4 h-4 flex items-center justify-center text-muted-foreground ml-1 flex-shrink-0 pointer-events-none">{node.isOpen ? <TbChevronDown size={14} /> : <TbChevronRight size={14} />}</div>}
       </div>
     </div>
   )
@@ -95,11 +95,11 @@ function FileTree({ nodes, activePath, onSelect, workspacePath }: FileTreeProps)
   const data = useMemo(() => (workspacePath ? buildTree(nodes, workspacePath) : []), [nodes, workspacePath])
   const [ref, size] = useElementSize()
   const activeAbsPath = activePath && workspacePath ? getAbsolutePath(activePath, workspacePath) : undefined
-  if (!workspacePath) return <div className="h-full flex items-center justify-center p-4 text-center"><div><FileIcon path="folder" isFolder size={32} className="text-tx-dim mx-auto mb-2" /><p className="text-sm text-tx-dim">No workspace<br />selected for this thread</p></div></div>
+  if (!workspacePath) return <div className="h-full flex items-center justify-center p-4 text-center"><div><FileIcon path="folder" isFolder size={32} className="text-muted-foreground mx-auto mb-2" /><p className="text-sm text-muted-foreground">No workspace<br />selected for this thread</p></div></div>
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-hidden select-none" ref={ref}>
-        {nodes.length === 0 ? <p className="text-xs text-tx-dim text-center py-4">Empty directory</p> : (
+        {nodes.length === 0 ? <p className="text-xs text-muted-foreground text-center py-4">Empty directory</p> : (
           <Tree className="!overflow-x-hidden" data={data} selection={activeAbsPath} width={size.width} height={size.height} rowHeight={24} indent={6} openByDefault={false} disableDrag disableDrop onActivate={(node) => { if (node.isLeaf) onSelect(node.id); else node.toggle() }}>{FileTreeNode}</Tree>
         )}
       </div>
@@ -174,8 +174,8 @@ export function ArtifactPanel({ onClose }: { onClose: () => void }): React.JSX.E
     return () => webview.removeEventListener('dom-ready', listener)
   }, [])
   return (
-    <div className="flex flex-col h-full min-w-artifact flex-1 bg-oc-base overflow-hidden">
-      <div className="h-titlebar w-full flex-shrink-0 z-10 app-region-no-drag border-b border-oc-border bg-oc-base">
+    <div className="flex flex-col h-full min-w-artifact flex-1 bg-background overflow-hidden">
+      <div className="h-titlebar w-full flex-shrink-0 z-10 app-region-no-drag border-b border-border bg-background">
         <ScrollableTabBar leftNode={<FileTab active={showBrowser} onClick={() => setShowBrowser(true)} onClose={() => setShowBrowser(false)} name="Browser" iconType="browser" browserIcon={<img src={chromeLogo} alt="Chrome" className="w-[16px] h-[16px]" />} maxWidth="max-w-[150px]" />} rightNode={<div className={cn('h-full flex-shrink-0', isMac ? 'w-[36px]' : 'w-[140px]')} />}>
           {openFiles.map((fp) => {
             const fName = fp.split(/[/\\]/).pop()
@@ -190,57 +190,57 @@ export function ArtifactPanel({ onClose }: { onClose: () => void }): React.JSX.E
           })}
         </ScrollableTabBar>
       </div>
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-oc-border bg-oc-base flex-shrink-0 min-h-[36px]">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-background flex-shrink-0 min-h-[36px]">
         {showBrowser ? (
           <div className="flex items-center gap-1 w-full">
-            <IconButton size="sm" onClick={() => webviewRef.current?.goBack()}><TbArrowLeft size={16} className="text-tx-sub hover:text-tx-bright" /></IconButton>
-            <IconButton size="sm" onClick={() => webviewRef.current?.goForward()}><TbArrowRight size={16} className="text-tx-sub hover:text-tx-bright" /></IconButton>
-            <IconButton size="sm" onClick={() => isLoading ? webviewRef.current?.stop() : webviewRef.current?.reload()}>{isLoading ? <TbX size={16} className="text-tx-sub hover:text-tx-bright" /> : <TbRefresh size={16} className="text-tx-sub hover:text-tx-bright" />}</IconButton>
-            <div className="flex-1 ml-2 bg-oc-surface border border-oc-border rounded-md px-3 py-1 flex items-center gap-2 overflow-hidden shadow-sm">
-              {isLoading ? <TbLoader2 size={14} className="text-tx-dim flex-shrink-0 animate-spin" /> : <TbSearch size={14} className="text-tx-dim flex-shrink-0" />}
-              <input type="text" value={inputUrl} onChange={(e) => setInputUrl(e.target.value)} className="w-full bg-transparent border-none outline-none text-xs text-tx-main font-mono placeholder:font-sans placeholder:text-tx-dim" placeholder="Search or enter web address" onKeyDown={(e) => { if (e.key === 'Enter') navigateBrowser(e.currentTarget.value) }} />
+            <IconButton size="sm" onClick={() => webviewRef.current?.goBack()}><TbArrowLeft size={16} className="text-muted-foreground hover:text-foreground" /></IconButton>
+            <IconButton size="sm" onClick={() => webviewRef.current?.goForward()}><TbArrowRight size={16} className="text-muted-foreground hover:text-foreground" /></IconButton>
+            <IconButton size="sm" onClick={() => isLoading ? webviewRef.current?.stop() : webviewRef.current?.reload()}>{isLoading ? <TbX size={16} className="text-muted-foreground hover:text-foreground" /> : <TbRefresh size={16} className="text-muted-foreground hover:text-foreground" />}</IconButton>
+            <div className="flex-1 ml-2 bg-card border border-border rounded-md px-3 py-1 flex items-center gap-2 overflow-hidden shadow-sm">
+              {isLoading ? <TbLoader2 size={14} className="text-muted-foreground flex-shrink-0 animate-spin" /> : <TbSearch size={14} className="text-muted-foreground flex-shrink-0" />}
+              <input type="text" value={inputUrl} onChange={(e) => setInputUrl(e.target.value)} className="w-full bg-transparent border-none outline-none text-xs text-foreground font-mono placeholder:font-sans placeholder:text-muted-foreground" placeholder="Search or enter web address" onKeyDown={(e) => { if (e.key === 'Enter') navigateBrowser(e.currentTarget.value) }} />
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2 w-full overflow-hidden text-xs text-tx-dim font-mono"><span className="truncate">{activeFilePath ? getRelativePath(activeFilePath, workspacePath) : 'No file selected'}</span></div>
+          <div className="flex items-center gap-2 w-full overflow-hidden text-xs text-muted-foreground font-mono"><span className="truncate">{activeFilePath ? getRelativePath(activeFilePath, workspacePath) : 'No file selected'}</span></div>
         )}
         <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-          <IconButton size="sm" onClick={() => { const next = !showTree; setShowTree(next); localStorage.setItem('ap:showTree', String(next)) }} tooltip={showTree ? 'Hide File Tree' : 'Show File Tree'} tooltipSide="bottom">{showTree ? <TbFolderOpen size={15} className="text-tx-sub" /> : <TbFolder size={15} className="text-tx-sub" />}</IconButton>
-          {!showBrowser && <IconButton size="sm" onClick={handleRefreshAll} tooltip="Refresh" tooltipSide="bottom"><TbRefresh size={15} className="text-tx-sub" /></IconButton>}
+          <IconButton size="sm" onClick={() => { const next = !showTree; setShowTree(next); localStorage.setItem('ap:showTree', String(next)) }} tooltip={showTree ? 'Hide File Tree' : 'Show File Tree'} tooltipSide="bottom">{showTree ? <TbFolderOpen size={15} className="text-muted-foreground" /> : <TbFolder size={15} className="text-muted-foreground" />}</IconButton>
+          {!showBrowser && <IconButton size="sm" onClick={handleRefreshAll} tooltip="Refresh" tooltipSide="bottom"><TbRefresh size={15} className="text-muted-foreground" /></IconButton>}
           <IconButton size="sm" onClick={onClose} tooltip="Close Panel" tooltipSide="bottom"><TbX size={17} strokeWidth={1.8} /></IconButton>
         </div>
       </div>
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-hidden min-w-0 flex flex-col bg-oc-base">
+        <div className="flex-1 overflow-hidden min-w-0 flex flex-col bg-background">
           <webview key={browserSessionId ?? 'home'} ref={webviewRef as React.LegacyRef<HTMLElement>} src={browserUrl} className={cn('w-full h-full flex-1 border-none', showBrowser ? 'flex' : 'hidden')} partition={`orch-browser-${browserSessionId ?? 'home'}`} webpreferences="contextIsolation=yes,javascript=yes,webgl=yes" allowpopups={true} />
-          <div className={cn('w-full flex-1 min-h-0 bg-oc-base', showBrowser ? 'hidden' : 'block')}>
+          <div className={cn('w-full flex-1 min-h-0 bg-background', showBrowser ? 'hidden' : 'block')}>
             {activeFilePath ? (
               activeFileContent !== undefined ? (
                 activeFilePath.toLowerCase().endsWith('.md') ? (
-                  <div className="h-full overflow-y-auto pl-3 pr-1.5 py-3 bg-oc-base select-text"><Markdown content={activeFileContent} /></div>
+                  <div className="h-full overflow-y-auto pl-3 pr-1.5 py-3 bg-background select-text"><Markdown content={activeFileContent} /></div>
                 ) : canHighlightFile ? (
                   <SyntaxHighlighter language={getLanguage(activeFilePath)} style={vscDarkPlus} showLineNumbers={false} wrapLines={true} wrapLongLines={false} customStyle={{ margin: 0, padding: '12px 8px 12px 5px', background: 'transparent', fontSize: '13px', tabSize: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} lineProps={{ className: 'code-line-with-counter', style: { display: 'block', position: 'relative', paddingLeft: '45px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }} codeTagProps={{ style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', paddingLeft: '0px', marginLeft: '0px', tabSize: 2, counterReset: 'line' } }} className="h-full overflow-y-auto overflow-x-hidden font-mono tab-size-2 leading-relaxed">{activeFileContent}</SyntaxHighlighter>
                 ) : (
-                  <pre className="h-full overflow-auto m-0 p-3 whitespace-pre-wrap break-words text-[13px] leading-relaxed font-mono text-tx-main">{activeFileContent}</pre>
+                  <pre className="h-full overflow-auto m-0 p-3 whitespace-pre-wrap break-words text-[13px] leading-relaxed font-mono text-foreground">{activeFileContent}</pre>
                 )
               ) : (
-                <div className="h-full flex flex-col items-center justify-center gap-3"><TbLoader2 size={32} className="text-tx-sub animate-spin" /><span className="text-sm text-tx-muted font-medium">Loading content...</span></div>
+                <div className="h-full flex flex-col items-center justify-center gap-3"><TbLoader2 size={32} className="text-muted-foreground animate-spin" /><span className="text-sm text-muted-foreground font-medium">Loading content...</span></div>
               )
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center p-6">
-                  <div className="w-12 h-12 rounded-xl bg-oc-raised border border-oc-border flex items-center justify-center mx-auto mb-3">
-                    <svg className="w-6 h-6 text-tx-dim" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
+                  <div className="w-12 h-12 rounded-xl bg-muted border border-border flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg>
                   </div>
-                  <p className="text-sm text-tx-dim font-semibold">No file open</p>
-                  <p className="text-xs text-tx-dim mt-1 opacity-60">Click a file in the tree or a file tool in chat</p>
+                  <p className="text-sm text-muted-foreground font-semibold">No file open</p>
+                  <p className="text-xs text-muted-foreground mt-1 opacity-60">Click a file in the tree or a file tool in chat</p>
                 </div>
               </div>
             )}
           </div>
         </div>
         {showTree && (
-          <div className="w-[180px] flex-shrink-0 flex flex-col border-l border-oc-border bg-oc-surface overflow-hidden pl-1 py-1 pr-0">
+          <div className="w-[180px] flex-shrink-0 flex flex-col border-l border-border bg-card overflow-hidden pl-1 py-1 pr-0">
             <FileTree nodes={fileTree ?? []} activePath={activeFilePath} onSelect={handleFileSelect} workspacePath={workspacePath} />
           </div>
         )}

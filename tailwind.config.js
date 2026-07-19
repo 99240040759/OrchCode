@@ -4,45 +4,62 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        /* App surface palette — derived from #1b1b1f */
-        'oc-base': 'var(--oc-base)',
-        'oc-surface': 'var(--oc-surface)',
-        'oc-raised': 'var(--oc-raised)',
-        'oc-hover': 'var(--oc-hover)',
-        'oc-active': 'var(--oc-active)',
-        'oc-border': 'var(--oc-border)',
-        'oc-border-sub': 'var(--oc-border-sub)',
-        /* Text tiers */
-        'tx-dim': 'var(--tx-dim)',
-        'tx-muted': 'var(--tx-muted)',
-        'tx-sub': 'var(--tx-sub)',
-        'tx-main': 'var(--tx-main)',
-        'tx-bright': 'var(--tx-bright)',
-        /* shadcn compat */
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        /* Legacy aliases re-routed strictly to shadcn theme tokens */
+        'oc-base': 'var(--background)',
+        'oc-surface': 'var(--card)',
+        'oc-raised': 'var(--muted)',
+        'oc-hover': 'var(--accent)',
+        'oc-active': 'var(--secondary)',
+        'oc-border': 'var(--border)',
+        'oc-border-sub': 'var(--border)',
+        'tx-dim': 'var(--muted-foreground)',
+        'tx-muted': 'var(--muted-foreground)',
+        'tx-sub': 'var(--muted-foreground)',
+        'tx-main': 'var(--foreground)',
+        'tx-bright': 'var(--foreground)',
+        /* shadcn theme tokens */
+        border: 'var(--border)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
         primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))'
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)'
         },
         secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))'
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)'
         },
         muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))'
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)'
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))'
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)'
         },
         destructive: {
-          DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))'
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground)'
+        },
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)'
+        },
+        popover: {
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)'
+        },
+        sidebar: {
+          DEFAULT: 'var(--sidebar)',
+          foreground: 'var(--sidebar-foreground)',
+          primary: 'var(--sidebar-primary)',
+          'primary-foreground': 'var(--sidebar-primary-foreground)',
+          accent: 'var(--sidebar-accent)',
+          'accent-foreground': 'var(--sidebar-accent-foreground)',
+          border: 'var(--sidebar-border)',
+          ring: 'var(--sidebar-ring)'
         }
       },
       borderRadius: {

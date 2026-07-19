@@ -61,8 +61,8 @@ export function SearchPanel(): React.JSX.Element {
   }, [debouncedQuery])
 
   return (
-    <div className="flex-1 flex flex-col p-6 bg-oc-base overflow-hidden">
-      <h2 className="text-xl font-bold text-tx-bright mb-4 flex items-center gap-2">
+    <div className="flex-1 flex flex-col p-6 bg-background overflow-hidden">
+      <h2 className="text-xl font-bold text-foreground mb-4 flex items-center gap-2">
         <TbSearch size={22} /> Global Search
       </h2>
       <div className="flex gap-2 mb-4">
@@ -71,7 +71,7 @@ export function SearchPanel(): React.JSX.Element {
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
           placeholder="Search message history..."
-          className="flex-1 bg-oc-raised border border-oc-border rounded-lg px-3 py-2 text-sm text-tx-main placeholder:text-tx-dim focus:outline-none focus:border-oc-active"
+          className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
           autoFocus
         />
       </div>
@@ -85,25 +85,25 @@ export function SearchPanel(): React.JSX.Element {
                 void selectSession(r.sessionId)
                 setActiveNav(undefined)
               }}
-              className="p-3 bg-oc-surface border border-oc-border rounded-lg hover:border-oc-active transition-colors cursor-pointer text-left"
+              className="p-3 bg-card border border-border rounded-lg hover:border-ring transition-colors cursor-pointer text-left"
             >
-              <div className="flex justify-between text-xs text-tx-muted mb-1 font-semibold">
+              <div className="flex justify-between text-xs text-muted-foreground mb-1 font-semibold">
                 <span>{r.title}</span>
-                <span className="capitalize px-1.5 bg-oc-raised rounded border border-oc-border">
+                <span className="capitalize px-1.5 bg-muted rounded border border-border">
                   {r.role}
                 </span>
               </div>
-              <p className="text-sm text-tx-main line-clamp-2 whitespace-pre-wrap">{r.text}</p>
+              <p className="text-sm text-foreground line-clamp-2 whitespace-pre-wrap">{r.text}</p>
             </button>
           ))
         ) : searching ? (
-          <p className="text-center text-sm text-tx-dim py-8">Searching conversations...</p>
+          <p className="text-center text-sm text-muted-foreground py-8">Searching conversations...</p>
         ) : error ? (
           <p className="text-center text-sm text-destructive py-8">{error}</p>
         ) : query.trim() ? (
-          <p className="text-center text-sm text-tx-dim py-8">No results found.</p>
+          <p className="text-center text-sm text-muted-foreground py-8">No results found.</p>
         ) : (
-          <p className="text-center text-sm text-tx-dim py-8">
+          <p className="text-center text-sm text-muted-foreground py-8">
             Type to search across all sessions.
           </p>
         )}

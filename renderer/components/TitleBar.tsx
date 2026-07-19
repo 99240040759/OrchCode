@@ -76,7 +76,7 @@ export function TitleBar({
             onClick={onToggleSidebar}
             tooltip={sidebarOpen ? 'Close Sidebar' : 'Open Sidebar'}
             tooltipSide="bottom"
-            className={cn(sidebarOpen === false && 'text-tx-muted')}
+            className={cn(sidebarOpen === false && 'text-muted-foreground')}
           >
             <TbLayoutSidebar size={19} strokeWidth={1.8} />
           </IconButton>
@@ -86,13 +86,13 @@ export function TitleBar({
         {showUpdateBanner && (
           <div className="flex items-center mr-2">
             {updateStatus === 'downloading' && (
-              <span className="text-3xs text-tx-sub flex items-center gap-1 font-sans animate-pulse">
+              <span className="text-3xs text-muted-foreground flex items-center gap-1 font-sans animate-pulse">
                 <TbRefresh size={13} className="animate-spin" />
                 <span>Downloading Update...</span>
               </span>
             )}
             {updateStatus === 'available' && (
-              <span className="text-3xs text-tx-sub flex items-center gap-1 font-sans animate-pulse">
+              <span className="text-3xs text-muted-foreground flex items-center gap-1 font-sans animate-pulse">
                 <TbRefresh size={13} className="animate-spin" />
                 <span>Preparing Update {updateVersion && `(${updateVersion})`}</span>
               </span>
@@ -122,7 +122,7 @@ export function TitleBar({
             onClick={onToggleArtifact}
             tooltip="Toggle Editor Panel"
             tooltipSide="bottom"
-            className={cn(artifactOpen === false && 'text-tx-muted')}
+            className={cn(artifactOpen === false && 'text-muted-foreground')}
           >
             <TbLayoutSidebarRight size={19} strokeWidth={1.8} />
           </IconButton>

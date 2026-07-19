@@ -6,7 +6,7 @@ const Tooltip = TooltipPrimitive.Root
 const TooltipTrigger = TooltipPrimitive.Trigger
 const TooltipContent = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>>(({ className, sideOffset = 4, children, ...props }, ref) => (
   <TooltipPrimitive.Portal>
-    <TooltipPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn('z-50 w-fit origin-[var(--radix-tooltip-content-transform-origin)] animate-in rounded-md bg-oc-surface border border-oc-border px-2.5 py-1 text-2xs text-tx-main shadow-xl font-sans fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95', className)} {...props}>{children}</TooltipPrimitive.Content>
+    <TooltipPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn('z-50 w-fit origin-[var(--radix-tooltip-content-transform-origin)] animate-in rounded-md bg-popover border border-border px-2.5 py-1 text-2xs text-popover-foreground shadow-xl font-sans fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95', className)} {...props}>{children}</TooltipPrimitive.Content>
   </TooltipPrimitive.Portal>
 ))
 TooltipContent.displayName = TooltipPrimitive.Content.displayName
