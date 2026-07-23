@@ -1,0 +1,53 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+// @ts-expect-error process is a nodejs global
+const host = process.env.TAURI_DEV_HOST;
+
+export default defineConfig(() => {
+  return {
+    plugins: [react()],
+
+    build: {
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/react/") || id.includes("node_modules/react-dom/")) {
+              return "vendor";
+            }
+            if (id.includes("node_modules/@radix-ui/")) {
+              return "radix";
+            }
+            if (id.includes("node_modules/react-markdown/") || id.includes("node_modules/remark-gfm/")) {
+              return "markdown";
+            }
+            if (id.includes("node_modules/shiki/")) {
+              return "shiki";
+            }
+            if (id.includes("node_modules/@xterm/")) {
+              return "xterm";
+            }
+          },
+        },
+      },
+    },
+
+    clearScreen: false,
+    server: {
+      port: 1420,
+      strictPort: true,
+      host: host || false,
+      hmr: host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
+      watch: {
+        ignored: ["**/src-tauri/**"],
+      },
+    },
+  };
+});

@@ -3,12 +3,21 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+
 env:
+  # App config injected into the Rust binary at compile time (build.rs / option_env!).
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+  # Tauri updater signing. Only the private key is a secret; it's used at BUILD
+  # time to sign updater artifacts (never shipped in the client — the app only
+  # holds the public key). The key was generated with no password, so the
+  # password is an explicit empty string here (GitHub rejects empty secrets).
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
   GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+
 jobs:
   create-release:
     name: Create GitHub Release
@@ -20,36 +29,120 @@ jobs:
           token: ${{ secrets.RELEASE_PAT }}
           repository: sameer786ss/OrchCode
           draft: false
+          prerelease: false
 
-  release-mac:
+  build-mac:
     name: Build & Publish macOS
-    runs-on: macos-15
+    runs-on: macos-latest
     needs: create-release
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run build
-      - run: npx electron-builder --mac --publish always
-      - name: Remove Mac blockmap files from release
-        run: |
-          gh release delete-asset "${{ github.ref_name }}" "Orch-macOS-arm64.dmg.blockmap" --repo sameer786ss/OrchCode --yes || true
-          gh release delete-asset "${{ github.ref_name }}" "Orch-macOS-x64.dmg.blockmap" --repo sameer786ss/OrchCode --yes || true
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
 
-  release-windows:
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build macOS Apple Silicon (arm64)
+        run: npx tauri build --target aarch64-apple-darwin
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Prepare Apple Silicon Asset
+        run: cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg Orch-macOS-arm64.dmg
+
+      - name: Build macOS Intel (x64)
+        run: npx tauri build --target x86_64-apple-darwin
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Prepare Intel Asset
+        run: cp src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg Orch-macOS-x64.dmg
+
+      - name: Publish macOS Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          repository: sameer786ss/OrchCode
+          tag_name: ${{ github.ref_name }}
+          files: |
+            Orch-macOS-arm64.dmg
+            Orch-macOS-x64.dmg
+
+  build-windows:
     name: Build & Publish Windows
-    runs-on: windows-2022
+    runs-on: windows-latest
     needs: create-release
     steps:
       - uses: actions/checkout@v4
-      - name: Disable Defender
+
+      - name: Disable Windows Defender
         shell: powershell
         run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - uses: dtolnay/rust-toolchain@stable
+
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          cache: npm
+
       - run: npm ci
-      - run: npm run build
-      - run: npx electron-builder --win --publish always
+
+      - name: Build Windows Setup Executable
+        run: npx tauri build
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Prepare Windows Asset & Updater Manifest
+        shell: powershell
+        run: |
+          $setup = (Get-Item src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
+          Copy-Item $setup -Destination Orch-Windows-Setup.exe
+
+          # createUpdaterArtifacts=true + the signing key produce this .sig next
+          # to the installer. Its contents go verbatim into latest.json.
+          $sigPath = (Get-Item src-tauri/target/release/bundle/nsis/*-setup.exe.sig).FullName
+          $signature = (Get-Content $sigPath -Raw).Trim()
+
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          $manifest = [ordered]@{
+            version   = $version
+            notes     = "Automated release $tag. See the GitHub release page for details."
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url       = "https://github.com/sameer786ss/OrchCode/releases/download/$tag/Orch-Windows-Setup.exe"
+              }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 6
+          # WriteAllText emits UTF-8 without BOM so Tauri can parse the manifest.
+          [System.IO.File]::WriteAllText("$PWD\latest.json", $json)
+
+      - name: Publish Windows Asset & Updater Manifest
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          repository: sameer786ss/OrchCode
+          tag_name: ${{ github.ref_name }}
+          files: |
+            Orch-Windows-Setup.exe
+            latest.json

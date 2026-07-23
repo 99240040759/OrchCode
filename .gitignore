@@ -1,7 +1,35 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
 node_modules
 dist
-out
+dist-ssr
+*.local
+
+# Local build-time config — real values must never be committed.
+# Injected into the binary at compile time (src-tauri/build.rs) and, in CI,
+# from GitHub repo secrets (see .github/workflows/build-release.yml).
+.env
+.env.*
+!.env.example
+
+# Tauri updater signing keys — never commit.
+*.key
+*.key.pub
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-.eslintcache
-*.log*
-.env*
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
