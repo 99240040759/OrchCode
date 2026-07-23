@@ -2,7 +2,12 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import * as api from "./api";
 import { newId } from "./utils";
-import type { ModelDto, Budget, WorkspaceInfo, SessionSummary, ToolDisplayInfo, MessageItemView } from "./api";
+import type { ModelDto, Budget, WorkspaceInfo, SessionSummary, ToolDisplayInfo, MessageItemView, AttachmentRef } from "./api";
+
+type ReasoningEffort = "low" | "medium" | "high";
+
+let sessionsListenerBound = false;
+let modelsListenerBound = false;
 
 export interface ReasoningItem {
   type: "reasoning";
@@ -29,7 +34,18 @@ export interface TextItem {
   text: string;
 }
 
-export type MessageItem = ReasoningItem | ToolCallItem | TextItem;
+/// Non-destructive marker rendered as a small divider line wherever the conversation was
+/// automatically compacted. The underlying messages are never removed from the database
+/// or from `messages` — this item only records where a summarisation boundary sits, so
+/// it persists across app restarts exactly like everything else in the session.
+export interface CompactionNoticeItem {
+  type: "compactionNotice";
+  id: string;
+  originalMessageCount: number;
+  ts: number;
+}
+
+export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNoticeItem;
 
 export interface TokenUsage {
   inputTokens: number;
@@ -39,8 +55,9 @@ export interface TokenUsage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   items: MessageItem[];
+  attachments?: AttachmentRef[];
   streaming?: boolean;
   error?: string;
   usage?: TokenUsage;
@@ -49,6 +66,9 @@ export interface ChatMessage {
 function viewItemToLocal(item: MessageItemView): MessageItem {
   if (item.type === "text") return { type: "text", id: item.id, text: item.text };
   if (item.type === "reasoning") return { type: "reasoning", id: item.id, text: item.text, active: false, startTime: 0 };
+  if (item.type === "compactionNotice") {
+    return { type: "compactionNotice", id: item.id, originalMessageCount: item.originalMessageCount, ts: item.ts };
+  }
   return {
     type: "toolCall",
     id: item.id,
@@ -66,10 +86,15 @@ interface ChatState {
   sessionGeneration: number;
   messages: ChatMessage[];
   streaming: boolean;
-  compacting: boolean;
+  /// Token usage for the *current* session. Seeded from the persisted `SessionSummary`
+  /// on session load (so the context ring is correct immediately, before any new turn
+  /// streams in) and updated live as `usage` events arrive during a turn — the two
+  /// paths write to the same field, so there is exactly one source of truth for the
+  /// input bar to read instead of it re-deriving usage by scanning `messages`.
+  sessionTokens: TokenUsage;
   models: ModelDto[];
   selectedModel: ModelDto | null;
-  reasoningEffort: "low" | "medium" | "high";
+  reasoningEffort: ReasoningEffort;
   budget: Budget | null;
   workspace: WorkspaceInfo | null;
   error: string | null;
@@ -80,11 +105,10 @@ interface ChatActions {
   newChat: () => void;
   selectSession: (id: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
-  send: (prompt: string, attachmentBlock?: string) => Promise<void>;
+  send: (prompt: string, attachments?: AttachmentRef[]) => Promise<void>;
   cancel: () => void;
-  compactSession: () => Promise<string>;
   setSelectedModel: (key: string) => Promise<void>;
-  setReasoningEffort: (effort: "low" | "medium" | "high") => void;
+  setReasoningEffort: (effort: ReasoningEffort) => void;
   pickWorkspace: () => Promise<void>;
   resetToSandbox: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -94,6 +118,8 @@ interface ChatActions {
 
 export type ChatStore = ChatState & ChatActions;
 
+const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
     sessions: [],
@@ -101,7 +127,7 @@ export const useChatStore = create(
     sessionGeneration: 0,
     messages: [],
     streaming: false,
-    compacting: false,
+    sessionTokens: ZERO_USAGE,
     models: [],
     selectedModel: null,
     reasoningEffort: "medium",
@@ -115,7 +141,10 @@ export const useChatStore = create(
         api.getWorkspaceInfo(),
         api.listModels(),
       ]);
-      const savedModelKey = await api.getUserPref("selectedModel").catch(() => null);
+      const [savedModelKey, savedEffort] = await Promise.all([
+        api.getUserPref("selectedModel").catch(() => null),
+        api.getUserPref("reasoningEffort").catch(() => null),
+      ]);
       set((s) => {
         if (sessions.status === "fulfilled") s.sessions = sessions.value;
         if (workspace.status === "fulfilled") s.workspace = workspace.value;
@@ -126,17 +155,33 @@ export const useChatStore = create(
             : undefined;
           s.selectedModel = preferred ?? models.value[0] ?? null;
         }
+        if (savedEffort === "low" || savedEffort === "medium" || savedEffort === "high") {
+          s.reasoningEffort = savedEffort;
+        }
       });
       api.getBudget().then((b) => {
         if (b) set((s) => { s.budget = b; });
       }).catch(() => {});
 
-      if (api.inTauri()) {
+      if (api.inTauri() && !sessionsListenerBound) {
+        sessionsListenerBound = true;
         import("@tauri-apps/api/event").then(({ listen }) => {
           listen("sessions-updated", () => {
             get().refreshSessions();
           });
-        }).catch(() => {});
+        }).catch(() => { sessionsListenerBound = false; });
+      }
+
+      // The model catalog now refreshes itself on a server-driven TTL in the background
+      // (see AppState::spawn_catalog_refresh_loop). This just picks up the result so a
+      // model added or changed server-side appears without the user forcing a refresh.
+      if (api.inTauri() && !modelsListenerBound) {
+        modelsListenerBound = true;
+        import("@tauri-apps/api/event").then(({ listen }) => {
+          listen("models-updated", () => {
+            get().refreshModels();
+          });
+        }).catch(() => { modelsListenerBound = false; });
       }
     },
 
@@ -146,6 +191,7 @@ export const useChatStore = create(
         s.currentSessionId = newId();
         s.sessionGeneration += 1;
         s.messages = [];
+        s.sessionTokens = ZERO_USAGE;
         s.error = null;
       });
     },
@@ -157,6 +203,11 @@ export const useChatStore = create(
         s.currentSessionId = id;
         s.sessionGeneration += 1;
         s.messages = [];
+        // Seed from the persisted summary immediately so the context ring is accurate
+        // on load, before any live 'usage' event has a chance to arrive.
+        s.sessionTokens = targetSession
+          ? { inputTokens: targetSession.lastInputTokens, outputTokens: targetSession.lastOutputTokens, totalTokens: targetSession.lastTotalTokens }
+          : ZERO_USAGE;
         s.error = null;
       });
       if (targetSession?.workspacePath && api.inTauri()) {
@@ -170,8 +221,11 @@ export const useChatStore = create(
           if (s.currentSessionId !== id) return;
           s.messages = views.map((v) => ({
             id: v.id,
-            role: v.role,
+            role: v.role as ChatMessage["role"],
             items: v.items.map(viewItemToLocal),
+            attachments: v.attachments && v.attachments.length > 0
+              ? v.attachments.map((a) => ({ path: a.dataUrl || a.name, name: a.name, isImage: a.isImage }))
+              : undefined,
             streaming: false,
           }));
         });
@@ -196,18 +250,19 @@ export const useChatStore = create(
           s.currentSessionId = newId();
           s.sessionGeneration += 1;
           s.messages = [];
+          s.sessionTokens = ZERO_USAGE;
           s.streaming = false;
           s.error = null;
         }
       });
     },
 
-    send: async (prompt: string, attachmentBlock?: string) => {
+    send: async (prompt: string, attachments?: AttachmentRef[]) => {
       const { streaming, currentSessionId, selectedModel, reasoningEffort } = get();
       const text = prompt.trim();
-      if ((!text && !attachmentBlock) || streaming) return;
+      const hasAttachments = !!attachments && attachments.length > 0;
+      if ((!text && !hasAttachments) || streaming) return;
 
-      const fullPrompt = text && attachmentBlock ? `${text}\n\n${attachmentBlock}` : attachmentBlock || text;
       const userMsgId = newId();
       const assistantMsgId = newId();
       const sessionIdAtSend = currentSessionId;
@@ -215,7 +270,12 @@ export const useChatStore = create(
       set((s) => {
         s.error = null;
         s.streaming = true;
-        s.messages.push({ id: userMsgId, role: "user", items: [{ type: "text", id: newId(), text: fullPrompt }] });
+        s.messages.push({
+          id: userMsgId,
+          role: "user",
+          items: [{ type: "text", id: newId(), text }],
+          attachments: hasAttachments ? attachments : undefined,
+        });
         s.messages.push({ id: assistantMsgId, role: "assistant", items: [], streaming: true });
       });
 
@@ -234,7 +294,7 @@ export const useChatStore = create(
       };
 
       try {
-        await api.startChat(sessionIdAtSend, selectedModel?.key ?? "", fullPrompt, reasoningEffort, (raw: unknown) => {
+        await api.startChat(sessionIdAtSend, selectedModel?.key ?? "", text, reasoningEffort, attachments, (raw: unknown) => {
           const e = raw as {
             type: string;
             delta?: string;
@@ -245,6 +305,8 @@ export const useChatStore = create(
             output?: string;
             message?: string;
             durationSeconds?: number;
+            originalMessageCount?: number;
+            ts?: number;
           };
           switch (e.type) {
             case "text": {
@@ -308,12 +370,34 @@ export const useChatStore = create(
             }
             case "usage": {
               const ue = e as { type: string; inputTokens?: number; outputTokens?: number; totalTokens?: number };
-              patch((m) => {
-                m.usage = {
-                  inputTokens: ue.inputTokens ?? 0,
-                  outputTokens: ue.outputTokens ?? 0,
-                  totalTokens: ue.totalTokens ?? 0,
-                };
+              const usage: TokenUsage = {
+                inputTokens: ue.inputTokens ?? 0,
+                outputTokens: ue.outputTokens ?? 0,
+                totalTokens: ue.totalTokens ?? 0,
+              };
+              patch((m) => { m.usage = usage; });
+              set((s) => {
+                if (s.currentSessionId === sessionIdAtSend) s.sessionTokens = usage;
+              });
+              break;
+            }
+            case "compacted": {
+              // Purely additive: append a divider message. No prior messages are
+              // touched, mirrored, or refetched — the backend already persisted the
+              // same marker, so a reload of this session will show it in the exact
+              // same place.
+              set((s) => {
+                if (s.currentSessionId !== sessionIdAtSend) return;
+                s.messages.push({
+                  id: newId(),
+                  role: "system",
+                  items: [{
+                    type: "compactionNotice",
+                    id: newId(),
+                    originalMessageCount: e.originalMessageCount ?? 0,
+                    ts: e.ts ?? Date.now(),
+                  }],
+                });
               });
               break;
             }
@@ -324,17 +408,6 @@ export const useChatStore = create(
                 if (b) set((s) => { s.budget = b; });
               }).catch(() => {});
               get().refreshSessions();
-              api.getSessionView(sessionIdAtSend).then((views) => {
-                set((s) => {
-                  if (s.currentSessionId !== sessionIdAtSend) return;
-                  s.messages = views.map((v) => ({
-                    id: v.id,
-                    role: v.role,
-                    items: v.items.map(viewItemToLocal),
-                    streaming: false,
-                  }));
-                });
-              }).catch(() => {});
               break;
             }
             case "cancelled": {
@@ -369,42 +442,6 @@ export const useChatStore = create(
       api.cancelChat(currentSessionId).catch(() => {});
     },
 
-    compactSession: async () => {
-      const { streaming, compacting, currentSessionId, selectedModel } = get();
-      if (streaming) return "Agent is running — cancel it first.";
-      if (compacting) return "Compaction already in progress.";
-
-      set((s) => { s.compacting = true; s.error = null; });
-
-      try {
-        const result = await api.compactChat(currentSessionId, selectedModel?.key ?? "");
-        const views = await api.getSessionView(currentSessionId);
-        set((s) => {
-          s.compacting = false;
-          if (s.currentSessionId !== currentSessionId) return;
-          s.messages = [
-            ...views.map((v) => ({
-              id: v.id,
-              role: v.role as "user" | "assistant",
-              items: v.items.map(viewItemToLocal),
-              streaming: false,
-            })),
-            {
-              id: newId(),
-              role: "assistant" as const,
-              items: [{ type: "text" as const, id: newId(), text: `✦ ${result}` }],
-              streaming: false,
-            },
-          ];
-        });
-        return result;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        set((s) => { s.compacting = false; s.error = msg; });
-        return `Compaction failed: ${msg}`;
-      }
-    },
-
     setSelectedModel: async (key: string) => {
       const { models } = get();
       const model = models.find((m) => m.key === key);
@@ -413,8 +450,9 @@ export const useChatStore = create(
       await api.setUserPref("selectedModel", key).catch(() => {});
     },
 
-    setReasoningEffort: (effort: "low" | "medium" | "high") => {
+    setReasoningEffort: (effort: ReasoningEffort) => {
       set((s) => { s.reasoningEffort = effort; });
+      api.setUserPref("reasoningEffort", effort).catch(() => {});
     },
 
     pickWorkspace: async () => {

@@ -10,6 +10,12 @@ pub struct WriteFileArgs {
     pub content: String,
 }
 
+fn temp_sibling(path: &std::path::Path) -> std::path::PathBuf {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
+    let unique = uuid::Uuid::new_v4().simple();
+    path.with_file_name(format!(".{name}.{unique}.tmp"))
+}
+
 pub struct WriteFile {
     workspace: WorkspaceHandle,
 }
@@ -40,6 +46,14 @@ impl Tool for WriteFile {
             .and_then(|g| g.clone())
             .ok_or_else(|| ToolError::msg("no workspace is open"))?;
 
+        if args.content.len() as u64 > fs_util::FILE_SIZE_LIMIT {
+            return Err(ToolError::msg(format!(
+                "content too large ({} bytes) for {}",
+                args.content.len(),
+                args.path
+            )));
+        }
+
         let path = fs_util::resolve_in_workspace(&root, &args.path)?;
 
         if let Some(parent) = path.parent() {
@@ -51,16 +65,14 @@ impl Tool for WriteFile {
         let existed = path.exists();
         let bytes = args.content.len();
 
-        let tmp_path = path.with_extension(format!(
-            "{}.tmp",
-            path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
-        ));
+        let tmp_path = temp_sibling(&path);
         tokio::fs::write(&tmp_path, args.content.as_bytes()).await.map_err(|e| {
             ToolError::msg(format!("cannot write temp file for {}: {e}", args.path))
         })?;
-        tokio::fs::rename(&tmp_path, &path).await.map_err(|e| {
-            ToolError::msg(format!("cannot finalize write for {}: {e}", args.path))
-        })?;
+        if let Err(e) = tokio::fs::rename(&tmp_path, &path).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(ToolError::msg(format!("cannot finalize write for {}: {e}", args.path)));
+        }
 
         let rel = fs_util::display_relative(&root, &path);
         let verb = if existed { "Overwrote" } else { "Created" };

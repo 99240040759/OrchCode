@@ -16,6 +16,7 @@ interface ArtifactsState {
   activeId: string | null;
   panelOpen: boolean;
   maximized: boolean;
+  fileVersions: Record<string, number>;
 }
 
 interface ArtifactsActions {
@@ -26,6 +27,7 @@ interface ArtifactsActions {
   setActive: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
   toggleMaximized: () => void;
+  bumpFile: (path: string) => void;
 }
 
 export type ArtifactsStore = ArtifactsState & ArtifactsActions;
@@ -36,6 +38,7 @@ export const useArtifactsStore = create(
     activeId: null,
     panelOpen: false,
     maximized: false,
+    fileVersions: {},
 
     openFile: (path?: string) => {
       set((s) => {
@@ -100,5 +103,6 @@ export const useArtifactsStore = create(
     setActive: (id: string) => { set((s) => { s.activeId = id; }); },
     setPanelOpen: (open: boolean) => { set((s) => { s.panelOpen = open; }); },
     toggleMaximized: () => { set((s) => { s.maximized = !s.maximized; }); },
+    bumpFile: (path: string) => { set((s) => { s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1; }); },
   }))
 );

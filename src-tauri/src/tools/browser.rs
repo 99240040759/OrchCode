@@ -1,13 +1,46 @@
+//! In-app browser automation tools.
+//!
+//! Why this is `eval()` + a request/response channel and not WebDriver BiDi or CDP:
+//! Tauri wraps the OS-native webview per platform (WebView2 on Windows, WKWebView on
+//! macOS, WebKitGTK on Linux). Only WebView2 is Chromium and exposes CDP; WKWebView and
+//! WebKitGTK have no CDP-equivalent at all, and this app ships both macOS and Windows
+//! builds (see .github/workflows/build-release.yml). Tauri's own WebDriver support
+//! (`tauri-plugin-webdriver`) is designed for external test tools driving the whole app
+//! in debug builds, not for an in-process agent tool driving one embedded content
+//! webview in a shipped release. `eval()` + a `oneshot` channel keyed by a generated
+//! request id is the correct cross-platform mechanism available today, not a shortcut.
+//!
+//! What *is* cleaned up here: every browser tool below previously hand-rolled its own
+//! "wrap an expression in a try/catch, await it, hand the result back over the
+//! `deliver_browser_content` IPC command" boilerplate. That's now centralized in
+//! `eval_js`, so click/type/get_content only supply the JS expression itself.
+
+use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use rig::tool::Tool;
 use super::ToolError;
+use crate::state::BrowserRequestsHandle;
 use tauri::Manager;
 
 const CONTENT_TIMEOUT_MS: u64 = 5_000;
+const WEBVIEW_WAIT_MS: u64 = 6_000;
 
 fn find_browser_webview(app: &tauri::AppHandle) -> Option<tauri::Webview> {
     app.webviews().into_values().find(|wv| wv.label().starts_with("browser-"))
+}
+
+async fn wait_for_browser_webview(app: &tauri::AppHandle) -> Option<tauri::Webview> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(WEBVIEW_WAIT_MS);
+    loop {
+        if let Some(wv) = find_browser_webview(app) {
+            return Some(wv);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 fn validate_http_url(url: &str) -> Result<String, ToolError> {
@@ -22,6 +55,58 @@ fn validate_http_url(url: &str) -> Result<String, ToolError> {
         return Err(ToolError::msg("only http:// and https:// URLs are permitted"));
     }
     Ok(normalized)
+}
+
+/// Evaluates a JS expression in the given webview and returns its stringified result.
+/// The single shared primitive behind every browser interaction tool (click, type,
+/// get_content) — each of those only needs to build the `expression` string; this
+/// function owns the request/response plumbing (channel registration, script wrapping,
+/// timeout, and cleanup on both the error and timeout paths) exactly once.
+async fn eval_js(
+    wv: &tauri::Webview,
+    browser_requests: &BrowserRequestsHandle,
+    expression: &str,
+) -> Result<String, ToolError> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    {
+        let mut guard = browser_requests.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(request_id.clone(), tx);
+    }
+
+    let script = format!(
+        r#"(async () => {{
+            let __result;
+            try {{ __result = ({expression}); }} catch (e) {{ __result = 'error: ' + (e && e.message ? e.message : e); }}
+            try {{ __result = await __result; }} catch (e) {{}}
+            try {{ await window.__TAURI_INTERNALS__.invoke('deliver_browser_content', {{ requestId: '{request_id}', text: String(__result) }}); }} catch (e) {{}}
+        }})()"#
+    );
+
+    if let Err(e) = wv.eval(&script) {
+        let mut guard = browser_requests.lock().unwrap_or_else(|e2| e2.into_inner());
+        guard.remove(&request_id);
+        return Err(ToolError::msg(format!("eval failed: {e}")));
+    }
+
+    match tokio::time::timeout(Duration::from_millis(CONTENT_TIMEOUT_MS), rx).await {
+        Ok(Ok(content)) => Ok(content),
+        Ok(Err(_)) => Err(ToolError::msg("browser eval channel closed unexpectedly")),
+        Err(_) => {
+            let mut guard = browser_requests.lock().unwrap_or_else(|e| e.into_inner());
+            guard.remove(&request_id);
+            Err(ToolError::msg("timeout waiting for browser response"))
+        }
+    }
+}
+
+/// Shared setup for the click/type/get_content tools: resolve the app handle and wait
+/// for the browser tab's webview to exist. Centralizes the two error cases ("app handle
+/// unavailable", "no browser tab is open") that were previously duplicated verbatim in
+/// each tool's `call` method.
+async fn require_browser_webview(app_handle: &Option<tauri::AppHandle>) -> Result<tauri::Webview, ToolError> {
+    let app = app_handle.as_ref().ok_or_else(|| ToolError::msg("app handle unavailable"))?;
+    wait_for_browser_webview(app).await.ok_or_else(|| ToolError::msg("no browser tab is open"))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -46,7 +131,7 @@ impl Tool for BrowserNavigate {
     type Output = String;
 
     fn description(&self) -> String {
-        "Navigate the in-app browser to an http or https URL. An open browser tab must exist in the UI.".to_string()
+        "Navigate the in-app browser to an http or https URL. A browser tab opens automatically if one is not already open.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -58,7 +143,7 @@ impl Tool for BrowserNavigate {
         let url_str = validate_http_url(&args.url)?;
         let parsed_url: tauri::Url = url_str.parse().map_err(|e| ToolError::msg(format!("url parse error: {e}")))?;
 
-        let wv = find_browser_webview(app).ok_or_else(|| ToolError::msg("no browser tab is open — open one in the UI first"))?;
+        let wv = wait_for_browser_webview(app).await.ok_or_else(|| ToolError::msg("browser tab did not open"))?;
         wv.navigate(parsed_url).map_err(|e| ToolError::msg(format!("navigation failed: {e}")))?;
         Ok(format!("Navigated to {url_str}"))
     }
@@ -71,11 +156,12 @@ pub struct BrowserClickArgs {
 
 pub struct BrowserClick {
     app_handle: Option<tauri::AppHandle>,
+    browser_requests: BrowserRequestsHandle,
 }
 
 impl BrowserClick {
-    pub fn new(app_handle: Option<tauri::AppHandle>) -> Self {
-        Self { app_handle }
+    pub fn new(app_handle: Option<tauri::AppHandle>, browser_requests: BrowserRequestsHandle) -> Self {
+        Self { app_handle, browser_requests }
     }
 }
 
@@ -94,23 +180,15 @@ impl Tool for BrowserClick {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let app = self.app_handle.as_ref().ok_or_else(|| ToolError::msg("app handle unavailable"))?;
-        let wv = find_browser_webview(app).ok_or_else(|| ToolError::msg("no browser tab is open"))?;
+        let wv = require_browser_webview(&self.app_handle).await?;
 
-        let selector = args.selector.replace('\'', "\\'");
-        let script = format!(
-            "document.querySelector('{selector}') ? (document.querySelector('{selector}').click(), 'clicked') : 'not_found'"
-        );
+        let sel = serde_json::to_string(&args.selector).unwrap_or_else(|_| "\"\"".to_string());
+        let expr = format!("(() => {{ const el = document.querySelector({sel}); if (!el) return 'not_found'; el.click(); return 'clicked'; }})()");
 
-        let result_str = std::panic::AssertUnwindSafe(async {
-            wv.eval(&format!("(() => {{ return {}; }})()", script))
-                .map_err(|e| ToolError::msg(format!("eval failed: {e}")))
-        })
-        .await;
-
-        match result_str {
-            Ok(_) => Ok(format!("Clicked '{}'", args.selector)),
-            Err(e) => Err(e),
+        match eval_js(&wv, &self.browser_requests, &expr).await?.trim() {
+            "clicked" => Ok(format!("Clicked '{}'", args.selector)),
+            "not_found" => Err(ToolError::msg(format!("no element matches selector '{}'", args.selector))),
+            other => Err(ToolError::msg(format!("click failed: {other}"))),
         }
     }
 }
@@ -123,11 +201,12 @@ pub struct BrowserTypeArgs {
 
 pub struct BrowserType {
     app_handle: Option<tauri::AppHandle>,
+    browser_requests: BrowserRequestsHandle,
 }
 
 impl BrowserType {
-    pub fn new(app_handle: Option<tauri::AppHandle>) -> Self {
-        Self { app_handle }
+    pub fn new(app_handle: Option<tauri::AppHandle>, browser_requests: BrowserRequestsHandle) -> Self {
+        Self { app_handle, browser_requests }
     }
 }
 
@@ -146,17 +225,19 @@ impl Tool for BrowserType {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let app = self.app_handle.as_ref().ok_or_else(|| ToolError::msg("app handle unavailable"))?;
-        let wv = find_browser_webview(app).ok_or_else(|| ToolError::msg("no browser tab is open"))?;
+        let wv = require_browser_webview(&self.app_handle).await?;
 
-        let selector = args.selector.replace('\'', "\\'");
-        let text = args.text.replace('\'', "\\'");
-        let script = format!(
-            "(() => {{ const el = document.querySelector('{selector}'); if (!el) return 'not_found'; el.value = '{text}'; el.dispatchEvent(new Event('input', {{ bubbles: true }})); return 'typed'; }})()"
+        let sel = serde_json::to_string(&args.selector).unwrap_or_else(|_| "\"\"".to_string());
+        let text = serde_json::to_string(&args.text).unwrap_or_else(|_| "\"\"".to_string());
+        let expr = format!(
+            "(() => {{ const el = document.querySelector({sel}); if (!el) return 'not_found'; el.value = {text}; el.dispatchEvent(new Event('input', {{ bubbles: true }})); el.dispatchEvent(new Event('change', {{ bubbles: true }})); return 'typed'; }})()"
         );
 
-        wv.eval(&script).map_err(|e| ToolError::msg(format!("eval failed: {e}")))?;
-        Ok(format!("Typed into '{}'", args.selector))
+        match eval_js(&wv, &self.browser_requests, &expr).await?.trim() {
+            "typed" => Ok(format!("Typed into '{}'", args.selector)),
+            "not_found" => Err(ToolError::msg(format!("no element matches selector '{}'", args.selector))),
+            other => Err(ToolError::msg(format!("type failed: {other}"))),
+        }
     }
 }
 
@@ -165,11 +246,11 @@ pub struct BrowserGetContentArgs {}
 
 pub struct BrowserGetContent {
     app_handle: Option<tauri::AppHandle>,
-    browser_requests: crate::state::BrowserRequestsHandle,
+    browser_requests: BrowserRequestsHandle,
 }
 
 impl BrowserGetContent {
-    pub fn new(app_handle: Option<tauri::AppHandle>, browser_requests: crate::state::BrowserRequestsHandle) -> Self {
+    pub fn new(app_handle: Option<tauri::AppHandle>, browser_requests: BrowserRequestsHandle) -> Self {
         Self { app_handle, browser_requests }
     }
 }
@@ -189,46 +270,12 @@ impl Tool for BrowserGetContent {
     }
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let app = self.app_handle.as_ref().ok_or_else(|| ToolError::msg("app handle unavailable"))?;
-        let wv = find_browser_webview(app).ok_or_else(|| ToolError::msg("no browser tab is open"))?;
-
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-
-        {
-            let mut guard = self.browser_requests.lock().unwrap_or_else(|e| e.into_inner());
-            guard.insert(request_id.clone(), tx);
-        }
-
-        let script = format!(
-            r#"(async () => {{
-                const text = document.body ? document.body.innerText.slice(0, 500000) : '';
-                try {{
-                    await window.__TAURI_INTERNALS__.invoke('deliver_browser_content', {{ requestId: '{}', text }});
-                }} catch(e) {{
-                    console.error('browser_get_content IPC error', e);
-                }}
-            }})()"#,
-            request_id
-        );
-
-        wv.eval(&script).map_err(|e| {
-            let mut guard = self.browser_requests.lock().unwrap_or_else(|e2| e2.into_inner());
-            guard.remove(&request_id);
-            ToolError::msg(format!("eval failed: {e}"))
-        })?;
-
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(CONTENT_TIMEOUT_MS),
-            rx
-        ).await {
-            Ok(Ok(content)) => Ok(content),
-            Ok(Err(_)) => Err(ToolError::msg("browser content channel closed unexpectedly")),
-            Err(_) => {
-                let mut guard = self.browser_requests.lock().unwrap_or_else(|e| e.into_inner());
-                guard.remove(&request_id);
-                Err(ToolError::msg("timeout waiting for browser page content"))
-            }
-        }
+        let wv = require_browser_webview(&self.app_handle).await?;
+        eval_js(
+            &wv,
+            &self.browser_requests,
+            "document.body ? document.body.innerText.slice(0, 500000) : ''",
+        )
+        .await
     }
 }

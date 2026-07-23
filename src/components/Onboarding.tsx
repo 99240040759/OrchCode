@@ -1,9 +1,18 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Titlebar } from "./ui/Titlebar";
 import { Button } from "./ui/Button";
 import { useAuthStore } from "../lib/auth";
+import { inTauri } from "../lib/api";
 
 const TERMS_URL = "https://orch.live/terms";
 const PRIVACY_URL = "https://orch.live/privacy";
+
+function openExternal(e: React.MouseEvent<HTMLAnchorElement>, url: string) {
+  if (inTauri()) {
+    e.preventDefault();
+    void openUrl(url);
+  }
+}
 
 export function Onboarding() {
   const signingIn = useAuthStore((s) => s.signingIn);
@@ -29,9 +38,9 @@ export function Onboarding() {
 
         <p className="Onboarding-legal">
           By continuing you agree to the{" "}
-          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer">Terms of Service</a>
+          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => openExternal(e, TERMS_URL)}>Terms of Service</a>
           {" "}and acknowledge the{" "}
-          <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+          <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => openExternal(e, PRIVACY_URL)}>Privacy Policy</a>.
         </p>
       </div>
     </div>

@@ -7,7 +7,6 @@ export function MessageList() {
   const messages = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
   const containerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
 
   const handleScroll = () => {
@@ -17,10 +16,16 @@ export function MessageList() {
   };
 
   useEffect(() => {
-    if (isNearBottomRef.current) {
-      endRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
-    }
-  });
+    const el = containerRef.current;
+    if (!el || !isNearBottomRef.current) return;
+    // Set scrollTop directly on this container instead of endRef.scrollIntoView(). During
+    // streaming this effect re-runs on every delta (each streamed token changes
+    // `messages`), and scrollIntoView walks the whole scrollable-ancestor chain on every
+    // call — inside the react-resizable-panels layout used by ChatPanel, that meant
+    // every token could nudge multiple nested containers, which is what produced the
+    // bounce. Writing scrollTop only ever touches this one element.
+    el.scrollTop = el.scrollHeight;
+  }, [messages, streaming]);
 
   return (
     <div className="MessageList" ref={containerRef} onScroll={handleScroll}>
@@ -29,7 +34,7 @@ export function MessageList() {
           <Message key={m.id} message={m} />
         ))}
         {streaming && messages.length === 0 && <ThinkingShimmer />}
-        <div ref={endRef} className="MessageList-bottomSpacer" />
+        <div className="MessageList-bottomSpacer" />
       </div>
     </div>
   );

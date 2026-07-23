@@ -79,7 +79,7 @@ impl Tool for ReadFile {
                 "svg" => "image/svg+xml",
                 _ => "image/png",
             };
-            return Ok(format!("data:{mime};base64,{b64}"));
+            return Ok(serde_json::json!({ "type": "image", "data": b64, "mimeType": mime }).to_string());
         } else {
             let meta = tokio::fs::metadata(&path).await.map_err(|e| ToolError::msg(format!("cannot stat {}: {e}", args.path)))?;
             if meta.len() > TEXT_SIZE_LIMIT {

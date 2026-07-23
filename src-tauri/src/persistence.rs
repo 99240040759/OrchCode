@@ -8,11 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 use rig::completion::Message;
 use rig::memory::{ConversationMemory, MemoryError};
-use rig::message::{AssistantContent, UserContent};
+use rig::message::{AssistantContent, DocumentSourceKind, MimeType, UserContent};
 
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
@@ -20,23 +19,14 @@ use crate::tools::parse_display_info;
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// Data stored in a `kind = 'compaction'` row's `data` column. Inserting one of these
+/// never deletes prior rows — the full conversation stays in the `messages` table forever.
+/// It only shifts where `ConversationMemory::load()` starts reading from for the *model's*
+/// view of history; `get_session_view()` still walks every row for the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredToolCall {
-    pub id: String,
-    pub name: String,
-    pub args: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredMessage {
-    pub id: String,
-    pub role: String,
-    pub text: String,
-    pub reasoning: Option<String>,
-    #[serde(default)]
-    pub tools: Vec<StoredToolCall>,
+struct CompactionMarker {
+    summary: String,
+    original_message_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,6 +36,24 @@ pub struct SessionSummary {
     pub title: Option<String>,
     pub workspace_path: Option<String>,
     pub updated_at: i64,
+    pub last_input_tokens: i64,
+    pub last_output_tokens: i64,
+    pub last_total_tokens: i64,
+}
+
+/// A single attachment reference reconstructed from persisted message data.
+/// For images the `data_url` is a `data:image/…;base64,…` string so the
+/// frontend can render the thumbnail without needing `convertFileSrc` or a
+/// live file on disk (the bytes were already stored as part of the rig message).
+/// For text/PDF attachments the content was inlined into the prompt body so
+/// only the filename is meaningful here.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentView {
+    pub name: String,
+    pub is_image: bool,
+    /// `data:image/<type>;base64,<data>` for images; empty string for docs.
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +76,16 @@ pub enum MessageItemView {
         display_info: ToolDisplayInfo,
         status: String,
     },
+    /// Non-destructive compaction boundary marker. Rendered as a small divider line in
+    /// the chat panel; the messages before it are still present in the database and are
+    /// still returned in this same view — this item only records where a summarisation
+    /// happened so the user can see it persisted across app restarts.
+    #[serde(rename_all = "camelCase")]
+    CompactionNotice {
+        id: String,
+        original_message_count: usize,
+        ts: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +94,16 @@ pub struct MessageView {
     pub id: String,
     pub role: String,
     pub items: Vec<MessageItemView>,
+    pub attachments: Vec<AttachmentView>,
+}
+
+/// Everything the summarisation prompt needs: the previous summary (if this isn't the
+/// first compaction), how many raw turns preceded it, and the raw messages accumulated
+/// since the last boundary that still need folding in.
+pub struct CompactionInput {
+    pub previous_summary: Option<String>,
+    pub prior_message_count: usize,
+    pub messages_since: Vec<Message>,
 }
 
 #[derive(Clone)]
@@ -105,26 +133,20 @@ impl SqliteMemory {
             ),
             rusqlite_migration::M::up_with_hook(
                 "-- add workspace_path column conditional on existence",
+                |tx| { Ok(add_column_if_missing(tx, "sessions", "workspace_path", "TEXT")?) }
+            ),
+            rusqlite_migration::M::up_with_hook(
+                "-- add compaction-marker discriminator column to messages",
+                |tx| { Ok(add_column_if_missing(tx, "messages", "kind", "TEXT NOT NULL DEFAULT 'message'")?) }
+            ),
+            rusqlite_migration::M::up_with_hook(
+                "-- add persisted per-session token usage columns",
                 |tx| {
-                    let mut column_exists = false;
-                    if let Ok(mut stmt) = tx.prepare("PRAGMA table_info(sessions)") {
-                        if let Ok(mut rows) = stmt.query([]) {
-                            while let Ok(Some(row)) = rows.next() {
-                                if let Ok(name) = row.get::<_, String>(1) {
-                                    if name == "workspace_path" {
-                                        column_exists = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !column_exists {
-                        tx.execute("ALTER TABLE sessions ADD COLUMN workspace_path TEXT;", [])?;
-                    }
-                    Ok(())
+                    add_column_if_missing(tx, "sessions", "last_input_tokens", "INTEGER NOT NULL DEFAULT 0")?;
+                    add_column_if_missing(tx, "sessions", "last_output_tokens", "INTEGER NOT NULL DEFAULT 0")?;
+                    Ok(add_column_if_missing(tx, "sessions", "last_total_tokens", "INTEGER NOT NULL DEFAULT 0")?)
                 }
-            )
+            ),
         ]);
 
         migrations.to_latest(&mut conn).map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
@@ -136,13 +158,19 @@ impl SqliteMemory {
         let conn = self.conn.clone();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let mut stmt = c.prepare("SELECT id, title, workspace_path, updated_at FROM sessions ORDER BY updated_at DESC").map_err(sql_err)?;
+            let mut stmt = c.prepare(
+                "SELECT id, title, workspace_path, updated_at, last_input_tokens, last_output_tokens, last_total_tokens
+                 FROM sessions ORDER BY updated_at DESC"
+            ).map_err(sql_err)?;
             let rows = stmt.query_map([], |row| {
                 Ok(SessionSummary {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     workspace_path: row.get(2)?,
                     updated_at: row.get(3)?,
+                    last_input_tokens: row.get(4)?,
+                    last_output_tokens: row.get(5)?,
+                    last_total_tokens: row.get(6)?,
                 })
             }).map_err(sql_err)?;
             let mut out = Vec::new();
@@ -168,6 +196,7 @@ impl SqliteMemory {
             Ok(())
         }).await
     }
+
     pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<()> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
@@ -198,54 +227,84 @@ impl SqliteMemory {
         }).await
     }
 
-    pub async fn load_raw_messages(&self, conversation_id: &str) -> AppResult<Vec<Message>> {
+    /// Persists the token usage reported for a completed turn so the input bar's context
+    /// ring reflects reality immediately after reloading a session, not just after a new
+    /// turn has streamed in.
+    pub async fn update_session_tokens(&self, conversation_id: &str, input_tokens: u64, output_tokens: u64, total_tokens: u64) -> AppResult<()> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let raw = load_raw(&c, &cid).map_err(sql_err)?;
-            let mut out = Vec::with_capacity(raw.len());
-            for json in raw {
-                let msg: Message = serde_json::from_str(&json).map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
-                out.push(msg);
-            }
-            Ok(out)
+            let now = now_millis();
+            c.execute(
+                "UPDATE sessions SET last_input_tokens = ?1, last_output_tokens = ?2, last_total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
+                params![input_tokens as i64, output_tokens as i64, total_tokens as i64, now, cid],
+            ).map_err(sql_err)?;
+            Ok(())
         }).await
     }
 
-    pub async fn compact_with_summary(&self, conversation_id: &str, summary: &str, original_message_count: usize) -> AppResult<()> {
+    /// Boundary-aware load used by the summariser: the previous summary (if any) plus
+    /// only the raw messages appended since that boundary. Does not mutate anything.
+    pub async fn get_compaction_input(&self, conversation_id: &str) -> AppResult<CompactionInput> {
+        let conn = self.conn.clone();
+        let cid = conversation_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let rows = load_all(&c, &cid).map_err(sql_err)?;
+            let boundary = rows.iter().rposition(|r| r.kind == "compaction");
+
+            let (previous_summary, prior_message_count, tail_start) = match boundary {
+                Some(idx) => {
+                    let marker: CompactionMarker = serde_json::from_str(&rows[idx].data)
+                        .map_err(|e| AppError::other(format!("compaction marker decode failed: {e}")))?;
+                    (Some(marker.summary), marker.original_message_count, idx + 1)
+                }
+                None => (None, 0, 0),
+            };
+
+            let mut messages_since = Vec::new();
+            for row in &rows[tail_start..] {
+                if row.kind == "message" {
+                    let msg: Message = serde_json::from_str(&row.data)
+                        .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
+                    messages_since.push(msg);
+                }
+            }
+
+            Ok(CompactionInput { previous_summary, prior_message_count, messages_since })
+        }).await
+    }
+
+    /// Appends a compaction boundary marker. Purely additive — no existing row is ever
+    /// deleted or overwritten, so the full transcript remains visible in `get_session_view`
+    /// and recoverable even after multiple compactions.
+    pub async fn insert_compaction_marker(&self, conversation_id: &str, summary: &str, original_message_count: usize) -> AppResult<i64> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         let summary = summary.to_string();
         run_db_task(move || {
             let now = now_millis();
-            let seed = Message::user(format!("[Conversation compacted — {original_message_count} messages summarised]\n\n{summary}"));
-            let seed_json = serde_json::to_string(&seed).map_err(|e| AppError::other(format!("serialize seed message: {e}")))?;
+            let marker = CompactionMarker { summary, original_message_count };
+            let data = serde_json::to_string(&marker).map_err(|e| AppError::other(format!("serialize compaction marker: {e}")))?;
 
             let mut c = conn.lock().map_err(lock_err)?;
             let tx = c.transaction().map_err(sql_err)?;
 
-            tx.execute("DELETE FROM messages WHERE conversation_id = ?1", params![cid]).map_err(sql_err)?;
-            tx.execute("INSERT INTO messages (conversation_id, seq, ts, data) VALUES (?1, 0, ?2, ?3)", params![cid, now, seed_json]).map_err(sql_err)?;
+            let seq: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
+                params![cid],
+                |row| row.get(0),
+            ).map_err(sql_err)?;
+
+            tx.execute(
+                "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'compaction')",
+                params![cid, seq, now, data],
+            ).map_err(sql_err)?;
             tx.execute("UPDATE sessions SET updated_at = ?1 WHERE id = ?2", params![now, cid]).map_err(sql_err)?;
 
             tx.commit().map_err(sql_err)?;
-            Ok(())
-        }).await
-    }
-
-    pub async fn get_messages(&self, conversation_id: &str) -> AppResult<Vec<StoredMessage>> {
-        let conn = self.conn.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            let raw = load_raw(&c, &cid).map_err(sql_err)?;
-            let mut out = Vec::with_capacity(raw.len());
-            for json in raw {
-                let msg: Message = serde_json::from_str(&json).map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
-                out.push(flatten(&msg));
-            }
-            Ok(out)
+            Ok(now)
         }).await
     }
 
@@ -255,26 +314,17 @@ impl SqliteMemory {
         let ws_buf = workspace.map(|p| p.to_path_buf());
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let raw_with_seq = load_raw_with_seq(&c, &cid).map_err(sql_err)?;
-
-            let mut messages: Vec<(i64, Message)> = Vec::new();
-            for (seq, json) in &raw_with_seq {
-                match serde_json::from_str::<Message>(json) {
-                    Ok(msg) => messages.push((*seq, msg)),
-                    Err(e) => {
-                        eprintln!("[persistence] corrupt message seq={seq} in session {cid}: {e}");
-                    }
-                }
-            }
+            let rows = load_all(&c, &cid).map_err(sql_err)?;
 
             struct StoredToolRes {
                 output: String,
                 is_error: bool,
             }
             let mut tool_outputs: HashMap<String, StoredToolRes> = HashMap::new();
-            for (_, msg) in &messages {
-                if let Message::User { content } = msg {
-                    for c in content.clone() {
+            for row in &rows {
+                if row.kind != "message" { continue; }
+                if let Ok(Message::User { content }) = serde_json::from_str::<Message>(&row.data) {
+                    for c in content {
                         if let UserContent::ToolResult(tr) = c {
                             let call_id = tr.call_id.as_ref().unwrap_or(&tr.id);
                             use rig::message::ToolResultContent;
@@ -290,33 +340,117 @@ impl SqliteMemory {
 
             let ws_path = ws_buf.as_deref();
             let mut views: Vec<MessageView> = Vec::new();
-            let mut msg_idx: usize = 0;
-            for (seq, msg) in &messages {
-                let msg_id = stable_id(&cid, *seq, msg_idx, None);
-                msg_idx += 1;
+
+            for row in &rows {
+                let msg_id = stable_id(&cid, row.seq, 0, None);
+
+                if row.kind == "compaction" {
+                    let marker: CompactionMarker = match serde_json::from_str(&row.data) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("[persistence] corrupt compaction marker seq={} in session {cid}: {e}", row.seq);
+                            continue;
+                        }
+                    };
+                    views.push(MessageView {
+                        id: msg_id,
+                        role: "system".to_string(),
+                        items: vec![MessageItemView::CompactionNotice {
+                            id: stable_id(&cid, row.seq, 0, Some("compaction")),
+                            original_message_count: marker.original_message_count,
+                            ts: row.ts,
+                        }],
+                        attachments: vec![],
+                    });
+                    continue;
+                }
+
+                let msg: Message = match serde_json::from_str(&row.data) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("[persistence] corrupt message seq={} in session {cid}: {e}", row.seq);
+                        continue;
+                    }
+                };
+
                 match msg {
                     Message::User { content } => {
                         let text: String = content.iter().filter_map(|c| {
                             if let UserContent::Text(t) = c { Some(t.text.as_str()) } else { None }
                         }).collect();
-                        if !text.is_empty() {
+
+                        // Reconstruct attachment views:
+                        // 1. Images — stored as UserContent::Image with base64 data.
+                        // 2. Docs/PDFs — their filenames are embedded in the text body as
+                        //    "[Attached File: name]" or "[Attached PDF: name]" markers.
+                        let mut attachments: Vec<AttachmentView> = Vec::new();
+
+                        for part in content.iter() {
+                            if let UserContent::Image(img) = part {
+                                let data_url = match &img.data {
+                                    DocumentSourceKind::Base64(b64) => {
+                                        let mime = img.media_type.as_ref()
+                                            .map(|m| format!("{}", m.to_mime_type()))
+                                            .unwrap_or_else(|| "image/png".to_string());
+                                        format!("data:{mime};base64,{b64}")
+                                    }
+                                    DocumentSourceKind::Url(url) => url.clone(),
+                                    _ => String::new(),
+                                };
+                                if !data_url.is_empty() {
+                                    // Derive a short display name from the data URL type
+                                    // (we don't have the original filename after persistence,
+                                    // so fall back to the mime subtype + ".img").
+                                    let ext = img.media_type.as_ref()
+                                        .map(|m| m.to_mime_type().split('/').nth(1).unwrap_or("img").to_string())
+                                        .unwrap_or_else(|| "img".to_string());
+                                    attachments.push(AttachmentView {
+                                        name: format!("image.{ext}"),
+                                        is_image: true,
+                                        data_url,
+                                    });
+                                }
+                            }
+                        }
+
+                        // Parse doc/PDF attachment markers embedded in prompt text.
+                        let doc_re = regex::Regex::new(r"\[Attached (?:File|PDF): ([^\]\n]+)\]").unwrap();
+                        for cap in doc_re.captures_iter(&text) {
+                            let label = cap[1].trim();
+                            // label may be "path/to/file.ext" (relative) or just "file.ext"
+                            let name = label.replace('\\', "/")
+                                .split('/')
+                                .last()
+                                .unwrap_or(label)
+                                .to_string();
+                            attachments.push(AttachmentView {
+                                name,
+                                is_image: false,
+                                data_url: String::new(),
+                            });
+                        }
+
+                        if !text.is_empty() || !attachments.is_empty() {
                             views.push(MessageView {
                                 id: msg_id.clone(),
                                 role: "user".to_string(),
-                                items: vec![MessageItemView::Text { id: stable_id(&cid, *seq, 0, Some("text")), text }],
+                                items: if text.is_empty() { vec![] } else {
+                                    vec![MessageItemView::Text { id: stable_id(&cid, row.seq, 0, Some("text")), text }]
+                                },
+                                attachments,
                             });
                         }
                     }
                     Message::Assistant { content, .. } => {
                         let mut items: Vec<MessageItemView> = Vec::new();
                         let mut item_idx: usize = 0;
-                        for c in content.clone() {
+                        for c in content {
                             match c {
                                 AssistantContent::Reasoning(r) => {
                                     let text = r.display_text();
                                     if !text.is_empty() {
                                         items.push(MessageItemView::Reasoning {
-                                            id: stable_id(&cid, *seq, item_idx, Some("reasoning")),
+                                            id: stable_id(&cid, row.seq, item_idx, Some("reasoning")),
                                             text,
                                         });
                                         item_idx += 1;
@@ -345,7 +479,7 @@ impl SqliteMemory {
                                 AssistantContent::Text(t) => {
                                     if !t.text.is_empty() {
                                         items.push(MessageItemView::Text {
-                                            id: stable_id(&cid, *seq, item_idx, Some("text")),
+                                            id: stable_id(&cid, row.seq, item_idx, Some("text")),
                                             text: t.text.clone(),
                                         });
                                         item_idx += 1;
@@ -359,6 +493,7 @@ impl SqliteMemory {
                                 id: msg_id,
                                 role: "assistant".to_string(),
                                 items,
+                                attachments: vec![],
                             });
                         }
                     }
@@ -371,17 +506,37 @@ impl SqliteMemory {
 }
 
 impl ConversationMemory for SqliteMemory {
+    /// Boundary-aware: if the conversation has been compacted, the model sees a single
+    /// synthetic summary message followed by every raw turn since that boundary — never
+    /// the full unbounded history. The database itself is untouched; `get_session_view`
+    /// (used by the UI) always returns every row regardless of this boundary.
     fn load<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
             run_mem_task(move || {
                 let c = conn.lock().map_err(mem_lock)?;
-                let raw = load_raw(&c, &cid).map_err(mem_sql)?;
-                let mut out = Vec::with_capacity(raw.len());
-                for json in raw {
-                    let msg: Message = serde_json::from_str(&json).map_err(MemoryError::backend)?;
-                    out.push(msg);
+                let rows = load_all(&c, &cid).map_err(mem_sql)?;
+                let boundary = rows.iter().rposition(|r| r.kind == "compaction");
+
+                let mut out = Vec::new();
+                let tail_start = match boundary {
+                    Some(idx) => {
+                        let marker: CompactionMarker = serde_json::from_str(&rows[idx].data).map_err(MemoryError::backend)?;
+                        out.push(Message::user(format!(
+                            "[Conversation compacted — {} earlier messages summarised]\n\n{}",
+                            marker.original_message_count, marker.summary
+                        )));
+                        idx + 1
+                    }
+                    None => 0,
+                };
+
+                for row in &rows[tail_start..] {
+                    if row.kind == "message" {
+                        let msg: Message = serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
+                        out.push(msg);
+                    }
                 }
                 Ok(out)
             }).await
@@ -397,14 +552,6 @@ impl ConversationMemory for SqliteMemory {
                 let mut c = conn.lock().map_err(mem_lock)?;
                 let tx = c.transaction().map_err(mem_sql)?;
 
-                let has_title: bool = tx.query_row(
-                    "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND title IS NOT NULL AND title != ''",
-                    params![cid],
-                    |row| row.get::<_, i64>(0),
-                ).map(|cnt| cnt > 0).unwrap_or(false);
-
-                let title = if has_title { None } else { derive_title(&messages) };
-
                 let start_seq: i64 = tx.query_row(
                     "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
                     params![cid],
@@ -414,15 +561,15 @@ impl ConversationMemory for SqliteMemory {
                 for (i, msg) in messages.iter().enumerate() {
                     let data = serde_json::to_string(msg).map_err(MemoryError::backend)?;
                     tx.execute(
-                        "INSERT INTO messages (conversation_id, seq, ts, data) VALUES (?1, ?2, ?3, ?4)",
+                        "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'message')",
                         params![cid, start_seq + i as i64, now, data],
                     ).map_err(mem_sql)?;
                 }
 
                 tx.execute(
-                    "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(id) DO UPDATE SET updated_at = ?4, title = COALESCE(sessions.title, ?2)",
-                    params![cid, title, now, now],
+                    "INSERT INTO sessions (id, created_at, updated_at) VALUES (?1, ?2, ?2)
+                     ON CONFLICT(id) DO UPDATE SET updated_at = ?2",
+                    params![cid, now],
                 ).map_err(mem_sql)?;
 
                 tx.commit().map_err(mem_sql)?;
@@ -445,9 +592,23 @@ impl ConversationMemory for SqliteMemory {
     }
 }
 
-fn load_raw(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")?;
-    let rows = stmt.query_map(params![conversation_id], |row| row.get::<_, String>(0))?;
+struct MessageRow {
+    seq: i64,
+    ts: i64,
+    kind: String,
+    data: String,
+}
+
+fn load_all(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<MessageRow>> {
+    let mut stmt = conn.prepare("SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")?;
+    let rows = stmt.query_map(params![conversation_id], |row| {
+        Ok(MessageRow {
+            seq: row.get(0)?,
+            ts: row.get(1)?,
+            kind: row.get(2)?,
+            data: row.get(3)?,
+        })
+    })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
@@ -455,82 +616,29 @@ fn load_raw(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<St
     Ok(out)
 }
 
-fn load_raw_with_seq(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<(i64, String)>> {
-    let mut stmt = conn.prepare("SELECT seq, data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")?;
-    let rows = stmt.query_map(params![conversation_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
+fn add_column_if_missing(tx: &rusqlite::Transaction, table: &str, column: &str, ddl_type: &str) -> rusqlite::Result<()> {
+    let mut exists = false;
+    let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            exists = true;
+            break;
+        }
     }
-    Ok(out)
+    drop(rows);
+    drop(stmt);
+    if !exists {
+        tx.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl_type};"), [])?;
+    }
+    Ok(())
 }
 
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
     let input = format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or(""));
     let hash = Sha256::digest(input.as_bytes());
     format!("{:016x}", u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8])))
-}
-
-fn flatten(m: &Message) -> StoredMessage {
-    let id = Uuid::new_v4().to_string();
-    match m {
-        Message::User { content } => StoredMessage {
-            id,
-            role: "user".to_string(),
-            text: content.iter().filter_map(|c| match c {
-                UserContent::Text(t) => Some(t.text.as_str()),
-                _ => None,
-            }).collect(),
-            reasoning: None,
-            tools: vec![],
-        },
-        Message::Assistant { content, .. } => {
-            let mut text_parts: Vec<&str> = Vec::new();
-            let mut reasoning_parts: Vec<String> = Vec::new();
-            let mut tools: Vec<StoredToolCall> = Vec::new();
-
-            for c in content.iter() {
-                match c {
-                    AssistantContent::Text(t) => text_parts.push(t.text.as_str()),
-                    AssistantContent::Reasoning(r) => reasoning_parts.push(r.display_text()),
-                    AssistantContent::ToolCall(tc) => {
-                        tools.push(StoredToolCall {
-                            id: tc.id.clone(),
-                            name: tc.function.name.clone(),
-                            args: tc.function.arguments.to_string(),
-                            output: None,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-
-            StoredMessage {
-                id,
-                role: "assistant".to_string(),
-                text: text_parts.join(""),
-                reasoning: if reasoning_parts.is_empty() { None } else { Some(reasoning_parts.join("")) },
-                tools,
-            }
-        }
-        Message::System { content } => StoredMessage {
-            id,
-            role: "system".to_string(),
-            text: content.clone(),
-            reasoning: None,
-            tools: vec![],
-        },
-    }
-}
-
-fn derive_title(messages: &[Message]) -> Option<String> {
-    messages.iter().find_map(|m| match m {
-        Message::User { content } => content.iter().find_map(|c| match c {
-            UserContent::Text(t) if !t.text.trim().is_empty() => Some(t.text.trim().chars().take(80).collect()),
-            _ => None,
-        }),
-        _ => None,
-    })
 }
 
 fn now_millis() -> i64 {

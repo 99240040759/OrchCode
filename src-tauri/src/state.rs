@@ -7,6 +7,7 @@ use std::time::Instant;
 use tokio::sync::oneshot;
 
 use crate::auth;
+use crate::config;
 use crate::dictation::DictationHandle;
 use crate::error::{AppError, AppResult};
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
@@ -155,6 +156,36 @@ impl AppState {
             *guard = Some(fresh.clone());
         }
         Ok(fresh)
+    }
+
+    /// Background TTL refresh of the model catalog. The catalog previously only
+    /// refetched on an explicit `force_refresh` from the frontend or on login/logout, so
+    /// a model added or changed server-side would not appear until the user manually
+    /// triggered a refresh. This loop re-polls `/models` on a fixed interval for the
+    /// lifetime of the app and emits `models-updated` so the frontend can silently pick
+    /// up changes without the user doing anything.
+    pub fn spawn_catalog_refresh_loop(app: tauri::AppHandle) {
+        use tauri::{Emitter, Manager};
+        // `tauri::async_runtime::spawn` (not `tokio::spawn`) — this is called from
+        // Tauri's synchronous `setup()` hook, which runs outside a tokio task context.
+        // `tokio::spawn` requires an active reactor on the calling thread and panics
+        // with "there is no reactor running" when called from there; Tauri's own
+        // runtime handle spawns onto its managed runtime regardless of caller context.
+        tauri::async_runtime::spawn(async move {
+            let interval = std::time::Duration::from_secs(config::MODEL_CATALOG_REFRESH_INTERVAL_SECS);
+            loop {
+                tokio::time::sleep(interval).await;
+                let state = app.state::<AppState>();
+                match state.refresh_catalog().await {
+                    Ok(_) => {
+                        let _ = app.emit("models-updated", ());
+                    }
+                    Err(e) => {
+                        eprintln!("[models] background TTL refresh failed: {e}");
+                    }
+                }
+            }
+        });
     }
 
     pub fn start_run(&self, session_id: &str) -> AppResult<(String, Arc<AtomicBool>)> {

@@ -8,6 +8,7 @@ pub mod gateway;
 pub mod ipc;
 pub mod llm;
 pub mod persistence;
+pub mod platform;
 pub mod skills;
 pub mod state;
 pub mod terminal;
@@ -64,6 +65,7 @@ pub fn run() {
             let db_path = data_dir.join("orchcode.db");
             let app_state = AppState::new(&db_path).expect("failed to initialize AppState");
             app.manage(app_state);
+            AppState::spawn_catalog_refresh_loop(app.handle().clone());
 
             #[cfg(desktop)]
             {
@@ -79,6 +81,10 @@ pub fn run() {
                         }
                     });
                 });
+            }
+
+            if let Some(window) = app.get_webview_window("main") {
+                platform::setup_native_window(&window);
             }
 
             Ok(())
@@ -104,7 +110,6 @@ pub fn run() {
             ipc::set_user_pref,
             ipc::start_chat,
             ipc::cancel_chat,
-            ipc::compact_chat,
             ipc::start_dictation,
             ipc::stop_dictation,
             ipc::terminal_open,
@@ -112,8 +117,8 @@ pub fn run() {
             ipc::terminal_resize,
             ipc::terminal_close,
             ipc::webview_navigate,
+            ipc::webview_history,
             ipc::deliver_browser_content,
-            ipc::list_skills,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

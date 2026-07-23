@@ -56,7 +56,13 @@ impl Tool for SearchWorkspace {
             .map_err(|e| ToolError::msg(format!("invalid search pattern: {e}")))?;
 
         let mut results = Vec::new();
-        let walker = WalkBuilder::new(&search_path).hidden(false).git_ignore(true).build();
+        let walker = WalkBuilder::new(&search_path)
+            .git_ignore(true)
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                !fs_util::SKIP_DIRS.contains(&name.as_ref())
+            })
+            .build();
         let mut searcher = grep_searcher::Searcher::new();
 
         for entry in walker.flatten() {

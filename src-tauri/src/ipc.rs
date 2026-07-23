@@ -10,16 +10,13 @@ use crate::config;
 use crate::dictation;
 use crate::events::{ChatEvent, DictationEvent, TerminalEvent};
 use crate::gateway::{Budget, ModelInfo};
-use crate::llm::{build_agent, build_client, run_chat};
+use crate::llm::{build_agent, build_client, maybe_compact, run_chat, AttachmentRef};
 use crate::persistence::{MessageView, SessionSummary};
 use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
 
-use rig::client::CompletionClient;
-use rig::completion::{CompletionModel, Message};
 use rig::memory::ConversationMemory;
-use rig::message::{AssistantContent, UserContent};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,6 +207,7 @@ pub async fn start_chat(
     model: String,
     prompt: String,
     reasoning_effort: Option<String>,
+    attachments: Vec<AttachmentRef>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     let jwt = state.token.read().ok().and_then(|g| g.clone()).ok_or_else(|| "not authenticated".to_string())?;
@@ -225,6 +223,7 @@ pub async fn start_chat(
     if let Some(effort) = reasoning_effort.filter(|e| !e.is_empty()) {
         model_info.reasoning_effort = Some(effort);
     }
+    let supports_images = model_info.supports_images();
 
     let (run_id, cancel) = state.start_run(&session_id).map_err(|e| e.to_string())?;
     let workspace_snapshot: Option<Arc<PathBuf>> = state.snapshot_workspace().map(Arc::new);
@@ -239,6 +238,7 @@ pub async fn start_chat(
         app_handle: Some(app.clone()),
         command_manager: (*state.command_manager).clone(),
         browser_requests: state.browser_requests.clone(),
+        data_dir: Some(state.data_dir.clone()),
     };
     let memory = state.memory.clone();
     let client = build_client(&jwt).map_err(|e| e.to_string())?;
@@ -250,104 +250,64 @@ pub async fn start_chat(
         let sid = session_id.clone();
         let p = prompt.clone();
         let app_handle = app.clone();
-        let run_id_clone = run_id.clone();
         tokio::spawn(async move {
-            if !memory_clone.session_has_title(&sid).await.unwrap_or(false) {
-                if let Ok(title) = gateway_clone.generate_title(&p).await {
-                    if !title.trim().is_empty() {
-                        if memory_clone.set_session_title(&sid, &title).await.is_ok() {
-                            let _ = run_id_clone;
-                            use tauri::Emitter;
-                            let _ = app_handle.emit("sessions-updated", ());
-                        }
-                    }
-                }
+            if memory_clone.session_has_title(&sid).await.unwrap_or(false) {
+                return;
+            }
+            let title = match gateway_clone.generate_title(&p).await {
+                Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
+                _ => p.trim().chars().take(80).collect::<String>(),
+            };
+            if !title.is_empty() && memory_clone.set_session_title(&sid, &title).await.is_ok() {
+                use tauri::Emitter;
+                let _ = app_handle.emit("sessions-updated", ());
             }
         });
     }
 
-    run_chat(
+    let outcome = run_chat(
         agent,
         session_id.clone(),
         prompt,
+        attachments,
+        supports_images,
         config::DEFAULT_MAX_TURNS,
         config::DEFAULT_TOOL_CONCURRENCY,
         cancel,
         workspace_snapshot,
-        on_event,
+        on_event.clone(),
     ).await;
+
+    if let Some(outcome) = outcome {
+        // Persist so the input bar's context ring is correct immediately on session
+        // reload, not just while this turn's in-memory usage event is still live.
+        let _ = state.memory.update_session_tokens(
+            &session_id,
+            outcome.input_tokens,
+            outcome.output_tokens,
+            outcome.total_tokens,
+        ).await;
+
+        // Automatic compaction: triggered by the model's own native contextWindow (from
+        // the gateway's /models catalog), not a guessed constant. Purely additive at the
+        // storage layer — see persistence::insert_compaction_marker. No manual /compact
+        // command exists anymore; this runs as a normal part of the turn pipeline.
+        match maybe_compact(&state.memory, &client, &model_info, &session_id, outcome.total_tokens).await {
+            Ok(Some(result)) => {
+                let _ = on_event.send(ChatEvent::Compacted {
+                    original_message_count: result.original_message_count,
+                    ts: result.ts,
+                });
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("[compaction] failed for session {session_id}: {e}");
+            }
+        }
+    }
 
     state.finish_run(&session_id, &run_id);
     Ok(())
-}
-
-#[tauri::command]
-pub async fn compact_chat(state: State<'_, AppState>, session_id: String, model: String) -> Result<String, String> {
-    let jwt = state.token.read().ok().and_then(|g| g.clone()).ok_or_else(|| "not authenticated".to_string())?;
-
-    if state.is_session_active(&session_id) {
-        return Err("session is currently running — cancel it first".to_string());
-    }
-
-    let messages = state.memory.load_raw_messages(&session_id).await.map_err(|e| e.to_string())?;
-    if messages.is_empty() {
-        return Ok("Nothing to compact — conversation is empty.".to_string());
-    }
-
-    let msg_count = messages.len();
-    let transcript = messages.iter().filter_map(|m| match m {
-        Message::User { content } => {
-            let text: String = content.iter()
-                .filter_map(|c| if let UserContent::Text(t) = c { Some(t.text.as_str()) } else { None })
-                .collect();
-            if text.is_empty() { None } else { Some(format!("User: {text}")) }
-        }
-        Message::Assistant { content, .. } => {
-            let parts: Vec<String> = content.iter().filter_map(|c| match c {
-                AssistantContent::Text(t) if !t.text.is_empty() => Some(format!("Assistant: {}", t.text)),
-                AssistantContent::ToolCall(tc) => Some(format!("Tool call: {} ({})", tc.function.name, tc.function.arguments)),
-                _ => None,
-            }).collect();
-            if parts.is_empty() { None } else { Some(parts.join("\n")) }
-        }
-        _ => None,
-    }).collect::<Vec<_>>().join("\n\n");
-
-    if transcript.trim().is_empty() {
-        return Ok("Nothing to compact — no text turns found.".to_string());
-    }
-
-    let catalog = state.catalog().await.map_err(|e| e.to_string())?;
-    let model_key = if model.is_empty() {
-        catalog.list().into_iter().next().map(|(k, _)| k).ok_or_else(|| "no models available".to_string())?
-    } else {
-        model
-    };
-    let model_info = catalog.resolve(&model_key).cloned().ok_or_else(|| format!("model not found: {model_key}"))?;
-    let target_model = model_info.id.strip_prefix("opencode/").unwrap_or(&model_info.id).to_string();
-    let client = build_client(&jwt).map_err(|e| e.to_string())?;
-
-    let summary_prompt = format!(
-        "Produce a concise but complete summary of the following conversation. \
-Capture: the user's goals, key decisions, files or code created or modified, important findings, and open items. \
-Write in third-person past tense. Output only the summary, no preamble or sign-off.\
-\n\n---\n{transcript}\n---"
-    );
-
-    let completion = client
-        .completion_model(&target_model)
-        .completion_request(&summary_prompt)
-        .send()
-        .await
-        .map_err(|e| format!("compaction model call failed: {e}"))?;
-
-    let summary = match completion.choice.first() {
-        AssistantContent::Text(t) => t.text.clone(),
-        _ => return Err("model returned no text for summary".to_string()),
-    };
-
-    state.memory.compact_with_summary(&session_id, &summary, msg_count).await.map_err(|e| e.to_string())?;
-    Ok(format!("Compacted {msg_count} messages into a summary."))
 }
 
 #[tauri::command]
@@ -480,11 +440,22 @@ pub fn webview_navigate(app: tauri::AppHandle, label: String, url: String) -> Re
 }
 
 #[tauri::command]
-pub fn deliver_browser_content(state: State<'_, AppState>, request_id: String, text: String) -> Result<(), String> {
-    state.fulfill_browser_request(&request_id, text).map_err(|e| e.to_string())
+pub fn webview_history(app: tauri::AppHandle, label: String, action: String) -> Result<(), String> {
+    use tauri::Manager;
+    if !label.starts_with("browser-") {
+        return Err(format!("webview_history only permitted for browser-* labels, got: {label}"));
+    }
+    let script = match action.as_str() {
+        "back" => "history.back()",
+        "forward" => "history.forward()",
+        "reload" => "location.reload()",
+        other => return Err(format!("unknown history action: {other}")),
+    };
+    let webview = app.webviews().get(&label).cloned().ok_or_else(|| format!("webview not found: {label}"))?;
+    webview.eval(script).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_skills(state: State<'_, AppState>) -> Vec<crate::skills::Skill> {
-    crate::skills::load_all_skills(Some(&state.data_dir), state.workspace().as_deref())
+pub fn deliver_browser_content(state: State<'_, AppState>, request_id: String, text: String) -> Result<(), String> {
+    state.fulfill_browser_request(&request_id, text).map_err(|e| e.to_string())
 }

@@ -16,10 +16,87 @@
         height: 100%;
         overflow: hidden;
       }
+
+      /* Pre-React loading overlay — mirrors .AuthLoading + .Spinner exactly so
+         there is zero visible change when React takes over. */
+      #pre-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #121212;
+        z-index: 9999;
+        opacity: 1;
+        transition: opacity 0.2s ease;
+      }
+
+      #pre-loader.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .pre-loader-spinner {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: conic-gradient(
+          from 0deg,
+          transparent 0deg,
+          transparent 260deg,
+          #03dac6 290deg,
+          #ffffff 315deg,
+          #bb86fc 360deg
+        );
+        -webkit-mask: radial-gradient(
+          farthest-side,
+          transparent calc(100% - 3.5px),
+          #fff calc(100% - 3px)
+        );
+        mask: radial-gradient(
+          farthest-side,
+          transparent calc(100% - 3.5px),
+          #fff calc(100% - 3px)
+        );
+        animation: pre-spin 0.8s linear infinite;
+        flex-shrink: 0;
+      }
+
+      @keyframes pre-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes pre-color {
+        0%   { border-top-color: #bb86fc; }
+        33%  { border-top-color: #ffffff; }
+        66%  { border-top-color: #03dac6; }
+        100% { border-top-color: #bb86fc; }
+      }
     </style>
   </head>
   <body style="background-color: #121212;">
+    <!-- Shown immediately on HTML parse. Fades out the instant React renders
+         its first child into #root — no arbitrary timeout, no flash. -->
+    <div id="pre-loader">
+      <div class="pre-loader-spinner"></div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <script type="module">
+      const root = document.getElementById("root");
+      const loader = document.getElementById("pre-loader");
+      if (root && loader) {
+        const observer = new MutationObserver(() => {
+          if (root.childElementCount > 0) {
+            observer.disconnect();
+            loader.classList.add("fade-out");
+            loader.addEventListener("transitionend", () => loader.remove(), { once: true });
+          }
+        });
+        observer.observe(root, { childList: true });
+      }
+    </script>
   </body>
 </html>

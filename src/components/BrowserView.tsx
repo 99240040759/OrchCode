@@ -21,29 +21,25 @@ const OFFSCREEN = -100000;
 export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: string }) {
   const start = normalizeUrl(initialUrl ?? "https://www.google.com");
   const [input, setInput] = useState(start);
+  const [committedUrl, setCommittedUrl] = useState(start);
   const [webviewReady, setWebviewReady] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
+  const startRef = useRef(start);
   const label = `browser-${id}`;
   const native = api.inTauri();
 
-  const go = useCallback(() => {
-    const next = normalizeUrl(input);
-    setInput(next);
-    if (native) void api.webviewNavigate(label, next);
-  }, [input, label, native]);
+  const lastPropUrl = useRef(start);
 
-  const back = () => {
-    if (!native || !webviewReady) return;
-    void api.webviewBack(label);
-  };
-  const forward = () => {
-    if (!native || !webviewReady) return;
-    void api.webviewForward(label);
-  };
-  const reload = () => {
-    if (!native || !webviewReady) return;
-    void api.webviewReload(label);
-  };
+  const navigate = useCallback((next: string) => {
+    setInput(next);
+    setCommittedUrl(next);
+  }, []);
+
+  const go = useCallback(() => navigate(normalizeUrl(input)), [navigate, input]);
+
+  const back = () => { if (native && webviewReady) void api.webviewBack(label); };
+  const forward = () => { if (native && webviewReady) void api.webviewForward(label); };
+  const reload = () => { if (native && webviewReady) void api.webviewReload(label); };
 
   const handleOpenExternal = () => {
     const target = normalizeUrl(input);
@@ -63,7 +59,7 @@ export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: strin
     const appWindow = getCurrentWindow();
 
     webview = new Webview(appWindow, label, {
-      url: start,
+      url: startRef.current,
       x: Math.round(rect0.left),
       y: Math.round(rect0.top),
       width: Math.max(1, Math.round(rect0.width)),
@@ -102,7 +98,18 @@ export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: strin
       mutationObserver.disconnect();
       if (webview) void webview.close();
     };
-  }, [label, native, start]);
+  }, [label, native]);
+
+  useEffect(() => {
+    const next = normalizeUrl(initialUrl ?? "https://www.google.com");
+    if (next === lastPropUrl.current) return;
+    lastPropUrl.current = next;
+    navigate(next);
+  }, [initialUrl, navigate]);
+
+  useEffect(() => {
+    if (native && webviewReady) void api.webviewNavigate(label, committedUrl);
+  }, [committedUrl, native, webviewReady, label]);
 
   return (
     <div className="BrowserView">
@@ -137,7 +144,7 @@ export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: strin
         <iframe
           className="BrowserFrame"
           style={{ colorScheme: "dark", background: "var(--md-bg)" }}
-          src={start}
+          src={committedUrl}
           title="Browser"
           sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
           referrerPolicy="no-referrer"

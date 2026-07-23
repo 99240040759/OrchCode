@@ -24,7 +24,7 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
-const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", ".git", ".next"];
+use crate::tools::fs_util::SKIP_DIRS;
 const MAX_PREVIEW_BYTES: usize = 512 * 1024;
 
 #[tauri::command]
@@ -103,13 +103,17 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
     let root = state.require_workspace().map_err(|e| e.to_string())?;
     let resolved = fs_util::resolve_in_workspace(&root, &path).map_err(|e| e.to_string())?;
 
+    use tokio::io::AsyncReadExt;
     let meta = tokio::fs::metadata(&resolved).await.map_err(|e| format!("cannot stat {path}: {e}"))?;
-    let file_size = meta.len() as usize;
-    let truncated = file_size > MAX_PREVIEW_BYTES;
-    let end = file_size.min(MAX_PREVIEW_BYTES);
+    let truncated = meta.len() as usize > MAX_PREVIEW_BYTES;
 
-    let bytes = tokio::fs::read(&resolved).await.map_err(|e| format!("cannot read {path}: {e}"))?;
-    let content = String::from_utf8_lossy(&bytes[..end]).to_string();
+    let file = tokio::fs::File::open(&resolved).await.map_err(|e| format!("cannot read {path}: {e}"))?;
+    let mut buf = Vec::new();
+    file.take(MAX_PREVIEW_BYTES as u64)
+        .read_to_end(&mut buf)
+        .await
+        .map_err(|e| format!("cannot read {path}: {e}"))?;
+    let content = String::from_utf8_lossy(&buf).to_string();
     let display_path = fs_util::display_relative(&root, &resolved);
     Ok(FileContent { path: display_path, content, truncated })
 }

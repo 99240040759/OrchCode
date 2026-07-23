@@ -1,9 +1,56 @@
 import { useEffect, useRef, useState } from "react";
-import { FiChevronRight, FiTerminal, FiSearch, FiGlobe, FiCpu, FiAlertTriangle } from "react-icons/fi";
-import type { ChatMessage, MessageItem, ToolCallItem, ReasoningItem, TextItem } from "../lib/store";
+import { FiChevronRight, FiTerminal, FiSearch, FiGlobe, FiCpu, FiAlertTriangle, FiMinimize2 } from "react-icons/fi";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import type { ChatMessage, MessageItem, ToolCallItem, ReasoningItem, TextItem, CompactionNoticeItem } from "../lib/store";
+import type { AttachmentRef } from "../lib/api";
+import { inTauri } from "../lib/api";
 import { Markdown, renderTextWithMentions } from "./Markdown";
 import FileTag from "./FileTag";
+import ExplorerIcon from "./ExplorerIcon";
 import { ThinkingShimmer } from "./ThinkingShimmer";
+
+// Handles both live attachments (path = filesystem path) and reloaded attachments
+// (path = data: URI for images, or empty/name for docs). The store.tsx selectSession
+// maps AttachmentView → AttachmentRef by setting path = dataUrl || name.
+function MsgAttachmentCard({ a }: { a: AttachmentRef }) {
+  const isDataUri = a.path.startsWith("data:");
+  const imgSrc = a.isImage
+    ? (isDataUri ? a.path : (inTauri() ? convertFileSrc(a.path) : `file://${a.path}`))
+    : undefined;
+
+  if (a.isImage) {
+    return (
+      <div className="AttachmentCard AttachmentCard-image" title={a.name}>
+        <div className="AttachmentCard-thumbWrap">
+          <img
+            src={imgSrc}
+            alt={a.name}
+            className="AttachmentCard-thumb"
+            onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+          />
+        </div>
+        <span className="AttachmentCard-name">{a.name}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="AttachmentCard AttachmentCard-doc" title={a.name}>
+      <ExplorerIcon type="file" name={a.name} className="AttachmentCard-icon" style={{ width: 15, height: 15, flexShrink: 0 }} />
+      <span className="AttachmentCard-name">{a.name}</span>
+    </div>
+  );
+}
+
+function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
+  const time = new Date(item.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="CompactionNotice" title={`${item.originalMessageCount} earlier messages summarised — full history is still saved`}>
+      <FiMinimize2 className="CompactionNotice-icon" />
+      <span>Context compacted — {item.originalMessageCount} messages summarised · {time}</span>
+    </div>
+  );
+}
 
 function ToolRow({ tool }: { tool: ToolCallItem }) {
   const info = tool.displayInfo ?? { label: tool.name, icon: "terminal" as const, opensArtifact: false };
@@ -52,7 +99,12 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
     if (item.active && bodyRef.current && isOpen) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [item.text, item.active, isOpen]);
 
-  const labelText = item.active ? `Thinking for ${elapsed}s` : `Thought for ${elapsed}s`;
+  const hasDuration = item.durationSeconds !== undefined || item.startTime > 0;
+  const labelText = item.active
+    ? `Thinking for ${elapsed}s`
+    : hasDuration
+      ? `Thought for ${elapsed}s`
+      : "Thought process";
 
   return (
     <div className="Reasoning">
@@ -80,6 +132,7 @@ type Group =
 function groupItems(items: MessageItem[]): Group[] {
   const groups: Group[] = [];
   for (const item of items) {
+    if (item.type === "compactionNotice") continue; // only ever appears in system-role messages
     if (item.type === "toolCall") {
       const last = groups[groups.length - 1];
       if (last?.type === "tools") last.tools.push(item);
@@ -99,10 +152,23 @@ function groupItems(items: MessageItem[]): Group[] {
 }
 
 export function Message({ message }: { message: ChatMessage }) {
+  if (message.role === "system") {
+    const notice = message.items.find((i): i is CompactionNoticeItem => i.type === "compactionNotice");
+    if (notice) return <CompactionDivider item={notice} />;
+    return null;
+  }
+
   if (message.role === "user") {
     const text = (message.items.find((i): i is TextItem => i.type === "text")?.text) ?? "";
     return (
       <div className="Msg Msg-user">
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="Msg-attachments">
+            {message.attachments.map((a) => (
+              <MsgAttachmentCard key={(a as AttachmentRef).path ?? a.name} a={a as AttachmentRef} />
+            ))}
+          </div>
+        )}
         <div className="Msg-bubble">{renderTextWithMentions(text)}</div>
       </div>
     );
@@ -124,16 +190,6 @@ export function Message({ message }: { message: ChatMessage }) {
         return <Markdown key={group.item.id}>{group.item.text}</Markdown>;
       })}
       {message.streaming && message.items.length === 0 && <ThinkingShimmer />}
-      {message.usage && message.usage.totalTokens > 0 && !message.streaming && (
-        <div className="Msg-usage" title={`Input: ${message.usage.inputTokens} | Output: ${message.usage.outputTokens}`}>
-          <FiCpu className="Msg-usageIcon" />
-          <span>{message.usage.totalTokens.toLocaleString()} tokens</span>
-          <span className="Msg-usageSep">•</span>
-          <span>in: {message.usage.inputTokens.toLocaleString()}</span>
-          <span className="Msg-usageSep">•</span>
-          <span>out: {message.usage.outputTokens.toLocaleString()}</span>
-        </div>
-      )}
       {message.error && (
         <div className="Msg-error" role="alert">
           <FiAlertTriangle aria-hidden="true" />

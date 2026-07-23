@@ -22,7 +22,7 @@ function AppShell() {
       <Titlebar title="Orch Code" />
       <TopBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((o) => !o)} />
       <div className="AppShell-body">
-        {sidebarOpen && <Sidebar onCollapse={() => setSidebarOpen(false)} />}
+        {sidebarOpen && <Sidebar />}
         <div className="Main">
           <ChatPanel />
         </div>

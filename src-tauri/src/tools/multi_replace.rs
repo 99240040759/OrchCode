@@ -80,16 +80,15 @@ impl Tool for MultiReplaceFileContent {
             total += count;
         }
 
-        let tmp_path = path.with_extension(format!(
-            "{}.tmp",
-            path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
-        ));
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
+        let tmp_path = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
         tokio::fs::write(&tmp_path, content.as_bytes()).await.map_err(|e| {
             ToolError::msg(format!("cannot write temp for {}: {e}", args.path))
         })?;
-        tokio::fs::rename(&tmp_path, &path).await.map_err(|e| {
-            ToolError::msg(format!("cannot finalize edit for {}: {e}", args.path))
-        })?;
+        if let Err(e) = tokio::fs::rename(&tmp_path, &path).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(ToolError::msg(format!("cannot finalize edit for {}: {e}", args.path)));
+        }
 
         let rel = fs_util::display_relative(&root, &path);
         Ok(format!("Applied {} replacement(s) ({total} occurrence(s)) to {rel}", args.replacements.len()))

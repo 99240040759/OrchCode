@@ -1,20 +1,16 @@
-import { FiEdit, FiCheckCircle, FiTrash2, FiLogOut } from "react-icons/fi";
+import { FiEdit, FiTrash2, FiLogOut } from "react-icons/fi";
 import { Avatar } from "./Avatar";
 import { Button } from "./ui/Button";
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
 import { formatUsd, formatRelativeTime } from "../lib/utils";
 
-interface SidebarProps {
-  onCollapse?: () => void;
-}
-
 function budgetLabel(cost: number, limit: number): string {
   const c = formatUsd(cost);
   return limit > 0 ? `${c} / ${formatUsd(limit)}` : c;
 }
 
-export function Sidebar({}: SidebarProps) {
+export function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const sessions = useChatStore((s) => s.sessions);
@@ -46,14 +42,10 @@ export function Sidebar({}: SidebarProps) {
               aria-current={s.id === currentSessionId ? "page" : undefined}
               onClick={() => void selectSession(s.id)}
             >
-              <FiCheckCircle className="ThreadItem-checkIcon" aria-hidden="true" />
               <div className="ThreadItem-content">
                 <div className="ThreadItem-topRow">
                   <span className="ThreadItem-title">{s.title || "New chat"}</span>
                   <span className="ThreadItem-time">{formatRelativeTime(s.updatedAt)}</span>
-                </div>
-                <div className="ThreadItem-subRow">
-                  <span className="ThreadItem-subText">{s.title ? "Task ready" : "New conversation"}</span>
                 </div>
               </div>
             </button>

@@ -45,26 +45,38 @@ export const CodeBlock = memo(function CodeBlock({
 
   useEffect(() => {
     let active = true;
-    codeToHtml(value, { lang, theme: THEME })
-      .then((out) => {
-        if (active) setHtml(out);
-      })
-      .catch(() => {
-        if (active) {
-          codeToHtml(value, { lang: "text", theme: THEME }).then((out) => {
-            if (active) setHtml(out);
-          });
-        }
-      });
-    return () => { active = false; };
+    // Debounced so a fast-streaming response doesn't re-run shiki on every delta — but
+    // during that entire debounce window `html` would otherwise stay whatever it was
+    // last set to. Since it starts as "", a code block being actively streamed into
+    // would render as an empty box until the stream paused long enough for this timer
+    // to actually fire (in practice: not until the whole response finished). The plain
+    // <pre> fallback below covers that window so raw text is always visible immediately;
+    // this only ever *upgrades* it to the highlighted version once shiki catches up.
+    const timer = setTimeout(() => {
+      codeToHtml(value, { lang, theme: THEME })
+        .then((out) => {
+          if (active) setHtml(out);
+        })
+        .catch(() => {
+          if (active) {
+            codeToHtml(value, { lang: "text", theme: THEME }).then((out) => {
+              if (active) setHtml(out);
+            });
+          }
+        });
+    }, 80);
+    return () => { active = false; clearTimeout(timer); };
   }, [value, lang]);
 
   const shikiClass = `CodeBlock-shiki ${showLineNumbers ? "shiki-line-numbers" : ""}`;
+  const body = html
+    ? <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
+    : <pre className={`${shikiClass} CodeBlock-plain`}><code>{value}</code></pre>;
 
   if (isEditor) {
     return (
       <div className={`CodeBlock CodeBlock-fullEditor ${className}`}>
-        <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
+        {body}
       </div>
     );
   }
@@ -77,7 +89,7 @@ export const CodeBlock = memo(function CodeBlock({
           {copied ? <><FiCheck className="CodeBlock-copyIconDone" /> Copied</> : <><FiCopy /> Copy</>}
         </button>
       </div>
-      <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
+      {body}
     </div>
   );
 });

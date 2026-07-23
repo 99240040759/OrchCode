@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FiMinus, FiSquare, FiCopy, FiX, FiRefreshCw, FiDownload } from "react-icons/fi";
+import { VscChromeClose, VscChromeMinimize, VscChromeMaximize, VscChromeRestore } from "react-icons/vsc";
 import { check } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -12,7 +13,7 @@ const MAC_RELEASES_URL = "https://github.com/sameer786ss/OrchCode/releases/lates
 type UpdateStatus = "none" | "downloading" | "readyToRestart" | "macAvailable";
 let updateCheckStarted = false;
 
-export function WindowControls({ className }: { className?: string }) {
+export function WindowControls({ className, isMac }: { className?: string; isMac?: boolean }) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("none");
   const [targetVersion, setTargetVersion] = useState<string>("");
@@ -22,35 +23,71 @@ export function WindowControls({ className }: { className?: string }) {
     if (!inTauri()) return;
     const appWindow = getCurrentWindow();
     appWindow.isMaximized().then(setIsMaximized).catch(() => {});
-    appWindow.onResized(() => { appWindow.isMaximized().then(setIsMaximized).catch(() => {}); }).then((un) => { unlistenRef.current = un; }).catch(() => {});
+    appWindow
+      .onResized(() => {
+        appWindow.isMaximized().then(setIsMaximized).catch(() => {});
+      })
+      .then((un) => {
+        unlistenRef.current = un;
+      })
+      .catch(() => {});
 
     if (!updateCheckStarted) {
       updateCheckStarted = true;
-      const isMac = navigator.userAgent.includes("Mac");
-      check().then(async (update) => {
-        if (update?.available) {
-          setTargetVersion(update.version);
-          if (isMac) { setUpdateStatus("macAvailable"); } else {
-            setUpdateStatus("downloading");
-            await update.downloadAndInstall();
-            setUpdateStatus("readyToRestart");
+      const mac = isMac ?? (typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"));
+      check()
+        .then(async (update) => {
+          if (update?.available) {
+            setTargetVersion(update.version);
+            if (mac) {
+              setUpdateStatus("macAvailable");
+            } else {
+              setUpdateStatus("downloading");
+              await update.downloadAndInstall();
+              setUpdateStatus("readyToRestart");
+            }
           }
-        }
-      }).catch(() => {});
+        })
+        .catch(() => {});
     }
 
-    return () => { unlistenRef.current?.(); };
-  }, []);
+    return () => {
+      unlistenRef.current?.();
+    };
+  }, [isMac]);
 
   const handleUpdateClick = async () => {
     if (updateStatus === "macAvailable") await openUrl(MAC_RELEASES_URL);
     else if (updateStatus === "readyToRestart") await relaunch();
   };
 
-  const act = (fn: (w: ReturnType<typeof getCurrentWindow>) => Promise<unknown>) => () => {
-    if (!inTauri()) return;
-    fn(getCurrentWindow()).catch(() => {});
+  const handleMinimize = () => {
+    if (inTauri()) getCurrentWindow().minimize().catch(() => {});
   };
+
+  const handleToggleMaximize = () => {
+    if (inTauri()) getCurrentWindow().toggleMaximize().catch(() => {});
+  };
+
+  const handleClose = () => {
+    if (inTauri()) getCurrentWindow().close().catch(() => {});
+  };
+
+  if (isMac) {
+    return (
+      <div className={cn("MacControls", className)} data-tauri-drag-region="false">
+        <Button type="button" className="MacBtn MacBtn-close" aria-label="Close" onClick={handleClose}>
+          <FiX />
+        </Button>
+        <Button type="button" className="MacBtn" aria-label="Minimize" onClick={handleMinimize}>
+          <FiMinus />
+        </Button>
+        <Button type="button" className="MacBtn" aria-label={isMaximized ? "Restore" : "Maximize"} onClick={handleToggleMaximize}>
+          {isMaximized ? <FiCopy /> : <FiSquare />}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className={cn("WinControls", className)} data-tauri-drag-region="false">
@@ -72,18 +109,40 @@ export function WindowControls({ className }: { className?: string }) {
           <span>Update v{targetVersion}</span>
         </Button>
       )}
-      <Button type="button" className="WinBtn" aria-label="Minimize" onClick={act((w) => w.minimize())}><FiMinus /></Button>
-      <Button type="button" className="WinBtn" aria-label={isMaximized ? "Restore" : "Maximize"} onClick={act((w) => w.toggleMaximize())}>{isMaximized ? <FiCopy /> : <FiSquare />}</Button>
-      <Button type="button" className="WinBtn WinBtn-close" aria-label="Close" onClick={act((w) => w.close())}><FiX /></Button>
+      <Button type="button" className="WinBtn" aria-label="Minimize" onClick={handleMinimize}>
+        <VscChromeMinimize />
+      </Button>
+      <Button type="button" className="WinBtn" aria-label={isMaximized ? "Restore" : "Maximize"} onClick={handleToggleMaximize}>
+        {isMaximized ? <VscChromeRestore /> : <VscChromeMaximize />}
+      </Button>
+      <Button type="button" className="WinBtn WinBtn-close" aria-label="Close" onClick={handleClose}>
+        <VscChromeClose />
+      </Button>
     </div>
   );
 }
 
 export function Titlebar({ title, className }: { title?: string; className?: string }) {
+  const [isMac, setIsMac] = useState(false);
+
+  useEffect(() => {
+    setIsMac(typeof navigator !== "undefined" && navigator.userAgent.includes("Mac"));
+  }, []);
+
   return (
-    <div className={cn("Titlebar", className)} data-tauri-drag-region>
-      {title && <span className="Titlebar-title" data-tauri-drag-region>{title}</span>}
-      <WindowControls />
+    <div className={cn("Titlebar", isMac && "Titlebar-mac", className)} data-tauri-drag-region>
+      {isMac ? (
+        <>
+          <WindowControls isMac={true} />
+          {title && <span className="Titlebar-title Titlebar-title-mac" data-tauri-drag-region>{title}</span>}
+          <div className="Titlebar-right" />
+        </>
+      ) : (
+        <>
+          {title && <span className="Titlebar-title" data-tauri-drag-region>{title}</span>}
+          <WindowControls isMac={false} />
+        </>
+      )}
     </div>
   );
 }

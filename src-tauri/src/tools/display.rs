@@ -103,6 +103,28 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             }
         }
 
+        "stop_command" => {
+            let id = args.get("task_id").and_then(|s| s.as_str()).unwrap_or(args_json).to_string();
+            ToolDisplayInfo {
+                label: "Stopped Task".to_string(),
+                target_text: Some(id),
+                icon: ToolIcon::Terminal,
+                opens_artifact: false,
+                ..Default::default()
+            }
+        }
+
+        "read_skill" => {
+            let name = args.get("name").and_then(|s| s.as_str()).unwrap_or(args_json).to_string();
+            ToolDisplayInfo {
+                label: "Read Skill".to_string(),
+                target_text: Some(name),
+                icon: ToolIcon::File,
+                opens_artifact: false,
+                ..Default::default()
+            }
+        }
+
         "web_search" => {
             let query = args.get("query").and_then(|s| s.as_str()).unwrap_or(args_json).to_string();
             ToolDisplayInfo {
@@ -140,7 +162,7 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
                 label: "Navigated".to_string(),
                 target_text: Some(url),
                 icon: ToolIcon::Globe,
-                opens_artifact: false,
+                opens_artifact: true,
                 ..Default::default()
             }
         }

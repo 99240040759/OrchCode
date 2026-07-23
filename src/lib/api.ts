@@ -35,6 +35,9 @@ export interface SessionSummary {
   title?: string;
   workspacePath?: string;
   updatedAt: number;
+  lastInputTokens: number;
+  lastOutputTokens: number;
+  lastTotalTokens: number;
 }
 
 export interface ToolDisplayInfo {
@@ -60,12 +63,21 @@ export type MessageItemView =
       output?: string;
       displayInfo: ToolDisplayInfo;
       status: string;
-    };
+    }
+  | { type: "compactionNotice"; id: string; originalMessageCount: number; ts: number };
+
+export interface AttachmentView {
+  name: string;
+  isImage: boolean;
+  /** `data:image/<type>;base64,<data>` for images; empty string for docs */
+  dataUrl: string;
+}
 
 export interface MessageView {
   id: string;
   role: "user" | "assistant";
   items: MessageItemView[];
+  attachments: AttachmentView[];
 }
 
 export interface UserDisplay {
@@ -87,15 +99,7 @@ export interface DirEntry {
   isDir: boolean;
 }
 
-export interface Skill {
-  name: string;
-  description: string;
-  filePath: string;
-  source: string;
-}
-
 export type DictationEvent =
-  | { type: "partial"; text: string }
   | { type: "final"; text: string }
   | { type: "error"; message: string };
 
@@ -175,27 +179,29 @@ export async function setUserPref(key: string, value: unknown): Promise<void> {
   return invoke("set_user_pref", { key, value });
 }
 
+export interface AttachmentRef {
+  path: string;
+  name: string;
+  isImage: boolean;
+}
+
 export async function startChat(
   sessionId: string,
   model: string,
   prompt: string,
   reasoningEffort?: string,
+  attachments?: AttachmentRef[],
   onEvent?: (evt: unknown) => void
 ): Promise<void> {
   if (!inTauri()) return;
   const ch = new Channel<unknown>();
   if (onEvent) ch.onmessage = onEvent;
-  return invoke("start_chat", { sessionId, model, prompt, reasoningEffort, onEvent: ch });
+  return invoke("start_chat", { sessionId, model, prompt, reasoningEffort, attachments: attachments ?? [], onEvent: ch });
 }
 
 export async function cancelChat(sessionId: string): Promise<void> {
   if (!inTauri() || !sessionId) return;
   return invoke("cancel_chat", { sessionId });
-}
-
-export async function compactChat(sessionId: string, model: string): Promise<string> {
-  if (!inTauri()) return "Not running in Tauri.";
-  return invoke("compact_chat", { sessionId, model });
 }
 
 export async function listWorkspaceFiles(query: string, limit = 100): Promise<FileEntry[]> {
@@ -260,20 +266,15 @@ export async function webviewNavigate(label: string, url: string): Promise<void>
 
 export async function webviewBack(label: string): Promise<void> {
   if (!inTauri()) return;
-  return invoke("webview_navigate", { label, url: "__back__" });
+  return invoke("webview_history", { label, action: "back" });
 }
 
 export async function webviewForward(label: string): Promise<void> {
   if (!inTauri()) return;
-  return invoke("webview_navigate", { label, url: "__forward__" });
+  return invoke("webview_history", { label, action: "forward" });
 }
 
 export async function webviewReload(label: string): Promise<void> {
   if (!inTauri()) return;
-  return invoke("webview_navigate", { label, url: "__reload__" });
-}
-
-export async function listSkills(): Promise<Skill[]> {
-  if (!inTauri()) return [];
-  return invoke("list_skills");
+  return invoke("webview_history", { label, action: "reload" });
 }

@@ -1,9 +1,9 @@
-use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use rig::tool::Tool;
-use super::{command_manager::CommandManager, fs_util, ToolError};
+use super::command_manager::{CommandManager, TaskStatus};
+use super::{fs_util, ToolError};
 use crate::config;
 use crate::state::WorkspaceHandle;
 
@@ -14,8 +14,6 @@ pub struct RunCommandArgs {
     pub cwd: Option<String>,
     #[serde(default)]
     pub background: Option<bool>,
-    #[serde(default)]
-    pub timeout_secs: Option<u64>,
 }
 
 pub struct RunCommand {
@@ -29,6 +27,18 @@ impl RunCommand {
     }
 }
 
+fn format_completed(s: &TaskStatus) -> String {
+    let code = s.exit_code.map(|c| c.to_string()).unwrap_or_else(|| s.status.clone());
+    let mut out = format!("status: {}\nexit code: {code}\nelapsed: {}s\n", s.status, s.elapsed_secs);
+    if s.output.trim().is_empty() {
+        out.push_str("(no output)");
+    } else {
+        out.push_str("--- output ---\n");
+        out.push_str(&s.output);
+    }
+    out
+}
+
 impl Tool for RunCommand {
     const NAME: &'static str = "run_command";
     type Error = ToolError;
@@ -36,7 +46,10 @@ impl Tool for RunCommand {
     type Output = String;
 
     fn description(&self) -> String {
-        "Run a shell command in the workspace directory. Pass background=true for long-running processes and receive a task_id immediately. Use get_command_status with the task_id to inspect output or exit status.".to_string()
+        "Run a shell command in the workspace directory. Quick commands return their output directly. \
+Longer commands are handed back a task_id (the command keeps running) so you can continue working and \
+poll get_command_status(task_id) for progress, or cancel it with stop_command(task_id). Pass background=true \
+to receive a task_id immediately without waiting.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -54,70 +67,30 @@ impl Tool for RunCommand {
             None => root.clone(),
         };
 
+        let task_id = self.manager.spawn_task(&args.command, &cwd);
+
         if args.background.unwrap_or(false) {
-            let task_id = self.manager.spawn_task(&args.command, &cwd);
             return Ok(format!(
-                "Background task started with task_id: '{}'. Use get_command_status(task_id: '{}') to check output.",
-                task_id, task_id
+                "Background task started with task_id: '{task_id}'. Use get_command_status(task_id: '{task_id}') to check output, or stop_command(task_id: '{task_id}') to cancel."
             ));
         }
 
-        let timeout_secs = args.timeout_secs
-            .unwrap_or(config::MAX_COMMAND_TIMEOUT_SECS)
-            .min(config::MAX_COMMAND_TIMEOUT_SECS);
-        let timeout = Duration::from_secs(timeout_secs);
-
-        let mut cmd = build_command(&args.command);
-        cmd.current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-
-        let output = match tokio::time::timeout(timeout, cmd.output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => return Err(ToolError::msg(format!("command failed to start: {e}"))),
-            Err(_) => return Err(ToolError::msg(format!("command timed out after {timeout_secs}s"))),
-        };
-
-        const OUTPUT_CAP: usize = 100 * 1024;
-        let code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string());
-        let stdout_raw = String::from_utf8_lossy(&output.stdout);
-        let stderr_raw = String::from_utf8_lossy(&output.stderr);
-
-        let stdout = if stdout_raw.len() > OUTPUT_CAP {
-            format!("...[truncated]...\n{}", &stdout_raw[stdout_raw.len() - OUTPUT_CAP..])
-        } else {
-            stdout_raw.into_owned()
-        };
-        let stderr = if stderr_raw.len() > OUTPUT_CAP {
-            format!("...[truncated]...\n{}", &stderr_raw[stderr_raw.len() - OUTPUT_CAP..])
-        } else {
-            stderr_raw.into_owned()
-        };
-
-        let mut combined = format!("exit code: {code}\n");
-        if !stdout.trim().is_empty() {
-            combined.push_str("--- stdout ---\n");
-            combined.push_str(&stdout);
-            if !stdout.ends_with('\n') { combined.push('\n'); }
+        let handoff = Duration::from_secs(config::COMMAND_FOREGROUND_HANDOFF_SECS);
+        let start = Instant::now();
+        loop {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            match self.manager.get_status(&task_id) {
+                Some(status) if status.status != "running" => return Ok(format_completed(&status)),
+                Some(_) => {
+                    if start.elapsed() >= handoff {
+                        return Ok(format!(
+                            "Command still running after {}s and is now tracked as task_id: '{task_id}'. It keeps running in the background — poll get_command_status(task_id: '{task_id}') for progress, or stop_command(task_id: '{task_id}') to cancel.",
+                            config::COMMAND_FOREGROUND_HANDOFF_SECS
+                        ));
+                    }
+                }
+                None => return Err(ToolError::msg("command task disappeared unexpectedly")),
+            }
         }
-        if !stderr.trim().is_empty() {
-            combined.push_str("--- stderr ---\n");
-            combined.push_str(&stderr);
-        }
-
-        Ok(combined)
-    }
-}
-
-fn build_command(command: &str) -> tokio::process::Command {
-    #[cfg(target_os = "windows")]
-    {
-        let mut cmd = tokio::process::Command::new("powershell.exe");
-        cmd.args(["-NoProfile", "-Command", command]);
-        cmd
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.args(["-c", command]);
-        cmd
     }
 }

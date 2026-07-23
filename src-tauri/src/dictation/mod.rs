@@ -69,7 +69,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let recording = recording.clone();
         let samples = samples.clone();
         let sample_rate = sample_rate.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             transcribe_loop(gateway, channel, recording, samples, sample_rate).await;
         });
     }

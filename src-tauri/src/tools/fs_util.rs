@@ -1,7 +1,10 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use crate::error::{AppError, AppResult};
 
-const FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
+pub const FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
+
+pub const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", ".git", ".next"];
 
 pub fn resolve_in_workspace(root: &Path, input: &str) -> AppResult<PathBuf> {
     let canonical_root = dunce::canonicalize(root)?;
@@ -12,35 +15,33 @@ pub fn resolve_in_workspace(root: &Path, input: &str) -> AppResult<PathBuf> {
         canonical_root.join(raw)
     };
 
-    let canonical = dunce::canonicalize(&joined).map_err(|_| {
-        AppError::PathEscapesWorkspace(input.to_string())
-    })?;
+    let mut cursor = joined.as_path();
+    let mut tail: Vec<OsString> = Vec::new();
+    let canonical_existing = loop {
+        match dunce::canonicalize(cursor) {
+            Ok(resolved) => break resolved,
+            Err(_) => {
+                let name = cursor.file_name().ok_or_else(|| AppError::PathEscapesWorkspace(input.to_string()))?;
+                tail.push(name.to_os_string());
+                cursor = cursor.parent().ok_or_else(|| AppError::PathEscapesWorkspace(input.to_string()))?;
+            }
+        }
+    };
 
-    if !canonical.starts_with(&canonical_root) {
+    if !canonical_existing.starts_with(&canonical_root) {
         return Err(AppError::PathEscapesWorkspace(input.to_string()));
     }
 
-    #[cfg(windows)]
-    {
-        if let Ok(meta) = std::fs::symlink_metadata(&joined) {
-            if meta.file_type().is_symlink() && !canonical.starts_with(&canonical_root) {
-                return Err(AppError::SymlinkEscape(input.to_string()));
-            }
-        }
+    let mut resolved = canonical_existing;
+    for name in tail.into_iter().rev() {
+        resolved.push(name);
     }
 
-    #[cfg(unix)]
-    {
-        if let Ok(meta) = std::fs::symlink_metadata(&joined) {
-            if meta.file_type().is_symlink() {
-                if !canonical.starts_with(&canonical_root) {
-                    return Err(AppError::SymlinkEscape(input.to_string()));
-                }
-            }
-        }
+    if !resolved.starts_with(&canonical_root) {
+        return Err(AppError::PathEscapesWorkspace(input.to_string()));
     }
 
-    Ok(canonical)
+    Ok(resolved)
 }
 
 pub fn check_file_size(path: &Path) -> AppResult<u64> {

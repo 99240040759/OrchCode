@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiChevronDown, FiMonitor, FiPlus, FiMic, FiArrowUp, FiSquare, FiX, FiFile, FiImage, FiCheck, FiCpu } from "react-icons/fi";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FiChevronDown, FiMonitor, FiPlus, FiMic, FiArrowUp, FiSquare, FiX, FiFile, FiImage, FiCheck } from "react-icons/fi";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useDebouncedCallback } from "use-debounce";
@@ -20,11 +20,13 @@ interface CommandItem {
   key: string;
   label: string;
   hint: string;
-  action: "clear" | "compact";
+  action: "clear";
 }
 
+// Context compaction is now fully automatic — triggered at 80% of the selected model's
+// native context window as a normal part of the turn pipeline (see the backend's
+// llm::compaction module) — so there is no manual "/compact" command anymore.
 const COMMANDS: CommandItem[] = [
-  { key: "compact", label: "Compact chat", hint: "Summarise conversation history to save context window space", action: "compact" },
   { key: "clear", label: "Clear chat", hint: "Clear current conversation session and start a new one", action: "clear" },
 ];
 
@@ -75,8 +77,6 @@ export function InputBar() {
   const send = useChatStore((s) => s.send);
   const cancel = useChatStore((s) => s.cancel);
   const streaming = useChatStore((s) => s.streaming);
-  const compacting = useChatStore((s) => s.compacting);
-  const compactSession = useChatStore((s) => s.compactSession);
   const models = useChatStore((s) => s.models);
   const selectedModel = useChatStore((s) => s.selectedModel);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
@@ -86,20 +86,17 @@ export function InputBar() {
   const pickWorkspace = useChatStore((s) => s.pickWorkspace);
   const resetToSandbox = useChatStore((s) => s.resetToSandbox);
   const newChat = useChatStore((s) => s.newChat);
-  const messages = useChatStore((s) => s.messages);
-
-  const sessionTokens = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role === "assistant" && m.usage && m.usage.totalTokens > 0) {
-        return m.usage.totalTokens;
-      }
-    }
-    return 0;
-  }, [messages]);
+  // Persisted + live session token usage, owned by the store (see store.tsx) instead of
+  // being re-derived here by scanning `messages` — that scan went stale the moment a
+  // session was reloaded from disk, since usage wasn't persisted before.
+  const sessionTokens = useChatStore((s) => s.sessionTokens);
 
   const maxContext = selectedModel?.contextWindow || 128000;
-  const fillPct = Math.min(100, Math.max(0, Math.round((sessionTokens / maxContext) * 100)));
+  const fillPct = Math.min(100, Math.max(0, Math.round((sessionTokens.totalTokens / maxContext) * 100)));
+
+  // Exact match against the server-defined capability literal (see
+  // gateway::models::ModelInfo::supports_images on the backend) — no guessing here either.
+  const modelSupportsImages = selectedModel?.capabilities.includes("images") ?? false;
 
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
@@ -127,12 +124,15 @@ export function InputBar() {
     getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop") {
         const paths = event.payload.paths ?? [];
-        const next: Attachment[] = paths.filter((p) => ATTACH_EXTS.test(p)).map((p) => ({ path: p, name: getBasename(p), isImage: IMAGE_EXTS.test(p) }));
+        const next: Attachment[] = paths
+          .filter((p) => ATTACH_EXTS.test(p))
+          .map((p) => ({ path: p, name: getBasename(p), isImage: IMAGE_EXTS.test(p) }))
+          .filter((a) => !a.isImage || modelSupportsImages);
         if (next.length) setAttachments((prev) => [...prev, ...next]);
       }
     }).then((un) => { unlisten = un; }).catch(() => { });
     return () => unlisten?.();
-  }, []);
+  }, [modelSupportsImages]);
 
   const searchFiles = useDebouncedCallback(async (q: string) => {
     if (!q && trigger !== "@") return;
@@ -191,22 +191,19 @@ export function InputBar() {
 
   const pickCommand = (item: CommandItem) => {
     if (item.action === "clear") { newChat(); closePopover(); setValue(""); return; }
-    if (item.action === "compact") { closePopover(); setValue(""); void compactSession(); return; }
-  };
-
-  const buildAttachmentBlock = (): string => {
-    if (!attachments.length) return "";
-    return attachments.map((a) => `[Attached ${a.isImage ? "image" : "file"}: ${a.name} — ${a.path}]`).join("\n");
   };
 
   const doSend = useCallback(async () => {
     const text = value.trim();
     if (!text && attachments.length === 0) return;
-    const attachBlock = buildAttachmentBlock();
+    // Attachments are sent as a structured list over IPC (api.AttachmentRef[]) instead
+    // of being embedded as marker text in the prompt and regex-parsed back out on the
+    // Rust side — see llm::stream::build_user_message.
+    const attachmentRefs = attachments.map((a) => ({ path: a.path, name: a.name, isImage: a.isImage }));
     setValue("");
     setAttachments([]);
     closePopover();
-    void send(text, attachBlock || undefined);
+    void send(text, attachmentRefs.length ? attachmentRefs : undefined);
   }, [value, attachments, send, closePopover]);
 
   const popoverOpen = trigger !== null;
@@ -228,7 +225,7 @@ export function InputBar() {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!compacting) void doSend();
+      void doSend();
     }
   };
 
@@ -238,10 +235,12 @@ export function InputBar() {
     setRecording(true);
     try {
       await api.startDictation((e) => {
-        if (e.type === "partial" || e.type === "final") {
+        if (e.type === "final") {
           setValue(dictBase.current + e.text);
-          if (e.type === "final") setRecording(false);
-        } else if (e.type === "error") { setRecording(false); }
+          setRecording(false);
+        } else if (e.type === "error") {
+          setRecording(false);
+        }
       });
     } catch { setRecording(false); }
   }, [recording, value]);
@@ -265,7 +264,7 @@ export function InputBar() {
   const removeAttachment = (path: string) => setAttachments((prev) => prev.filter((a) => a.path !== path));
 
   return (
-    <div className="Composer">
+    <div className="Composer" data-streaming={streaming || undefined} data-recording={recording || undefined}>
       {popoverOpen && (
         <div className="MentionPopover">
           {trigger === "@" ? (
@@ -314,14 +313,21 @@ export function InputBar() {
         <textarea
           ref={taRef}
           className="Composer-input"
-          placeholder={compacting ? "Compacting conversation…" : "Ask anything, @ to mention, / for actions"}
-          rows={2}
+          placeholder="Ask anything, @ to mention, / for actions"
           value={value}
           onChange={onChange}
           onKeyDown={onKeyDown}
-          disabled={compacting}
           onClick={(e) => syncToken(value, e.currentTarget.selectionStart ?? value.length)}
         />
+        {recording && (
+          <div className="Composer-recBadge" aria-live="polite">
+            <span className="Composer-recDot" />
+            <span className="Composer-recBars">
+              <span /><span /><span /><span />
+            </span>
+            <span className="Composer-recLabel">Recording</span>
+          </div>
+        )}
 
         <div className="Composer-row">
           <DropdownMenu>
@@ -329,7 +335,13 @@ export function InputBar() {
               <Button className="Composer-plus" aria-label="Add attachment"><FiPlus /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent sideOffset={6} align="start">
-              <DropdownMenuItem onSelect={() => void pickAttachments(true)}><FiImage /><span>Image</span></DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!modelSupportsImages}
+                title={modelSupportsImages ? undefined : `${selectedModel?.name ?? "This model"} has no vision capability`}
+                onSelect={() => modelSupportsImages && void pickAttachments(true)}
+              >
+                <FiImage /><span>Image</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void pickAttachments(false)}><FiFile /><span>Document</span></DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -357,29 +369,42 @@ export function InputBar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <span className="Composer-rowspacer" />
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="Composer-mic" aria-label="Reasoning Effort" title={`Reasoning Effort: ${reasoningEffort}`}>
-                <FiCpu />
+              <Button className="Composer-model" title={`Reasoning effort: ${reasoningEffort}`}>
+                <span className="Composer-effort-label">{reasoningEffort}</span>
+                <FiChevronDown />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent sideOffset={6} align="end">
-              <DropdownMenuItem data-selected={reasoningEffort === "low"} onSelect={() => setReasoningEffort("low")}>
-                {reasoningEffort === "low" && <FiCheck className="DropdownItem-check" />}
-                <span>Low Effort</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem data-selected={reasoningEffort === "medium"} onSelect={() => setReasoningEffort("medium")}>
-                {reasoningEffort === "medium" && <FiCheck className="DropdownItem-check" />}
-                <span>Medium Effort</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem data-selected={reasoningEffort === "high"} onSelect={() => setReasoningEffort("high")}>
-                {reasoningEffort === "high" && <FiCheck className="DropdownItem-check" />}
-                <span>High Effort</span>
-              </DropdownMenuItem>
+            <DropdownMenuContent sideOffset={6} align="start">
+              <div className="EffortSliderPanel">
+                <div className="EffortSliderPanel-header">
+                  <span className="EffortSliderPanel-title">Reasoning effort</span>
+                  <span className="EffortSliderPanel-value">{reasoningEffort}</span>
+                </div>
+                <input
+                  type="range"
+                  className="EffortSlider-input"
+                  min={0}
+                  max={2}
+                  step={1}
+                  value={reasoningEffort === "low" ? 0 : reasoningEffort === "medium" ? 1 : 2}
+                  onChange={(e) => {
+                    const map = ["low", "medium", "high"] as const;
+                    setReasoningEffort(map[Number(e.target.value)]);
+                  }}
+                  aria-label="Reasoning effort"
+                />
+                <div className="EffortSliderPanel-ticks">
+                  <span>Low</span>
+                  <span>Med</span>
+                  <span>High</span>
+                </div>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <span className="Composer-rowspacer" />
 
           <Button className="Composer-mic" aria-label="Dictate" data-active={recording} onClick={() => void toggleDictation()}>
             <FiMic />
@@ -387,7 +412,7 @@ export function InputBar() {
 
           <div
             className="TokenRing"
-            title={`Session Context: ${sessionTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+            title={`Session Context: ${sessionTokens.totalTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
           >
             <svg width="22" height="22" viewBox="0 0 22 22">
               <circle cx="11" cy="11" r="8.5" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
@@ -412,7 +437,7 @@ export function InputBar() {
               <FiSquare />
             </Button>
           ) : (
-            <Button className="Composer-send" aria-label="Send prompt" disabled={(!value.trim() && attachments.length === 0) || compacting} onClick={() => void doSend()}>
+            <Button className="Composer-send" aria-label="Send prompt" disabled={!value.trim() && attachments.length === 0} onClick={() => void doSend()}>
               <FiArrowUp />
             </Button>
           )}

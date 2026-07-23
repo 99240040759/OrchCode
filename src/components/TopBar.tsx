@@ -4,11 +4,8 @@ import { useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { getBasename } from "../lib/utils";
 import FileTag from "./FileTag";
+import { ChromeIcon } from "./ChromeIcon";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "./ui/DropdownMenu";
-
-function ChromeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
-  return <img src="/chrome.svg" alt="Browser" className={className} style={{ width: 14, height: 14, flexShrink: 0, ...style }} />;
-}
 
 const KIND_ICON: Record<ArtifactKind, React.ComponentType<{ className?: string }>> = {
   file: FiFile,

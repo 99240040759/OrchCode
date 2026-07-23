@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FiChevronRight, FiCopy, FiCheck } from "react-icons/fi";
 import * as api from "../lib/api";
 import { getLanguageFromPath, splitPathParts } from "../lib/utils";
+import { useArtifactsStore } from "../lib/artifacts";
 import CodeBlock, { useCopy } from "./ui/CodeBlock";
 import { Markdown } from "./Markdown";
 
@@ -25,6 +26,7 @@ export function FileViewer({ initialPath }: { initialPath?: string }) {
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { copied, copy } = useCopy(content);
+  const version = useArtifactsStore((s) => (initialPath ? s.fileVersions[initialPath] ?? 0 : 0));
 
   const openFile = useCallback(async (p: string) => {
     setPath(p);
@@ -41,7 +43,7 @@ export function FileViewer({ initialPath }: { initialPath?: string }) {
 
   useEffect(() => {
     if (initialPath) void openFile(initialPath);
-  }, [initialPath, openFile]);
+  }, [initialPath, openFile, version]);
 
   const lang = path ? getLanguageFromPath(path) : "text";
 

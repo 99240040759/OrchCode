@@ -5,11 +5,8 @@ import { useChatStore } from "../lib/store";
 import { TerminalView } from "./TerminalView";
 import { FileViewer } from "./FileViewer";
 import { BrowserView } from "./BrowserView";
+import { ChromeIcon } from "./ChromeIcon";
 import { Button } from "./ui/Button";
-
-function ChromeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
-  return <img src="/chrome.svg" alt="Browser" className={className} style={{ width: 14, height: 14, flexShrink: 0, ...style }} />;
-}
 
 const EMPTY_CARDS: { kind: ArtifactKind; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { kind: "file", label: "File", Icon: FiFile },
@@ -19,6 +16,7 @@ const EMPTY_CARDS: { kind: ArtifactKind; label: string; Icon: React.ComponentTyp
 
 function useAutoOpenWrittenFiles() {
   const openFile = useArtifactsStore((s) => s.openFile);
+  const bumpFile = useArtifactsStore((s) => s.bumpFile);
   const messages = useChatStore((s) => s.messages);
   const sessionGeneration = useChatStore((s) => s.sessionGeneration);
   const processedRef = useRef<Set<string>>(new Set());
@@ -36,9 +34,10 @@ function useAutoOpenWrittenFiles() {
         if (!path || processedRef.current.has(item.id)) continue;
         processedRef.current.add(item.id);
         openFile(path);
+        bumpFile(path);
       }
     }
-  }, [messages, sessionGeneration, openFile]);
+  }, [messages, sessionGeneration, openFile, bumpFile]);
 }
 
 export function ArtifactPanel() {

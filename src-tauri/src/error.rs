@@ -8,8 +8,6 @@ pub enum AppError {
     NoWorkspace,
     #[error("path escapes the workspace root: {0}")]
     PathEscapesWorkspace(String),
-    #[error("path contains a symlink that escapes the workspace: {0}")]
-    SymlinkEscape(String),
     #[error("model not found in catalog: {0}")]
     ModelNotFound(String),
     #[error("gateway request failed ({status}): {body}")]

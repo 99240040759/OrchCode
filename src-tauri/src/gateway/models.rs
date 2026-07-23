@@ -21,8 +21,14 @@ pub struct ModelInfo {
 }
 
 impl ModelInfo {
-    pub fn supports(&self, capability: &str) -> bool {
-        self.capabilities.iter().any(|c| c == capability)
+    /// The gateway (`gcp-functions/api/index.js` MODEL_DEFINITIONS) emits an explicit
+    /// `"images"` literal in `capabilities` when a model accepts image input. This is an
+    /// exact match against that server-defined contract — no client-side heuristics or
+    /// substring guessing (`contains("vision")`, `== "multimodal"`, etc.). If the gateway
+    /// introduces a new capability literal, it must be added here explicitly so the two
+    /// sides stay in lockstep instead of silently drifting.
+    pub fn supports_images(&self) -> bool {
+        self.capabilities.iter().any(|c| c == "images")
     }
 }
 

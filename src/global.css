@@ -31,7 +31,7 @@
    /* Layout */
    --topbar-h: 36px;
    --sidebar-w: 256px;
-   --composer-w: 720px;
+   --composer-w: 640px;
 
    /* Spacing */
    --spacing-xs: 4px;
@@ -120,7 +120,42 @@ body {
    }
 }
 
-@keyframes textShimmer {
+@keyframes spinnerColorShift {
+   0%   { --spinner-hue: 265 }   /* purple #bb86fc */
+   33%  { --spinner-hue: 0   }   /* white — peaks near hsl(0,0%,100%) */
+   66%  { --spinner-hue: 174 }   /* teal #03dac6  */
+   100% { --spinner-hue: 265 }
+}
+
+/* Gradient-arc spinner: conic-gradient from primary → teal fades around the
+   ring; the inner mask circle cuts out the centre so only the border shows.
+   Result: a continuously colour-shifting arc that's clearly visible. */
+.Spinner {
+   width: 32px;
+   height: 32px;
+   border-radius: 50%;
+   /* conic starts transparent at the tail and sweeps to colour at the head */
+   background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 260deg,
+      var(--color-secondary) 290deg,
+      #ffffff 315deg,
+      var(--color-primary) 360deg
+   );
+   /* hollow out the centre to fake a border */
+   -webkit-mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 3.5px),
+      #fff calc(100% - 3px)
+   );
+   mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 3.5px),
+      #fff calc(100% - 3px)
+   );
+   animation: spin .8s linear infinite
+}@keyframes textShimmer {
    0% {
       background-position: 200% 0
    }
@@ -235,7 +270,12 @@ body {
    background: #18181a;
    border-bottom: 1px solid var(--border-subtle);
    user-select: none;
-   -webkit-app-region: drag
+   -webkit-app-region: drag;
+   position: relative;
+}
+
+.Titlebar-mac {
+   padding: 0 12px;
 }
 
 .Titlebar-title {
@@ -243,6 +283,57 @@ body {
    font-weight: 600;
    color: var(--md-text-med);
    letter-spacing: .3px
+}
+
+.Titlebar-title-mac {
+   position: absolute;
+   left: 50%;
+   transform: translateX(-50%);
+   pointer-events: none;
+}
+
+.Titlebar-right {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   margin-left: auto;
+   -webkit-app-region: no-drag;
+}
+
+.MacControls {
+   display: flex;
+   align-items: center;
+   height: 30px;
+   flex: 0 0 auto;
+   -webkit-app-region: no-drag;
+}
+
+.MacBtn {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   width: 32px;
+   height: 100%;
+   border: none;
+   background: transparent;
+   color: var(--md-text-med);
+   cursor: pointer;
+   transition: background .15s, color .15s;
+}
+
+.MacBtn:hover {
+   background: rgba(255, 255, 255, 0.08);
+   color: var(--md-text-high);
+}
+
+.MacBtn svg {
+   width: 13px;
+   height: 13px;
+}
+
+.MacBtn-close:hover {
+   background: rgba(255, 95, 86, 0.2);
+   color: #ff5f56;
 }
 
 .WinControls {
@@ -767,6 +858,12 @@ div[data-panel-resize-handle]:focus-visible {
    width: 100%;
    overflow-y: auto;
    overscroll-behavior: contain;
+   /* Scroll position during streaming is driven manually (see MessageList.tsx) by
+      writing scrollTop directly on every new delta. The browser's automatic scroll
+      anchoring tries to preserve visual position on its own whenever content shifts
+      above the viewport, which fights that manual write on every frame and was part of
+      the streaming scroll bounce. */
+   overflow-anchor: none;
    display: flex;
    flex-direction: column;
    align-items: center;
@@ -872,6 +969,52 @@ div[data-panel-resize-handle]:focus-visible {
    flex: 0 0 auto;
    width: 15px;
    height: 15px
+}
+
+.Msg-attachments {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 6px;
+   margin-bottom: 6px;
+   justify-content: flex-end
+}
+
+/* Plain chip kept for any legacy renders; new code uses AttachmentCard directly */
+.Msg-attachmentChip {
+   padding: 3px 10px;
+   border-radius: 999px;
+   background: rgba(255, 255, 255, 0.06);
+   border: 1px solid rgba(255, 255, 255, 0.1);
+   color: var(--md-text-med);
+   font-size: 11.5px
+}
+
+/* Non-destructive divider marking where a conversation was auto-compacted. The
+   underlying messages remain in the list above and below this line. */
+.CompactionNotice {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 6px;
+   margin: 10px 0;
+   padding: 4px 0;
+   color: var(--md-text-med);
+   font-size: 11.5px;
+   opacity: .75
+}
+
+.CompactionNotice::before,
+.CompactionNotice::after {
+   content: "";
+   flex: 1 1 auto;
+   height: 1px;
+   background: rgba(255, 255, 255, 0.08)
+}
+
+.CompactionNotice-icon {
+   width: 12px;
+   height: 12px;
+   flex-shrink: 0
 }
 
 /* Thinking shimmer */
@@ -1132,27 +1275,133 @@ div[data-panel-resize-handle]:focus-visible {
    display: flex;
    flex-direction: column;
    background: rgba(255, 255, 255, 0.03) !important;
-   border: 1px solid rgba(255, 255, 255, 0.08) !important;
+   border: 1.5px solid rgba(255, 255, 255, 0.08);
    border-radius: 10px;
    overflow: hidden;
-   box-shadow: none !important;
-   outline: none !important
+   box-shadow: none;
+   outline: none !important;
+   transition: border-color 0.3s ease
 }
 
 .Composer-box:focus,
 .Composer-box:focus-within,
 .Composer-box:focus-visible {
    background: rgba(255, 255, 255, 0.03) !important;
-   border-color: rgba(255, 255, 255, 0.08) !important;
-   box-shadow: none !important;
+   border-color: rgba(255, 255, 255, 0.08);
+   box-shadow: none;
    outline: none !important
+}
+
+/* Streaming border: animated color cycle on the border itself.
+   Works because border has no !important here, so @keyframes wins. */
+.Composer[data-streaming='true'] .Composer-box {
+   animation: composerBorderShift 2s linear infinite;
+   border-color: var(--color-primary)
+}
+
+/* Recording border: pulsing red glow */
+.Composer[data-recording='true'] .Composer-box {
+   animation: composerRecordShift 1.6s ease-in-out infinite;
+   border-color: #ff5252
+}
+
+/* Recording overrides streaming if both somehow active */
+.Composer[data-recording='true'][data-streaming='true'] .Composer-box {
+   animation: composerRecordShift 1.6s ease-in-out infinite
+}
+
+@keyframes composerBorderShift {
+   0%   { border-color: var(--color-primary) }
+   33%  { border-color: #ffffff }
+   66%  { border-color: var(--color-secondary) }
+   100% { border-color: var(--color-primary) }
+}
+
+@keyframes composerRecordShift {
+   0%   { border-color: #ff5252; box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.08) }
+   50%  { border-color: #ff8a80; box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.18) }
+   100% { border-color: #ff5252; box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.08) }
+}
+
+@keyframes composerGlowShift {
+   0%   { background-position: 0% 0 }
+   100% { background-position: -300% 0 }
+}
+
+/* Recording badge */
+.Composer-recBadge {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   gap: 6px;
+   padding: 3px 10px 7px;
+   pointer-events: none;
+   user-select: none
+}
+
+.Composer-recDot {
+   width: 7px;
+   height: 7px;
+   border-radius: 50%;
+   background: #ff5252;
+   flex-shrink: 0;
+   animation: recDotPulse 1s ease-in-out infinite
+}
+
+@keyframes recDotPulse {
+   0%, 100% { opacity: 1; transform: scale(1) }
+   50%       { opacity: 0.5; transform: scale(0.75) }
+}
+
+.Composer-recBars {
+   display: flex;
+   align-items: center;
+   gap: 2px;
+   height: 14px
+}
+
+.Composer-recBars span {
+   display: block;
+   width: 2.5px;
+   border-radius: 99px;
+   background: #ff5252;
+   animation: recBar 0.8s ease-in-out infinite alternate
+}
+
+.Composer-recBars span:nth-child(1) { animation-delay: 0s;    height: 4px }
+.Composer-recBars span:nth-child(2) { animation-delay: 0.15s; height: 10px }
+.Composer-recBars span:nth-child(3) { animation-delay: 0.3s;  height: 6px }
+.Composer-recBars span:nth-child(4) { animation-delay: 0.45s; height: 12px }
+
+@keyframes recBar {
+   from { transform: scaleY(0.4); opacity: 0.6 }
+   to   { transform: scaleY(1);   opacity: 1 }
+}
+
+.Composer-recLabel {
+   font-size: 11px;
+   font-weight: 500;
+   color: #ff8a80;
+   letter-spacing: .3px
+}
+
+/* Mic button: red tint while recording instead of purple */
+.Composer[data-recording='true'] .Composer-mic[data-active='true'] {
+   background: rgba(255, 82, 82, 0.18);
+   color: #ff5252
+}
+
+.Composer[data-recording='true'] .Composer-mic[data-active='true']:hover {
+   background: rgba(255, 82, 82, 0.28);
+   color: #ff8a80
 }
 
 .Composer-input,
 .Composer-input:focus,
 .Composer-input:focus-visible {
+   display: block;
    width: 100%;
-   min-height: 36px;
+   min-height: 42px;
    max-height: 140px;
    resize: none;
    border: none !important;
@@ -1162,15 +1411,16 @@ div[data-panel-resize-handle]:focus-visible {
    color: var(--md-text-high);
    font-family: inherit;
    font-size: 13.5px;
-   line-height: 1.4;
-   padding: 6px 10px 4px;
+   line-height: 1.5;
+   padding: 10px 10px 6px;
    box-sizing: border-box;
-   box-shadow: none !important
+   box-shadow: none !important;
+   vertical-align: top
 }
 
 .Composer-input::placeholder {
    color: rgba(255, 255, 255, 0.38);
-   line-height: 1.4
+   line-height: 1.5
 }
 
 .Composer-attachments {
@@ -1292,6 +1542,103 @@ div[data-panel-resize-handle]:focus-visible {
 .Composer-mic svg {
    width: 13px;
    height: 13px
+}
+
+/* Reasoning effort slider — lives inside a dropdown panel */
+.EffortSliderPanel {
+   padding: 10px 12px 8px;
+   min-width: 180px;
+   display: flex;
+   flex-direction: column;
+   gap: 8px
+}
+
+.EffortSliderPanel-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between
+}
+
+.EffortSliderPanel-title {
+   font-size: 11px;
+   font-weight: 500;
+   color: var(--md-text-med);
+   text-transform: uppercase;
+   letter-spacing: .4px
+}
+
+.EffortSliderPanel-value {
+   font-size: 11px;
+   font-weight: 600;
+   color: var(--color-primary);
+   text-transform: capitalize
+}
+
+.EffortSlider-input {
+   -webkit-appearance: none;
+   appearance: none;
+   width: 100%;
+   height: 4px;
+   border-radius: 99px;
+   outline: none;
+   cursor: pointer;
+   background: linear-gradient(
+      90deg,
+      var(--color-primary) 0%,
+      #ffffff 50%,
+      var(--color-secondary) 100%
+   );
+   background-size: 200% 100%;
+   animation: textShimmer 2s linear infinite;
+   margin: 0
+}
+
+.EffortSlider-input::-webkit-slider-thumb {
+   -webkit-appearance: none;
+   appearance: none;
+   width: 14px;
+   height: 14px;
+   border-radius: 50%;
+   background: #ffffff;
+   border: 2px solid var(--color-primary);
+   cursor: pointer;
+   box-shadow: 0 0 0 3px rgba(187, 134, 252, 0.2);
+   transition: border-color .15s, box-shadow .15s
+}
+
+.EffortSlider-input::-moz-range-thumb {
+   width: 14px;
+   height: 14px;
+   border-radius: 50%;
+   background: #ffffff;
+   border: 2px solid var(--color-primary);
+   cursor: pointer;
+   box-shadow: 0 0 0 3px rgba(187, 134, 252, 0.2)
+}
+
+.EffortSlider-input::-webkit-slider-thumb:hover {
+   border-color: var(--color-secondary);
+   box-shadow: 0 0 0 4px rgba(3, 218, 198, 0.25)
+}
+
+.EffortSliderPanel-ticks {
+   display: flex;
+   justify-content: space-between;
+   padding: 0 1px
+}
+
+.EffortSliderPanel-ticks span {
+   font-size: 10px;
+   color: var(--md-text-dim);
+   user-select: none
+}
+
+/* Trigger button label for effort */
+.Composer-effort-label {
+   font-size: 11px;
+   font-weight: 500;
+   text-transform: capitalize;
+   color: var(--md-text-med)
 }
 
 .Composer-repo {
@@ -2126,6 +2473,15 @@ button[data-state='open'],
    background: transparent
 }
 
+/* Plain fallback shown while a streaming code block hasn't been syntax-highlighted yet
+   (shiki highlighting is debounced so it doesn't re-run on every streamed delta) —
+   unstyled text now instead of an empty box until the stream settles. */
+.CodeBlock-plain code {
+   color: rgba(255, 255, 255, 0.82);
+   white-space: pre-wrap;
+   word-break: break-word
+}
+
 .CodeBlock-pre {
    margin: 0;
    padding: 12px 16px;
@@ -2383,15 +2739,6 @@ button[data-state='open'],
    height: 100vh;
    width: 100vw;
    background: var(--md-bg)
-}
-
-.Spinner {
-   width: 32px;
-   height: 32px;
-   border-radius: 50%;
-   border: 3px solid rgba(255, 255, 255, 0.12);
-   border-top-color: var(--md-primary);
-   animation: spin .8s linear infinite
 }
 
 /* Onboarding */
