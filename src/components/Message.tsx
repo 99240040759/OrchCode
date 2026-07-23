@@ -9,9 +9,6 @@ import FileTag from "./FileTag";
 import ExplorerIcon from "./ExplorerIcon";
 import { ThinkingShimmer } from "./ThinkingShimmer";
 
-// Handles both live attachments (path = filesystem path) and reloaded attachments
-// (path = data: URI for images, or empty/name for docs). The store.tsx selectSession
-// maps AttachmentView → AttachmentRef by setting path = dataUrl || name.
 function MsgAttachmentCard({ a }: { a: AttachmentRef }) {
   const isDataUri = a.path.startsWith("data:");
   const imgSrc = a.isImage
@@ -132,7 +129,7 @@ type Group =
 function groupItems(items: MessageItem[]): Group[] {
   const groups: Group[] = [];
   for (const item of items) {
-    if (item.type === "compactionNotice") continue; // only ever appears in system-role messages
+    if (item.type === "compactionNotice") continue;
     if (item.type === "toolCall") {
       const last = groups[groups.length - 1];
       if (last?.type === "tools") last.tools.push(item);

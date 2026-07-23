@@ -1,12 +1,3 @@
-//! Automatic context compaction.
-//!
-//! Runs as a normal step of the turn pipeline (`stream.rs` calls `maybe_compact` right
-//! after a turn finishes) instead of being a user-invoked slash command. The trigger is
-//! the model's own native `contextWindow`, as reported by the gateway's `/models`
-//! endpoint (`ModelInfo::context_window`) — never a guessed constant. Compaction is
-//! purely additive at the storage layer: it appends a summary marker row, it never
-//! deletes or rewrites prior messages (see `persistence::insert_compaction_marker`).
-
 use rig::client::CompletionClient;
 use rig::completion::{CompletionModel, Message};
 use rig::message::{AssistantContent, UserContent};
@@ -17,17 +8,11 @@ use crate::gateway::ModelInfo;
 use crate::llm::client::ChatClient;
 use crate::persistence::SqliteMemory;
 
-/// Outcome of a compaction check, forwarded to the frontend as a `ChatEvent::Compacted`
-/// so the chat panel can append the divider line live without re-fetching the session.
 pub struct CompactionOutcome {
     pub original_message_count: usize,
     pub ts: i64,
 }
 
-/// Checks whether the just-completed turn crossed the model's native compaction
-/// threshold and, if so, summarises everything since the last boundary (or the start of
-/// the conversation) and appends a new boundary marker. Returns `None` when no
-/// compaction was needed or the model reports no usable context window.
 pub async fn maybe_compact(
     memory: &SqliteMemory,
     client: &ChatClient,
@@ -46,8 +31,6 @@ pub async fn maybe_compact(
 
     let input = memory.get_compaction_input(session_id).await?;
     if input.messages_since.is_empty() {
-        // Already compacted right up to the latest turn (e.g. two rapid completions
-        // both crossing the threshold before the first summary lands) — nothing new to fold in.
         return Ok(None);
     }
 

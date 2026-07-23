@@ -54,13 +54,5 @@ pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;
 pub const COMMAND_FOREGROUND_HANDOFF_SECS: u64 = 30;
 pub const MAX_ATTACHMENT_BYTES: usize = 1024 * 1024;
 
-/// Fraction of a model's native `contextWindow` (as reported by the gateway's `/models`
-/// endpoint) at which the conversation is automatically summarised. Checked against the
-/// server-provided context window for the *selected* model on every completed turn —
-/// there is no fixed token count, since different models expose very different windows.
 pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.8;
-
-/// How often the desktop app refreshes its cached model catalog in the background, so a
-/// model added or changed server-side shows up without the user needing to explicitly
-/// force a refresh or restart the app.
 pub const MODEL_CATALOG_REFRESH_INTERVAL_SECS: u64 = 300;

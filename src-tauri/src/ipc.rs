@@ -279,8 +279,6 @@ pub async fn start_chat(
     ).await;
 
     if let Some(outcome) = outcome {
-        // Persist so the input bar's context ring is correct immediately on session
-        // reload, not just while this turn's in-memory usage event is still live.
         let _ = state.memory.update_session_tokens(
             &session_id,
             outcome.input_tokens,
@@ -288,10 +286,6 @@ pub async fn start_chat(
             outcome.total_tokens,
         ).await;
 
-        // Automatic compaction: triggered by the model's own native contextWindow (from
-        // the gateway's /models catalog), not a guessed constant. Purely additive at the
-        // storage layer — see persistence::insert_compaction_marker. No manual /compact
-        // command exists anymore; this runs as a normal part of the turn pipeline.
         match maybe_compact(&state.memory, &client, &model_info, &session_id, outcome.total_tokens).await {
             Ok(Some(result)) => {
                 let _ = on_event.send(ChatEvent::Compacted {

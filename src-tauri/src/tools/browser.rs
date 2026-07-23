@@ -1,20 +1,3 @@
-//! In-app browser automation tools.
-//!
-//! Why this is `eval()` + a request/response channel and not WebDriver BiDi or CDP:
-//! Tauri wraps the OS-native webview per platform (WebView2 on Windows, WKWebView on
-//! macOS, WebKitGTK on Linux). Only WebView2 is Chromium and exposes CDP; WKWebView and
-//! WebKitGTK have no CDP-equivalent at all, and this app ships both macOS and Windows
-//! builds (see .github/workflows/build-release.yml). Tauri's own WebDriver support
-//! (`tauri-plugin-webdriver`) is designed for external test tools driving the whole app
-//! in debug builds, not for an in-process agent tool driving one embedded content
-//! webview in a shipped release. `eval()` + a `oneshot` channel keyed by a generated
-//! request id is the correct cross-platform mechanism available today, not a shortcut.
-//!
-//! What *is* cleaned up here: every browser tool below previously hand-rolled its own
-//! "wrap an expression in a try/catch, await it, hand the result back over the
-//! `deliver_browser_content` IPC command" boilerplate. That's now centralized in
-//! `eval_js`, so click/type/get_content only supply the JS expression itself.
-
 use std::time::Duration;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -57,11 +40,6 @@ fn validate_http_url(url: &str) -> Result<String, ToolError> {
     Ok(normalized)
 }
 
-/// Evaluates a JS expression in the given webview and returns its stringified result.
-/// The single shared primitive behind every browser interaction tool (click, type,
-/// get_content) — each of those only needs to build the `expression` string; this
-/// function owns the request/response plumbing (channel registration, script wrapping,
-/// timeout, and cleanup on both the error and timeout paths) exactly once.
 async fn eval_js(
     wv: &tauri::Webview,
     browser_requests: &BrowserRequestsHandle,
@@ -100,10 +78,6 @@ async fn eval_js(
     }
 }
 
-/// Shared setup for the click/type/get_content tools: resolve the app handle and wait
-/// for the browser tab's webview to exist. Centralizes the two error cases ("app handle
-/// unavailable", "no browser tab is open") that were previously duplicated verbatim in
-/// each tool's `call` method.
 async fn require_browser_webview(app_handle: &Option<tauri::AppHandle>) -> Result<tauri::Webview, ToolError> {
     let app = app_handle.as_ref().ok_or_else(|| ToolError::msg("app handle unavailable"))?;
     wait_for_browser_webview(app).await.ok_or_else(|| ToolError::msg("no browser tab is open"))

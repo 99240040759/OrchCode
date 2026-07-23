@@ -19,9 +19,6 @@ use crate::config;
 use crate::events::ChatEvent;
 use crate::tools::parse_display_info;
 
-/// Result of a completed (non-cancelled, non-errored) turn, handed back to the caller so
-/// it can persist usage and decide whether to run automatic compaction — the streaming
-/// loop itself only knows how to stream, not what the model's context window is.
 pub struct TurnOutcome {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -169,11 +166,6 @@ fn display_label(path: &Path, workspace: Option<&Path>) -> String {
         })
 }
 
-/// Resolves `@path` mentions typed directly into the prompt text (the workspace
-/// file-picker feature in `InputBar`). This is intentionally still text-based, since an
-/// `@mention` genuinely is part of what the user typed — unlike attachment chips, which
-/// arrive as a separate structured list and no longer need any parsing at all (see
-/// `AttachmentRef` and its use in `build_user_message` below).
 fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -195,12 +187,6 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<PathBu
     out
 }
 
-/// Builds the outgoing user message directly from the structured attachment list the
-/// frontend sent alongside the prompt — no marker text embedded in `prompt` and no
-/// regex parsing back out. Native rig primitives (`UserContent::image_base64`,
-/// `rig::loaders::PdfFileLoader`) do the actual media handling; this function only
-/// decides, per attachment, which primitive applies and folds `@mention`ed workspace
-/// files in alongside them.
 async fn build_user_message(workspace: Option<&Path>, prompt: &str, attachments: &[AttachmentRef], supports_images: bool) -> Message {
     let cap = config::MAX_ATTACHMENT_BYTES;
     let mut text_sections: Vec<String> = Vec::new();

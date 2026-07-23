@@ -34,10 +34,6 @@ export interface TextItem {
   text: string;
 }
 
-/// Non-destructive marker rendered as a small divider line wherever the conversation was
-/// automatically compacted. The underlying messages are never removed from the database
-/// or from `messages` — this item only records where a summarisation boundary sits, so
-/// it persists across app restarts exactly like everything else in the session.
 export interface CompactionNoticeItem {
   type: "compactionNotice";
   id: string;
@@ -86,11 +82,6 @@ interface ChatState {
   sessionGeneration: number;
   messages: ChatMessage[];
   streaming: boolean;
-  /// Token usage for the *current* session. Seeded from the persisted `SessionSummary`
-  /// on session load (so the context ring is correct immediately, before any new turn
-  /// streams in) and updated live as `usage` events arrive during a turn — the two
-  /// paths write to the same field, so there is exactly one source of truth for the
-  /// input bar to read instead of it re-deriving usage by scanning `messages`.
   sessionTokens: TokenUsage;
   models: ModelDto[];
   selectedModel: ModelDto | null;
@@ -172,9 +163,6 @@ export const useChatStore = create(
         }).catch(() => { sessionsListenerBound = false; });
       }
 
-      // The model catalog now refreshes itself on a server-driven TTL in the background
-      // (see AppState::spawn_catalog_refresh_loop). This just picks up the result so a
-      // model added or changed server-side appears without the user forcing a refresh.
       if (api.inTauri() && !modelsListenerBound) {
         modelsListenerBound = true;
         import("@tauri-apps/api/event").then(({ listen }) => {
@@ -203,8 +191,6 @@ export const useChatStore = create(
         s.currentSessionId = id;
         s.sessionGeneration += 1;
         s.messages = [];
-        // Seed from the persisted summary immediately so the context ring is accurate
-        // on load, before any live 'usage' event has a chance to arrive.
         s.sessionTokens = targetSession
           ? { inputTokens: targetSession.lastInputTokens, outputTokens: targetSession.lastOutputTokens, totalTokens: targetSession.lastTotalTokens }
           : ZERO_USAGE;
@@ -382,10 +368,6 @@ export const useChatStore = create(
               break;
             }
             case "compacted": {
-              // Purely additive: append a divider message. No prior messages are
-              // touched, mirrored, or refetched — the backend already persisted the
-              // same marker, so a reload of this session will show it in the exact
-              // same place.
               set((s) => {
                 if (s.currentSessionId !== sessionIdAtSend) return;
                 s.messages.push({

@@ -23,9 +23,6 @@ interface CommandItem {
   action: "clear";
 }
 
-// Context compaction is now fully automatic — triggered at 80% of the selected model's
-// native context window as a normal part of the turn pipeline (see the backend's
-// llm::compaction module) — so there is no manual "/compact" command anymore.
 const COMMANDS: CommandItem[] = [
   { key: "clear", label: "Clear chat", hint: "Clear current conversation session and start a new one", action: "clear" },
 ];
@@ -86,16 +83,11 @@ export function InputBar() {
   const pickWorkspace = useChatStore((s) => s.pickWorkspace);
   const resetToSandbox = useChatStore((s) => s.resetToSandbox);
   const newChat = useChatStore((s) => s.newChat);
-  // Persisted + live session token usage, owned by the store (see store.tsx) instead of
-  // being re-derived here by scanning `messages` — that scan went stale the moment a
-  // session was reloaded from disk, since usage wasn't persisted before.
   const sessionTokens = useChatStore((s) => s.sessionTokens);
 
   const maxContext = selectedModel?.contextWindow || 128000;
   const fillPct = Math.min(100, Math.max(0, Math.round((sessionTokens.totalTokens / maxContext) * 100)));
 
-  // Exact match against the server-defined capability literal (see
-  // gateway::models::ModelInfo::supports_images on the backend) — no guessing here either.
   const modelSupportsImages = selectedModel?.capabilities.includes("images") ?? false;
 
   const [value, setValue] = useState("");
@@ -196,9 +188,6 @@ export function InputBar() {
   const doSend = useCallback(async () => {
     const text = value.trim();
     if (!text && attachments.length === 0) return;
-    // Attachments are sent as a structured list over IPC (api.AttachmentRef[]) instead
-    // of being embedded as marker text in the prompt and regex-parsed back out on the
-    // Rust side — see llm::stream::build_user_message.
     const attachmentRefs = attachments.map((a) => ({ path: a.path, name: a.name, isImage: a.isImage }));
     setValue("");
     setAttachments([]);

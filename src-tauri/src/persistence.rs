@@ -19,10 +19,6 @@ use crate::tools::parse_display_info;
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Data stored in a `kind = 'compaction'` row's `data` column. Inserting one of these
-/// never deletes prior rows — the full conversation stays in the `messages` table forever.
-/// It only shifts where `ConversationMemory::load()` starts reading from for the *model's*
-/// view of history; `get_session_view()` still walks every row for the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompactionMarker {
     summary: String,
@@ -41,12 +37,6 @@ pub struct SessionSummary {
     pub last_total_tokens: i64,
 }
 
-/// A single attachment reference reconstructed from persisted message data.
-/// For images the `data_url` is a `data:image/…;base64,…` string so the
-/// frontend can render the thumbnail without needing `convertFileSrc` or a
-/// live file on disk (the bytes were already stored as part of the rig message).
-/// For text/PDF attachments the content was inlined into the prompt body so
-/// only the filename is meaningful here.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentView {
@@ -76,10 +66,6 @@ pub enum MessageItemView {
         display_info: ToolDisplayInfo,
         status: String,
     },
-    /// Non-destructive compaction boundary marker. Rendered as a small divider line in
-    /// the chat panel; the messages before it are still present in the database and are
-    /// still returned in this same view — this item only records where a summarisation
-    /// happened so the user can see it persisted across app restarts.
     #[serde(rename_all = "camelCase")]
     CompactionNotice {
         id: String,
@@ -97,9 +83,6 @@ pub struct MessageView {
     pub attachments: Vec<AttachmentView>,
 }
 
-/// Everything the summarisation prompt needs: the previous summary (if this isn't the
-/// first compaction), how many raw turns preceded it, and the raw messages accumulated
-/// since the last boundary that still need folding in.
 pub struct CompactionInput {
     pub previous_summary: Option<String>,
     pub prior_message_count: usize,
@@ -227,9 +210,6 @@ impl SqliteMemory {
         }).await
     }
 
-    /// Persists the token usage reported for a completed turn so the input bar's context
-    /// ring reflects reality immediately after reloading a session, not just after a new
-    /// turn has streamed in.
     pub async fn update_session_tokens(&self, conversation_id: &str, input_tokens: u64, output_tokens: u64, total_tokens: u64) -> AppResult<()> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
@@ -244,8 +224,6 @@ impl SqliteMemory {
         }).await
     }
 
-    /// Boundary-aware load used by the summariser: the previous summary (if any) plus
-    /// only the raw messages appended since that boundary. Does not mutate anything.
     pub async fn get_compaction_input(&self, conversation_id: &str) -> AppResult<CompactionInput> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
@@ -276,9 +254,6 @@ impl SqliteMemory {
         }).await
     }
 
-    /// Appends a compaction boundary marker. Purely additive — no existing row is ever
-    /// deleted or overwritten, so the full transcript remains visible in `get_session_view`
-    /// and recoverable even after multiple compactions.
     pub async fn insert_compaction_marker(&self, conversation_id: &str, summary: &str, original_message_count: usize) -> AppResult<i64> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
@@ -379,10 +354,6 @@ impl SqliteMemory {
                             if let UserContent::Text(t) = c { Some(t.text.as_str()) } else { None }
                         }).collect();
 
-                        // Reconstruct attachment views:
-                        // 1. Images — stored as UserContent::Image with base64 data.
-                        // 2. Docs/PDFs — their filenames are embedded in the text body as
-                        //    "[Attached File: name]" or "[Attached PDF: name]" markers.
                         let mut attachments: Vec<AttachmentView> = Vec::new();
 
                         for part in content.iter() {
@@ -398,9 +369,6 @@ impl SqliteMemory {
                                     _ => String::new(),
                                 };
                                 if !data_url.is_empty() {
-                                    // Derive a short display name from the data URL type
-                                    // (we don't have the original filename after persistence,
-                                    // so fall back to the mime subtype + ".img").
                                     let ext = img.media_type.as_ref()
                                         .map(|m| m.to_mime_type().split('/').nth(1).unwrap_or("img").to_string())
                                         .unwrap_or_else(|| "img".to_string());
@@ -413,11 +381,9 @@ impl SqliteMemory {
                             }
                         }
 
-                        // Parse doc/PDF attachment markers embedded in prompt text.
                         let doc_re = regex::Regex::new(r"\[Attached (?:File|PDF): ([^\]\n]+)\]").unwrap();
                         for cap in doc_re.captures_iter(&text) {
                             let label = cap[1].trim();
-                            // label may be "path/to/file.ext" (relative) or just "file.ext"
                             let name = label.replace('\\', "/")
                                 .split('/')
                                 .last()
@@ -506,10 +472,6 @@ impl SqliteMemory {
 }
 
 impl ConversationMemory for SqliteMemory {
-    /// Boundary-aware: if the conversation has been compacted, the model sees a single
-    /// synthetic summary message followed by every raw turn since that boundary — never
-    /// the full unbounded history. The database itself is untouched; `get_session_view`
-    /// (used by the UI) always returns every row regardless of this boundary.
     fn load<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();

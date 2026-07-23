@@ -18,12 +18,6 @@ export function MessageList() {
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !isNearBottomRef.current) return;
-    // Set scrollTop directly on this container instead of endRef.scrollIntoView(). During
-    // streaming this effect re-runs on every delta (each streamed token changes
-    // `messages`), and scrollIntoView walks the whole scrollable-ancestor chain on every
-    // call — inside the react-resizable-panels layout used by ChatPanel, that meant
-    // every token could nudge multiple nested containers, which is what produced the
-    // bounce. Writing scrollTop only ever touches this one element.
     el.scrollTop = el.scrollHeight;
   }, [messages, streaming]);
 

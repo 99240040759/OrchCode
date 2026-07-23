@@ -45,13 +45,6 @@ export const CodeBlock = memo(function CodeBlock({
 
   useEffect(() => {
     let active = true;
-    // Debounced so a fast-streaming response doesn't re-run shiki on every delta — but
-    // during that entire debounce window `html` would otherwise stay whatever it was
-    // last set to. Since it starts as "", a code block being actively streamed into
-    // would render as an empty box until the stream paused long enough for this timer
-    // to actually fire (in practice: not until the whole response finished). The plain
-    // <pre> fallback below covers that window so raw text is always visible immediately;
-    // this only ever *upgrades* it to the highlighted version once shiki catches up.
     const timer = setTimeout(() => {
       codeToHtml(value, { lang, theme: THEME })
         .then((out) => {

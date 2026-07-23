@@ -158,19 +158,8 @@ impl AppState {
         Ok(fresh)
     }
 
-    /// Background TTL refresh of the model catalog. The catalog previously only
-    /// refetched on an explicit `force_refresh` from the frontend or on login/logout, so
-    /// a model added or changed server-side would not appear until the user manually
-    /// triggered a refresh. This loop re-polls `/models` on a fixed interval for the
-    /// lifetime of the app and emits `models-updated` so the frontend can silently pick
-    /// up changes without the user doing anything.
     pub fn spawn_catalog_refresh_loop(app: tauri::AppHandle) {
         use tauri::{Emitter, Manager};
-        // `tauri::async_runtime::spawn` (not `tokio::spawn`) — this is called from
-        // Tauri's synchronous `setup()` hook, which runs outside a tokio task context.
-        // `tokio::spawn` requires an active reactor on the calling thread and panics
-        // with "there is no reactor running" when called from there; Tauri's own
-        // runtime handle spawns onto its managed runtime regardless of caller context.
         tauri::async_runtime::spawn(async move {
             let interval = std::time::Duration::from_secs(config::MODEL_CATALOG_REFRESH_INTERVAL_SECS);
             loop {
