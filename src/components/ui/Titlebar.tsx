@@ -22,15 +22,15 @@ export function WindowControls({ className, isMac }: { className?: string; isMac
   useEffect(() => {
     if (!inTauri()) return;
     const appWindow = getCurrentWindow();
-    appWindow.isMaximized().then(setIsMaximized).catch(() => {});
+    appWindow.isMaximized().then(setIsMaximized).catch(() => { });
     appWindow
       .onResized(() => {
-        appWindow.isMaximized().then(setIsMaximized).catch(() => {});
+        appWindow.isMaximized().then(setIsMaximized).catch(() => { });
       })
       .then((un) => {
         unlistenRef.current = un;
       })
-      .catch(() => {});
+      .catch(() => { });
 
     if (!updateCheckStarted) {
       updateCheckStarted = true;
@@ -43,12 +43,20 @@ export function WindowControls({ className, isMac }: { className?: string; isMac
               setUpdateStatus("macAvailable");
             } else {
               setUpdateStatus("downloading");
-              await update.downloadAndInstall();
-              setUpdateStatus("readyToRestart");
+              try {
+                await update.downloadAndInstall();
+                setUpdateStatus("readyToRestart");
+              } catch (err) {
+                console.error("[updater] download/install failed:", err);
+                setUpdateStatus("none");
+              }
             }
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("[updater] check failed:", err);
+          setUpdateStatus("none");
+        });
     }
 
     return () => {
@@ -62,15 +70,15 @@ export function WindowControls({ className, isMac }: { className?: string; isMac
   };
 
   const handleMinimize = () => {
-    if (inTauri()) getCurrentWindow().minimize().catch(() => {});
+    if (inTauri()) getCurrentWindow().minimize().catch(() => { });
   };
 
   const handleToggleMaximize = () => {
-    if (inTauri()) getCurrentWindow().toggleMaximize().catch(() => {});
+    if (inTauri()) getCurrentWindow().toggleMaximize().catch(() => { });
   };
 
   const handleClose = () => {
-    if (inTauri()) getCurrentWindow().close().catch(() => {});
+    if (inTauri()) getCurrentWindow().close().catch(() => { });
   };
 
   if (isMac) {
@@ -93,7 +101,7 @@ export function WindowControls({ className, isMac }: { className?: string; isMac
     <div className={cn("WinControls", className)} data-tauri-drag-region="false">
       {updateStatus === "downloading" && (
         <span className="Titlebar-update-badge Titlebar-update-downloading">
-          <FiDownload className="Titlebar-spinner" />
+          <FiRefreshCw className="Titlebar-spinner" />
           <span>Updating...</span>
         </span>
       )}

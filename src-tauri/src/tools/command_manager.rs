@@ -87,6 +87,7 @@ impl CommandManager {
         tokio::spawn(async move {
             #[cfg(target_os = "windows")]
             let child_res = Command::new("powershell.exe")
+                .creation_flags(0x08000000)
                 .args(["-NoProfile", "-Command", &cmd_str])
                 .current_dir(&cwd_buf)
                 .stdout(std::process::Stdio::piped())

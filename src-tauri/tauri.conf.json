@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Orch Code",
-  "version": "0.0.2",
+  "version": "1.1.0",
   "identifier": "orchcode",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -73,7 +73,10 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": true,
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "startMenuFolder": "Orch Code",
         "installerHooks": "installer-hooks.nsh"
       }
     },
