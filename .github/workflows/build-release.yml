@@ -1,19 +1,15 @@
 name: Build & Release
 on:
   push:
+    branches: ['main']
     tags: ['v*']
   workflow_dispatch:
 
 env:
-  # App config injected into the Rust binary at compile time (build.rs / option_env!).
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-  # Tauri updater signing. Only the private key is a secret; it's used at BUILD
-  # time to sign updater artifacts (never shipped in the client — the app only
-  # holds the public key). The key was generated with no password, so the
-  # password is an explicit empty string here (GitHub rejects empty secrets).
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
   GH_TOKEN: ${{ secrets.RELEASE_PAT }}
@@ -21,6 +17,7 @@ env:
 jobs:
   create-release:
     name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +30,7 @@ jobs:
 
   build-mac:
     name: Build & Publish macOS
+    if: ${{ !cancelled() }}
     runs-on: macos-latest
     needs: create-release
     steps:
@@ -45,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+          shared-key: "orchcode-cache-mac"
 
       - uses: actions/setup-node@v4
         with:
@@ -53,7 +52,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache Seeder (Cargo Check)
+        if: github.ref == 'refs/heads/main'
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
       - name: Build macOS Apple Silicon (arm64)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build --target aarch64-apple-darwin
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -62,9 +66,11 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Prepare Apple Silicon Asset
+        if: startsWith(github.ref, 'refs/tags/v')
         run: cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg Orch-macOS-arm64.dmg
 
       - name: Build macOS Intel (x64)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build --target x86_64-apple-darwin
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -73,9 +79,11 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Prepare Intel Asset
+        if: startsWith(github.ref, 'refs/tags/v')
         run: cp src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg Orch-macOS-x64.dmg
 
       - name: Publish macOS Assets
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
@@ -87,6 +95,7 @@ jobs:
 
   build-windows:
     name: Build & Publish Windows
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     needs: create-release
     steps:
@@ -101,6 +110,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+          shared-key: "orchcode-cache-win"
 
       - uses: actions/setup-node@v4
         with:
@@ -109,7 +119,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache Seeder (Cargo Check)
+        if: github.ref == 'refs/heads/main'
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
       - name: Build Windows Setup Executable
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -118,6 +133,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Prepare Windows Asset & Updater Manifest
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: powershell
         run: |
           $setup = (Get-Item src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
@@ -146,6 +162,7 @@ jobs:
           [System.IO.File]::WriteAllText("$PWD\latest.json", $json)
 
       - name: Publish Windows Asset & Updater Manifest
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RELEASE_PAT }}
@@ -154,3 +171,5 @@ jobs:
           files: |
             Orch-Windows-Setup.exe
             latest.json
+
+

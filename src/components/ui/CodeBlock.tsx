@@ -5,27 +5,41 @@ import {
   createJavaScriptRegexEngine,
   type BundledLanguage,
   type BundledTheme,
+  type SpecialLanguage,
 } from "shiki";
 
 const THEME: BundledTheme = "vitesse-dark";
 
-const PRELOAD_LANGS: BundledLanguage[] = [
+const PRELOAD_LANGS: (BundledLanguage | SpecialLanguage)[] = [
+  "text",
+  "plaintext",
+  "txt",
   "typescript",
   "tsx",
   "javascript",
   "jsx",
+  "js",
+  "ts",
   "json",
+  "jsonc",
+  "json5",
   "html",
   "css",
   "scss",
   "less",
   "rust",
+  "rs",
   "python",
+  "py",
   "bash",
+  "sh",
+  "zsh",
   "shellscript",
   "markdown",
+  "md",
   "mdx",
   "yaml",
+  "yml",
   "toml",
   "sql",
   "go",
@@ -33,16 +47,23 @@ const PRELOAD_LANGS: BundledLanguage[] = [
   "cpp",
   "c",
   "csharp",
+  "cs",
   "ruby",
+  "rb",
   "php",
   "swift",
   "kotlin",
+  "kt",
   "xml",
   "graphql",
   "dockerfile",
+  "docker",
   "ini",
+  "dotenv",
   "powershell",
+  "ps1",
   "diff",
+  "log",
   "vue",
   "svelte",
   "zig",
@@ -59,18 +80,13 @@ const highlighterPromise = createHighlighter({
 
 async function highlight(code: string, lang: string): Promise<string> {
   const hl = await highlighterPromise;
-  let targetLang = lang.toLowerCase();
+  const targetLang = (lang || "text").toLowerCase();
 
-  if (targetLang === "shell" || targetLang === "zsh" || targetLang === "sh") targetLang = "bash";
-  if (targetLang === "docker") targetLang = "dockerfile";
-  if (targetLang === "make") targetLang = "makefile";
-  if (targetLang === "cs") targetLang = "csharp";
-  if (targetLang === "py") targetLang = "python";
-  if (targetLang === "rs") targetLang = "rust";
-  if (targetLang === "js") targetLang = "javascript";
-  if (targetLang === "ts") targetLang = "typescript";
-
-  return hl.codeToHtml(code, { lang: targetLang, theme: THEME });
+  try {
+    return hl.codeToHtml(code, { lang: targetLang, theme: THEME });
+  } catch {
+    return hl.codeToHtml(code, { lang: "text", theme: THEME });
+  }
 }
 
 export interface CodeBlockProps {
@@ -118,7 +134,7 @@ export const CodeBlock = memo(function CodeBlock({
       highlight(value, lang).then((out) => {
         if (active) setHtml(out);
       });
-    }, 80);
+    }, 50);
     return () => {
       active = false;
       clearTimeout(timer);
@@ -164,3 +180,5 @@ export function useCopy(text: string) {
 }
 
 export default CodeBlock;
+
+

@@ -85,6 +85,7 @@ export function Markdown({ children }: { children: string }) {
             const match = /language-(\w+)/.exec(className ?? "");
             const value = extractText(codeChildren).replace(/\n$/, "");
             if (match) return <CodeBlock language={match[1]} value={value} />;
+            if (value.includes("\n") || Boolean(className)) return <CodeBlock language="plaintext" value={value} />;
             return <code className="Markdown-inlinecode">{codeChildren}</code>;
           },
           p({ children: pChildren }) {

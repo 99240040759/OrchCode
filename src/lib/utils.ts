@@ -94,5 +94,5 @@ export function getLanguageFromPath(pathStr: string): string {
   if (filename.startsWith(".env")) return "bash";
   if (filename === ".gitignore" || filename === ".dockerignore") return "ini";
   const ext = filename.includes(".") ? filename.split(".").pop() ?? "" : "";
-  return EXT_LANG_MAP[ext] ?? "text";
+  return EXT_LANG_MAP[ext] ?? "plaintext";
 }
