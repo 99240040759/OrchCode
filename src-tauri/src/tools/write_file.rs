@@ -33,7 +33,12 @@ impl Tool for WriteFile {
     type Output = String;
 
     fn description(&self) -> String {
-        "Create or completely overwrite a file with the given content. Parent directories are created automatically. Use multi_replace_file_content for targeted edits to existing files.".to_string()
+        "Create a new file, or completely overwrite an existing file, with the provided content. \
+Parent directories are created automatically if they don't exist. \
+Use this when creating a file from scratch or when the changes are so large that targeted replacements would be impractical. \
+For surgical edits to an existing file — changing a function, fixing a bug, updating a value — \
+prefer multi_replace_file_content instead, which is safer because it only touches the exact strings you specify. \
+The tool returns a confirmation with the file path and byte count on success.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

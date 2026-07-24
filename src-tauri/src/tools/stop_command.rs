@@ -25,7 +25,11 @@ impl Tool for StopCommand {
     type Output = String;
 
     fn description(&self) -> String {
-        "Cancel a running background command started via run_command, using its task_id.".to_string()
+        "Cancel a background command that is currently running. \
+Use the task_id returned by run_command or get_command_status. \
+Call this when a command is hung, taking too long, or when you want to restart it with different arguments. \
+The tool sends a termination signal and confirms cancellation. \
+After cancelling, you can start the command again with run_command if needed.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

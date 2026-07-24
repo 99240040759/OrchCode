@@ -1109,7 +1109,7 @@ div[data-panel-resize-handle]:focus-visible {
    color: var(--md-text-med);
    white-space: pre-wrap;
    word-break: break-word;
-   max-height: 240px;
+   max-height: 100px;
    overflow-y: auto;
    border-left: 1px solid rgba(255, 255, 255, 0.08);
    margin-left: 5px

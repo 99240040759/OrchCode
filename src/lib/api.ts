@@ -54,7 +54,7 @@ export interface ToolDisplayInfo {
 
 export type MessageItemView =
   | { type: "text"; id: string; text: string }
-  | { type: "reasoning"; id: string; text: string }
+  | { type: "reasoning"; id: string; text: string; durationSeconds?: number }
   | {
       type: "toolCall";
       id: string;
@@ -69,7 +69,6 @@ export type MessageItemView =
 export interface AttachmentView {
   name: string;
   isImage: boolean;
-  /** `data:image/<type>;base64,<data>` for images; empty string for docs */
   dataUrl: string;
 }
 

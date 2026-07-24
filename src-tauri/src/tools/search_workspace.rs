@@ -31,7 +31,14 @@ impl Tool for SearchWorkspace {
     type Output = String;
 
     fn description(&self) -> String {
-        "Search codebase files using case-insensitive regular expression matching on file lines. Returns matching lines with relative file paths.".to_string()
+        "Search all files in the workspace using a case-insensitive regular expression. \
+Returns matching lines with their file path and line number in the format path:line: content. \
+Use this to locate where a symbol, function, class, string, or pattern is defined or used — \
+faster than reading files one by one. \
+Optionally scope the search to a subdirectory with the path parameter. \
+Increase max_results (default 50, max 200) if you need broader coverage. \
+Respects .gitignore and skips common non-source directories like node_modules and build output. \
+If a search returns no results, check your regex syntax — special characters like ( ) [ ] . * must be escaped with \\.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

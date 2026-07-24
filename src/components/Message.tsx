@@ -80,6 +80,14 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
     return Math.max(1, Math.round((Date.now() - item.startTime) / 1000));
   });
 
+  const prevActiveRef = useRef(item.active);
+  useEffect(() => {
+    if (prevActiveRef.current && !item.active) {
+      setUserToggled(null);
+    }
+    prevActiveRef.current = item.active;
+  }, [item.active]);
+
   useEffect(() => {
     if (!item.active) {
       if (item.durationSeconds !== undefined) setElapsed(Math.round(item.durationSeconds));

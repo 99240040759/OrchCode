@@ -61,7 +61,9 @@ export interface ChatMessage {
 
 function viewItemToLocal(item: MessageItemView): MessageItem {
   if (item.type === "text") return { type: "text", id: item.id, text: item.text };
-  if (item.type === "reasoning") return { type: "reasoning", id: item.id, text: item.text, active: false, startTime: 0 };
+  if (item.type === "reasoning") {
+    return { type: "reasoning", id: item.id, text: item.text, active: false, startTime: 0, durationSeconds: item.durationSeconds };
+  }
   if (item.type === "compactionNotice") {
     return { type: "compactionNotice", id: item.id, originalMessageCount: item.originalMessageCount, ts: item.ts };
   }
@@ -279,6 +281,38 @@ export const useChatStore = create(
         });
       };
 
+      let textBuf = "";
+      let reasoningBuf = "";
+      let timerId: ReturnType<typeof setInterval> | null = null;
+
+      const flushBatch = () => {
+        const t = textBuf;
+        const r = reasoningBuf;
+        textBuf = "";
+        reasoningBuf = "";
+        if (!t && !r) return;
+        patch((m) => {
+          if (r) {
+            const last = m.items[m.items.length - 1];
+            if (last?.type === "reasoning" && last.active) last.text += r;
+            else m.items.push({ type: "reasoning", id: newId(), text: r, active: true, startTime: Date.now() });
+          }
+          if (t) {
+            const last = m.items[m.items.length - 1];
+            if (last?.type === "text") last.text += t;
+            else m.items.push({ type: "text", id: newId(), text: t });
+          }
+        });
+      };
+
+      const startTimer = () => {
+        if (timerId === null) timerId = setInterval(flushBatch, 30);
+      };
+
+      const stopTimer = () => {
+        if (timerId !== null) { clearInterval(timerId); timerId = null; }
+      };
+
       try {
         await api.startChat(sessionIdAtSend, selectedModel?.key ?? "", text, reasoningEffort, attachments, (raw: unknown) => {
           const e = raw as {
@@ -296,22 +330,18 @@ export const useChatStore = create(
           };
           switch (e.type) {
             case "text": {
-              patch((m) => {
-                const last = m.items[m.items.length - 1];
-                if (last?.type === "text") last.text += e.delta ?? "";
-                else m.items.push({ type: "text", id: newId(), text: e.delta ?? "" });
-              });
+              textBuf += e.delta ?? "";
+              startTimer();
               break;
             }
             case "reasoning": {
-              patch((m) => {
-                const last = m.items[m.items.length - 1];
-                if (last?.type === "reasoning" && last.active) last.text += e.delta ?? "";
-                else m.items.push({ type: "reasoning", id: newId(), text: e.delta ?? "", active: true, startTime: Date.now() });
-              });
+              reasoningBuf += e.delta ?? "";
+              startTimer();
               break;
             }
             case "reasoningDone": {
+              stopTimer();
+              flushBatch();
               patch((m) => {
                 for (let i = m.items.length - 1; i >= 0; i--) {
                   const it = m.items[i];
@@ -325,6 +355,8 @@ export const useChatStore = create(
               break;
             }
             case "toolCall": {
+              stopTimer();
+              flushBatch();
               const info = e.displayInfo ?? { label: e.name ?? "Tool", icon: "terminal", opensArtifact: false };
               patch((m) => {
                 m.items.push({
@@ -356,14 +388,19 @@ export const useChatStore = create(
             }
             case "usage": {
               const ue = e as { type: string; inputTokens?: number; outputTokens?: number; totalTokens?: number };
-              const usage: TokenUsage = {
+              const turnUsage: TokenUsage = {
                 inputTokens: ue.inputTokens ?? 0,
                 outputTokens: ue.outputTokens ?? 0,
                 totalTokens: ue.totalTokens ?? 0,
               };
-              patch((m) => { m.usage = usage; });
+              patch((m) => { m.usage = turnUsage; });
               set((s) => {
-                if (s.currentSessionId === sessionIdAtSend) s.sessionTokens = usage;
+                if (s.currentSessionId !== sessionIdAtSend) return;
+                s.sessionTokens = {
+                  inputTokens: s.sessionTokens.inputTokens + turnUsage.inputTokens,
+                  outputTokens: s.sessionTokens.outputTokens + turnUsage.outputTokens,
+                  totalTokens: s.sessionTokens.totalTokens + turnUsage.totalTokens,
+                };
               });
               break;
             }
@@ -384,6 +421,8 @@ export const useChatStore = create(
               break;
             }
             case "done": {
+              stopTimer();
+              flushBatch();
               patch((m) => { m.streaming = false; });
               finishStreaming();
               api.getBudget().then((b) => {
@@ -393,11 +432,15 @@ export const useChatStore = create(
               break;
             }
             case "cancelled": {
+              stopTimer();
+              flushBatch();
               patch((m) => { m.streaming = false; });
               finishStreaming();
               break;
             }
             case "error": {
+              stopTimer();
+              flushBatch();
               patch((m) => { m.streaming = false; m.error = e.message; });
               finishStreaming();
               set((s) => {
@@ -411,6 +454,8 @@ export const useChatStore = create(
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        stopTimer();
+        flushBatch();
         patch((m) => { m.streaming = false; m.error = msg; });
         finishStreaming();
         set((s) => {

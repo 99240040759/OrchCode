@@ -4,7 +4,6 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
-/** Splits a path into non-empty segments, normalizing Windows separators. */
 export function splitPathParts(pathStr: string): string[] {
   return pathStr.replace(/\\/g, "/").split("/").filter(Boolean);
 }
@@ -22,14 +21,6 @@ export function getDirname(pathStr: string): string {
   return parts.join("/");
 }
 
-/**
- * Single source of truth for the `@file` / `@[file]` mention grammar used to
- * tag file references in rendered text. Returns a fresh stateful (global)
- * regex so callers never share `lastIndex`.
- *
- * NOTE: the backend mirrors this grammar in `src-tauri/src/llm/stream.rs`
- * (`resolve_prompt_mentions`); keep the two in sync.
- */
 export function createMentionRegex(): RegExp {
   return /(?:@|@\[)([a-zA-Z0-9_\-./\\]+?\.[a-zA-Z0-9]+)\]?(#L\d+(?:-\d+)?)?/g;
 }

@@ -210,7 +210,11 @@ pub async fn start_chat(
     attachments: Vec<AttachmentRef>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
-    let jwt = state.token.read().ok().and_then(|g| g.clone()).ok_or_else(|| "not authenticated".to_string())?;
+    let jwt = state.token.read()
+        .ok()
+        .and_then(|g| g.clone())
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| "not authenticated".to_string())?;
     if model.is_empty() {
         return Err("model key must not be empty".to_string());
     }
@@ -218,7 +222,14 @@ pub async fn start_chat(
         return Err("prompt must not be empty".to_string());
     }
 
-    let catalog = state.catalog().await.map_err(|e| e.to_string())?;
+    let catalog = {
+        let c = state.catalog().await.map_err(|e| e.to_string())?;
+        if c.is_empty() {
+            state.refresh_catalog().await.map_err(|e| e.to_string())?
+        } else {
+            c
+        }
+    };
     let mut model_info = catalog.resolve(&model).cloned().ok_or_else(|| format!("model not found: {model}"))?;
     if let Some(effort) = reasoning_effort.filter(|e| !e.is_empty()) {
         model_info.reasoning_effort = Some(effort);
@@ -275,6 +286,7 @@ pub async fn start_chat(
         config::DEFAULT_TOOL_CONCURRENCY,
         cancel,
         workspace_snapshot,
+        state.memory.clone(),
         on_event.clone(),
     ).await;
 

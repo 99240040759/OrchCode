@@ -17,6 +17,7 @@ use super::agent::ChatAgent;
 use super::attachment::AttachmentRef;
 use crate::config;
 use crate::events::ChatEvent;
+use crate::persistence::SqliteMemory;
 use crate::tools::parse_display_info;
 
 pub struct TurnOutcome {
@@ -35,6 +36,7 @@ pub async fn run_chat(
     tool_concurrency: usize,
     cancel: Arc<AtomicBool>,
     workspace: Option<Arc<std::path::PathBuf>>,
+    memory: SqliteMemory,
     channel: Channel<ChatEvent>,
 ) -> Option<TurnOutcome> {
     let ws_ref: Option<&Path> = workspace.as_deref().map(|p| p.as_path());
@@ -42,15 +44,24 @@ pub async fn run_chat(
 
     let mut stream = agent
         .stream_prompt(user_message)
-        .conversation(session_id)
+        .conversation(session_id.clone())
         .max_turns(max_turns)
         .tool_concurrency(tool_concurrency)
         .await;
 
     let mut reasoning_started: Option<Instant> = None;
+    let mut reasoning_idx_in_turn: usize = 0;
+    let mut final_outcome: Option<TurnOutcome> = None;
 
     while let Some(item) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
+            close_reasoning(
+                &mut reasoning_started,
+                &mut reasoning_idx_in_turn,
+                &memory,
+                &session_id,
+                &channel,
+            ).await;
             let _ = channel.send(ChatEvent::Cancelled);
             return None;
         }
@@ -58,7 +69,13 @@ pub async fn run_chat(
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
                 StreamedAssistantContent::Text(t) => {
-                    finish_reasoning(&mut reasoning_started, &channel);
+                    close_reasoning(
+                        &mut reasoning_started,
+                        &mut reasoning_idx_in_turn,
+                        &memory,
+                        &session_id,
+                        &channel,
+                    ).await;
                     let _ = channel.send(ChatEvent::Text { delta: t.text });
                 }
                 StreamedAssistantContent::Reasoning(r) => {
@@ -67,10 +84,22 @@ pub async fn run_chat(
                     }
                     let _ = channel.send(ChatEvent::Reasoning { delta: r.display_text() });
                 }
+                StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
+                    if reasoning_started.is_none() {
+                        reasoning_started = Some(Instant::now());
+                    }
+                    let _ = channel.send(ChatEvent::Reasoning { delta: reasoning });
+                }
                 _ => {}
             },
             Ok(MultiTurnStreamItem::ToolExecutionStart { tool_call, internal_call_id }) => {
-                finish_reasoning(&mut reasoning_started, &channel);
+                close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_idx_in_turn,
+                    &memory,
+                    &session_id,
+                    &channel,
+                ).await;
                 let args_value = match &tool_call.function.arguments {
                     serde_json::Value::String(s) => {
                         serde_json::from_str::<serde_json::Value>(s)
@@ -100,7 +129,14 @@ pub async fn run_chat(
                 });
             }
             Ok(MultiTurnStreamItem::FinalResponse(res)) => {
-                finish_reasoning(&mut reasoning_started, &channel);
+                close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_idx_in_turn,
+                    &memory,
+                    &session_id,
+                    &channel,
+                ).await;
+                reasoning_idx_in_turn = 0;
                 let usage = res.usage();
                 let _ = channel.send(ChatEvent::Usage {
                     input_tokens: usage.input_tokens,
@@ -108,7 +144,7 @@ pub async fn run_chat(
                     total_tokens: usage.total_tokens,
                 });
                 let _ = channel.send(ChatEvent::Done { output: res.output().to_string() });
-                return Some(TurnOutcome {
+                final_outcome = Some(TurnOutcome {
                     input_tokens: usage.input_tokens,
                     output_tokens: usage.output_tokens,
                     total_tokens: usage.total_tokens,
@@ -116,21 +152,56 @@ pub async fn run_chat(
             }
             Ok(_) => {}
             Err(e) => {
-                finish_reasoning(&mut reasoning_started, &channel);
+                close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_idx_in_turn,
+                    &memory,
+                    &session_id,
+                    &channel,
+                ).await;
                 let _ = channel.send(ChatEvent::Error { message: e.to_string() });
                 return None;
             }
         }
     }
 
-    None
+    if final_outcome.is_none() {
+        close_reasoning(
+            &mut reasoning_started,
+            &mut reasoning_idx_in_turn,
+            &memory,
+            &session_id,
+            &channel,
+        ).await;
+        let _ = channel.send(ChatEvent::Done { output: String::new() });
+    }
+
+    final_outcome
 }
 
-fn finish_reasoning(started: &mut Option<Instant>, channel: &Channel<ChatEvent>) {
-    if let Some(start) = started.take() {
-        let duration_seconds = start.elapsed().as_secs().max(1);
-        let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
+async fn close_reasoning(
+    started: &mut Option<Instant>,
+    idx_in_turn: &mut usize,
+    memory: &SqliteMemory,
+    session_id: &str,
+    channel: &Channel<ChatEvent>,
+) {
+    let Some(start) = started.take() else { return };
+    let duration_seconds = start.elapsed().as_secs().max(1);
+
+    match memory.next_reasoning_item_id(session_id, *idx_in_turn).await {
+        Ok(item_id) => {
+            if let Err(e) = memory.upsert_reasoning_duration(session_id, &item_id, duration_seconds).await {
+                eprintln!("[stream] failed to persist reasoning duration for {session_id}: {e}");
+            }
+        }
+        Err(e) => {
+            eprintln!("[stream] failed to compute reasoning item_id for {session_id}: {e}");
+        }
     }
+
+    *idx_in_turn += 1;
+    let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
 }
 
 fn image_media_type(ext: &str) -> ImageMediaType {

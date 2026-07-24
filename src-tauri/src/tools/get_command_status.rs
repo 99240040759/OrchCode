@@ -25,7 +25,14 @@ impl Tool for GetCommandStatus {
     type Output = String;
 
     fn description(&self) -> String {
-        "Check status, exit code, elapsed time, and latest output for a background command launched via run_command.".to_string()
+        "Check the current status of a background command that was started with run_command. \
+Returns the task_id, the original command string, current status (running or finished), \
+exit code (when finished), elapsed time in seconds, and the latest output lines. \
+Call this in a loop — waiting a few seconds between calls — to monitor a long-running command. \
+When the status shows the command has finished, read the exit code to determine success or failure: \
+exit code 0 means success, anything else means an error occurred. \
+Always read the full output before drawing conclusions — warnings and errors appear in stdout/stderr \
+even when the exit code is 0.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

@@ -46,10 +46,16 @@ impl Tool for RunCommand {
     type Output = String;
 
     fn description(&self) -> String {
-        "Run a shell command in the workspace directory. Quick commands return their output directly. \
-Longer commands are handed back a task_id (the command keeps running) so you can continue working and \
-poll get_command_status(task_id) for progress, or cancel it with stop_command(task_id). Pass background=true \
-to receive a task_id immediately without waiting.".to_string()
+        "Run a shell command in the workspace root directory. \
+SHORT COMMANDS (finish in under 30 seconds) return their full stdout/stderr output and exit code directly in the tool result. \
+LONG COMMANDS (builds, installs, servers, watchers) are automatically handed off to a background task and return a task_id. \
+You can then call get_command_status(task_id) to check whether the command is still running, read its output so far, \
+or confirm it completed successfully. Call stop_command(task_id) to cancel it. \
+Pass background=true to skip waiting entirely and receive the task_id immediately — use this for dev servers \
+or any process you intend to run indefinitely. \
+The cwd parameter scopes the command to a subdirectory of the workspace — pass a relative path. \
+Read the full output from get_command_status before concluding a command succeeded or failed — \
+a zero exit code does not always mean success.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

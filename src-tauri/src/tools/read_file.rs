@@ -32,7 +32,14 @@ impl Tool for ReadFile {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read contents of a text file in the workspace. Pass start_line and end_line (1-based, inclusive) to read a slice. Read before editing so edits match exactly.".to_string()
+        "Read the contents of any file in the workspace. \
+Returns the raw text content. \
+Supports text files, source code, config files, markdown, JSON, and binary formats like PDF and images. \
+For large files, pass start_line and end_line (1-based, inclusive) to read only the relevant section — \
+this is faster and avoids context bloat. \
+ALWAYS call this before editing any file — you must see the exact current content, \
+including whitespace and line endings, before attempting a replacement. \
+Never assume you already know what a file contains.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

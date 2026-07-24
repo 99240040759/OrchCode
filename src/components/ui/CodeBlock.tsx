@@ -1,8 +1,62 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { FiCheck, FiCopy } from "react-icons/fi";
-import { codeToHtml } from "shiki";
+import {
+  getSingletonHighlighter,
+  type BundledLanguage,
+  type BundledTheme,
+  isSpecialLang,
+} from "shiki";
 
-const THEME = "vitesse-dark";
+const THEME: BundledTheme = "vitesse-dark";
+
+const PRELOAD_LANGS: BundledLanguage[] = [
+  "typescript",
+  "tsx",
+  "javascript",
+  "jsx",
+  "json",
+  "html",
+  "css",
+  "rust",
+  "python",
+  "bash",
+  "shell",
+  "markdown",
+  "yaml",
+  "toml",
+  "sql",
+  "go",
+  "java",
+  "cpp",
+  "c",
+  "cs",
+  "ruby",
+  "php",
+  "swift",
+  "kotlin",
+];
+
+const highlighterPromise = getSingletonHighlighter({
+  themes: [THEME],
+  langs: PRELOAD_LANGS,
+});
+
+async function highlight(code: string, lang: string): Promise<string> {
+  const hl = await highlighterPromise;
+
+  if (!isSpecialLang(lang)) {
+    const loadedLangs = hl.getLoadedLanguages();
+    if (!loadedLangs.includes(lang as BundledLanguage)) {
+      try {
+        await hl.loadLanguage(lang as BundledLanguage);
+      } catch {
+        lang = "text";
+      }
+    }
+  }
+
+  return hl.codeToHtml(code, { lang, theme: THEME });
+}
 
 export interface CodeBlockProps {
   language?: string;
@@ -46,25 +100,28 @@ export const CodeBlock = memo(function CodeBlock({
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
-      codeToHtml(value, { lang, theme: THEME })
+      highlight(value, lang)
         .then((out) => {
           if (active) setHtml(out);
         })
         .catch(() => {
-          if (active) {
-            codeToHtml(value, { lang: "text", theme: THEME }).then((out) => {
-              if (active) setHtml(out);
-            });
-          }
+          if (active) setHtml("");
         });
     }, 80);
-    return () => { active = false; clearTimeout(timer); };
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [value, lang]);
 
   const shikiClass = `CodeBlock-shiki ${showLineNumbers ? "shiki-line-numbers" : ""}`;
-  const body = html
-    ? <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
-    : <pre className={`${shikiClass} CodeBlock-plain`}><code>{value}</code></pre>;
+  const body = html ? (
+    <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <pre className={`${shikiClass} CodeBlock-plain`}>
+      <code>{value}</code>
+    </pre>
+  );
 
   if (isEditor) {
     return (
@@ -79,7 +136,15 @@ export const CodeBlock = memo(function CodeBlock({
       <div className="CodeBlock-header">
         <span className="CodeBlock-lang">{lang}</span>
         <button className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
-          {copied ? <><FiCheck className="CodeBlock-copyIconDone" /> Copied</> : <><FiCopy /> Copy</>}
+          {copied ? (
+            <>
+              <FiCheck className="CodeBlock-copyIconDone" /> Copied
+            </>
+          ) : (
+            <>
+              <FiCopy /> Copy
+            </>
+          )}
         </button>
       </div>
       {body}

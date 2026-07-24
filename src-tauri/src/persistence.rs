@@ -42,7 +42,6 @@ pub struct SessionSummary {
 pub struct AttachmentView {
     pub name: String,
     pub is_image: bool,
-    /// `data:image/<type>;base64,<data>` for images; empty string for docs.
     pub data_url: String,
 }
 
@@ -53,9 +52,11 @@ pub enum MessageItemView {
         id: String,
         text: String,
     },
+    #[serde(rename_all = "camelCase")]
     Reasoning {
         id: String,
         text: String,
+        duration_seconds: Option<u64>,
     },
     #[serde(rename_all = "camelCase")]
     ToolCall {
@@ -129,6 +130,14 @@ impl SqliteMemory {
                     add_column_if_missing(tx, "sessions", "last_output_tokens", "INTEGER NOT NULL DEFAULT 0")?;
                     Ok(add_column_if_missing(tx, "sessions", "last_total_tokens", "INTEGER NOT NULL DEFAULT 0")?)
                 }
+            ),
+            rusqlite_migration::M::up(
+                "CREATE TABLE IF NOT EXISTS reasoning_durations (
+                     conversation_id TEXT NOT NULL,
+                     item_id         TEXT NOT NULL,
+                     duration_seconds INTEGER NOT NULL,
+                     PRIMARY KEY (conversation_id, item_id)
+                 );"
             ),
         ]);
 
@@ -224,6 +233,45 @@ impl SqliteMemory {
         }).await
     }
 
+    pub async fn next_reasoning_item_id(
+        &self,
+        conversation_id: &str,
+        item_idx: usize,
+    ) -> AppResult<String> {
+        let conn = self.conn.clone();
+        let cid = conversation_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let next_seq: i64 = c.query_row(
+                "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
+                params![cid],
+                |row| row.get(0),
+            ).map_err(sql_err)?;
+            Ok(stable_id(&cid, next_seq, item_idx, Some("reasoning")))
+        }).await
+    }
+
+    pub async fn upsert_reasoning_duration(
+        &self,
+        conversation_id: &str,
+        item_id: &str,
+        duration_seconds: u64,
+    ) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let cid = conversation_id.to_string();
+        let iid = item_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute(
+                "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
+                params![cid, iid, duration_seconds as i64],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
     pub async fn get_compaction_input(&self, conversation_id: &str) -> AppResult<CompactionInput> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
@@ -290,6 +338,20 @@ impl SqliteMemory {
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
             let rows = load_all(&c, &cid).map_err(sql_err)?;
+
+            let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
+            {
+                let mut stmt = c.prepare(
+                    "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1"
+                ).map_err(sql_err)?;
+                let iter = stmt.query_map(params![cid], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                }).map_err(sql_err)?;
+                for row in iter {
+                    let (item_id, secs) = row.map_err(sql_err)?;
+                    reasoning_durations.insert(item_id, secs as u64);
+                }
+            }
 
             struct StoredToolRes {
                 output: String,
@@ -415,9 +477,12 @@ impl SqliteMemory {
                                 AssistantContent::Reasoning(r) => {
                                     let text = r.display_text();
                                     if !text.is_empty() {
+                                        let item_id = stable_id(&cid, row.seq, item_idx, Some("reasoning"));
+                                        let duration_seconds = reasoning_durations.get(&item_id).copied();
                                         items.push(MessageItemView::Reasoning {
-                                            id: stable_id(&cid, row.seq, item_idx, Some("reasoning")),
+                                            id: item_id,
                                             text,
+                                            duration_seconds,
                                         });
                                         item_idx += 1;
                                     }
@@ -548,6 +613,7 @@ impl ConversationMemory for SqliteMemory {
                 let c = conn.lock().map_err(mem_lock)?;
                 c.execute("DELETE FROM messages WHERE conversation_id = ?1", params![cid]).map_err(mem_sql)?;
                 c.execute("DELETE FROM sessions WHERE id = ?1", params![cid]).map_err(mem_sql)?;
+                c.execute("DELETE FROM reasoning_durations WHERE conversation_id = ?1", params![cid]).map_err(mem_sql)?;
                 Ok(())
             }).await
         })

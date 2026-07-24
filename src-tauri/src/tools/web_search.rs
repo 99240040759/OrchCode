@@ -35,7 +35,14 @@ impl Tool for WebSearch {
     type Output = String;
 
     fn description(&self) -> String {
-        "Search the web for current information. Use this for anything that may be newer than your training data, for library/API documentation, or to verify facts. Optionally pass search_depth ('basic' or 'advanced') and domain. Returns a list of results with titles, URLs, and snippets.".to_string()
+        "Search the live web and return relevant results with titles, URLs, and content snippets. \
+Use this whenever the task involves: current events or recent releases, library or API documentation, \
+version numbers or changelogs, error messages you cannot explain from the codebase alone, \
+or anything where your training data may be outdated. \
+Set search_depth to 'advanced' for deeper research on technical topics. \
+Optionally restrict results to a specific domain (e.g. 'docs.rust-lang.org'). \
+The topic parameter accepts 'general' (default) or 'news'. \
+Results include a direct answer when available, followed by numbered source entries.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

@@ -33,7 +33,15 @@ impl Tool for MultiReplaceFileContent {
     type Output = String;
 
     fn description(&self) -> String {
-        "Edit an existing file by applying ordered exact string replacements. old_string must appear verbatim in the file. All occurrences of each old_string are replaced. Returns error if any old_string is not found and no changes are written.".to_string()
+        "Edit an existing file by applying one or more exact string replacements in order. \
+Each replacement specifies old_string (the exact text currently in the file) and new_string (what to replace it with). \
+old_string must match the file content character-for-character, including whitespace, indentation, and newlines — \
+if it does not match exactly, the tool returns an error and writes nothing. \
+All occurrences of each old_string are replaced. \
+If you need to change multiple unrelated parts of a file, pass all replacements in a single call — \
+they are applied in the order listed. \
+Always read the file first so you know the exact current content before constructing replacements. \
+On success, returns a summary of how many replacements were applied and how many occurrences were changed.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

@@ -29,7 +29,10 @@ impl Tool for ReadSkill {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read the full instructions for an available skill by its name, as listed in the skills index.".to_string()
+        "Load the complete step-by-step instructions for a named skill from the skills index. \
+Skills are reusable procedure guides — call this at the start of any task that matches a skill name. \
+The skill content replaces guesswork with a proven sequence of steps, tool calls, and verification checks. \
+Pass the skill name exactly as it appears in the SKILLS INDEX section of this system prompt.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

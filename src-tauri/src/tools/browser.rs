@@ -105,7 +105,13 @@ impl Tool for BrowserNavigate {
     type Output = String;
 
     fn description(&self) -> String {
-        "Navigate the in-app browser to an http or https URL. A browser tab opens automatically if one is not already open.".to_string()
+        "Open a URL in the integrated browser panel. \
+Accepts any http:// or https:// URL — the browser tab opens automatically if not already visible. \
+Use this to preview web UIs, inspect live documentation, test deployed applications, or verify that \
+a web page behaves as expected after making changes. \
+After navigating, call browser_get_content to read the page text, or use browser_click and browser_type \
+to interact with forms and buttons. \
+Returns a confirmation when navigation completes.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -146,7 +152,11 @@ impl Tool for BrowserClick {
     type Output = String;
 
     fn description(&self) -> String {
-        "Click an element in the active browser page by CSS selector.".to_string()
+        "Click a DOM element in the currently open browser page using a CSS selector. \
+Use this to submit forms, activate buttons, open dropdowns, navigate tabs, or trigger any interactive UI element. \
+The selector must match a visible, clickable element — use browser_get_content first to understand \
+the page structure if needed. \
+Returns 'Clicked' on success, or an error if no element matches the selector.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -191,7 +201,11 @@ impl Tool for BrowserType {
     type Output = String;
 
     fn description(&self) -> String {
-        "Type text into an input or textarea element in the active browser page by CSS selector.".to_string()
+        "Set the value of an input field or textarea in the currently open browser page using a CSS selector. \
+Use this to fill in search boxes, forms, login fields, or any text input. \
+The text parameter replaces the current value and fires input and change events so reactive frameworks update. \
+Returns 'Typed' on success, or an error if no element matches the selector. \
+After typing into a form, use browser_click to submit it.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -236,7 +250,12 @@ impl Tool for BrowserGetContent {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get visible text content from the active browser page.".to_string()
+        "Extract all visible text from the currently open browser page. \
+Use this after browser_navigate to verify what the page actually contains — \
+check for error messages, rendered output, form labels, loaded data, or any visible UI text. \
+Returns up to 500,000 characters of innerText. \
+Call this to confirm a UI change worked, to read documentation, or to understand page structure \
+before using browser_click or browser_type.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
