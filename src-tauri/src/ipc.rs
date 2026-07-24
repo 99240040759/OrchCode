@@ -96,7 +96,7 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
 #[tauri::command]
 pub fn get_oauth_url(redirect_to: Option<String>) -> String {
     let auth_client = auth::SupabaseAuthClient::new();
-    let r = redirect_to.unwrap_or_else(|| "orchcode://auth-callback".to_string());
+    let r = redirect_to.unwrap_or_else(|| "https://orch.live/auth-callback".to_string());
     auth_client.get_google_oauth_url(&r)
 }
 
@@ -250,6 +250,7 @@ pub async fn start_chat(
         command_manager: (*state.command_manager).clone(),
         browser_requests: state.browser_requests.clone(),
         data_dir: Some(state.data_dir.clone()),
+        workspace_index: state.workspace_index.clone(),
     };
     let memory = state.memory.clone();
     let client = build_client(&jwt).map_err(|e| e.to_string())?;

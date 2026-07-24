@@ -108,7 +108,7 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Stopped Task".to_string(),
                 target_text: Some(id),
-                icon: ToolIcon::Terminal,
+                icon: ToolIcon::ZapOff,
                 opens_artifact: false,
                 ..Default::default()
             }
@@ -119,7 +119,7 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Read Skill".to_string(),
                 target_text: Some(name),
-                icon: ToolIcon::File,
+                icon: ToolIcon::Book,
                 opens_artifact: false,
                 ..Default::default()
             }
@@ -130,17 +130,20 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Searched Web".to_string(),
                 target_text: Some(query),
-                icon: ToolIcon::Search,
+                icon: ToolIcon::Globe,
                 ..Default::default()
             }
         }
 
         "search_workspace" => {
             let query = args.get("query").and_then(|s| s.as_str()).unwrap_or(args_json).to_string();
+            let mode = args.get("mode").and_then(|s| s.as_str()).unwrap_or("text");
+            let label = if mode == "semantic" { "Semantic Search" } else { "Searched Code" };
+            let icon = if mode == "semantic" { ToolIcon::Database } else { ToolIcon::Search };
             ToolDisplayInfo {
-                label: "Searched Code".to_string(),
+                label: label.to_string(),
                 target_text: Some(query),
-                icon: ToolIcon::Search,
+                icon,
                 ..Default::default()
             }
         }
@@ -150,7 +153,7 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Task Status".to_string(),
                 target_text: Some(id),
-                icon: ToolIcon::Terminal,
+                icon: ToolIcon::Cpu,
                 opens_artifact: false,
                 ..Default::default()
             }
@@ -172,7 +175,7 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Clicked".to_string(),
                 target_text: Some(sel),
-                icon: ToolIcon::Globe,
+                icon: ToolIcon::MousePointer,
                 ..Default::default()
             }
         }
@@ -183,14 +186,14 @@ pub fn parse_display_info(name: &str, args_json: &str, workspace: Option<&Path>)
             ToolDisplayInfo {
                 label: "Typed".to_string(),
                 target_text: Some(format!("'{txt}' into {sel}")),
-                icon: ToolIcon::Globe,
+                icon: ToolIcon::Keyboard,
                 ..Default::default()
             }
         }
 
         "browser_get_content" => ToolDisplayInfo {
             label: "Browser Text".to_string(),
-            icon: ToolIcon::Globe,
+            icon: ToolIcon::Eye,
             ..Default::default()
         },
 

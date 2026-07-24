@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FiChevronRight, FiTerminal, FiSearch, FiGlobe, FiCpu, FiAlertTriangle, FiMinimize2 } from "react-icons/fi";
+import { FiChevronRight, FiTerminal, FiSearch, FiGlobe, FiCpu, FiAlertTriangle, FiMinimize2, FiBook, FiMousePointer, FiType, FiEye, FiZapOff, FiDatabase } from "react-icons/fi";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ChatMessage, MessageItem, ToolCallItem, ReasoningItem, TextItem, CompactionNoticeItem } from "../lib/store";
 import type { AttachmentRef } from "../lib/api";
@@ -61,7 +61,29 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
           <FileTag path={info.fullPath ?? info.filename} name={info.filename} lineRange={info.lineRange} added={info.addedLines} removed={info.removedLines} />
         ) : (
           <span className="ToolRow-target">
-            {info.icon === "globe" ? <FiGlobe className="ToolRow-icon" /> : info.icon === "search" ? <FiSearch className="ToolRow-icon" /> : <FiTerminal className="ToolRow-icon" />}
+            {info.icon === "globe" ? (
+              <FiGlobe className="ToolRow-icon" />
+            ) : info.icon === "search" ? (
+              <FiSearch className="ToolRow-icon" />
+            ) : info.icon === "book" ? (
+              <FiBook className="ToolRow-icon" />
+            ) : info.icon === "cpu" ? (
+              <FiCpu className="ToolRow-icon" />
+            ) : info.icon === "mousePointer" ? (
+              <FiMousePointer className="ToolRow-icon" />
+            ) : info.icon === "keyboard" ? (
+              <FiType className="ToolRow-icon" />
+            ) : info.icon === "eye" ? (
+              <FiEye className="ToolRow-icon" />
+            ) : info.icon === "zapOff" ? (
+              <FiZapOff className="ToolRow-icon" />
+            ) : info.icon === "database" ? (
+              <FiDatabase className="ToolRow-icon" />
+            ) : info.icon === "file" ? (
+              <ExplorerIcon type="file" name={info.targetText ?? ""} className="ToolRow-icon" style={{ width: 13, height: 13, flexShrink: 0 }} />
+            ) : (
+              <FiTerminal className="ToolRow-icon" />
+            )}
             <span className="ToolRow-text">{info.targetText}</span>
           </span>
         )}

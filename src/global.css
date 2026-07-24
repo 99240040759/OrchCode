@@ -2474,7 +2474,13 @@ button[data-state='open'],
 .CodeBlock-shiki code {
    font-family: inherit;
    font-size: inherit;
-   background: transparent
+   background: transparent;
+   display: block;
+   line-height: 0
+}
+
+.CodeBlock-shiki .line {
+   line-height: 1.6
 }
 
 /* Plain fallback shown while a streaming code block hasn't been syntax-highlighted yet
@@ -2529,7 +2535,7 @@ button[data-state='open'],
 .shiki-line-numbers .line {
    position: relative;
    padding-left: 3.5em;
-   display: inline-block;
+   display: block;
    width: 100%;
    box-sizing: border-box
 }

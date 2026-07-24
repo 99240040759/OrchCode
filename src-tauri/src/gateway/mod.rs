@@ -68,6 +68,35 @@ impl Gateway {
         Ok(resp.json().await?)
     }
 
+    pub async fn embed(&self, texts: Vec<String>, model: Option<&str>) -> AppResult<Vec<Vec<f32>>> {
+        let token = self.require_token()?;
+        let body = json!({
+            "input": texts,
+            "model": model.unwrap_or("gemini-embedding-2")
+        });
+        let resp = self.http
+            .post(config::embeddings_url())
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await?;
+        let resp = check_status(resp).await?;
+
+        #[derive(Deserialize)]
+        struct EmbeddingItem {
+            embedding: Vec<f32>,
+            index: usize,
+        }
+        #[derive(Deserialize)]
+        struct EmbedResponse {
+            data: Vec<EmbeddingItem>,
+        }
+
+        let mut parsed: EmbedResponse = resp.json().await?;
+        parsed.data.sort_by_key(|e| e.index);
+        Ok(parsed.data.into_iter().map(|e| e.embedding).collect())
+    }
+
     pub async fn generate_title(&self, prompt: &str) -> AppResult<String> {
         let token = self.require_token()?;
         let base = config::models_url();

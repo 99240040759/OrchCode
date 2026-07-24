@@ -34,6 +34,10 @@ pub fn tavily_url() -> String {
     format!("{}/tavily", gcp_functions_url())
 }
 
+pub fn embeddings_url() -> String {
+    format!("{}/embeddings", gcp_functions_url())
+}
+
 pub fn validate_runtime_config() {
     let gcf = gcp_functions_url();
     let supa = supabase_url();

@@ -23,7 +23,7 @@ export default defineConfig(() => {
               return "markdown";
             }
             if (id.includes("node_modules/shiki") || id.includes("node_modules/@shikijs")) {
-              return "shiki";
+              return "vendor";
             }
             if (id.includes("node_modules/@xterm/")) {
               return "xterm";

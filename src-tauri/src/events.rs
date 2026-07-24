@@ -22,6 +22,13 @@ pub enum ToolIcon {
     Terminal,
     Search,
     Globe,
+    Book,
+    Cpu,
+    MousePointer,
+    Keyboard,
+    Eye,
+    ZapOff,
+    Database,
 }
 
 #[derive(Clone, Serialize)]

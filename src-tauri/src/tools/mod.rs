@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::gateway::Gateway;
 use crate::state::{BrowserRequestsHandle, WorkspaceHandle};
 use crate::tools::command_manager::CommandManager;
+use crate::vector_store::WorkspaceIndex;
 
 pub use browser::{BrowserClick, BrowserGetContent, BrowserNavigate, BrowserType};
 pub use display::parse_display_info;
@@ -55,6 +56,7 @@ pub struct ToolContext {
     pub command_manager: CommandManager,
     pub browser_requests: BrowserRequestsHandle,
     pub data_dir: Option<PathBuf>,
+    pub workspace_index: WorkspaceIndex,
 }
 
 impl ToolContext {
@@ -62,7 +64,7 @@ impl ToolContext {
     pub fn read_skill(&self) -> ReadSkill { ReadSkill::new(self.data_dir.clone(), self.workspace.clone()) }
     pub fn write_file(&self) -> WriteFile { WriteFile::new(self.workspace.clone()) }
     pub fn multi_replace(&self) -> MultiReplaceFileContent { MultiReplaceFileContent::new(self.workspace.clone()) }
-    pub fn search_workspace(&self) -> SearchWorkspace { SearchWorkspace::new(self.workspace.clone()) }
+    pub fn search_workspace(&self) -> SearchWorkspace { SearchWorkspace::new(self.workspace.clone(), self.workspace_index.clone()) }
     pub fn web_search(&self) -> WebSearch { WebSearch::new(self.gateway.clone()) }
     pub fn run_command(&self) -> RunCommand { RunCommand::new(self.workspace.clone(), self.command_manager.clone()) }
     pub fn get_command_status(&self) -> GetCommandStatus { GetCommandStatus::new(self.command_manager.clone()) }

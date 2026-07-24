@@ -92,7 +92,7 @@ pub struct CompactionInput {
 
 #[derive(Clone)]
 pub struct SqliteMemory {
-    conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteMemory {
@@ -138,6 +138,21 @@ impl SqliteMemory {
                      duration_seconds INTEGER NOT NULL,
                      PRIMARY KEY (conversation_id, item_id)
                  );"
+            ),
+            rusqlite_migration::M::up(
+                "CREATE TABLE IF NOT EXISTS vector_chunks (
+                     id           TEXT PRIMARY KEY,
+                     workspace    TEXT NOT NULL,
+                     file_path    TEXT NOT NULL,
+                     start_line   INTEGER NOT NULL,
+                     end_line     INTEGER NOT NULL,
+                     content      TEXT NOT NULL,
+                     content_hash TEXT NOT NULL,
+                     embedding    BLOB NOT NULL,
+                     indexed_at   INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_vector_chunks_workspace ON vector_chunks(workspace);
+                 CREATE INDEX IF NOT EXISTS idx_vector_chunks_file ON vector_chunks(workspace, file_path);"
             ),
         ]);
 

@@ -13,6 +13,7 @@ use crate::error::{AppError, AppResult};
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
 use crate::persistence::SqliteMemory;
 use crate::tools::command_manager::CommandManager;
+use crate::vector_store::WorkspaceIndex;
 
 pub type WorkspaceHandle = Arc<RwLock<Option<PathBuf>>>;
 pub type BrowserRequestsHandle = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub gateway: Arc<Gateway>,
     pub catalog: RwLock<Option<ModelCatalog>>,
     pub memory: SqliteMemory,
+    pub workspace_index: WorkspaceIndex,
     pub runs: Mutex<HashMap<String, RunHandle>>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Mutex<HashMap<String, crate::terminal::TerminalSession>>,
@@ -58,13 +60,14 @@ impl AppState {
         }
 
         let state = Self {
-            token,
+            token: token.clone(),
             workspace: Arc::new(RwLock::new(Some(sandbox.clone()))),
             data_dir,
             sandbox,
-            gateway,
+            gateway: gateway.clone(),
             catalog: RwLock::new(None),
-            memory,
+            memory: memory.clone(),
+            workspace_index: WorkspaceIndex::new(memory.conn.clone(), token),
             runs: Mutex::new(HashMap::new()),
             dictation: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
@@ -116,7 +119,6 @@ impl AppState {
     pub fn use_sandbox(&self) {
         self.set_workspace(self.sandbox.clone());
     }
-
     pub fn is_sandbox(&self) -> bool {
         self.workspace().map(|w| w == self.sandbox).unwrap_or(true)
     }

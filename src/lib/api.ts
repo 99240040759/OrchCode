@@ -48,7 +48,7 @@ export interface ToolDisplayInfo {
   addedLines?: number;
   removedLines?: number;
   targetText?: string;
-  icon: "file" | "terminal" | "search" | "globe";
+  icon: "file" | "terminal" | "search" | "globe" | "book" | "cpu" | "mousePointer" | "keyboard" | "eye" | "zapOff" | "database";
   opensArtifact: boolean;
 }
 

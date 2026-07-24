@@ -83,7 +83,7 @@ export const useAuthStore = create(
         set((s) => { if (s.signingIn) { s.signingIn = false; s.error = "Sign-in timed out — please try again"; } });
       }, 120_000);
       try {
-        const url = await api.getOAuthUrl("orchcode://auth-callback");
+        const url = await api.getOAuthUrl("https://orch.live/auth-callback");
         if (!url) {
           clearSignInTimeout();
           set({ signingIn: false, error: "Could not obtain OAuth URL" });

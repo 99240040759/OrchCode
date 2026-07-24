@@ -51,7 +51,7 @@ pub fn build_agent(
 
     if let Some(effort) = model.reasoning_effort.as_deref() {
         let validated = match effort {
-            "low" | "medium" | "high" => Some(effort),
+            "low" | "medium" | "high" | "xhigh" => Some(effort),
             _ => {
                 tracing::warn!("ignoring unrecognised reasoning_effort value: {effort:?}");
                 None

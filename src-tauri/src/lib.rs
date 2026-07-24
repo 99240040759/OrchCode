@@ -13,6 +13,7 @@ pub mod skills;
 pub mod state;
 pub mod terminal;
 pub mod tools;
+pub mod vector_store;
 
 use state::AppState;
 use tauri::{Emitter, Manager};
