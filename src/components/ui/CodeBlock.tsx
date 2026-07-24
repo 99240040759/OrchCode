@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { FiCheck, FiCopy } from "react-icons/fi";
 import {
-  getSingletonHighlighter,
+  createHighlighter,
+  createJavaScriptRegexEngine,
   type BundledLanguage,
   type BundledTheme,
-  isSpecialLang,
 } from "shiki";
 
 const THEME: BundledTheme = "vitesse-dark";
@@ -17,11 +17,14 @@ const PRELOAD_LANGS: BundledLanguage[] = [
   "json",
   "html",
   "css",
+  "scss",
+  "less",
   "rust",
   "python",
   "bash",
-  "shell",
+  "shellscript",
   "markdown",
+  "mdx",
   "yaml",
   "toml",
   "sql",
@@ -29,33 +32,45 @@ const PRELOAD_LANGS: BundledLanguage[] = [
   "java",
   "cpp",
   "c",
-  "cs",
+  "csharp",
   "ruby",
   "php",
   "swift",
   "kotlin",
+  "xml",
+  "graphql",
+  "dockerfile",
+  "ini",
+  "powershell",
+  "diff",
+  "vue",
+  "svelte",
+  "zig",
+  "elixir",
+  "makefile",
+  "cmake",
 ];
 
-const highlighterPromise = getSingletonHighlighter({
+const highlighterPromise = createHighlighter({
   themes: [THEME],
   langs: PRELOAD_LANGS,
+  engine: createJavaScriptRegexEngine(),
 });
 
 async function highlight(code: string, lang: string): Promise<string> {
   const hl = await highlighterPromise;
+  let targetLang = lang.toLowerCase();
 
-  if (!isSpecialLang(lang)) {
-    const loadedLangs = hl.getLoadedLanguages();
-    if (!loadedLangs.includes(lang as BundledLanguage)) {
-      try {
-        await hl.loadLanguage(lang as BundledLanguage);
-      } catch {
-        lang = "text";
-      }
-    }
-  }
+  if (targetLang === "shell" || targetLang === "zsh" || targetLang === "sh") targetLang = "bash";
+  if (targetLang === "docker") targetLang = "dockerfile";
+  if (targetLang === "make") targetLang = "makefile";
+  if (targetLang === "cs") targetLang = "csharp";
+  if (targetLang === "py") targetLang = "python";
+  if (targetLang === "rs") targetLang = "rust";
+  if (targetLang === "js") targetLang = "javascript";
+  if (targetLang === "ts") targetLang = "typescript";
 
-  return hl.codeToHtml(code, { lang, theme: THEME });
+  return hl.codeToHtml(code, { lang: targetLang, theme: THEME });
 }
 
 export interface CodeBlockProps {
@@ -100,13 +115,9 @@ export const CodeBlock = memo(function CodeBlock({
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
-      highlight(value, lang)
-        .then((out) => {
-          if (active) setHtml(out);
-        })
-        .catch(() => {
-          if (active) setHtml("");
-        });
+      highlight(value, lang).then((out) => {
+        if (active) setHtml(out);
+      });
     }, 80);
     return () => {
       active = false;
@@ -115,12 +126,8 @@ export const CodeBlock = memo(function CodeBlock({
   }, [value, lang]);
 
   const shikiClass = `CodeBlock-shiki ${showLineNumbers ? "shiki-line-numbers" : ""}`;
-  const body = html ? (
+  const body = (
     <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
-  ) : (
-    <pre className={`${shikiClass} CodeBlock-plain`}>
-      <code>{value}</code>
-    </pre>
   );
 
   if (isEditor) {

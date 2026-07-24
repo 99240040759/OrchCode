@@ -9,7 +9,7 @@ export default defineConfig(() => {
     plugins: [react()],
 
     build: {
-      chunkSizeWarningLimit: 1000,
+      chunkSizeWarningLimit: 10000,
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -21,6 +21,9 @@ export default defineConfig(() => {
             }
             if (id.includes("node_modules/react-markdown/") || id.includes("node_modules/remark-gfm/")) {
               return "markdown";
+            }
+            if (id.includes("node_modules/shiki") || id.includes("node_modules/@shikijs")) {
+              return "shiki";
             }
             if (id.includes("node_modules/@xterm/")) {
               return "xterm";

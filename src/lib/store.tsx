@@ -396,11 +396,7 @@ export const useChatStore = create(
               patch((m) => { m.usage = turnUsage; });
               set((s) => {
                 if (s.currentSessionId !== sessionIdAtSend) return;
-                s.sessionTokens = {
-                  inputTokens: s.sessionTokens.inputTokens + turnUsage.inputTokens,
-                  outputTokens: s.sessionTokens.outputTokens + turnUsage.outputTokens,
-                  totalTokens: s.sessionTokens.totalTokens + turnUsage.totalTokens,
-                };
+                s.sessionTokens = turnUsage;
               });
               break;
             }

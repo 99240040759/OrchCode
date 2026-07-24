@@ -53,9 +53,9 @@ export function formatRelativeTime(ts?: number): string {
 
 const EXT_LANG_MAP: Record<string, string> = {
   ts: "typescript",
-  tsx: "typescript",
+  tsx: "tsx",
   js: "javascript",
-  jsx: "javascript",
+  jsx: "jsx",
   mjs: "javascript",
   cjs: "javascript",
   rs: "rust",
