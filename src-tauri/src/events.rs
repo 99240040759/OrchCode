@@ -34,21 +34,45 @@ pub enum ToolIcon {
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ChatEvent {
-    Text { delta: String },
-    Reasoning { delta: String },
+    Text {
+        delta: String,
+    },
+    Reasoning {
+        delta: String,
+    },
     #[serde(rename_all = "camelCase")]
-    ReasoningDone { duration_seconds: u64 },
+    ReasoningDone {
+        duration_seconds: u64,
+    },
     #[serde(rename_all = "camelCase")]
-    ToolCall { id: String, name: String, args: String, display_info: ToolDisplayInfo },
+    ToolCall {
+        id: String,
+        name: String,
+        args: String,
+        display_info: ToolDisplayInfo,
+    },
     #[serde(rename_all = "camelCase")]
-    ToolResult { id: String, output: String, is_error: bool },
+    ToolResult {
+        id: String,
+        output: String,
+        is_error: bool,
+    },
     #[serde(rename_all = "camelCase")]
-    Usage { input_tokens: u64, output_tokens: u64, total_tokens: u64 },
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
+    },
     #[serde(rename_all = "camelCase")]
-    Compacted { original_message_count: usize, ts: i64 },
-    Done { output: String },
+    Compacted {
+        original_message_count: usize,
+        ts: i64,
+    },
+    Done,
     Cancelled,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Clone, Serialize)]

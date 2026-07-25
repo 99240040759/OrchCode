@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use tauri::{Emitter, Manager};
 use tokio::sync::oneshot;
 
 use crate::auth;
@@ -21,7 +22,6 @@ pub type BrowserRequestsHandle = Arc<Mutex<HashMap<String, oneshot::Sender<Strin
 pub struct RunHandle {
     pub run_id: String,
     pub cancel: Arc<AtomicBool>,
-    pub started_at: Instant,
 }
 
 pub struct AppState {
@@ -36,47 +36,40 @@ pub struct AppState {
     pub runs: Mutex<HashMap<String, RunHandle>>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Mutex<HashMap<String, crate::terminal::TerminalSession>>,
-    pub browser_requests: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
+    pub browser_requests: BrowserRequestsHandle,
     pub command_manager: Arc<CommandManager>,
-    pub current_user_id: RwLock<Option<String>>,
+    current_user_id: RwLock<Option<String>>,
+    sign_in_started_at: Mutex<Option<Instant>>,
 }
 
 impl AppState {
-    pub fn new(db_path: &Path) -> AppResult<Self> {
+    pub fn new(data_dir: &Path) -> AppResult<Self> {
+        let db_path = data_dir.join("orchcode.db");
         let token: TokenHandle = Arc::new(RwLock::new(None));
-        let gateway = Arc::new(Gateway::new(token.clone()));
-        let memory = SqliteMemory::open(db_path)?;
+        let gateway = Arc::new(Gateway::new(token.clone())?);
+        let memory = SqliteMemory::open(&db_path)?;
+        let workspace_index = WorkspaceIndex::open(&db_path, gateway.clone())?;
 
-        let data_dir = db_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         let sandbox = data_dir.join("sandbox");
-        std::fs::create_dir_all(&sandbox).map_err(AppError::Io)?;
+        std::fs::create_dir_all(&sandbox)?;
 
-        auth::migrate_legacy_tokens(&data_dir);
-
-        if let Some(at) = auth::load_access_token(&data_dir) {
-            if let Ok(mut guard) = token.write() {
-                *guard = Some(at);
-            }
-        }
-
-        let state = Self {
-            token: token.clone(),
+        Ok(Self {
+            token,
             workspace: Arc::new(RwLock::new(Some(sandbox.clone()))),
-            data_dir,
+            data_dir: data_dir.to_path_buf(),
             sandbox,
-            gateway: gateway.clone(),
+            gateway,
             catalog: RwLock::new(None),
-            memory: memory.clone(),
-            workspace_index: WorkspaceIndex::new(memory.conn.clone(), token),
+            memory,
+            workspace_index,
             runs: Mutex::new(HashMap::new()),
             dictation: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
             browser_requests: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
             current_user_id: RwLock::new(None),
-        };
-
-        Ok(state)
+            sign_in_started_at: Mutex::new(None),
+        })
     }
 
     pub fn set_token(&self, token: Option<String>) {
@@ -86,46 +79,80 @@ impl AppState {
         }
     }
 
+    pub fn access_token(&self) -> Option<String> {
+        self.token
+            .read()
+            .ok()
+            .and_then(|g| g.clone())
+            .filter(|t| !t.is_empty())
+    }
+
+    pub fn has_token(&self) -> bool {
+        self.access_token().is_some()
+    }
+
     pub fn clear_credentials(&self) {
         self.set_token(None);
-        auth::clear_access_token(&self.data_dir);
-        auth::clear_refresh_token();
+        auth::clear_tokens();
         if let Ok(mut guard) = self.current_user_id.write() {
             *guard = None;
         }
         if let Ok(mut guard) = self.catalog.write() {
             *guard = None;
         }
+        self.workspace_index.invalidate();
     }
 
-    pub fn has_token(&self) -> bool {
-        self.token.read().map(|g| g.is_some()).unwrap_or(false)
-    }
-
-    pub fn set_authenticated_user(&self, user_id: &str) -> bool {
-        if let Ok(mut guard) = self.current_user_id.write() {
-            let changed = guard.as_deref() != Some(user_id);
-            *guard = Some(user_id.to_string());
-            if changed {
-                if let Ok(mut cat) = self.catalog.write() {
-                    *cat = None;
-                }
+    pub fn set_authenticated_user(&self, user_id: &str) {
+        let changed = match self.current_user_id.write() {
+            Ok(mut guard) => {
+                let changed = guard.as_deref() != Some(user_id);
+                *guard = Some(user_id.to_string());
+                changed
             }
-            return changed;
+            Err(_) => false,
+        };
+        if changed {
+            if let Ok(mut cat) = self.catalog.write() {
+                *cat = None;
+            }
+            self.workspace_index.invalidate();
         }
-        false
+    }
+
+    pub fn mark_sign_in_started(&self) {
+        if let Ok(mut guard) = self.sign_in_started_at.lock() {
+            *guard = Some(Instant::now());
+        }
+    }
+
+    pub fn consume_sign_in_window(&self) -> bool {
+        match self.sign_in_started_at.lock() {
+            Ok(mut guard) => match guard.take() {
+                Some(started) => {
+                    started.elapsed().as_secs() <= config::SIGN_IN_WINDOW_SECS
+                }
+                None => false,
+            },
+            Err(_) => false,
+        }
     }
 
     pub fn use_sandbox(&self) {
         self.set_workspace(self.sandbox.clone());
     }
+
     pub fn is_sandbox(&self) -> bool {
         self.workspace().map(|w| w == self.sandbox).unwrap_or(true)
     }
 
     pub fn set_workspace(&self, path: PathBuf) {
+        let changed = self.workspace().as_deref() != Some(path.as_path());
         if let Ok(mut guard) = self.workspace.write() {
             *guard = Some(path);
+        }
+        if changed {
+            self.workspace_index.invalidate();
         }
     }
 
@@ -135,10 +162,6 @@ impl AppState {
 
     pub fn require_workspace(&self) -> AppResult<PathBuf> {
         self.workspace().ok_or(AppError::NoWorkspace)
-    }
-
-    pub fn snapshot_workspace(&self) -> Option<PathBuf> {
-        self.workspace()
     }
 
     pub async fn catalog(&self) -> AppResult<ModelCatalog> {
@@ -160,20 +183,74 @@ impl AppState {
         Ok(fresh)
     }
 
-    pub fn spawn_catalog_refresh_loop(app: tauri::AppHandle) {
-        use tauri::{Emitter, Manager};
+    pub async fn ensure_fresh_token(&self) -> AppResult<()> {
+        let Some(current) = self.access_token() else {
+            return Err(AppError::NoToken);
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        match auth::jwt_expiry(&current) {
+            Some(exp) if exp - now > config::TOKEN_REFRESH_SKEW_SECS => return Ok(()),
+            _ => {}
+        }
+
+        let Some(refresh_token) = auth::load_refresh_token() else {
+            return Err(AppError::NoToken);
+        };
+
+        let client = auth::SupabaseAuthClient::new();
+        let session = client.refresh_session(&refresh_token).await?;
+        if let Some(rt) = session.refresh_token.as_deref() {
+            auth::save_refresh_token(rt)?;
+        }
+        self.set_token(Some(session.access_token));
+        if let Some(user) = session.user.as_ref() {
+            self.set_authenticated_user(&user.id);
+        }
+        Ok(())
+    }
+
+    pub fn spawn_background_loops(app: tauri::AppHandle) {
+        let catalog_app = app.clone();
         tauri::async_runtime::spawn(async move {
-            let interval = std::time::Duration::from_secs(config::MODEL_CATALOG_REFRESH_INTERVAL_SECS);
+            let interval =
+                std::time::Duration::from_secs(config::MODEL_CATALOG_REFRESH_INTERVAL_SECS);
+            loop {
+                tokio::time::sleep(interval).await;
+                let state = catalog_app.state::<AppState>();
+                if !state.has_token() {
+                    continue;
+                }
+                match state.refresh_catalog().await {
+                    Ok(_) => {
+                        let _ = catalog_app.emit("models-updated", ());
+                    }
+                    Err(e) => {
+                        eprintln!("[models] background refresh failed: {e}");
+                    }
+                }
+            }
+        });
+
+        tauri::async_runtime::spawn(async move {
+            let interval =
+                std::time::Duration::from_secs(config::TOKEN_REFRESH_CHECK_INTERVAL_SECS);
             loop {
                 tokio::time::sleep(interval).await;
                 let state = app.state::<AppState>();
-                match state.refresh_catalog().await {
-                    Ok(_) => {
-                        let _ = app.emit("models-updated", ());
-                    }
-                    Err(e) => {
-                        eprintln!("[models] background TTL refresh failed: {e}");
-                    }
+                if !state.has_token() {
+                    continue;
+                }
+                if let Err(e) = state.ensure_fresh_token().await {
+                    state.clear_credentials();
+                    let _ = app.emit(
+                        "auth-changed",
+                        serde_json::json!({ "user": null, "error": e.to_string() }),
+                    );
                 }
             }
         });
@@ -186,17 +263,23 @@ impl AppState {
         }
         let run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
         let cancel = Arc::new(AtomicBool::new(false));
-        guard.insert(session_id.to_string(), RunHandle {
-            run_id: run_id.clone(),
-            cancel: cancel.clone(),
-            started_at: Instant::now(),
-        });
+        guard.insert(
+            session_id.to_string(),
+            RunHandle {
+                run_id: run_id.clone(),
+                cancel: cancel.clone(),
+            },
+        );
         Ok((run_id, cancel))
     }
 
     pub fn finish_run(&self, session_id: &str, run_id: &str) {
         let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.get(session_id).map(|r| r.run_id == run_id).unwrap_or(false) {
+        if guard
+            .get(session_id)
+            .map(|r| r.run_id == run_id)
+            .unwrap_or(false)
+        {
             guard.remove(session_id);
         }
     }
@@ -204,29 +287,36 @@ impl AppState {
     pub fn cancel_run(&self, session_id: &str) {
         let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(run) = guard.get(session_id) {
-            run.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            run.cancel
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
-    pub fn is_session_active(&self, session_id: &str) -> bool {
-        self.runs.lock().unwrap_or_else(|e| e.into_inner()).contains_key(session_id)
-    }
-
-    pub fn register_browser_request(&self, request_id: &str) -> oneshot::Receiver<String> {
-        let (tx, rx) = oneshot::channel();
-        let mut guard = self.browser_requests.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert(request_id.to_string(), tx);
-        rx
-    }
-
     pub fn fulfill_browser_request(&self, request_id: &str, content: String) -> AppResult<()> {
-        let mut guard = self.browser_requests.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self
+            .browser_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         match guard.remove(request_id) {
             Some(tx) => {
                 let _ = tx.send(content);
                 Ok(())
             }
             None => Err(AppError::NoBrowserRequest),
+        }
+    }
+
+    pub fn shutdown(&self) {
+        self.command_manager.kill_all();
+        let mut guard = self.terminals.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, session) in guard.iter_mut() {
+            session.kill();
+        }
+        guard.clear();
+        if let Ok(mut dictation) = self.dictation.lock() {
+            if let Some(handle) = dictation.take() {
+                handle.stop();
+            }
         }
     }
 }

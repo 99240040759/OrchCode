@@ -3,11 +3,19 @@ import { Avatar } from "./Avatar";
 import { Titlebar } from "./ui/Titlebar";
 import type { UserDisplay } from "../lib/api";
 
-export function Greeting({ user, onDone }: { user: UserDisplay | null; onDone: () => void }) {
+const GREETING_MS = 2600;
+
+export function Greeting({
+  user,
+  onDone,
+}: {
+  user: UserDisplay | null;
+  onDone: () => void;
+}) {
   useEffect(() => {
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const t = setTimeout(onDone, prefersReduced ? 0 : 3200);
-    return () => clearTimeout(t);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = setTimeout(onDone, reduced ? 0 : GREETING_MS);
+    return () => clearTimeout(timer);
   }, [onDone]);
 
   const firstName = user?.displayName?.split(" ")[0] ?? "there";
@@ -15,11 +23,13 @@ export function Greeting({ user, onDone }: { user: UserDisplay | null; onDone: (
   return (
     <div
       className="Greeting"
-      role="dialog"
-      aria-label={`Welcome, ${firstName}`}
-      onClick={onDone}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "Escape") onDone(); }}
+      role="button"
       tabIndex={0}
+      aria-label="Continue to the workspace"
+      onClick={onDone}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " " || event.key === "Escape") onDone();
+      }}
     >
       <Titlebar className="Greeting-titlebar" />
       <div className="Greeting-content">
@@ -30,3 +40,5 @@ export function Greeting({ user, onDone }: { user: UserDisplay | null; onDone: (
     </div>
   );
 }
+
+export default Greeting;

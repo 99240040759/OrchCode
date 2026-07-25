@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::sync::Notify;
 
 const OUTPUT_RING_BYTES: usize = 100 * 1024;
 const TASK_MAX_AGE: Duration = Duration::from_secs(3600);
@@ -34,14 +36,19 @@ struct RingBuffer {
 
 impl RingBuffer {
     fn new(cap: usize) -> Self {
-        Self { data: String::with_capacity(cap.min(4096)), cap }
+        Self {
+            data: String::with_capacity(cap.min(4096)),
+            cap,
+        }
     }
 
     fn push(&mut self, s: &str) {
         self.data.push_str(s);
         if self.data.len() > self.cap {
             let excess = self.data.len() - self.cap;
-            let split = self.data.char_indices().find(|(i, _)| *i >= excess).map(|(i, _)| i).unwrap_or(excess);
+            let split = (excess..=self.data.len())
+                .find(|i| self.data.is_char_boundary(*i))
+                .unwrap_or(self.data.len());
             self.data.drain(..split);
         }
     }
@@ -61,11 +68,12 @@ impl CommandManager {
         Self::default()
     }
 
-    pub fn spawn_task(&self, command_str: &str, cwd: &std::path::Path) -> String {
+    pub fn spawn_task(&self, command_str: &str, cwd: &std::path::Path) -> (String, Arc<Notify>) {
         self.prune_old_tasks();
 
-        let task_id = format!("task-{}", uuid::Uuid::new_v4().simple().to_string().chars().take(8).collect::<String>());
+        let task_id = format!("task-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+        let done = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(InnerTask {
             task_id: task_id.clone(),
             command: command_str.to_string(),
@@ -83,15 +91,17 @@ impl CommandManager {
 
         let cmd_str = command_str.to_string();
         let cwd_buf = cwd.to_path_buf();
+        let done_signal = done.clone();
 
         tokio::spawn(async move {
             #[cfg(target_os = "windows")]
             let child_res = Command::new("powershell.exe")
-                .creation_flags(0x08000000)
-                .args(["-NoProfile", "-Command", &cmd_str])
+                .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
                 .current_dir(&cwd_buf)
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                .creation_flags(0x08000000)
                 .kill_on_drop(true)
                 .spawn();
 
@@ -99,6 +109,7 @@ impl CommandManager {
             let child_res = Command::new("sh")
                 .args(["-c", &cmd_str])
                 .current_dir(&cwd_buf)
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
@@ -106,66 +117,46 @@ impl CommandManager {
 
             match child_res {
                 Ok(mut child) => {
-                    let (stdout_done_tx, stdout_done_rx) = tokio::sync::oneshot::channel::<()>();
-                    let (stderr_done_tx, stderr_done_rx) = tokio::sync::oneshot::channel::<()>();
-
-                    if let Some(mut out) = child.stdout.take() {
+                    let stdout_task = child.stdout.take().map(|out| {
                         let inner_ref = inner.clone();
-                        tokio::spawn(async move {
-                            let mut buf = [0u8; 4096];
-                            while let Ok(n) = out.read(&mut buf).await {
-                                if n == 0 { break; }
-                                let s = String::from_utf8_lossy(&buf[..n]);
-                                if let Ok(mut g) = inner_ref.lock() {
-                                    g.output.push(&s);
-                                }
-                            }
-                            let _ = stdout_done_tx.send(());
-                        });
-                    } else {
-                        let _ = stdout_done_tx.send(());
-                    }
-
-                    if let Some(mut err) = child.stderr.take() {
+                        tokio::spawn(async move { pump(out, inner_ref).await })
+                    });
+                    let stderr_task = child.stderr.take().map(|err| {
                         let inner_ref = inner.clone();
-                        tokio::spawn(async move {
-                            let mut buf = [0u8; 4096];
-                            while let Ok(n) = err.read(&mut buf).await {
-                                if n == 0 { break; }
-                                let s = String::from_utf8_lossy(&buf[..n]);
-                                if let Ok(mut g) = inner_ref.lock() {
-                                    g.output.push(&s);
-                                }
-                            }
-                            let _ = stderr_done_tx.send(());
-                        });
-                    } else {
-                        let _ = stderr_done_tx.send(());
-                    }
+                        tokio::spawn(async move { pump(err, inner_ref).await })
+                    });
 
-                    tokio::select! {
-                        res = child.wait() => {
-                            let _ = stdout_done_rx.await;
-                            let _ = stderr_done_rx.await;
-                            if let Ok(mut g) = inner.lock() {
-                                g.kill_tx = None;
-                                match res {
-                                    Ok(status) => {
-                                        g.exit_code = status.code();
-                                        g.status = if status.success() { "completed".to_string() } else { "failed".to_string() };
-                                    }
-                                    Err(_) => g.status = "failed".to_string(),
-                                }
-                            }
-                        }
+                    let wait_result = tokio::select! {
+                        res = child.wait() => Some(res),
                         _ = kill_rx => {
                             let _ = child.kill().await;
-                            let _ = stdout_done_rx.await;
-                            let _ = stderr_done_rx.await;
-                            if let Ok(mut g) = inner.lock() {
-                                g.kill_tx = None;
-                                g.status = "cancelled".to_string();
+                            None
+                        }
+                    };
+
+                    if let Some(handle) = stdout_task {
+                        let _ = handle.await;
+                    }
+                    if let Some(handle) = stderr_task {
+                        let _ = handle.await;
+                    }
+
+                    if let Ok(mut g) = inner.lock() {
+                        g.kill_tx = None;
+                        match wait_result {
+                            Some(Ok(status)) => {
+                                g.exit_code = status.code();
+                                g.status = if status.success() {
+                                    "completed".to_string()
+                                } else {
+                                    "failed".to_string()
+                                };
                             }
+                            Some(Err(e)) => {
+                                g.status = "failed".to_string();
+                                g.output.push(&format!("\nprocess wait error: {e}\n"));
+                            }
+                            None => g.status = "cancelled".to_string(),
                         }
                     }
                 }
@@ -177,9 +168,11 @@ impl CommandManager {
                     }
                 }
             }
+
+            done_signal.notify_waiters();
         });
 
-        task_id
+        (task_id, done)
     }
 
     pub fn get_status(&self, task_id: &str) -> Option<TaskStatus> {
@@ -198,21 +191,50 @@ impl CommandManager {
 
     pub fn kill_task(&self, task_id: &str) -> bool {
         let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(task) = guard.get(task_id) {
-            if let Ok(mut g) = task.lock() {
-                if let Some(tx) = g.kill_tx.take() {
-                    let _ = tx.send(());
-                    return true;
-                }
+        let Some(task) = guard.get(task_id) else {
+            return false;
+        };
+        let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+        match g.kill_tx.take() {
+            Some(tx) => tx.send(()).is_ok(),
+            None => false,
+        }
+    }
+
+    pub fn kill_all(&self) {
+        let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        for task in guard.values() {
+            let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(tx) = g.kill_tx.take() {
+                let _ = tx.send(());
             }
         }
-        false
     }
 
     fn prune_old_tasks(&self) {
         let mut guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         guard.retain(|_, task| {
-            task.lock().map(|g| g.started_at.elapsed() < TASK_MAX_AGE).unwrap_or(true)
+            let g = task.lock().unwrap_or_else(|e| e.into_inner());
+            g.status == "running" || g.started_at.elapsed() < TASK_MAX_AGE
         });
+    }
+}
+
+async fn pump<R>(mut reader: R, inner: Arc<Mutex<InnerTask>>)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf = [0u8; 4096];
+    loop {
+        match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                let text = String::from_utf8_lossy(&buf[..n]);
+                if let Ok(mut g) = inner.lock() {
+                    g.output.push(&text);
+                }
+            }
+            Err(_) => break,
+        }
     }
 }

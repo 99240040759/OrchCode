@@ -1,42 +1,97 @@
-import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
-import { InputBar } from "./InputBar";
-import { ArtifactPanel } from "./ArtifactPanel";
-import { MessageList } from "./MessageList";
-import { useChatStore } from "../lib/store";
+import { useEffect, useRef } from "react";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from "react-resizable-panels";
+import { FiX } from "react-icons/fi";
 import { useArtifactsStore } from "../lib/artifacts";
+import { useChatStore } from "../lib/store";
+import { ArtifactPanel } from "./ArtifactPanel";
+import { InputBar } from "./InputBar";
+import { MessageList } from "./MessageList";
 
 export function ChatPanel() {
   const hasMessages = useChatStore((s) => s.messages.length > 0);
-  const streaming = useChatStore((s) => s.streaming);
+  const error = useChatStore((s) => s.error);
+  const dismissError = useChatStore((s) => s.dismissError);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
-  const showMessageList = hasMessages || streaming;
 
-  const chatContent = (
-    <div className="ChatPane">
-      {showMessageList && <MessageList />}
-      <div className={showMessageList ? "Composer-dock" : "EmptyState"}>
-        <div className="Composer-wrapper">
-          <InputBar />
-        </div>
-      </div>
-    </div>
-  );
+  const chatRef = useRef<ImperativePanelHandle>(null);
+  const artifactRef = useRef<ImperativePanelHandle>(null);
 
-  if (!panelOpen) return <div className="Workspace">{chatContent}</div>;
-  if (maximized) return <div className="Workspace"><ArtifactPanel /></div>;
+  useEffect(() => {
+    const chat = chatRef.current;
+    const artifact = artifactRef.current;
+    if (!chat || !artifact) return;
+
+    if (!panelOpen) {
+      artifact.collapse();
+      chat.expand();
+      return;
+    }
+
+    artifact.expand();
+    if (maximized) chat.collapse();
+    else chat.expand();
+  }, [panelOpen, maximized]);
 
   return (
     <div className="Workspace">
-      <PanelGroup direction="horizontal" className="WorkspacePanels">
-        <Panel defaultSize={40} minSize={20}>
-          {chatContent}
+      <PanelGroup
+        direction="horizontal"
+        className="WorkspacePanels"
+        data-panel-open={panelOpen}
+        data-maximized={maximized}
+      >
+        <Panel
+          id="chat"
+          order={1}
+          ref={chatRef}
+          collapsible
+          collapsedSize={0}
+          defaultSize={100}
+          minSize={25}
+        >
+          <div className="ChatPane">
+            {hasMessages && <MessageList />}
+            {error && (
+              <div className="ChatPane-error" role="alert">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  className="ChatPane-errorClose"
+                  aria-label="Dismiss error"
+                  onClick={dismissError}
+                >
+                  <FiX />
+                </button>
+              </div>
+            )}
+            <div className={hasMessages ? "Composer-dock" : "EmptyState"}>
+              <div className="Composer-wrapper">
+                <InputBar />
+              </div>
+            </div>
+          </div>
         </Panel>
         <PanelResizeHandle className="PanelResizeHandle" />
-        <Panel defaultSize={60} minSize={25}>
+        <Panel
+          id="artifacts"
+          order={2}
+          ref={artifactRef}
+          collapsible
+          collapsedSize={0}
+          defaultSize={0}
+          minSize={25}
+        >
           <ArtifactPanel />
         </Panel>
       </PanelGroup>
     </div>
   );
 }
+
+export default ChatPanel;

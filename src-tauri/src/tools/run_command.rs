@@ -1,9 +1,11 @@
 use std::time::{Duration, Instant};
+
+use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use rig::tool::Tool;
+
 use super::command_manager::{CommandManager, TaskStatus};
-use super::{fs_util, ToolError};
+use super::{fs_util, workspace_root, ToolError};
 use crate::config;
 use crate::state::WorkspaceHandle;
 
@@ -28,8 +30,14 @@ impl RunCommand {
 }
 
 fn format_completed(s: &TaskStatus) -> String {
-    let code = s.exit_code.map(|c| c.to_string()).unwrap_or_else(|| s.status.clone());
-    let mut out = format!("status: {}\nexit code: {code}\nelapsed: {}s\n", s.status, s.elapsed_secs);
+    let code = s
+        .exit_code
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let mut out = format!(
+        "status: {}\nexit code: {code}\nelapsed: {}s\n",
+        s.status, s.elapsed_secs
+    );
     if s.output.trim().is_empty() {
         out.push_str("(no output)");
     } else {
@@ -54,8 +62,10 @@ or confirm it completed successfully. Call stop_command(task_id) to cancel it. \
 Pass background=true to skip waiting entirely and receive the task_id immediately — use this for dev servers \
 or any process you intend to run indefinitely. \
 The cwd parameter scopes the command to a subdirectory of the workspace — pass a relative path. \
-Read the full output from get_command_status before concluding a command succeeded or failed — \
-a zero exit code does not always mean success.".to_string()
+Commands run without an interactive stdin, so never use interactive flags. \
+Read the full output before concluding a command succeeded or failed — \
+a zero exit code does not always mean success."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -63,17 +73,23 @@ a zero exit code does not always mean success.".to_string()
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let root = self.workspace.read()
-            .ok()
-            .and_then(|g| g.clone())
-            .ok_or_else(|| ToolError::msg("no workspace is open"))?;
+        if args.command.trim().is_empty() {
+            return Err(ToolError::msg("command must not be empty"));
+        }
 
+        let root = workspace_root(&self.workspace)?;
         let cwd = match &args.cwd {
             Some(sub) => fs_util::resolve_in_workspace(&root, sub)?,
-            None => root.clone(),
+            None => root,
         };
+        if !cwd.is_dir() {
+            return Err(ToolError::msg(format!(
+                "cwd is not a directory: {}",
+                cwd.display()
+            )));
+        }
 
-        let task_id = self.manager.spawn_task(&args.command, &cwd);
+        let (task_id, done) = self.manager.spawn_task(&args.command, &cwd);
 
         if args.background.unwrap_or(false) {
             return Ok(format!(
@@ -82,20 +98,29 @@ a zero exit code does not always mean success.".to_string()
         }
 
         let handoff = Duration::from_secs(config::COMMAND_FOREGROUND_HANDOFF_SECS);
-        let start = Instant::now();
+        let started = Instant::now();
+
         loop {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            match self.manager.get_status(&task_id) {
-                Some(status) if status.status != "running" => return Ok(format_completed(&status)),
-                Some(_) => {
-                    if start.elapsed() >= handoff {
-                        return Ok(format!(
-                            "Command still running after {}s and is now tracked as task_id: '{task_id}'. It keeps running in the background — poll get_command_status(task_id: '{task_id}') for progress, or stop_command(task_id: '{task_id}') to cancel.",
-                            config::COMMAND_FOREGROUND_HANDOFF_SECS
-                        ));
-                    }
-                }
-                None => return Err(ToolError::msg("command task disappeared unexpectedly")),
+            let status = self
+                .manager
+                .get_status(&task_id)
+                .ok_or_else(|| ToolError::msg("command task disappeared unexpectedly"))?;
+            if status.status != "running" {
+                return Ok(format_completed(&status));
+            }
+
+            let remaining = handoff.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Ok(format!(
+                    "Command still running after {}s and is now tracked as task_id: '{task_id}'. It keeps running in the background — poll get_command_status(task_id: '{task_id}') for progress, or stop_command(task_id: '{task_id}') to cancel.",
+                    config::COMMAND_FOREGROUND_HANDOFF_SECS
+                ));
+            }
+
+            let tick = remaining.min(Duration::from_millis(250));
+            tokio::select! {
+                _ = done.notified() => {}
+                _ = tokio::time::sleep(tick) => {}
             }
         }
     }

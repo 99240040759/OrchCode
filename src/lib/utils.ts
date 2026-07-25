@@ -21,8 +21,10 @@ export function getDirname(pathStr: string): string {
   return parts.join("/");
 }
 
+export const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
+
 export function createMentionRegex(): RegExp {
-  return /(?:@|@\[)([a-zA-Z0-9_\-./\\]+?\.[a-zA-Z0-9]+)\]?(#L\d+(?:-\d+)?)?/g;
+  return new RegExp(MENTION_PATTERN, "g");
 }
 
 const USD_FORMAT = new Intl.NumberFormat("en-US", {
@@ -51,6 +53,10 @@ export function formatRelativeTime(ts?: number): string {
   return RELATIVE_FORMAT.format(-diffDay, "day");
 }
 
+export function formatTokens(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
 const EXT_LANG_MAP: Record<string, string> = {
   ts: "typescript",
   tsx: "tsx",
@@ -72,10 +78,18 @@ const EXT_LANG_MAP: Record<string, string> = {
   php: "php",
   swift: "swift",
   json: "json",
+  jsonc: "jsonc",
   md: "markdown",
   css: "css",
   scss: "scss",
   html: "html",
+  vue: "vue",
+  svelte: "svelte",
+  zig: "zig",
+  ex: "elixir",
+  exs: "elixir",
+  graphql: "graphql",
+  gql: "graphql",
   xml: "xml",
   svg: "xml",
   toml: "toml",
@@ -83,16 +97,27 @@ const EXT_LANG_MAP: Record<string, string> = {
   yml: "yaml",
   sh: "bash",
   bash: "bash",
+  zsh: "bash",
+  ps1: "powershell",
   sql: "sql",
+  diff: "diff",
+  patch: "diff",
+  ini: "ini",
+  cfg: "ini",
 };
 
 export function getLanguageFromPath(pathStr: string): string {
   const filename = getBasename(pathStr).toLowerCase();
-  if (filename === "dockerfile" || filename.startsWith("dockerfile."))
-    return "dockerfile";
+  if (filename === "dockerfile" || filename.startsWith("dockerfile.")) return "dockerfile";
   if (filename === "makefile" || filename.endsWith(".mk")) return "makefile";
-  if (filename.startsWith(".env")) return "bash";
+  if (filename.startsWith(".env")) return "ini";
   if (filename === ".gitignore" || filename === ".dockerignore") return "ini";
-  const ext = filename.includes(".") ? filename.split(".").pop() ?? "" : "";
-  return EXT_LANG_MAP[ext] ?? "plaintext";
+  const ext = filename.includes(".") ? (filename.split(".").pop() ?? "") : "";
+  return EXT_LANG_MAP[ext] ?? "text";
+}
+
+const IMAGE_EXT_PATTERN = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+export function isImagePath(pathStr: string): boolean {
+  return IMAGE_EXT_PATTERN.test(pathStr);
 }

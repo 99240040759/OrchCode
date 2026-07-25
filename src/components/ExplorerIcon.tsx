@@ -1,7 +1,7 @@
 import React, { SVGProps } from "react";
-import { FileIcon, FolderIcon, DefaultFolderOpenedIcon } from "@react-symbols/icons/utils";
+import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
 
-export type ExplorerIconType = "file" | "folder" | "folder-open";
+export type ExplorerIconType = "file" | "folder";
 
 export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
   type: ExplorerIconType;
@@ -9,9 +9,8 @@ export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
 }
 
 export const ExplorerIcon: React.FC<ExplorerIconProps> = ({ type, name, ...svgProps }) => {
-  if (type === "folder-open") return <DefaultFolderOpenedIcon {...svgProps} />;
   if (type === "folder") return <FolderIcon folderName={name} {...svgProps} />;
-  return <FileIcon fileName={name} autoAssign={true} {...svgProps} />;
+  return <FileIcon fileName={name} autoAssign {...svgProps} />;
 };
 
 export default ExplorerIcon;

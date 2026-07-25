@@ -4,6 +4,8 @@ import { newId } from "./utils";
 
 export type ArtifactKind = "file" | "browser" | "terminal";
 
+export const DEFAULT_BROWSER_URL = "https://www.google.com";
+
 export interface ArtifactTab {
   id: string;
   kind: ArtifactKind;
@@ -23,32 +25,43 @@ interface ArtifactsActions {
   openFile: (path?: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
+  setTabPath: (id: string, path: string) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
   toggleMaximized: () => void;
   bumpFile: (path: string) => void;
+  reset: () => void;
 }
 
 export type ArtifactsStore = ArtifactsState & ArtifactsActions;
 
+const INITIAL_STATE: ArtifactsState = {
+  tabs: [],
+  activeId: null,
+  panelOpen: false,
+  maximized: false,
+  fileVersions: {},
+};
+
+export function activeTabId(state: ArtifactsState): string | null {
+  if (state.activeId && state.tabs.some((t) => t.id === state.activeId)) return state.activeId;
+  return state.tabs[0]?.id ?? null;
+}
+
 export const useArtifactsStore = create(
   immer<ArtifactsStore>((set) => ({
-    tabs: [],
-    activeId: null,
-    panelOpen: false,
-    maximized: false,
-    fileVersions: {},
+    ...INITIAL_STATE,
 
     openFile: (path?: string) => {
       set((s) => {
-        if (path) {
-          const existing = s.tabs.find((t) => t.kind === "file" && t.path === path);
-          if (existing) {
-            s.activeId = existing.id;
-            s.panelOpen = true;
-            return;
-          }
+        const existing = path
+          ? s.tabs.find((t) => t.kind === "file" && t.path === path)
+          : s.tabs.find((t) => t.kind === "file" && !t.path);
+        if (existing) {
+          s.activeId = existing.id;
+          s.panelOpen = true;
+          return;
         }
         const tab: ArtifactTab = { id: newId(), kind: "file", path };
         s.tabs.push(tab);
@@ -61,12 +74,16 @@ export const useArtifactsStore = create(
       set((s) => {
         const existing = s.tabs.find((t) => t.kind === "browser");
         if (existing) {
-          existing.url = url ?? existing.url;
+          if (url) existing.url = url;
           s.activeId = existing.id;
           s.panelOpen = true;
           return;
         }
-        const tab: ArtifactTab = { id: newId(), kind: "browser", url: url ?? "https://www.google.com" };
+        const tab: ArtifactTab = {
+          id: newId(),
+          kind: "browser",
+          url: url ?? DEFAULT_BROWSER_URL,
+        };
         s.tabs.push(tab);
         s.activeId = tab.id;
         s.panelOpen = true;
@@ -88,21 +105,59 @@ export const useArtifactsStore = create(
       });
     },
 
-    closeTab: (id: string) => {
+    setTabPath: (id: string, path: string) => {
       set((s) => {
-        const idx = s.tabs.findIndex((t) => t.id === id);
-        if (idx === -1) return;
-        s.tabs.splice(idx, 1);
-        if (s.activeId === id) {
-          s.activeId = s.tabs[Math.max(0, idx - 1)]?.id ?? null;
-        }
-        if (s.tabs.length === 0) s.panelOpen = false;
+        const tab = s.tabs.find((t) => t.id === id);
+        if (tab && tab.kind === "file") tab.path = path;
       });
     },
 
-    setActive: (id: string) => { set((s) => { s.activeId = id; }); },
-    setPanelOpen: (open: boolean) => { set((s) => { s.panelOpen = open; }); },
-    toggleMaximized: () => { set((s) => { s.maximized = !s.maximized; }); },
-    bumpFile: (path: string) => { set((s) => { s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1; }); },
+    closeTab: (id: string) => {
+      set((s) => {
+        const index = s.tabs.findIndex((t) => t.id === id);
+        if (index === -1) return;
+        s.tabs.splice(index, 1);
+        if (s.activeId === id) {
+          s.activeId = s.tabs[Math.max(0, index - 1)]?.id ?? null;
+        }
+        if (s.tabs.length === 0) {
+          s.panelOpen = false;
+          s.maximized = false;
+        }
+      });
+    },
+
+    setActive: (id: string) => {
+      set((s) => {
+        s.activeId = id;
+      });
+    },
+
+    setPanelOpen: (open: boolean) => {
+      set((s) => {
+        s.panelOpen = open;
+        if (!open) s.maximized = false;
+      });
+    },
+
+    toggleMaximized: () => {
+      set((s) => {
+        s.maximized = !s.maximized;
+      });
+    },
+
+    bumpFile: (path: string) => {
+      set((s) => {
+        s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1;
+      });
+    },
+
+    reset: () => {
+      set((s) => {
+        Object.assign(s, INITIAL_STATE);
+        s.tabs = [];
+        s.fileVersions = {};
+      });
+    },
   }))
 );

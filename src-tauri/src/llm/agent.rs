@@ -1,7 +1,9 @@
 use std::path::Path;
+
 use rig::agent::Agent;
 use rig::client::CompletionClient;
 use rig::memory::ConversationMemory;
+
 use super::client::{ChatClient, ChatModel};
 use crate::config;
 use crate::gateway::ModelInfo;
@@ -14,19 +16,13 @@ pub fn build_agent(
     model: &ModelInfo,
     ctx: &ToolContext,
     memory: impl ConversationMemory + 'static,
-    data_dir: Option<&Path>,
+    data_dir: &Path,
     workspace: Option<&Path>,
 ) -> ChatAgent {
     let preamble = build_preamble(data_dir, workspace);
 
-    let target_model = if let Some(pos) = model.id.rfind('/') {
-        &model.id[pos + 1..]
-    } else {
-        &model.id
-    };
-
     let mut builder = client
-        .agent(target_model)
+        .agent(model.target_model_id())
         .preamble(&preamble)
         .temperature(0.0)
         .default_max_turns(config::DEFAULT_MAX_TURNS)
@@ -50,41 +46,35 @@ pub fn build_agent(
     }
 
     if let Some(effort) = model.reasoning_effort.as_deref() {
-        let validated = match effort {
-            "low" | "medium" | "high" | "xhigh" => Some(effort),
-            _ => {
-                tracing::warn!("ignoring unrecognised reasoning_effort value: {effort:?}");
-                None
-            }
-        };
-        if let Some(e) = validated {
-            builder = builder.additional_params(serde_json::json!({ "reasoning_effort": e }));
-        }
+        builder = builder.additional_params(serde_json::json!({ "reasoning_effort": effort }));
     }
 
     builder.build()
 }
 
-fn build_preamble(data_dir: Option<&Path>, workspace: Option<&Path>) -> String {
+fn build_preamble(data_dir: &Path, workspace: Option<&Path>) -> String {
     let workspace_line = match workspace {
         Some(p) => format!("Active Workspace: {}", p.display()),
-        None => "No workspace is open. Ask the user to open a folder before making file changes.".to_string(),
+        None => "No workspace is open. Ask the user to open a folder before making file changes."
+            .to_string(),
     };
 
     let all_skills = crate::skills::load_all_skills(data_dir, workspace);
     let mut skills_section = String::new();
     if !all_skills.is_empty() {
         skills_section.push_str("\n## SKILLS\n");
-        skills_section.push_str("These are reusable procedure guides for common task categories. \
+        skills_section.push_str(
+            "These are reusable procedure guides for common task categories. \
 When your current task matches a skill name, call read_skill with that name BEFORE starting work. \
-The skill content gives you a proven sequence of steps, tool calls, and checks — follow it.\n\n");
+The skill content gives you a proven sequence of steps, tool calls, and checks — follow it.\n\n",
+        );
         for sk in &all_skills {
             skills_section.push_str(&format!("- **{}** — {}\n", sk.name, sk.description));
         }
     }
 
     format!(
-"You are Orch Code, an autonomous AI software engineer embedded inside a desktop IDE. \
+        "You are Orch Code, an autonomous AI software engineer embedded inside a desktop IDE. \
 You have full access to the user's codebase and can read files, edit files, run commands, \
 search the web, and control an integrated browser. You operate in a continuous tool-call loop: \
 you think, call a tool, receive the result, and continue until the task is complete. \
@@ -114,14 +104,14 @@ Every tool returns a result you must read and reason about before continuing:
 - **run_command** returns either the full output (short commands) or a task_id (long commands). \
   For a task_id, poll get_command_status until the command finishes, then check the exit code AND the output.
 - **get_command_status** returns status, exit code, and output. \
-  \"running\" means keep polling. \"finished\" with exit code 0 means success — read the output to confirm. \
-  Non-zero exit code means failure — read the output to diagnose the error.
+  \"running\" means keep polling. \"completed\" with exit code 0 means success — read the output to confirm. \
+  \"failed\" with a non-zero exit code means failure — read the output to diagnose the error.
 - **search_workspace** returns file:line: content matches. Use these to locate exactly where to read or edit.
 - **web_search** returns titles, URLs, and snippets. Read them before deciding your next action.
 - **browser_navigate** opens a URL. Follow with browser_get_content to confirm what loaded.
 - **browser_get_content** returns visible page text. Use it to verify UI state, read docs, or check errors.
 
-If a tool returns an error, diagnose it from the error message before retrying. \
+Tool failures are prefixed with [[tool-error]]. Diagnose the message before retrying. \
 Do not retry the same call unchanged if it failed — something must be different.
 
 ## WORKING WITH FILES
@@ -140,9 +130,10 @@ Do not retry the same call unchanged if it failed — something must be differen
 2. For commands that take more than ~30 seconds (install, long build, dev server): \
    use background=true with run_command to get a task_id immediately, then poll get_command_status.
 3. When polling: wait a few seconds between calls. Read the output each time — errors appear in the stream.
-4. A build that outputs warnings but exits 0 still succeeded. A build that exits non-zero failed — \
+4. Commands run with no interactive stdin. Never pass interactive flags.
+5. A build that outputs warnings but exits 0 still succeeded. A build that exits non-zero failed — \
    read the output to find the error, fix the file, and run the build again.
-5. Never declare success on a command without checking its exit code and output.
+6. Never declare success on a command without checking its exit code and output.
 
 ## INVESTIGATION STRATEGY
 
@@ -164,5 +155,6 @@ A task is complete only when you have empirical evidence it works:
 - For command tasks: exit code 0 and output confirms the expected outcome.
 - For file edits: reading the file back confirms the content is exactly right.
 
-Never tell the user a task is done based on reasoning alone. Show the evidence.")
+Never tell the user a task is done based on reasoning alone. Show the evidence."
+    )
 }

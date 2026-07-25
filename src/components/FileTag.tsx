@@ -9,9 +9,6 @@ export interface FileTagProps {
   lineRange?: string;
   added?: number;
   removed?: number;
-  prefix?: React.ReactNode;
-  onClick?: () => void;
-  onOpen?: (path: string) => void;
   interactive?: boolean;
   className?: string;
 }
@@ -22,46 +19,49 @@ export const FileTag: React.FC<FileTagProps> = ({
   lineRange,
   added,
   removed,
-  prefix,
-  onClick,
-  onOpen,
   interactive = true,
   className = "",
 }) => {
+  const openFile = useArtifactsStore((s) => s.openFile);
   const filename = name || getBasename(path);
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onClick) onClick();
-    else if (onOpen && interactive && path) onOpen(path);
-    else if (interactive && path) useArtifactsStore.getState().openFile(path);
-  };
+  const clickable = interactive && Boolean(path);
 
-  const isClickable = (interactive && Boolean(path)) || Boolean(onClick);
+  const activate = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+    openFile(path);
+  };
 
   return (
     <span
-      className={`FileTag ${isClickable ? "FileTag-clickable" : ""} ${className}`}
+      className={`FileTag ${clickable ? "FileTag-clickable" : ""} ${className}`}
       title={path || filename}
-      onClick={isClickable ? handleClick : undefined}
-      role={isClickable ? "button" : undefined}
-      tabIndex={isClickable ? 0 : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? activate : undefined}
       onKeyDown={
-        isClickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                handleClick(e as unknown as React.MouseEvent);
+        clickable
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                activate(event);
               }
             }
           : undefined
       }
     >
-      {prefix && <span className="FileTag-prefix">{prefix}</span>}
-      <ExplorerIcon type="file" name={filename} className="FileTag-icon" style={{ width: 14, height: 14, flexShrink: 0 }} />
+      <ExplorerIcon
+        type="file"
+        name={filename}
+        className="FileTag-icon"
+        width={14}
+        height={14}
+      />
       <span className="FileTag-name">{filename}</span>
       {lineRange && <span className="FileTag-lineRange">{lineRange}</span>}
       {typeof added === "number" && added > 0 && <span className="FileTag-added">+{added}</span>}
-      {typeof removed === "number" && removed > 0 && <span className="FileTag-removed">-{removed}</span>}
+      {typeof removed === "number" && removed > 0 && (
+        <span className="FileTag-removed">-{removed}</span>
+      )}
     </span>
   );
 };

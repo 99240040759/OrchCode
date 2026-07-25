@@ -2,12 +2,27 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import * as api from "./api";
 import { newId } from "./utils";
-import type { ModelDto, Budget, WorkspaceInfo, SessionSummary, ToolDisplayInfo, MessageItemView, AttachmentRef } from "./api";
+import type {
+  AttachmentRef,
+  Budget,
+  ChatStreamEvent,
+  MessageItemView,
+  ModelDto,
+  SessionSummary,
+  ToolDisplayInfo,
+  WorkspaceInfo,
+} from "./api";
 
-type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high";
 
-let sessionsListenerBound = false;
-let modelsListenerBound = false;
+const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high"];
+
+export interface MessageAttachment {
+  name: string;
+  isImage: boolean;
+  path?: string;
+  dataUrl?: string;
+}
 
 export interface ReasoningItem {
   type: "reasoning";
@@ -53,28 +68,55 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   items: MessageItem[];
-  attachments?: AttachmentRef[];
-  streaming?: boolean;
+  attachments: MessageAttachment[];
+  streaming: boolean;
   error?: string;
   usage?: TokenUsage;
 }
 
+const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+
+let sessionsListenerBound = false;
+let modelsListenerBound = false;
+
 function viewItemToLocal(item: MessageItemView): MessageItem {
-  if (item.type === "text") return { type: "text", id: item.id, text: item.text };
-  if (item.type === "reasoning") {
-    return { type: "reasoning", id: item.id, text: item.text, active: false, startTime: 0, durationSeconds: item.durationSeconds };
+  switch (item.type) {
+    case "text":
+      return { type: "text", id: item.id, text: item.text };
+    case "reasoning":
+      return {
+        type: "reasoning",
+        id: item.id,
+        text: item.text,
+        active: false,
+        startTime: 0,
+        durationSeconds: item.durationSeconds ?? undefined,
+      };
+    case "compactionNotice":
+      return {
+        type: "compactionNotice",
+        id: item.id,
+        originalMessageCount: item.originalMessageCount,
+        ts: item.ts,
+      };
+    case "toolCall":
+      return {
+        type: "toolCall",
+        id: item.id,
+        name: item.name,
+        args: item.args,
+        displayInfo: item.displayInfo,
+        output: item.output ?? undefined,
+        status: item.status === "error" ? "error" : "done",
+      };
   }
-  if (item.type === "compactionNotice") {
-    return { type: "compactionNotice", id: item.id, originalMessageCount: item.originalMessageCount, ts: item.ts };
-  }
+}
+
+function usageFrom(session: SessionSummary): TokenUsage {
   return {
-    type: "toolCall",
-    id: item.id,
-    name: item.name,
-    args: item.args,
-    displayInfo: item.displayInfo ?? { label: item.name || "Tool", icon: "terminal", opensArtifact: false },
-    output: item.output,
-    status: item.status as "running" | "done" | "error",
+    inputTokens: session.lastInputTokens,
+    outputTokens: session.lastOutputTokens,
+    totalTokens: session.lastTotalTokens,
   };
 }
 
@@ -91,88 +133,97 @@ interface ChatState {
   budget: Budget | null;
   workspace: WorkspaceInfo | null;
   error: string | null;
+  initialized: boolean;
 }
 
 interface ChatActions {
   initialize: () => Promise<void>;
+  reset: () => void;
   newChat: () => void;
   selectSession: (id: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
-  send: (prompt: string, attachments?: AttachmentRef[]) => Promise<void>;
+  send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
   cancel: () => void;
-  setSelectedModel: (key: string) => Promise<void>;
+  setSelectedModel: (key: string) => void;
   setReasoningEffort: (effort: ReasoningEffort) => void;
   pickWorkspace: () => Promise<void>;
   resetToSandbox: () => Promise<void>;
   refreshSessions: () => Promise<void>;
-  refreshBudget: () => Promise<void>;
   refreshModels: () => Promise<void>;
+  refreshBudget: () => Promise<void>;
+  dismissError: () => void;
 }
 
 export type ChatStore = ChatState & ChatActions;
 
-const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+const INITIAL_STATE: ChatState = {
+  sessions: [],
+  currentSessionId: newId(),
+  sessionGeneration: 0,
+  messages: [],
+  streaming: false,
+  sessionTokens: ZERO_USAGE,
+  models: [],
+  selectedModel: null,
+  reasoningEffort: "medium",
+  budget: null,
+  workspace: null,
+  error: null,
+  initialized: false,
+};
 
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
-    sessions: [],
-    currentSessionId: newId(),
-    sessionGeneration: 0,
-    messages: [],
-    streaming: false,
-    sessionTokens: ZERO_USAGE,
-    models: [],
-    selectedModel: null,
-    reasoningEffort: "medium",
-    budget: null,
-    workspace: null,
-    error: null,
+    ...INITIAL_STATE,
 
     initialize: async () => {
-      const [sessions, workspace, models] = await Promise.allSettled([
-        api.listSessions(),
-        api.getWorkspaceInfo(),
-        api.listModels(),
-      ]);
-      const [savedModelKey, savedEffort] = await Promise.all([
+      if (get().initialized) return;
+      set((s) => {
+        s.initialized = true;
+      });
+
+      const [sessions, workspace, models, savedModel, savedEffort] = await Promise.all([
+        api.listSessions().catch(() => [] as SessionSummary[]),
+        api.getWorkspaceInfo().catch(() => null),
+        api.listModels().catch(() => [] as ModelDto[]),
         api.getUserPref("selectedModel").catch(() => null),
         api.getUserPref("reasoningEffort").catch(() => null),
       ]);
+
       set((s) => {
-        if (sessions.status === "fulfilled") s.sessions = sessions.value;
-        if (workspace.status === "fulfilled") s.workspace = workspace.value;
-        if (models.status === "fulfilled") {
-          s.models = models.value;
-          const preferred = typeof savedModelKey === "string"
-            ? models.value.find((m) => m.key === savedModelKey)
-            : undefined;
-          s.selectedModel = preferred ?? models.value[0] ?? null;
-        }
-        if (savedEffort === "low" || savedEffort === "medium" || savedEffort === "high") {
-          s.reasoningEffort = savedEffort;
+        s.sessions = sessions;
+        if (workspace) s.workspace = workspace;
+        s.models = models;
+        const preferred = savedModel ? models.find((m) => m.key === savedModel) : undefined;
+        s.selectedModel = preferred ?? models[0] ?? null;
+        if (savedEffort && (REASONING_EFFORTS as string[]).includes(savedEffort)) {
+          s.reasoningEffort = savedEffort as ReasoningEffort;
         }
       });
-      api.getBudget().then((b) => {
-        if (b) set((s) => { s.budget = b; });
-      }).catch(() => {});
 
-      if (api.inTauri() && !sessionsListenerBound) {
+      void get().refreshBudget();
+
+      const { listen } = await import("@tauri-apps/api/event");
+      if (!sessionsListenerBound) {
         sessionsListenerBound = true;
-        import("@tauri-apps/api/event").then(({ listen }) => {
-          listen("sessions-updated", () => {
-            get().refreshSessions();
-          });
-        }).catch(() => { sessionsListenerBound = false; });
+        await listen("sessions-updated", () => {
+          void get().refreshSessions();
+        });
       }
-
-      if (api.inTauri() && !modelsListenerBound) {
+      if (!modelsListenerBound) {
         modelsListenerBound = true;
-        import("@tauri-apps/api/event").then(({ listen }) => {
-          listen("models-updated", () => {
-            get().refreshModels();
-          });
-        }).catch(() => { modelsListenerBound = false; });
+        await listen("models-updated", () => {
+          void get().refreshModels();
+        });
       }
+    },
+
+    reset: () => {
+      set((s) => {
+        Object.assign(s, INITIAL_STATE);
+        s.currentSessionId = newId();
+        s.sessionGeneration += 1;
+      });
     },
 
     newChat: () => {
@@ -187,22 +238,30 @@ export const useChatStore = create(
     },
 
     selectSession: async (id: string) => {
-      if (get().streaming) return;
-      const targetSession = get().sessions.find((s) => s.id === id);
+      if (get().streaming || get().currentSessionId === id) return;
+      const target = get().sessions.find((s) => s.id === id);
+
       set((s) => {
         s.currentSessionId = id;
         s.sessionGeneration += 1;
         s.messages = [];
-        s.sessionTokens = targetSession
-          ? { inputTokens: targetSession.lastInputTokens, outputTokens: targetSession.lastOutputTokens, totalTokens: targetSession.lastTotalTokens }
-          : ZERO_USAGE;
+        s.sessionTokens = target ? usageFrom(target) : ZERO_USAGE;
         s.error = null;
       });
-      if (targetSession?.workspacePath && api.inTauri()) {
-        api.setWorkspace(targetSession.workspacePath).then((info) => {
-          set((s) => { s.workspace = info; });
-        }).catch(() => {});
+
+      if (target?.workspacePath) {
+        try {
+          const info = await api.setWorkspace(target.workspacePath);
+          set((s) => {
+            s.workspace = info;
+          });
+        } catch (e) {
+          set((s) => {
+            s.error = api.errorMessage(e);
+          });
+        }
       }
+
       try {
         const views = await api.getSessionView(id);
         set((s) => {
@@ -211,27 +270,33 @@ export const useChatStore = create(
             id: v.id,
             role: v.role as ChatMessage["role"],
             items: v.items.map(viewItemToLocal),
-            attachments: v.attachments && v.attachments.length > 0
-              ? v.attachments.map((a) => ({ path: a.dataUrl || a.name, name: a.name, isImage: a.isImage }))
-              : undefined,
+            attachments: v.attachments.map((a) => ({
+              name: a.name,
+              isImage: a.isImage,
+              dataUrl: a.dataUrl ?? undefined,
+            })),
             streaming: false,
           }));
         });
       } catch (e) {
         set((s) => {
-          if (s.currentSessionId === id) {
-            s.error = e instanceof Error ? e.message : String(e);
-          }
+          if (s.currentSessionId === id) s.error = api.errorMessage(e);
         });
       }
     },
 
     deleteSession: async (id: string) => {
       if (get().streaming && get().currentSessionId === id) {
-        api.cancelChat(id).catch(() => {});
-        await new Promise((r) => setTimeout(r, 300));
+        get().cancel();
       }
-      await api.clearSession(id);
+      try {
+        await api.clearSession(id);
+      } catch (e) {
+        set((s) => {
+          s.error = api.errorMessage(e);
+        });
+        return;
+      }
       set((s) => {
         s.sessions = s.sessions.filter((sess) => sess.id !== id);
         if (s.currentSessionId === id) {
@@ -245,15 +310,21 @@ export const useChatStore = create(
       });
     },
 
-    send: async (prompt: string, attachments?: AttachmentRef[]) => {
+    send: async (prompt: string, attachments: AttachmentRef[]) => {
       const { streaming, currentSessionId, selectedModel, reasoningEffort } = get();
       const text = prompt.trim();
-      const hasAttachments = !!attachments && attachments.length > 0;
-      if ((!text && !hasAttachments) || streaming) return;
+      if (streaming) return false;
+      if (!text && attachments.length === 0) return false;
+      if (!selectedModel) {
+        set((s) => {
+          s.error = "Select a model before sending a message";
+        });
+        return false;
+      }
 
+      const sessionId = currentSessionId;
       const userMsgId = newId();
       const assistantMsgId = newId();
-      const sessionIdAtSend = currentSessionId;
 
       set((s) => {
         s.error = null;
@@ -262,259 +333,322 @@ export const useChatStore = create(
           id: userMsgId,
           role: "user",
           items: [{ type: "text", id: newId(), text }],
-          attachments: hasAttachments ? attachments : undefined,
+          attachments: attachments.map((a) => ({
+            name: a.name,
+            isImage: a.isImage,
+            path: a.path,
+          })),
+          streaming: false,
         });
-        s.messages.push({ id: assistantMsgId, role: "assistant", items: [], streaming: true });
+        s.messages.push({
+          id: assistantMsgId,
+          role: "assistant",
+          items: [],
+          attachments: [],
+          streaming: true,
+        });
       });
 
       const patch = (fn: (m: ChatMessage) => void) => {
         set((s) => {
-          if (s.currentSessionId !== sessionIdAtSend) return;
+          if (s.currentSessionId !== sessionId) return;
           const msg = s.messages.find((m) => m.id === assistantMsgId);
           if (msg) fn(msg);
         });
       };
 
-      const finishStreaming = () => {
-        set((s) => {
-          if (s.currentSessionId === sessionIdAtSend) s.streaming = false;
-        });
-      };
-
-      let textBuf = "";
-      let reasoningBuf = "";
-      let timerId: ReturnType<typeof setInterval> | null = null;
-
-      const flushBatch = () => {
-        const t = textBuf;
-        const r = reasoningBuf;
-        textBuf = "";
-        reasoningBuf = "";
-        if (!t && !r) return;
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         patch((m) => {
-          if (r) {
+          m.streaming = false;
+        });
+        set((s) => {
+          if (s.currentSessionId === sessionId) s.streaming = false;
+        });
+      };
+
+      let textBuffer = "";
+      let reasoningBuffer = "";
+      let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+      const flush = () => {
+        const pendingText = textBuffer;
+        const pendingReasoning = reasoningBuffer;
+        textBuffer = "";
+        reasoningBuffer = "";
+        if (!pendingText && !pendingReasoning) return;
+        patch((m) => {
+          if (pendingReasoning) {
             const last = m.items[m.items.length - 1];
-            if (last?.type === "reasoning" && last.active) last.text += r;
-            else m.items.push({ type: "reasoning", id: newId(), text: r, active: true, startTime: Date.now() });
+            if (last?.type === "reasoning" && last.active) last.text += pendingReasoning;
+            else
+              m.items.push({
+                type: "reasoning",
+                id: newId(),
+                text: pendingReasoning,
+                active: true,
+                startTime: Date.now(),
+              });
           }
-          if (t) {
+          if (pendingText) {
             const last = m.items[m.items.length - 1];
-            if (last?.type === "text") last.text += t;
-            else m.items.push({ type: "text", id: newId(), text: t });
+            if (last?.type === "text") last.text += pendingText;
+            else m.items.push({ type: "text", id: newId(), text: pendingText });
           }
         });
       };
 
-      const startTimer = () => {
-        if (timerId === null) timerId = setInterval(flushBatch, 30);
+      const startFlushTimer = () => {
+        if (flushTimer === null) flushTimer = setInterval(flush, 40);
       };
 
-      const stopTimer = () => {
-        if (timerId !== null) { clearInterval(timerId); timerId = null; }
+      const stopFlushTimer = () => {
+        if (flushTimer !== null) {
+          clearInterval(flushTimer);
+          flushTimer = null;
+        }
+      };
+
+      const handleEvent = (event: ChatStreamEvent) => {
+        switch (event.type) {
+          case "text":
+            textBuffer += event.delta;
+            startFlushTimer();
+            break;
+          case "reasoning":
+            reasoningBuffer += event.delta;
+            startFlushTimer();
+            break;
+          case "reasoningDone":
+            stopFlushTimer();
+            flush();
+            patch((m) => {
+              for (let i = m.items.length - 1; i >= 0; i--) {
+                const item = m.items[i];
+                if (item.type === "reasoning" && item.active) {
+                  item.active = false;
+                  item.durationSeconds = event.durationSeconds;
+                  break;
+                }
+              }
+            });
+            break;
+          case "toolCall":
+            stopFlushTimer();
+            flush();
+            patch((m) => {
+              m.items.push({
+                type: "toolCall",
+                id: event.id,
+                name: event.name,
+                args: event.args,
+                displayInfo: event.displayInfo,
+                status: "running",
+              });
+            });
+            if (
+              event.displayInfo.opensArtifact &&
+              event.displayInfo.icon === "globe" &&
+              event.displayInfo.targetText
+            ) {
+              const url = event.displayInfo.targetText;
+              void import("./artifacts").then(({ useArtifactsStore }) => {
+                useArtifactsStore.getState().openBrowser(url);
+              });
+            }
+            break;
+          case "toolResult":
+            patch((m) => {
+              const item = m.items.find(
+                (i): i is ToolCallItem => i.type === "toolCall" && i.id === event.id
+              );
+              if (item) {
+                item.output = event.output;
+                item.status = event.isError ? "error" : "done";
+              }
+            });
+            break;
+          case "usage": {
+            const usage: TokenUsage = {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              totalTokens: event.totalTokens,
+            };
+            patch((m) => {
+              m.usage = usage;
+            });
+            set((s) => {
+              if (s.currentSessionId === sessionId) s.sessionTokens = usage;
+            });
+            break;
+          }
+          case "compacted":
+            set((s) => {
+              if (s.currentSessionId !== sessionId) return;
+              s.messages.push({
+                id: newId(),
+                role: "system",
+                items: [
+                  {
+                    type: "compactionNotice",
+                    id: newId(),
+                    originalMessageCount: event.originalMessageCount,
+                    ts: event.ts,
+                  },
+                ],
+                attachments: [],
+                streaming: false,
+              });
+            });
+            break;
+          case "done":
+            stopFlushTimer();
+            flush();
+            settle();
+            void get().refreshBudget();
+            break;
+          case "cancelled":
+            stopFlushTimer();
+            flush();
+            settle();
+            break;
+          case "error":
+            stopFlushTimer();
+            flush();
+            patch((m) => {
+              m.error = event.message;
+            });
+            settle();
+            set((s) => {
+              if (s.currentSessionId === sessionId) s.error = event.message;
+            });
+            break;
+        }
       };
 
       try {
-        await api.startChat(sessionIdAtSend, selectedModel?.key ?? "", text, reasoningEffort, attachments, (raw: unknown) => {
-          const e = raw as {
-            type: string;
-            delta?: string;
-            id?: string;
-            name?: string;
-            args?: string;
-            displayInfo?: ToolDisplayInfo;
-            output?: string;
-            message?: string;
-            durationSeconds?: number;
-            originalMessageCount?: number;
-            ts?: number;
-          };
-          switch (e.type) {
-            case "text": {
-              textBuf += e.delta ?? "";
-              startTimer();
-              break;
-            }
-            case "reasoning": {
-              reasoningBuf += e.delta ?? "";
-              startTimer();
-              break;
-            }
-            case "reasoningDone": {
-              stopTimer();
-              flushBatch();
-              patch((m) => {
-                for (let i = m.items.length - 1; i >= 0; i--) {
-                  const it = m.items[i];
-                  if (it.type === "reasoning" && it.active) {
-                    it.active = false;
-                    it.durationSeconds = e.durationSeconds ?? Math.max(1, Math.round((Date.now() - it.startTime) / 1000));
-                    break;
-                  }
-                }
-              });
-              break;
-            }
-            case "toolCall": {
-              stopTimer();
-              flushBatch();
-              const info = e.displayInfo ?? { label: e.name ?? "Tool", icon: "terminal", opensArtifact: false };
-              patch((m) => {
-                m.items.push({
-                  type: "toolCall",
-                  id: e.id!,
-                  name: e.name!,
-                  args: e.args!,
-                  displayInfo: info,
-                  status: "running",
-                });
-              });
-              if (info.opensArtifact && info.icon === "globe" && info.targetText) {
-                import("./artifacts").then(({ useArtifactsStore }) => {
-                  useArtifactsStore.getState().openBrowser(info.targetText!);
-                }).catch(() => {});
-              }
-              break;
-            }
-            case "toolResult": {
-              const tre = e as { type: string; id: string; output: string; isError?: boolean };
-              patch((m) => {
-                const item = m.items.find((i): i is ToolCallItem => i.type === "toolCall" && i.id === tre.id);
-                if (item) {
-                  item.output = tre.output;
-                  item.status = tre.isError ? "error" : "done";
-                }
-              });
-              break;
-            }
-            case "usage": {
-              const ue = e as { type: string; inputTokens?: number; outputTokens?: number; totalTokens?: number };
-              const turnUsage: TokenUsage = {
-                inputTokens: ue.inputTokens ?? 0,
-                outputTokens: ue.outputTokens ?? 0,
-                totalTokens: ue.totalTokens ?? 0,
-              };
-              patch((m) => { m.usage = turnUsage; });
-              set((s) => {
-                if (s.currentSessionId !== sessionIdAtSend) return;
-                s.sessionTokens = {
-                  inputTokens: Math.max(s.sessionTokens.inputTokens, turnUsage.inputTokens),
-                  outputTokens: s.sessionTokens.outputTokens + turnUsage.outputTokens,
-                  totalTokens: Math.max(s.sessionTokens.inputTokens, turnUsage.inputTokens) + s.sessionTokens.outputTokens + turnUsage.outputTokens,
-                };
-              });
-              break;
-            }
-            case "compacted": {
-              set((s) => {
-                if (s.currentSessionId !== sessionIdAtSend) return;
-                s.messages.push({
-                  id: newId(),
-                  role: "system",
-                  items: [{
-                    type: "compactionNotice",
-                    id: newId(),
-                    originalMessageCount: e.originalMessageCount ?? 0,
-                    ts: e.ts ?? Date.now(),
-                  }],
-                });
-              });
-              break;
-            }
-            case "done": {
-              stopTimer();
-              flushBatch();
-              patch((m) => { m.streaming = false; });
-              finishStreaming();
-              api.getBudget().then((b) => {
-                if (b) set((s) => { s.budget = b; });
-              }).catch(() => {});
-              get().refreshSessions();
-              break;
-            }
-            case "cancelled": {
-              stopTimer();
-              flushBatch();
-              patch((m) => { m.streaming = false; });
-              finishStreaming();
-              break;
-            }
-            case "error": {
-              stopTimer();
-              flushBatch();
-              patch((m) => { m.streaming = false; m.error = e.message; });
-              finishStreaming();
-              set((s) => {
-                if (s.currentSessionId === sessionIdAtSend && !s.error) {
-                  s.error = e.message ?? "An error occurred";
-                }
-              });
-              break;
-            }
-          }
-        });
+        await api.startChat(
+          sessionId,
+          selectedModel.key,
+          text,
+          reasoningEffort,
+          attachments,
+          handleEvent
+        );
+        stopFlushTimer();
+        flush();
+        settle();
+        return true;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        stopTimer();
-        flushBatch();
-        patch((m) => { m.streaming = false; m.error = msg; });
-        finishStreaming();
+        const message = api.errorMessage(e);
+        stopFlushTimer();
+        flush();
+        settle();
         set((s) => {
-          if (s.currentSessionId === sessionIdAtSend) s.error = msg;
+          if (s.currentSessionId !== sessionId) return;
+          s.error = message;
+          s.messages = s.messages.filter(
+            (m) => m.id !== userMsgId && m.id !== assistantMsgId
+          );
         });
+        return false;
       }
     },
 
     cancel: () => {
-      const { currentSessionId } = get();
-      api.cancelChat(currentSessionId).catch(() => {});
+      void api.cancelChat(get().currentSessionId).catch(() => undefined);
     },
 
-    setSelectedModel: async (key: string) => {
-      const { models } = get();
-      const model = models.find((m) => m.key === key);
+    setSelectedModel: (key: string) => {
+      const model = get().models.find((m) => m.key === key);
       if (!model) return;
-      set((s) => { s.selectedModel = model; });
-      await api.setUserPref("selectedModel", key).catch(() => {});
+      set((s) => {
+        s.selectedModel = model;
+      });
+      void api.setUserPref("selectedModel", key).catch(() => undefined);
     },
 
     setReasoningEffort: (effort: ReasoningEffort) => {
-      set((s) => { s.reasoningEffort = effort; });
-      api.setUserPref("reasoningEffort", effort).catch(() => {});
+      set((s) => {
+        s.reasoningEffort = effort;
+      });
+      void api.setUserPref("reasoningEffort", effort).catch(() => undefined);
     },
 
     pickWorkspace: async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === "string") {
+      if (typeof selected !== "string") return;
+      try {
         const info = await api.setWorkspace(selected);
-        set((s) => { s.workspace = info; });
+        set((s) => {
+          s.workspace = info;
+        });
+      } catch (e) {
+        set((s) => {
+          s.error = api.errorMessage(e);
+        });
       }
     },
 
     resetToSandbox: async () => {
-      const info = await api.useSandbox();
-      set((s) => { s.workspace = info; });
+      try {
+        const info = await api.useSandbox();
+        set((s) => {
+          s.workspace = info;
+        });
+      } catch (e) {
+        set((s) => {
+          s.error = api.errorMessage(e);
+        });
+      }
     },
 
     refreshSessions: async () => {
       try {
         const sessions = await api.listSessions();
-        set((s) => { s.sessions = sessions; });
-      } catch {}
+        set((s) => {
+          s.sessions = sessions;
+        });
+      } catch {
+        return;
+      }
+    },
+
+    refreshModels: async () => {
+      try {
+        const models = await api.listModels();
+        set((s) => {
+          s.models = models;
+          if (s.selectedModel) {
+            const current = models.find((m) => m.key === s.selectedModel?.key);
+            s.selectedModel = current ?? models[0] ?? null;
+          } else {
+            s.selectedModel = models[0] ?? null;
+          }
+        });
+      } catch {
+        return;
+      }
     },
 
     refreshBudget: async () => {
       try {
         const budget = await api.getBudget();
-        if (budget) set((s) => { s.budget = budget; });
-      } catch {}
+        set((s) => {
+          s.budget = budget;
+        });
+      } catch {
+        return;
+      }
     },
 
-    refreshModels: async () => {
-      try {
-        const models = await api.listModels(true);
-        set((s) => { s.models = models; });
-      } catch {}
+    dismissError: () => {
+      set((s) => {
+        s.error = null;
+      });
     },
   }))
 );

@@ -1,14 +1,9 @@
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::*;
+pub use windows::setup_native_window;
 
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "macos")]
-pub use macos::*;
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(target_os = "windows"))]
 mod other;
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-pub use other::*;
+#[cfg(not(target_os = "windows"))]
+pub use other::setup_native_window;

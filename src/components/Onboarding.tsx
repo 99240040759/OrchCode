@@ -2,16 +2,22 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Titlebar } from "./ui/Titlebar";
 import { Button } from "./ui/Button";
 import { useAuthStore } from "../lib/auth";
-import { inTauri } from "../lib/api";
 
 const TERMS_URL = "https://orch.live/terms";
 const PRIVACY_URL = "https://orch.live/privacy";
 
-function openExternal(e: React.MouseEvent<HTMLAnchorElement>, url: string) {
-  if (inTauri()) {
-    e.preventDefault();
-    void openUrl(url);
-  }
+function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        void openUrl(href);
+      }}
+    >
+      {children}
+    </a>
+  );
 }
 
 export function Onboarding() {
@@ -23,26 +29,36 @@ export function Onboarding() {
     <div className="Onboarding">
       <Titlebar className="Onboarding-titlebar" />
       <div className="Onboarding-content">
-        <img src="/icon.png" alt="Orch Code Logo" className="Onboarding-logo-img" />
+        <img src="/icon.png" alt="" className="Onboarding-logo-img" />
         <h1 className="Onboarding-title">Welcome to Orch Code</h1>
         <p className="Onboarding-sub">
-          Your AI software engineer, right on your desktop. Sign in to start planning, building, and shipping.
+          Your AI software engineer, right on your desktop. Sign in to start planning, building,
+          and shipping.
         </p>
 
-        <Button className="GoogleBtn" onClick={() => void signInWithGoogle()} disabled={signingIn} aria-busy={signingIn}>
-          <img src="/google.svg" alt="Google" className="GoogleIcon" style={{ width: 18, height: 18 }} />
+        <Button
+          className="GoogleBtn"
+          onClick={() => void signInWithGoogle()}
+          disabled={signingIn}
+          aria-busy={signingIn}
+        >
+          <img src="/google.svg" alt="" className="GoogleIcon" />
           <span>{signingIn ? "Waiting for Google…" : "Continue with Google"}</span>
         </Button>
 
-        {error && <div className="Onboarding-err" role="alert">{error}</div>}
+        {error && (
+          <div className="Onboarding-err" role="alert">
+            {error}
+          </div>
+        )}
 
         <p className="Onboarding-legal">
-          By continuing you agree to the{" "}
-          <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => openExternal(e, TERMS_URL)}>Terms of Service</a>
-          {" "}and acknowledge the{" "}
-          <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => openExternal(e, PRIVACY_URL)}>Privacy Policy</a>.
+          By continuing you agree to the <ExternalLink href={TERMS_URL}>Terms of Service</ExternalLink>{" "}
+          and acknowledge the <ExternalLink href={PRIVACY_URL}>Privacy Policy</ExternalLink>.
         </p>
       </div>
     </div>
   );
 }
+
+export default Onboarding;

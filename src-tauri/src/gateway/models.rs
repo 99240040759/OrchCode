@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     #[serde(default)]
@@ -24,6 +25,13 @@ impl ModelInfo {
     pub fn supports_images(&self) -> bool {
         self.capabilities.iter().any(|c| c == "images")
     }
+
+    pub fn target_model_id(&self) -> &str {
+        match self.id.rfind('/') {
+            Some(pos) => &self.id[pos + 1..],
+            None => &self.id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -41,16 +49,18 @@ impl ModelCatalog {
     }
 
     pub fn resolve(&self, key: &str) -> Option<&ModelInfo> {
-        if let Some(info) = self.entries.get(key) {
-            return Some(info);
-        }
-        let lower = key.to_lowercase();
-        self.entries.iter().find(|(k, v)| k.to_lowercase() == lower || v.id == key).map(|(_, v)| v)
+        self.entries
+            .get(key)
+            .or_else(|| self.entries.values().find(|v| v.id == key))
     }
 
     pub fn list(&self) -> Vec<(String, ModelInfo)> {
-        let mut out: Vec<(String, ModelInfo)> = self.entries.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut out: Vec<(String, ModelInfo)> = self
+            .entries
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        out.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.0.cmp(&b.0)));
         out
     }
 }

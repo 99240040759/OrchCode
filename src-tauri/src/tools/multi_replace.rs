@@ -1,7 +1,8 @@
+use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use rig::tool::Tool;
-use super::{fs_util, ToolError};
+
+use super::{fs_util, workspace_root, ToolError};
 use crate::state::WorkspaceHandle;
 
 #[derive(Deserialize, JsonSchema)]
@@ -41,7 +42,8 @@ All occurrences of each old_string are replaced. \
 If you need to change multiple unrelated parts of a file, pass all replacements in a single call — \
 they are applied in the order listed. \
 Always read the file first so you know the exact current content before constructing replacements. \
-On success, returns a summary of how many replacements were applied and how many occurrences were changed.".to_string()
+On success, returns a summary of how many replacements were applied and how many occurrences were changed."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -53,28 +55,30 @@ On success, returns a summary of how many replacements were applied and how many
             return Err(ToolError::msg("no replacements provided"));
         }
 
-        let root = self.workspace.read()
-            .ok()
-            .and_then(|g| g.clone())
-            .ok_or_else(|| ToolError::msg("no workspace is open"))?;
-
+        let root = workspace_root(&self.workspace)?;
         let path = fs_util::resolve_in_workspace(&root, &args.path)?;
 
-        let meta = tokio::fs::metadata(&path).await.map_err(|e| {
-            ToolError::msg(format!("cannot stat {}: {e}", args.path))
-        })?;
-        if meta.len() > 10 * 1024 * 1024 {
-            return Err(ToolError::msg(format!("file too large to edit: {}", args.path)));
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .map_err(|e| ToolError::msg(format!("cannot stat {}: {e}", args.path)))?;
+        if meta.len() > fs_util::FILE_SIZE_LIMIT {
+            return Err(ToolError::msg(format!(
+                "file too large to edit: {}",
+                args.path
+            )));
         }
 
-        let mut content = tokio::fs::read_to_string(&path).await.map_err(|e| {
-            ToolError::msg(format!("cannot read {}: {e}", args.path))
-        })?;
+        let mut content = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| ToolError::msg(format!("cannot read {}: {e}", args.path)))?;
 
         let mut total = 0usize;
         for (i, r) in args.replacements.iter().enumerate() {
             if r.old_string.is_empty() {
-                return Err(ToolError::msg(format!("replacement #{} has empty old_string", i + 1)));
+                return Err(ToolError::msg(format!(
+                    "replacement #{} has empty old_string",
+                    i + 1
+                )));
             }
             let count = content.matches(&r.old_string).count();
             if count == 0 {
@@ -88,17 +92,12 @@ On success, returns a summary of how many replacements were applied and how many
             total += count;
         }
 
-        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
-        let tmp_path = path.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
-        tokio::fs::write(&tmp_path, content.as_bytes()).await.map_err(|e| {
-            ToolError::msg(format!("cannot write temp for {}: {e}", args.path))
-        })?;
-        if let Err(e) = tokio::fs::rename(&tmp_path, &path).await {
-            let _ = tokio::fs::remove_file(&tmp_path).await;
-            return Err(ToolError::msg(format!("cannot finalize edit for {}: {e}", args.path)));
-        }
+        fs_util::atomic_write(&path, content.as_bytes()).await?;
 
         let rel = fs_util::display_relative(&root, &path);
-        Ok(format!("Applied {} replacement(s) ({total} occurrence(s)) to {rel}", args.replacements.len()))
+        Ok(format!(
+            "Applied {} replacement(s) ({total} occurrence(s)) to {rel}",
+            args.replacements.len()
+        ))
     }
 }

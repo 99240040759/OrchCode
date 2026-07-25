@@ -1,178 +1,211 @@
 import { useEffect, useRef, useState } from "react";
-import { FiChevronRight, FiTerminal, FiSearch, FiGlobe, FiCpu, FiAlertTriangle, FiMinimize2, FiBook, FiMousePointer, FiType, FiEye, FiZapOff, FiDatabase } from "react-icons/fi";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import type { ChatMessage, MessageItem, ToolCallItem, ReasoningItem, TextItem, CompactionNoticeItem } from "../lib/store";
-import type { AttachmentRef } from "../lib/api";
-import { inTauri } from "../lib/api";
+import {
+  FiAlertTriangle,
+  FiBook,
+  FiChevronRight,
+  FiCpu,
+  FiDatabase,
+  FiEye,
+  FiGlobe,
+  FiMinimize2,
+  FiMousePointer,
+  FiSearch,
+  FiTerminal,
+  FiType,
+  FiZapOff,
+} from "react-icons/fi";
+import type { ToolIcon } from "../lib/api";
+import type {
+  ChatMessage,
+  CompactionNoticeItem,
+  MessageItem,
+  ReasoningItem,
+  TextItem,
+  ToolCallItem,
+} from "../lib/store";
 import { Markdown, renderTextWithMentions } from "./Markdown";
-import FileTag from "./FileTag";
+import AttachmentCard from "./AttachmentCard";
 import ExplorerIcon from "./ExplorerIcon";
+import FileTag from "./FileTag";
 import { ThinkingShimmer } from "./ThinkingShimmer";
 
-function MsgAttachmentCard({ a }: { a: AttachmentRef }) {
-  const isDataUri = a.path.startsWith("data:");
-  const imgSrc = a.isImage
-    ? (isDataUri ? a.path : (inTauri() ? convertFileSrc(a.path) : `file://${a.path}`))
-    : undefined;
-
-  if (a.isImage) {
-    return (
-      <div className="AttachmentCard AttachmentCard-image" title={a.name}>
-        <div className="AttachmentCard-thumbWrap">
-          <img
-            src={imgSrc}
-            alt={a.name}
-            className="AttachmentCard-thumb"
-            onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-          />
-        </div>
-        <span className="AttachmentCard-name">{a.name}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="AttachmentCard AttachmentCard-doc" title={a.name}>
-      <ExplorerIcon type="file" name={a.name} className="AttachmentCard-icon" style={{ width: 15, height: 15, flexShrink: 0 }} />
-      <span className="AttachmentCard-name">{a.name}</span>
-    </div>
-  );
-}
+const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ className?: string }>> = {
+  terminal: FiTerminal,
+  search: FiSearch,
+  globe: FiGlobe,
+  book: FiBook,
+  cpu: FiCpu,
+  mousePointer: FiMousePointer,
+  keyboard: FiType,
+  eye: FiEye,
+  zapOff: FiZapOff,
+  database: FiDatabase,
+};
 
 function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
   const time = new Date(item.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
-    <div className="CompactionNotice" title={`${item.originalMessageCount} earlier messages summarised — full history is still saved`}>
+    <div
+      className="CompactionNotice"
+      title={`${item.originalMessageCount} earlier messages were summarised to free up context`}
+    >
       <FiMinimize2 className="CompactionNotice-icon" />
-      <span>Context compacted — {item.originalMessageCount} messages summarised · {time}</span>
+      <span>
+        Context compacted — {item.originalMessageCount} messages summarised · {time}
+      </span>
     </div>
   );
 }
 
+function ToolTarget({ tool }: { tool: ToolCallItem }) {
+  const info = tool.displayInfo;
+  if (info.filename) {
+    return (
+      <FileTag
+        path={info.fullPath ?? info.filename}
+        name={info.filename}
+        lineRange={info.lineRange ?? undefined}
+        added={info.addedLines ?? undefined}
+        removed={info.removedLines ?? undefined}
+      />
+    );
+  }
+
+  const Icon = info.icon === "file" ? null : TOOL_ICONS[info.icon];
+  return (
+    <span className="ToolRow-target">
+      {Icon ? (
+        <Icon className="ToolRow-icon" />
+      ) : (
+        <ExplorerIcon
+          type="file"
+          name={info.targetText ?? ""}
+          className="ToolRow-icon"
+          width={13}
+          height={13}
+        />
+      )}
+      {info.targetText && <span className="ToolRow-text">{info.targetText}</span>}
+    </span>
+  );
+}
+
 function ToolRow({ tool }: { tool: ToolCallItem }) {
-  const info = tool.displayInfo ?? { label: tool.name, icon: "terminal" as const, opensArtifact: false };
-  const labelText = info.label || tool.name;
+  const [open, setOpen] = useState(false);
+  const output = tool.output?.trim() ?? "";
+  const hasOutput = output.length > 0;
 
   return (
     <div className="ToolRow" data-status={tool.status}>
       <div className="ToolRow-header">
-        <span className="ToolRow-label">{labelText}</span>
-        {info.filename ? (
-          <FileTag path={info.fullPath ?? info.filename} name={info.filename} lineRange={info.lineRange} added={info.addedLines} removed={info.removedLines} />
-        ) : (
-          <span className="ToolRow-target">
-            {info.icon === "globe" ? (
-              <FiGlobe className="ToolRow-icon" />
-            ) : info.icon === "search" ? (
-              <FiSearch className="ToolRow-icon" />
-            ) : info.icon === "book" ? (
-              <FiBook className="ToolRow-icon" />
-            ) : info.icon === "cpu" ? (
-              <FiCpu className="ToolRow-icon" />
-            ) : info.icon === "mousePointer" ? (
-              <FiMousePointer className="ToolRow-icon" />
-            ) : info.icon === "keyboard" ? (
-              <FiType className="ToolRow-icon" />
-            ) : info.icon === "eye" ? (
-              <FiEye className="ToolRow-icon" />
-            ) : info.icon === "zapOff" ? (
-              <FiZapOff className="ToolRow-icon" />
-            ) : info.icon === "database" ? (
-              <FiDatabase className="ToolRow-icon" />
-            ) : info.icon === "file" ? (
-              <ExplorerIcon type="file" name={info.targetText ?? ""} className="ToolRow-icon" style={{ width: 13, height: 13, flexShrink: 0 }} />
-            ) : (
-              <FiTerminal className="ToolRow-icon" />
-            )}
-            <span className="ToolRow-text">{info.targetText}</span>
-          </span>
+        <span className="ToolRow-label">{tool.displayInfo.label || tool.name}</span>
+        <ToolTarget tool={tool} />
+        {tool.status === "running" && <span className="ToolRow-spinner" role="status" />}
+        {tool.status === "error" && (
+          <FiAlertTriangle className="ToolRow-errIcon" aria-label="Tool call failed" />
         )}
-        {tool.status === "running" && <span className="ToolRow-spinner" aria-label="Running" />}
-        {tool.status === "error" && <FiAlertTriangle className="ToolRow-errIcon" aria-label="Error" />}
+        {hasOutput && (
+          <button
+            type="button"
+            className="ToolRow-toggle"
+            data-open={open}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <FiChevronRight className="ToolRow-chevron" />
+            <span>{open ? "Hide output" : "Show output"}</span>
+          </button>
+        )}
       </div>
+      {open && hasOutput && <pre className="ToolRow-output">{output}</pre>}
     </div>
   );
 }
 
 function ThinkingBlock({ item }: { item: ReasoningItem }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
-  const [elapsed, setElapsed] = useState<number>(() => {
-    if (item.durationSeconds !== undefined) return Math.round(item.durationSeconds);
-    if (!item.startTime) return 0;
-    return Math.max(1, Math.round((Date.now() - item.startTime) / 1000));
-  });
+  const [elapsed, setElapsed] = useState(() => item.durationSeconds ?? 0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const wasActive = useRef(item.active);
 
-  const prevActiveRef = useRef(item.active);
   useEffect(() => {
-    if (prevActiveRef.current && !item.active) {
-      setUserToggled(null);
-    }
-    prevActiveRef.current = item.active;
+    if (wasActive.current && !item.active) setUserToggled(null);
+    wasActive.current = item.active;
   }, [item.active]);
 
   useEffect(() => {
     if (!item.active) {
-      if (item.durationSeconds !== undefined) setElapsed(Math.round(item.durationSeconds));
+      if (item.durationSeconds !== undefined) setElapsed(item.durationSeconds);
       return;
     }
-    const interval = setInterval(() => setElapsed(Math.max(1, Math.round((Date.now() - item.startTime) / 1000))), 1000);
+    const tick = () =>
+      setElapsed(Math.max(1, Math.round((Date.now() - item.startTime) / 1000)));
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [item.active, item.startTime, item.durationSeconds]);
 
-  const isOpen = userToggled !== null ? userToggled : item.active;
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const isOpen = userToggled ?? item.active;
 
   useEffect(() => {
-    if (item.active && bodyRef.current && isOpen) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    if (item.active && isOpen && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
   }, [item.text, item.active, isOpen]);
 
-  const hasDuration = item.durationSeconds !== undefined || item.startTime > 0;
-  const labelText = item.active
+  const label = item.active
     ? `Thinking for ${elapsed}s`
-    : hasDuration
+    : elapsed > 0
       ? `Thought for ${elapsed}s`
       : "Thought process";
 
   return (
     <div className="Reasoning">
       <button
+        type="button"
         className="Reasoning-toggle"
         data-open={isOpen}
         aria-expanded={isOpen}
         onClick={() => setUserToggled(!isOpen)}
       >
         <FiCpu className="Reasoning-icon" />
-        <span className="Reasoning-label">{labelText}</span>
+        <span className="Reasoning-label">{label}</span>
         {item.active && <span className="Reasoning-spinner" aria-hidden="true" />}
         <FiChevronRight className="Reasoning-chevron" />
       </button>
-      {isOpen && <div className="Reasoning-body" ref={bodyRef}>{item.text}</div>}
+      {isOpen && (
+        <div className="Reasoning-body" ref={bodyRef}>
+          {item.text}
+        </div>
+      )}
     </div>
   );
 }
 
 type Group =
-  | { type: "reasoning"; item: ReasoningItem }
-  | { type: "text"; item: TextItem }
-  | { type: "tools"; tools: ToolCallItem[] };
+  | { kind: "reasoning"; item: ReasoningItem }
+  | { kind: "text"; id: string; text: string }
+  | { kind: "tools"; id: string; tools: ToolCallItem[] };
 
 function groupItems(items: MessageItem[]): Group[] {
   const groups: Group[] = [];
   for (const item of items) {
     if (item.type === "compactionNotice") continue;
+    if (item.type === "reasoning") {
+      groups.push({ kind: "reasoning", item });
+      continue;
+    }
     if (item.type === "toolCall") {
       const last = groups[groups.length - 1];
-      if (last?.type === "tools") last.tools.push(item);
-      else groups.push({ type: "tools", tools: [item] });
-    } else if (item.type === "reasoning") {
-      groups.push({ type: "reasoning", item });
+      if (last?.kind === "tools") last.tools.push(item);
+      else groups.push({ kind: "tools", id: item.id, tools: [item] });
+      continue;
+    }
+    const last = groups[groups.length - 1];
+    if (last?.kind === "text") {
+      last.text += last.text.endsWith("\n") ? item.text : `\n${item.text}`;
     } else {
-      const last = groups[groups.length - 1];
-      if (last?.type === "text") {
-        last.item = { ...last.item, text: last.item.text + (last.item.text.endsWith("\n") ? "" : "\n") + item.text };
-      } else {
-        groups.push({ type: "text", item: { ...item } });
-      }
+      groups.push({ kind: "text", id: item.id, text: item.text });
     }
   }
   return groups;
@@ -180,23 +213,30 @@ function groupItems(items: MessageItem[]): Group[] {
 
 export function Message({ message }: { message: ChatMessage }) {
   if (message.role === "system") {
-    const notice = message.items.find((i): i is CompactionNoticeItem => i.type === "compactionNotice");
-    if (notice) return <CompactionDivider item={notice} />;
-    return null;
+    const notice = message.items.find(
+      (i): i is CompactionNoticeItem => i.type === "compactionNotice"
+    );
+    return notice ? <CompactionDivider item={notice} /> : null;
   }
 
   if (message.role === "user") {
-    const text = (message.items.find((i): i is TextItem => i.type === "text")?.text) ?? "";
+    const text = message.items.find((i): i is TextItem => i.type === "text")?.text ?? "";
     return (
       <div className="Msg Msg-user">
-        {message.attachments && message.attachments.length > 0 && (
+        {message.attachments.length > 0 && (
           <div className="Msg-attachments">
-            {message.attachments.map((a) => (
-              <MsgAttachmentCard key={(a as AttachmentRef).path ?? a.name} a={a as AttachmentRef} />
+            {message.attachments.map((attachment, index) => (
+              <AttachmentCard
+                key={`${attachment.name}-${index}`}
+                name={attachment.name}
+                isImage={attachment.isImage}
+                path={attachment.path}
+                dataUrl={attachment.dataUrl}
+              />
             ))}
           </div>
         )}
-        <div className="Msg-bubble">{renderTextWithMentions(text)}</div>
+        {text && <div className="Msg-bubble">{renderTextWithMentions(text)}</div>}
       </div>
     );
   }
@@ -205,16 +245,20 @@ export function Message({ message }: { message: ChatMessage }) {
 
   return (
     <div className="Msg Msg-assistant">
-      {groups.map((group, idx) => {
-        if (group.type === "reasoning") return <ThinkingBlock key={group.item.id} item={group.item} />;
-        if (group.type === "tools") {
+      {groups.map((group) => {
+        if (group.kind === "reasoning") {
+          return <ThinkingBlock key={group.item.id} item={group.item} />;
+        }
+        if (group.kind === "tools") {
           return (
-            <div key={`tools-${idx}`} className="ToolList">
-              {group.tools.map((t) => <ToolRow key={t.id} tool={t} />)}
+            <div key={`tools-${group.id}`} className="ToolList">
+              {group.tools.map((tool) => (
+                <ToolRow key={tool.id} tool={tool} />
+              ))}
             </div>
           );
         }
-        return <Markdown key={group.item.id}>{group.item.text}</Markdown>;
+        return <Markdown key={group.id}>{group.text}</Markdown>;
       })}
       {message.streaming && message.items.length === 0 && <ThinkingShimmer />}
       {message.error && (
@@ -226,3 +270,5 @@ export function Message({ message }: { message: ChatMessage }) {
     </div>
   );
 }
+
+export default Message;

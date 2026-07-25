@@ -1,9 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 
-export function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 export interface WorkspaceInfo {
   path: string;
   name: string;
@@ -18,8 +14,7 @@ export interface ModelDto {
   contextWindow: number;
   maxTokens: number;
   capabilities: string[];
-  badge?: string;
-  reasoningEffort?: string;
+  badge?: string | null;
 }
 
 export interface Budget {
@@ -32,35 +27,48 @@ export interface Budget {
 
 export interface SessionSummary {
   id: string;
-  title?: string;
-  workspacePath?: string;
+  title?: string | null;
+  workspacePath?: string | null;
   updatedAt: number;
   lastInputTokens: number;
   lastOutputTokens: number;
   lastTotalTokens: number;
 }
 
+export type ToolIcon =
+  | "file"
+  | "terminal"
+  | "search"
+  | "globe"
+  | "book"
+  | "cpu"
+  | "mousePointer"
+  | "keyboard"
+  | "eye"
+  | "zapOff"
+  | "database";
+
 export interface ToolDisplayInfo {
   label: string;
-  filename?: string;
-  fullPath?: string;
-  lineRange?: string;
-  addedLines?: number;
-  removedLines?: number;
-  targetText?: string;
-  icon: "file" | "terminal" | "search" | "globe" | "book" | "cpu" | "mousePointer" | "keyboard" | "eye" | "zapOff" | "database";
+  filename?: string | null;
+  fullPath?: string | null;
+  lineRange?: string | null;
+  addedLines?: number | null;
+  removedLines?: number | null;
+  targetText?: string | null;
+  icon: ToolIcon;
   opensArtifact: boolean;
 }
 
 export type MessageItemView =
   | { type: "text"; id: string; text: string }
-  | { type: "reasoning"; id: string; text: string; durationSeconds?: number }
+  | { type: "reasoning"; id: string; text: string; durationSeconds?: number | null }
   | {
       type: "toolCall";
       id: string;
       name: string;
       args: string;
-      output?: string;
+      output?: string | null;
       displayInfo: ToolDisplayInfo;
       status: string;
     }
@@ -69,21 +77,21 @@ export type MessageItemView =
 export interface AttachmentView {
   name: string;
   isImage: boolean;
-  dataUrl: string;
+  dataUrl?: string | null;
 }
 
 export interface MessageView {
   id: string;
-  role: "user" | "assistant";
+  role: string;
   items: MessageItemView[];
   attachments: AttachmentView[];
 }
 
 export interface UserDisplay {
   id: string;
-  email?: string;
+  email?: string | null;
   displayName: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
   initial: string;
 }
 
@@ -92,90 +100,10 @@ export interface FileEntry {
   name: string;
 }
 
-export interface DirEntry {
-  name: string;
+export interface FileContent {
   path: string;
-  isDir: boolean;
-}
-
-export type DictationEvent =
-  | { type: "final"; text: string }
-  | { type: "error"; message: string };
-
-export type TerminalEvent =
-  | { type: "data"; data: string }
-  | { type: "exit" };
-
-export async function isAuthenticated(): Promise<boolean> {
-  if (!inTauri()) return false;
-  return invoke("is_authenticated");
-}
-
-export async function getAuthUser(): Promise<UserDisplay | null> {
-  if (!inTauri()) return null;
-  return invoke("get_auth_user");
-}
-
-export async function getOAuthUrl(redirectTo?: string): Promise<string> {
-  if (!inTauri()) return "";
-  return invoke("get_oauth_url", { redirectTo });
-}
-
-export async function setAuthSession(accessToken: string, refreshToken?: string): Promise<UserDisplay> {
-  if (!inTauri()) throw new Error("Tauri API unavailable");
-  return invoke("set_auth_session", { accessToken, refreshToken });
-}
-
-export async function signOutAuth(): Promise<void> {
-  if (!inTauri()) return;
-  return invoke("sign_out_auth");
-}
-
-export async function setWorkspace(path: string): Promise<WorkspaceInfo> {
-  return invoke("set_workspace", { path });
-}
-
-export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
-  return invoke("get_workspace_info");
-}
-
-export async function useSandbox(): Promise<WorkspaceInfo> {
-  return invoke("use_sandbox");
-}
-
-export async function listModels(forceRefresh = false): Promise<ModelDto[]> {
-  if (!inTauri()) return [];
-  return invoke("list_models", { forceRefresh });
-}
-
-export async function getBudget(): Promise<Budget | null> {
-  if (!inTauri()) return null;
-  return invoke("get_budget");
-}
-
-export async function listSessions(): Promise<SessionSummary[]> {
-  if (!inTauri()) return [];
-  return invoke("list_sessions");
-}
-
-export async function getSessionView(sessionId: string): Promise<MessageView[]> {
-  if (!inTauri()) return [];
-  return invoke("get_session_view", { sessionId });
-}
-
-export async function clearSession(sessionId?: string): Promise<void> {
-  if (!inTauri() || !sessionId) return;
-  return invoke("clear_session", { sessionId });
-}
-
-export async function getUserPref(key: string): Promise<unknown> {
-  if (!inTauri()) return null;
-  return invoke("get_user_pref", { key });
-}
-
-export async function setUserPref(key: string, value: unknown): Promise<void> {
-  if (!inTauri()) return;
-  return invoke("set_user_pref", { key, value });
+  content: string;
+  truncated: boolean;
 }
 
 export interface AttachmentRef {
@@ -184,96 +112,157 @@ export interface AttachmentRef {
   isImage: boolean;
 }
 
-export async function startChat(
+export type ChatStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "reasoningDone"; durationSeconds: number }
+  | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
+  | { type: "toolResult"; id: string; output: string; isError: boolean }
+  | { type: "usage"; inputTokens: number; outputTokens: number; totalTokens: number }
+  | { type: "compacted"; originalMessageCount: number; ts: number }
+  | { type: "done" }
+  | { type: "cancelled" }
+  | { type: "error"; message: string };
+
+export type DictationEvent =
+  | { type: "final"; text: string }
+  | { type: "error"; message: string };
+
+export type TerminalEvent = { type: "data"; data: string } | { type: "exit" };
+
+export type HistoryAction = "back" | "forward" | "reload";
+
+export function getAuthUser(): Promise<UserDisplay | null> {
+  return invoke("get_auth_user");
+}
+
+export function getOAuthUrl(redirectTo: string): Promise<string> {
+  return invoke("get_oauth_url", { redirectTo });
+}
+
+export function signOutAuth(): Promise<void> {
+  return invoke("sign_out_auth");
+}
+
+export function setWorkspace(path: string): Promise<WorkspaceInfo> {
+  return invoke("set_workspace", { path });
+}
+
+export function getWorkspaceInfo(): Promise<WorkspaceInfo> {
+  return invoke("get_workspace_info");
+}
+
+export function useSandbox(): Promise<WorkspaceInfo> {
+  return invoke("use_sandbox");
+}
+
+export function listModels(forceRefresh = false): Promise<ModelDto[]> {
+  return invoke("list_models", { forceRefresh });
+}
+
+export function getBudget(): Promise<Budget> {
+  return invoke("get_budget");
+}
+
+export function listSessions(): Promise<SessionSummary[]> {
+  return invoke("list_sessions");
+}
+
+export function getSessionView(sessionId: string): Promise<MessageView[]> {
+  return invoke("get_session_view", { sessionId });
+}
+
+export function clearSession(sessionId: string): Promise<void> {
+  return invoke("clear_session", { sessionId });
+}
+
+export function getUserPref(key: string): Promise<string | null> {
+  return invoke("get_user_pref", { key });
+}
+
+export function setUserPref(key: string, value: string): Promise<void> {
+  return invoke("set_user_pref", { key, value });
+}
+
+export function startChat(
   sessionId: string,
   model: string,
   prompt: string,
-  reasoningEffort?: string,
-  attachments?: AttachmentRef[],
-  onEvent?: (evt: unknown) => void
+  reasoningEffort: string,
+  attachments: AttachmentRef[],
+  onEvent: (evt: ChatStreamEvent) => void
 ): Promise<void> {
-  if (!inTauri()) return;
-  const ch = new Channel<unknown>();
-  if (onEvent) ch.onmessage = onEvent;
-  return invoke("start_chat", { sessionId, model, prompt, reasoningEffort, attachments: attachments ?? [], onEvent: ch });
+  const channel = new Channel<ChatStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("start_chat", {
+    sessionId,
+    model,
+    prompt,
+    reasoningEffort,
+    attachments,
+    onEvent: channel,
+  });
 }
 
-export async function cancelChat(sessionId: string): Promise<void> {
-  if (!inTauri() || !sessionId) return;
+export function cancelChat(sessionId: string): Promise<void> {
   return invoke("cancel_chat", { sessionId });
 }
 
-export async function listWorkspaceFiles(query: string, limit = 100): Promise<FileEntry[]> {
-  if (!inTauri()) return [];
+export function listWorkspaceFiles(query: string, limit = 100): Promise<FileEntry[]> {
   return invoke("list_workspace_files", { query, limit });
 }
 
-export async function listDir(path?: string): Promise<DirEntry[]> {
-  if (!inTauri()) return [];
-  return invoke("list_dir", { path: path ?? null });
-}
-
-export async function readTextFile(path: string): Promise<{ content: string; truncated: boolean }> {
-  if (!inTauri()) return { content: "", truncated: false };
+export function readTextFile(path: string): Promise<FileContent> {
   return invoke("read_text_file", { path });
 }
 
-export async function startDictation(onEvent: (evt: DictationEvent) => void): Promise<void> {
-  if (!inTauri()) return;
-  const ch = new Channel<DictationEvent>();
-  ch.onmessage = onEvent;
-  await invoke("start_dictation", { onEvent: ch });
+export function readImageDataUrl(path: string): Promise<string> {
+  return invoke("read_image_data_url", { path });
 }
 
-export async function stopDictation(): Promise<void> {
-  if (!inTauri()) return;
-  await invoke("stop_dictation");
+export function startDictation(onEvent: (evt: DictationEvent) => void): Promise<void> {
+  const channel = new Channel<DictationEvent>();
+  channel.onmessage = onEvent;
+  return invoke("start_dictation", { onEvent: channel });
 }
 
-export async function terminalOpen(
+export function stopDictation(): Promise<void> {
+  return invoke("stop_dictation");
+}
+
+export function terminalOpen(
   id: string,
-  cwd: string | null,
   cols: number,
   rows: number,
-  onEvent: (data: TerminalEvent) => void
+  onEvent: (evt: TerminalEvent) => void
 ): Promise<void> {
-  if (!inTauri()) return;
-  const ch = new Channel<TerminalEvent>();
-  ch.onmessage = onEvent;
-  return invoke("terminal_open", { id, cwd, cols, rows, onEvent: ch });
+  const channel = new Channel<TerminalEvent>();
+  channel.onmessage = onEvent;
+  return invoke("terminal_open", { id, cols, rows, onEvent: channel });
 }
 
-export async function terminalWrite(id: string, data: string): Promise<void> {
-  if (!inTauri()) return;
+export function terminalWrite(id: string, data: string): Promise<void> {
   return invoke("terminal_write", { id, data });
 }
 
-export async function terminalResize(id: string, cols: number, rows: number): Promise<void> {
-  if (!inTauri()) return;
+export function terminalResize(id: string, cols: number, rows: number): Promise<void> {
   return invoke("terminal_resize", { id, cols, rows });
 }
 
-export async function terminalClose(id: string): Promise<void> {
-  if (!inTauri()) return;
+export function terminalClose(id: string): Promise<void> {
   return invoke("terminal_close", { id });
 }
 
-export async function webviewNavigate(label: string, url: string): Promise<void> {
-  if (!inTauri()) return;
+export function webviewNavigate(label: string, url: string): Promise<void> {
   return invoke("webview_navigate", { label, url });
 }
 
-export async function webviewBack(label: string): Promise<void> {
-  if (!inTauri()) return;
-  return invoke("webview_history", { label, action: "back" });
+export function webviewHistory(label: string, action: HistoryAction): Promise<void> {
+  return invoke("webview_history", { label, action });
 }
 
-export async function webviewForward(label: string): Promise<void> {
-  if (!inTauri()) return;
-  return invoke("webview_history", { label, action: "forward" });
-}
-
-export async function webviewReload(label: string): Promise<void> {
-  if (!inTauri()) return;
-  return invoke("webview_history", { label, action: "reload" });
+export function errorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

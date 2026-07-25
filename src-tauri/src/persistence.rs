@@ -15,9 +15,70 @@ use rig::message::{AssistantContent, DocumentSourceKind, MimeType, UserContent};
 
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
-use crate::tools::parse_display_info;
+use crate::llm::attachment::{is_payload_part, payload_part_label};
+use crate::tools::{parse_display_info, strip_tool_error_sentinel, tool_output_is_error};
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+const BASELINE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS messages (
+     conversation_id TEXT NOT NULL,
+     seq             INTEGER NOT NULL,
+     ts              INTEGER NOT NULL,
+     data            TEXT NOT NULL,
+     kind            TEXT NOT NULL DEFAULT 'message',
+     PRIMARY KEY (conversation_id, seq)
+ );
+ CREATE TABLE IF NOT EXISTS sessions (
+     id                 TEXT PRIMARY KEY,
+     title              TEXT,
+     workspace_path     TEXT,
+     created_at         INTEGER NOT NULL,
+     updated_at         INTEGER NOT NULL,
+     last_input_tokens   INTEGER NOT NULL DEFAULT 0,
+     last_output_tokens  INTEGER NOT NULL DEFAULT 0,
+     last_total_tokens   INTEGER NOT NULL DEFAULT 0
+ );
+ CREATE TABLE IF NOT EXISTS reasoning_durations (
+     conversation_id  TEXT NOT NULL,
+     item_id          TEXT NOT NULL,
+     duration_seconds INTEGER NOT NULL,
+     PRIMARY KEY (conversation_id, item_id)
+ );
+ CREATE TABLE IF NOT EXISTS vector_chunks (
+     id           TEXT PRIMARY KEY,
+     workspace    TEXT NOT NULL,
+     file_path    TEXT NOT NULL,
+     start_line   INTEGER NOT NULL,
+     end_line     INTEGER NOT NULL,
+     content      TEXT NOT NULL,
+     content_hash TEXT NOT NULL,
+     embedding    BLOB NOT NULL,
+     indexed_at   INTEGER NOT NULL
+ );
+ CREATE INDEX IF NOT EXISTS idx_vector_chunks_workspace ON vector_chunks(workspace);
+ CREATE INDEX IF NOT EXISTS idx_vector_chunks_file ON vector_chunks(workspace, file_path);";
+
+const VECTOR_SCHEMA: &str = "DROP TABLE IF EXISTS vector_chunks;
+ CREATE TABLE vector_chunks (
+     id         TEXT PRIMARY KEY,
+     workspace  TEXT NOT NULL,
+     file_path  TEXT NOT NULL,
+     start_line INTEGER NOT NULL,
+     end_line   INTEGER NOT NULL,
+     content    TEXT NOT NULL,
+     embedding  BLOB NOT NULL
+ );
+ CREATE INDEX idx_vector_chunks_workspace ON vector_chunks(workspace);
+ CREATE INDEX idx_vector_chunks_file ON vector_chunks(workspace, file_path);
+ CREATE TABLE vector_files (
+     workspace    TEXT NOT NULL,
+     file_path    TEXT NOT NULL,
+     content_hash TEXT NOT NULL,
+     mtime_ms     INTEGER NOT NULL,
+     size_bytes   INTEGER NOT NULL,
+     PRIMARY KEY (workspace, file_path)
+ );
+ CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompactionMarker {
@@ -42,7 +103,7 @@ pub struct SessionSummary {
 pub struct AttachmentView {
     pub name: String,
     pub is_image: bool,
-    pub data_url: String,
+    pub data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,108 +148,85 @@ pub struct MessageView {
 pub struct CompactionInput {
     pub previous_summary: Option<String>,
     pub prior_message_count: usize,
-    pub messages_since: Vec<Message>,
+    pub summarize: Vec<Message>,
+    pub summarize_upto_seq: i64,
+    pub first_seq: i64,
 }
 
 #[derive(Clone)]
 pub struct SqliteMemory {
-    pub(crate) conn: Arc<Mutex<Connection>>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteMemory {
     pub fn open(path: &Path) -> AppResult<Self> {
-        let mut conn = Connection::open(path).map_err(|e| AppError::other(format!("sqlite open failed: {e}")))?;
+        let mut conn = Connection::open(path)
+            .map_err(|e| AppError::other(format!("sqlite open failed: {e}")))?;
+        configure_connection(&conn)?;
 
-        let migrations = rusqlite_migration::Migrations::new(vec![
-            rusqlite_migration::M::up(
-                "CREATE TABLE IF NOT EXISTS messages (
-                     conversation_id TEXT NOT NULL,
-                     seq             INTEGER NOT NULL,
-                     ts              INTEGER NOT NULL,
-                     data            TEXT NOT NULL,
-                     PRIMARY KEY (conversation_id, seq)
-                 );
-                 CREATE TABLE IF NOT EXISTS sessions (
-                     id             TEXT PRIMARY KEY,
-                     title          TEXT,
-                     created_at     INTEGER NOT NULL,
-                     updated_at     INTEGER NOT NULL
-                 );"
-            ),
-            rusqlite_migration::M::up_with_hook(
-                "-- add workspace_path column conditional on existence",
-                |tx| { Ok(add_column_if_missing(tx, "sessions", "workspace_path", "TEXT")?) }
-            ),
-            rusqlite_migration::M::up_with_hook(
-                "-- add compaction-marker discriminator column to messages",
-                |tx| { Ok(add_column_if_missing(tx, "messages", "kind", "TEXT NOT NULL DEFAULT 'message'")?) }
-            ),
-            rusqlite_migration::M::up_with_hook(
-                "-- add persisted per-session token usage columns",
-                |tx| {
-                    add_column_if_missing(tx, "sessions", "last_input_tokens", "INTEGER NOT NULL DEFAULT 0")?;
-                    add_column_if_missing(tx, "sessions", "last_output_tokens", "INTEGER NOT NULL DEFAULT 0")?;
-                    Ok(add_column_if_missing(tx, "sessions", "last_total_tokens", "INTEGER NOT NULL DEFAULT 0")?)
-                }
-            ),
-            rusqlite_migration::M::up(
-                "CREATE TABLE IF NOT EXISTS reasoning_durations (
-                     conversation_id TEXT NOT NULL,
-                     item_id         TEXT NOT NULL,
-                     duration_seconds INTEGER NOT NULL,
-                     PRIMARY KEY (conversation_id, item_id)
-                 );"
-            ),
-            rusqlite_migration::M::up(
-                "CREATE TABLE IF NOT EXISTS vector_chunks (
-                     id           TEXT PRIMARY KEY,
-                     workspace    TEXT NOT NULL,
-                     file_path    TEXT NOT NULL,
-                     start_line   INTEGER NOT NULL,
-                     end_line     INTEGER NOT NULL,
-                     content      TEXT NOT NULL,
-                     content_hash TEXT NOT NULL,
-                     embedding    BLOB NOT NULL,
-                     indexed_at   INTEGER NOT NULL
-                 );
-                 CREATE INDEX IF NOT EXISTS idx_vector_chunks_workspace ON vector_chunks(workspace);
-                 CREATE INDEX IF NOT EXISTS idx_vector_chunks_file ON vector_chunks(workspace, file_path);"
-            ),
-        ]);
+        let migration_list = vec![
+            rusqlite_migration::M::up(BASELINE_SCHEMA),
+            rusqlite_migration::M::up(VECTOR_SCHEMA),
+        ];
+        let max_version = migration_list.len();
+        let migrations = rusqlite_migration::Migrations::new(migration_list);
 
-        migrations.to_latest(&mut conn).map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
+        let current_version: usize = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|e| AppError::other(format!("sqlite user_version read failed: {e}")))?;
 
-        Ok(Self { conn: Arc::new(Mutex::new(conn)) })
+        if current_version > max_version {
+            return Err(AppError::other(format!(
+                "database schema version {current_version} is newer than this build supports ({max_version})"
+            )));
+        }
+
+        migrations
+            .to_latest(&mut conn)
+            .map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     pub async fn list_sessions(&self) -> AppResult<Vec<SessionSummary>> {
         let conn = self.conn.clone();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let mut stmt = c.prepare(
-                "SELECT id, title, workspace_path, updated_at, last_input_tokens, last_output_tokens, last_total_tokens
-                 FROM sessions ORDER BY updated_at DESC"
-            ).map_err(sql_err)?;
-            let rows = stmt.query_map([], |row| {
-                Ok(SessionSummary {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    workspace_path: row.get(2)?,
-                    updated_at: row.get(3)?,
-                    last_input_tokens: row.get(4)?,
-                    last_output_tokens: row.get(5)?,
-                    last_total_tokens: row.get(6)?,
+            let mut stmt = c
+                .prepare(
+                    "SELECT id, title, workspace_path, updated_at, last_input_tokens, last_output_tokens, last_total_tokens
+                     FROM sessions ORDER BY updated_at DESC",
+                )
+                .map_err(sql_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(SessionSummary {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        workspace_path: row.get(2)?,
+                        updated_at: row.get(3)?,
+                        last_input_tokens: row.get(4)?,
+                        last_output_tokens: row.get(5)?,
+                        last_total_tokens: row.get(6)?,
+                    })
                 })
-            }).map_err(sql_err)?;
+                .map_err(sql_err)?;
             let mut out = Vec::new();
             for r in rows {
                 out.push(r.map_err(sql_err)?);
             }
             Ok(out)
-        }).await
+        })
+        .await
     }
 
-    pub async fn set_session_workspace(&self, conversation_id: &str, workspace_path: Option<&str>) -> AppResult<()> {
+    pub async fn set_session_workspace(
+        &self,
+        conversation_id: &str,
+        workspace_path: Option<&str>,
+    ) -> AppResult<()> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         let ws = workspace_path.map(|s| s.to_string());
@@ -197,11 +235,13 @@ impl SqliteMemory {
             let now = now_millis();
             c.execute(
                 "INSERT INTO sessions (id, workspace_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
-                 ON CONFLICT(id) DO UPDATE SET workspace_path = COALESCE(?2, workspace_path), updated_at = ?3",
+                 ON CONFLICT(id) DO UPDATE SET workspace_path = ?2, updated_at = ?3",
                 params![cid, ws, now],
-            ).map_err(sql_err)?;
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<()> {
@@ -215,9 +255,11 @@ impl SqliteMemory {
                 "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
                  ON CONFLICT(id) DO UPDATE SET title = ?2, updated_at = ?3",
                 params![cid, t, now],
-            ).map_err(sql_err)?;
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn session_has_title(&self, conversation_id: &str) -> AppResult<bool> {
@@ -225,16 +267,24 @@ impl SqliteMemory {
         let cid = conversation_id.to_string();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let exists: bool = c.query_row(
+            c.query_row(
                 "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND title IS NOT NULL AND title != ''",
                 params![cid],
                 |row| row.get::<_, i64>(0),
-            ).map(|n| n > 0).map_err(sql_err)?;
-            Ok(exists)
-        }).await
+            )
+            .map(|n| n > 0)
+            .map_err(sql_err)
+        })
+        .await
     }
 
-    pub async fn update_session_tokens(&self, conversation_id: &str, input_tokens: u64, output_tokens: u64, total_tokens: u64) -> AppResult<()> {
+    pub async fn update_session_tokens(
+        &self,
+        conversation_id: &str,
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
+    ) -> AppResult<()> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
@@ -243,51 +293,105 @@ impl SqliteMemory {
             c.execute(
                 "UPDATE sessions SET last_input_tokens = ?1, last_output_tokens = ?2, last_total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
                 params![input_tokens as i64, output_tokens as i64, total_tokens as i64, now, cid],
-            ).map_err(sql_err)?;
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
-    pub async fn next_reasoning_item_id(
-        &self,
-        conversation_id: &str,
-        item_idx: usize,
-    ) -> AppResult<String> {
+    pub async fn max_seq(&self, conversation_id: &str) -> AppResult<i64> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
-            let next_seq: i64 = c.query_row(
-                "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
+            c.query_row(
+                "SELECT COALESCE(MAX(seq), -1) FROM messages WHERE conversation_id = ?1",
                 params![cid],
                 |row| row.get(0),
-            ).map_err(sql_err)?;
-            Ok(stable_id(&cid, next_seq, item_idx, Some("reasoning")))
-        }).await
+            )
+            .map_err(sql_err)
+        })
+        .await
     }
 
-    pub async fn upsert_reasoning_duration(
+    pub async fn assign_reasoning_durations(
         &self,
         conversation_id: &str,
-        item_id: &str,
-        duration_seconds: u64,
+        after_seq: i64,
+        durations: Vec<u64>,
     ) -> AppResult<()> {
+        if durations.is_empty() {
+            return Ok(());
+        }
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
-        let iid = item_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            c.execute(
-                "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
-                params![cid, iid, duration_seconds as i64],
-            ).map_err(sql_err)?;
+            let mut c = conn.lock().map_err(lock_err)?;
+            let rows = load_after(&c, &cid, after_seq).map_err(sql_err)?;
+            let mut pending = durations.into_iter();
+            let mut assignments: Vec<(String, u64)> = Vec::new();
+
+            'outer: for row in &rows {
+                if row.kind != "message" {
+                    continue;
+                }
+                let Ok(Message::Assistant { content, .. }) =
+                    serde_json::from_str::<Message>(&row.data)
+                else {
+                    continue;
+                };
+                let mut item_idx = 0usize;
+                for part in content.iter() {
+                    match part {
+                        AssistantContent::Reasoning(r) => {
+                            if r.display_text().is_empty() {
+                                continue;
+                            }
+                            match pending.next() {
+                                Some(secs) => {
+                                    assignments.push((
+                                        stable_id(&cid, row.seq, item_idx, Some("reasoning")),
+                                        secs,
+                                    ));
+                                }
+                                None => break 'outer,
+                            }
+                            item_idx += 1;
+                        }
+                        AssistantContent::ToolCall(_) | AssistantContent::Text(_) => {
+                            item_idx += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if assignments.is_empty() {
+                return Ok(());
+            }
+
+            let tx = c.transaction().map_err(sql_err)?;
+            for (item_id, secs) in assignments {
+                tx.execute(
+                    "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
+                    params![cid, item_id, secs as i64],
+                )
+                .map_err(sql_err)?;
+            }
+            tx.commit().map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
-    pub async fn get_compaction_input(&self, conversation_id: &str) -> AppResult<CompactionInput> {
+    pub async fn get_compaction_input(
+        &self,
+        conversation_id: &str,
+        keep_recent_user_turns: usize,
+    ) -> AppResult<Option<CompactionInput>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
@@ -298,112 +402,167 @@ impl SqliteMemory {
             let (previous_summary, prior_message_count, tail_start) = match boundary {
                 Some(idx) => {
                     let marker: CompactionMarker = serde_json::from_str(&rows[idx].data)
-                        .map_err(|e| AppError::other(format!("compaction marker decode failed: {e}")))?;
+                        .map_err(|e| {
+                            AppError::other(format!("compaction marker decode failed: {e}"))
+                        })?;
                     (Some(marker.summary), marker.original_message_count, idx + 1)
                 }
                 None => (None, 0, 0),
             };
 
-            let mut messages_since = Vec::new();
-            for row in &rows[tail_start..] {
-                if row.kind == "message" {
-                    let msg: Message = serde_json::from_str(&row.data)
-                        .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
-                    messages_since.push(msg);
+            let tail = &rows[tail_start..];
+            let mut decoded: Vec<(i64, Message)> = Vec::new();
+            for row in tail {
+                if row.kind != "message" {
+                    continue;
                 }
+                let msg: Message = serde_json::from_str(&row.data)
+                    .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
+                decoded.push((row.seq, msg));
             }
 
-            Ok(CompactionInput { previous_summary, prior_message_count, messages_since })
-        }).await
+            if decoded.is_empty() {
+                return Ok(None);
+            }
+
+            let user_turn_positions: Vec<usize> = decoded
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, m))| is_user_turn(m))
+                .map(|(i, _)| i)
+                .collect();
+
+            let cut = if user_turn_positions.len() > keep_recent_user_turns {
+                user_turn_positions[user_turn_positions.len() - keep_recent_user_turns]
+            } else {
+                return Ok(None);
+            };
+
+            if cut == 0 {
+                return Ok(None);
+            }
+
+            let summarize: Vec<Message> =
+                decoded[..cut].iter().map(|(_, m)| m.clone()).collect();
+            let first_seq = decoded[0].0;
+            let summarize_upto_seq = decoded[cut - 1].0;
+
+            Ok(Some(CompactionInput {
+                previous_summary,
+                prior_message_count,
+                summarize,
+                summarize_upto_seq,
+                first_seq,
+            }))
+        })
+        .await
     }
 
-    pub async fn insert_compaction_marker(&self, conversation_id: &str, summary: &str, original_message_count: usize) -> AppResult<i64> {
+    pub async fn apply_compaction(
+        &self,
+        conversation_id: &str,
+        summary: &str,
+        original_message_count: usize,
+        first_seq: i64,
+        upto_seq: i64,
+    ) -> AppResult<i64> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         let summary = summary.to_string();
         run_db_task(move || {
             let now = now_millis();
-            let marker = CompactionMarker { summary, original_message_count };
-            let data = serde_json::to_string(&marker).map_err(|e| AppError::other(format!("serialize compaction marker: {e}")))?;
+            let marker = CompactionMarker {
+                summary,
+                original_message_count,
+            };
+            let data = serde_json::to_string(&marker)
+                .map_err(|e| AppError::other(format!("serialize compaction marker: {e}")))?;
 
             let mut c = conn.lock().map_err(lock_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-
-            let seq: i64 = tx.query_row(
-                "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
-                params![cid],
-                |row| row.get(0),
-            ).map_err(sql_err)?;
-
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1 AND seq <= ?2",
+                params![cid, upto_seq],
+            )
+            .map_err(sql_err)?;
             tx.execute(
                 "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'compaction')",
-                params![cid, seq, now, data],
-            ).map_err(sql_err)?;
-            tx.execute("UPDATE sessions SET updated_at = ?1 WHERE id = ?2", params![now, cid]).map_err(sql_err)?;
-
+                params![cid, first_seq, now, data],
+            )
+            .map_err(sql_err)?;
+            tx.execute(
+                "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+                params![now, cid],
+            )
+            .map_err(sql_err)?;
             tx.commit().map_err(sql_err)?;
             Ok(now)
-        }).await
+        })
+        .await
     }
 
-    pub async fn get_session_view(&self, conversation_id: &str, workspace: Option<&Path>) -> AppResult<Vec<MessageView>> {
+    pub async fn get_session_view(&self, conversation_id: &str) -> AppResult<Vec<MessageView>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
-        let ws_buf = workspace.map(|p| p.to_path_buf());
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
             let rows = load_all(&c, &cid).map_err(sql_err)?;
 
             let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
             {
-                let mut stmt = c.prepare(
-                    "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1"
-                ).map_err(sql_err)?;
-                let iter = stmt.query_map(params![cid], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                }).map_err(sql_err)?;
+                let mut stmt = c
+                    .prepare(
+                        "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
+                    )
+                    .map_err(sql_err)?;
+                let iter = stmt
+                    .query_map(params![cid], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .map_err(sql_err)?;
                 for row in iter {
                     let (item_id, secs) = row.map_err(sql_err)?;
-                    reasoning_durations.insert(item_id, secs as u64);
+                    reasoning_durations.insert(item_id, secs.max(0) as u64);
                 }
             }
 
-            struct StoredToolRes {
-                output: String,
-                is_error: bool,
-            }
-            let mut tool_outputs: HashMap<String, StoredToolRes> = HashMap::new();
+            let mut tool_outputs: HashMap<String, String> = HashMap::new();
             for row in &rows {
-                if row.kind != "message" { continue; }
+                if row.kind != "message" {
+                    continue;
+                }
                 if let Ok(Message::User { content }) = serde_json::from_str::<Message>(&row.data) {
-                    for c in content {
-                        if let UserContent::ToolResult(tr) = c {
-                            let call_id = tr.call_id.as_ref().unwrap_or(&tr.id);
+                    for part in content.iter() {
+                        if let UserContent::ToolResult(tr) = part {
+                            let call_id = tr.call_id.clone().unwrap_or_else(|| tr.id.clone());
                             use rig::message::ToolResultContent;
-                            let output: String = tr.content.iter().filter_map(|c| {
-                                if let ToolResultContent::Text(t) = c { Some(t.text.as_str()) } else { None }
-                            }).collect();
-                            let is_error = output.starts_with("Error:");
-                            tool_outputs.insert(call_id.clone(), StoredToolRes { output, is_error });
+                            let output: String = tr
+                                .content
+                                .iter()
+                                .filter_map(|c| {
+                                    if let ToolResultContent::Text(t) = c {
+                                        Some(t.text.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            tool_outputs.insert(call_id, output);
                         }
                     }
                 }
             }
 
-            let ws_path = ws_buf.as_deref();
             let mut views: Vec<MessageView> = Vec::new();
 
             for row in &rows {
                 let msg_id = stable_id(&cid, row.seq, 0, None);
 
                 if row.kind == "compaction" {
-                    let marker: CompactionMarker = match serde_json::from_str(&row.data) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            eprintln!("[persistence] corrupt compaction marker seq={} in session {cid}: {e}", row.seq);
-                            continue;
-                        }
-                    };
+                    let marker: CompactionMarker = serde_json::from_str(&row.data)
+                        .map_err(|e| {
+                            AppError::other(format!("compaction marker decode failed: {e}"))
+                        })?;
                     views.push(MessageView {
                         id: msg_id,
                         role: "system".to_string(),
@@ -417,119 +576,125 @@ impl SqliteMemory {
                     continue;
                 }
 
-                let msg: Message = match serde_json::from_str(&row.data) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("[persistence] corrupt message seq={} in session {cid}: {e}", row.seq);
-                        continue;
-                    }
-                };
+                let msg: Message = serde_json::from_str(&row.data)
+                    .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
 
                 match msg {
                     Message::User { content } => {
-                        let text: String = content.iter().filter_map(|c| {
-                            if let UserContent::Text(t) = c { Some(t.text.as_str()) } else { None }
-                        }).collect();
-
+                        let mut text = String::new();
                         let mut attachments: Vec<AttachmentView> = Vec::new();
 
                         for part in content.iter() {
-                            if let UserContent::Image(img) = part {
-                                let data_url = match &img.data {
-                                    DocumentSourceKind::Base64(b64) => {
-                                        let mime = img.media_type.as_ref()
-                                            .map(|m| format!("{}", m.to_mime_type()))
-                                            .unwrap_or_else(|| "image/png".to_string());
-                                        format!("data:{mime};base64,{b64}")
+                            match part {
+                                UserContent::Text(t) => {
+                                    if is_payload_part(&t.text) {
+                                        if let Some(label) = payload_part_label(&t.text) {
+                                            attachments.push(AttachmentView {
+                                                name: basename(&label),
+                                                is_image: false,
+                                                data_url: None,
+                                            });
+                                        }
+                                    } else if text.is_empty() {
+                                        text = t.text.clone();
                                     }
-                                    DocumentSourceKind::Url(url) => url.clone(),
-                                    _ => String::new(),
-                                };
-                                if !data_url.is_empty() {
-                                    let ext = img.media_type.as_ref()
-                                        .map(|m| m.to_mime_type().split('/').nth(1).unwrap_or("img").to_string())
-                                        .unwrap_or_else(|| "img".to_string());
-                                    attachments.push(AttachmentView {
-                                        name: format!("image.{ext}"),
-                                        is_image: true,
-                                        data_url,
-                                    });
                                 }
+                                UserContent::Image(img) => {
+                                    let mime = img
+                                        .media_type
+                                        .as_ref()
+                                        .map(|m| m.to_mime_type().to_string())
+                                        .unwrap_or_else(|| "image/png".to_string());
+                                    let data_url = match &img.data {
+                                        DocumentSourceKind::Base64(b64) => {
+                                            Some(format!("data:{mime};base64,{b64}"))
+                                        }
+                                        DocumentSourceKind::Url(url) => Some(url.clone()),
+                                        _ => None,
+                                    };
+                                    if let Some(data_url) = data_url {
+                                        let ext =
+                                            mime.split('/').nth(1).unwrap_or("png").to_string();
+                                        attachments.push(AttachmentView {
+                                            name: format!("image.{ext}"),
+                                            is_image: true,
+                                            data_url: Some(data_url),
+                                        });
+                                    }
+                                }
+                                _ => {}
                             }
                         }
 
-                        let doc_re = regex::Regex::new(r"\[Attached (?:File|PDF): ([^\]\n]+)\]").unwrap();
-                        for cap in doc_re.captures_iter(&text) {
-                            let label = cap[1].trim();
-                            let name = label.replace('\\', "/")
-                                .split('/')
-                                .last()
-                                .unwrap_or(label)
-                                .to_string();
-                            attachments.push(AttachmentView {
-                                name,
-                                is_image: false,
-                                data_url: String::new(),
-                            });
+                        if text.is_empty() && attachments.is_empty() {
+                            continue;
                         }
 
-                        if !text.is_empty() || !attachments.is_empty() {
-                            views.push(MessageView {
-                                id: msg_id.clone(),
-                                role: "user".to_string(),
-                                items: if text.is_empty() { vec![] } else {
-                                    vec![MessageItemView::Text { id: stable_id(&cid, row.seq, 0, Some("text")), text }]
-                                },
-                                attachments,
-                            });
-                        }
+                        views.push(MessageView {
+                            id: msg_id,
+                            role: "user".to_string(),
+                            items: if text.is_empty() {
+                                vec![]
+                            } else {
+                                vec![MessageItemView::Text {
+                                    id: stable_id(&cid, row.seq, 0, Some("text")),
+                                    text,
+                                }]
+                            },
+                            attachments,
+                        });
                     }
                     Message::Assistant { content, .. } => {
                         let mut items: Vec<MessageItemView> = Vec::new();
-                        let mut item_idx: usize = 0;
-                        for c in content {
-                            match c {
+                        let mut item_idx = 0usize;
+                        for part in content.iter() {
+                            match part {
                                 AssistantContent::Reasoning(r) => {
                                     let text = r.display_text();
-                                    if !text.is_empty() {
-                                        let item_id = stable_id(&cid, row.seq, item_idx, Some("reasoning"));
-                                        let duration_seconds = reasoning_durations.get(&item_id).copied();
-                                        items.push(MessageItemView::Reasoning {
-                                            id: item_id,
-                                            text,
-                                            duration_seconds,
-                                        });
-                                        item_idx += 1;
+                                    if text.is_empty() {
+                                        continue;
                                     }
+                                    let item_id =
+                                        stable_id(&cid, row.seq, item_idx, Some("reasoning"));
+                                    let duration_seconds =
+                                        reasoning_durations.get(&item_id).copied();
+                                    items.push(MessageItemView::Reasoning {
+                                        id: item_id,
+                                        text,
+                                        duration_seconds,
+                                    });
+                                    item_idx += 1;
                                 }
                                 AssistantContent::ToolCall(tc) => {
                                     let args = tc.function.arguments.to_string();
-                                    let display_info = parse_display_info(&tc.function.name, &args, ws_path);
-                                    let entry = tool_outputs.get(&tc.id);
-                                    let output = entry.map(|e| e.output.clone());
-                                    let status = match entry {
-                                        Some(e) if e.is_error => "error",
+                                    let display_info =
+                                        parse_display_info(&tc.function.name, &args);
+                                    let raw = tool_outputs.get(&tc.id);
+                                    let status = match raw {
+                                        Some(o) if tool_output_is_error(o) => "error",
                                         Some(_) => "done",
-                                        None => "done",
+                                        None => "error",
                                     };
                                     items.push(MessageItemView::ToolCall {
                                         id: tc.id.clone(),
                                         name: tc.function.name.clone(),
                                         args,
-                                        output,
+                                        output: raw
+                                            .map(|o| strip_tool_error_sentinel(o).to_string()),
                                         display_info,
                                         status: status.to_string(),
                                     });
                                     item_idx += 1;
                                 }
                                 AssistantContent::Text(t) => {
-                                    if !t.text.is_empty() {
-                                        items.push(MessageItemView::Text {
-                                            id: stable_id(&cid, row.seq, item_idx, Some("text")),
-                                            text: t.text.clone(),
-                                        });
-                                        item_idx += 1;
+                                    if t.text.is_empty() {
+                                        continue;
                                     }
+                                    items.push(MessageItemView::Text {
+                                        id: stable_id(&cid, row.seq, item_idx, Some("text")),
+                                        text: t.text.clone(),
+                                    });
+                                    item_idx += 1;
                                 }
                                 _ => {}
                             }
@@ -547,12 +712,16 @@ impl SqliteMemory {
                 }
             }
             Ok(views)
-        }).await
+        })
+        .await
     }
 }
 
 impl ConversationMemory for SqliteMemory {
-    fn load<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
+    fn load<'a>(
+        &'a self,
+        conversation_id: &'a str,
+    ) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
@@ -564,7 +733,8 @@ impl ConversationMemory for SqliteMemory {
                 let mut out = Vec::new();
                 let tail_start = match boundary {
                     Some(idx) => {
-                        let marker: CompactionMarker = serde_json::from_str(&rows[idx].data).map_err(MemoryError::backend)?;
+                        let marker: CompactionMarker =
+                            serde_json::from_str(&rows[idx].data).map_err(MemoryError::backend)?;
                         out.push(Message::user(format!(
                             "[Conversation compacted — {} earlier messages summarised]\n\n{}",
                             marker.original_message_count, marker.summary
@@ -576,16 +746,22 @@ impl ConversationMemory for SqliteMemory {
 
                 for row in &rows[tail_start..] {
                     if row.kind == "message" {
-                        let msg: Message = serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
+                        let msg: Message =
+                            serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
                         out.push(msg);
                     }
                 }
                 Ok(out)
-            }).await
+            })
+            .await
         })
     }
 
-    fn append<'a>(&'a self, conversation_id: &'a str, messages: Vec<Message>) -> MemoryFuture<'a, Result<(), MemoryError>> {
+    fn append<'a>(
+        &'a self,
+        conversation_id: &'a str,
+        messages: Vec<Message>,
+    ) -> MemoryFuture<'a, Result<(), MemoryError>> {
         let conn = self.conn.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
@@ -594,29 +770,34 @@ impl ConversationMemory for SqliteMemory {
                 let mut c = conn.lock().map_err(mem_lock)?;
                 let tx = c.transaction().map_err(mem_sql)?;
 
-                let start_seq: i64 = tx.query_row(
-                    "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
-                    params![cid],
-                    |row| row.get(0),
-                ).map_err(mem_sql)?;
+                let start_seq: i64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE conversation_id = ?1",
+                        params![cid],
+                        |row| row.get(0),
+                    )
+                    .map_err(mem_sql)?;
 
                 for (i, msg) in messages.iter().enumerate() {
                     let data = serde_json::to_string(msg).map_err(MemoryError::backend)?;
                     tx.execute(
                         "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'message')",
                         params![cid, start_seq + i as i64, now, data],
-                    ).map_err(mem_sql)?;
+                    )
+                    .map_err(mem_sql)?;
                 }
 
                 tx.execute(
                     "INSERT INTO sessions (id, created_at, updated_at) VALUES (?1, ?2, ?2)
                      ON CONFLICT(id) DO UPDATE SET updated_at = ?2",
                     params![cid, now],
-                ).map_err(mem_sql)?;
+                )
+                .map_err(mem_sql)?;
 
                 tx.commit().map_err(mem_sql)?;
                 Ok(())
-            }).await
+            })
+            .await
         })
     }
 
@@ -625,14 +806,36 @@ impl ConversationMemory for SqliteMemory {
         let cid = conversation_id.to_string();
         Box::pin(async move {
             run_mem_task(move || {
-                let c = conn.lock().map_err(mem_lock)?;
-                c.execute("DELETE FROM messages WHERE conversation_id = ?1", params![cid]).map_err(mem_sql)?;
-                c.execute("DELETE FROM sessions WHERE id = ?1", params![cid]).map_err(mem_sql)?;
-                c.execute("DELETE FROM reasoning_durations WHERE conversation_id = ?1", params![cid]).map_err(mem_sql)?;
+                let mut c = conn.lock().map_err(mem_lock)?;
+                let tx = c.transaction().map_err(mem_sql)?;
+                tx.execute(
+                    "DELETE FROM messages WHERE conversation_id = ?1",
+                    params![cid],
+                )
+                .map_err(mem_sql)?;
+                tx.execute("DELETE FROM sessions WHERE id = ?1", params![cid])
+                    .map_err(mem_sql)?;
+                tx.execute(
+                    "DELETE FROM reasoning_durations WHERE conversation_id = ?1",
+                    params![cid],
+                )
+                .map_err(mem_sql)?;
+                tx.commit().map_err(mem_sql)?;
                 Ok(())
-            }).await
+            })
+            .await
         })
     }
+}
+
+pub fn configure_connection(conn: &Connection) -> AppResult<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| AppError::other(format!("sqlite journal_mode failed: {e}")))?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(|e| AppError::other(format!("sqlite synchronous failed: {e}")))?;
+    conn.busy_timeout(std::time::Duration::from_secs(10))
+        .map_err(|e| AppError::other(format!("sqlite busy_timeout failed: {e}")))?;
+    Ok(())
 }
 
 struct MessageRow {
@@ -642,50 +845,65 @@ struct MessageRow {
     data: String,
 }
 
-fn load_all(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<MessageRow>> {
-    let mut stmt = conn.prepare("SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC")?;
-    let rows = stmt.query_map(params![conversation_id], |row| {
-        Ok(MessageRow {
-            seq: row.get(0)?,
-            ts: row.get(1)?,
-            kind: row.get(2)?,
-            data: row.get(3)?,
-        })
-    })?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
-    }
-    Ok(out)
+fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
+    Ok(MessageRow {
+        seq: row.get(0)?,
+        ts: row.get(1)?,
+        kind: row.get(2)?,
+        data: row.get(3)?,
+    })
 }
 
-fn add_column_if_missing(tx: &rusqlite::Transaction, table: &str, column: &str, ddl_type: &str) -> rusqlite::Result<()> {
-    let mut exists = false;
-    let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let name: String = row.get(1)?;
-        if name == column {
-            exists = true;
-            break;
-        }
+fn load_all(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<MessageRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC",
+    )?;
+    let rows = stmt.query_map(params![conversation_id], map_message_row)?;
+    rows.collect()
+}
+
+fn load_after(
+    conn: &Connection,
+    conversation_id: &str,
+    after_seq: i64,
+) -> rusqlite::Result<Vec<MessageRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 AND seq > ?2 ORDER BY seq ASC",
+    )?;
+    let rows = stmt.query_map(params![conversation_id, after_seq], map_message_row)?;
+    rows.collect()
+}
+
+fn is_user_turn(msg: &Message) -> bool {
+    match msg {
+        Message::User { content } => content.iter().any(|c| matches!(c, UserContent::Text(_))),
+        _ => false,
     }
-    drop(rows);
-    drop(stmt);
-    if !exists {
-        tx.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl_type};"), [])?;
-    }
-    Ok(())
+}
+
+fn basename(label: &str) -> String {
+    label
+        .replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or(label)
+        .to_string()
 }
 
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
     let input = format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or(""));
     let hash = Sha256::digest(input.as_bytes());
-    format!("{:016x}", u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8])))
+    format!(
+        "{:016x}",
+        u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
+    )
 }
 
 fn now_millis() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 async fn run_db_task<T, F>(f: F) -> AppResult<T>
@@ -693,7 +911,9 @@ where
     T: Send + 'static,
     F: FnOnce() -> AppResult<T> + Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|e| AppError::other(format!("db task failed: {e}")))?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::other(format!("db task failed: {e}")))?
 }
 
 async fn run_mem_task<T, F>(f: F) -> Result<T, MemoryError>
@@ -701,7 +921,9 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, MemoryError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|e| MemoryError::Internal(e.to_string()))?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| MemoryError::Internal(e.to_string()))?
 }
 
 fn sql_err(e: rusqlite::Error) -> AppError {

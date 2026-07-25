@@ -14,6 +14,7 @@ pub mod write_file;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+
 use crate::gateway::Gateway;
 use crate::state::{BrowserRequestsHandle, WorkspaceHandle};
 use crate::tools::command_manager::CommandManager;
@@ -31,9 +32,11 @@ pub use stop_command::StopCommand;
 pub use web_search::WebSearch;
 pub use write_file::WriteFile;
 
+pub const TOOL_ERROR_SENTINEL: &str = "[[tool-error]] ";
+
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
-    #[error("Error: {0}")]
+    #[error("[[tool-error]] {0}")]
     Msg(String),
 }
 
@@ -49,29 +52,69 @@ impl From<crate::error::AppError> for ToolError {
     }
 }
 
+pub fn tool_output_is_error(output: &str) -> bool {
+    output.starts_with(TOOL_ERROR_SENTINEL)
+}
+
+pub fn strip_tool_error_sentinel(output: &str) -> &str {
+    output.strip_prefix(TOOL_ERROR_SENTINEL).unwrap_or(output)
+}
+
+pub fn workspace_root(handle: &WorkspaceHandle) -> Result<PathBuf, ToolError> {
+    handle
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .ok_or_else(|| ToolError::msg("no workspace is open"))
+}
+
 pub struct ToolContext {
     pub workspace: WorkspaceHandle,
     pub gateway: Arc<Gateway>,
-    pub app_handle: Option<tauri::AppHandle>,
+    pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
     pub browser_requests: BrowserRequestsHandle,
-    pub data_dir: Option<PathBuf>,
+    pub data_dir: PathBuf,
     pub workspace_index: WorkspaceIndex,
 }
 
 impl ToolContext {
-    pub fn read_file(&self) -> ReadFile { ReadFile::new(self.workspace.clone()) }
-    pub fn read_skill(&self) -> ReadSkill { ReadSkill::new(self.data_dir.clone(), self.workspace.clone()) }
-    pub fn write_file(&self) -> WriteFile { WriteFile::new(self.workspace.clone()) }
-    pub fn multi_replace(&self) -> MultiReplaceFileContent { MultiReplaceFileContent::new(self.workspace.clone()) }
-    pub fn search_workspace(&self) -> SearchWorkspace { SearchWorkspace::new(self.workspace.clone(), self.workspace_index.clone()) }
-    pub fn web_search(&self) -> WebSearch { WebSearch::new(self.gateway.clone()) }
-    pub fn run_command(&self) -> RunCommand { RunCommand::new(self.workspace.clone(), self.command_manager.clone()) }
-    pub fn get_command_status(&self) -> GetCommandStatus { GetCommandStatus::new(self.command_manager.clone()) }
-    pub fn stop_command(&self) -> StopCommand { StopCommand::new(self.command_manager.clone()) }
-    pub fn browser_navigate(&self) -> BrowserNavigate { BrowserNavigate::new(self.app_handle.clone()) }
-    pub fn browser_click(&self) -> BrowserClick { BrowserClick::new(self.app_handle.clone(), self.browser_requests.clone()) }
-    pub fn browser_type(&self) -> BrowserType { BrowserType::new(self.app_handle.clone(), self.browser_requests.clone()) }
+    pub fn read_file(&self) -> ReadFile {
+        ReadFile::new(self.workspace.clone())
+    }
+    pub fn read_skill(&self) -> ReadSkill {
+        ReadSkill::new(self.data_dir.clone(), self.workspace.clone())
+    }
+    pub fn write_file(&self) -> WriteFile {
+        WriteFile::new(self.workspace.clone())
+    }
+    pub fn multi_replace(&self) -> MultiReplaceFileContent {
+        MultiReplaceFileContent::new(self.workspace.clone())
+    }
+    pub fn search_workspace(&self) -> SearchWorkspace {
+        SearchWorkspace::new(self.workspace.clone(), self.workspace_index.clone())
+    }
+    pub fn web_search(&self) -> WebSearch {
+        WebSearch::new(self.gateway.clone())
+    }
+    pub fn run_command(&self) -> RunCommand {
+        RunCommand::new(self.workspace.clone(), self.command_manager.clone())
+    }
+    pub fn get_command_status(&self) -> GetCommandStatus {
+        GetCommandStatus::new(self.command_manager.clone())
+    }
+    pub fn stop_command(&self) -> StopCommand {
+        StopCommand::new(self.command_manager.clone())
+    }
+    pub fn browser_navigate(&self) -> BrowserNavigate {
+        BrowserNavigate::new(self.app_handle.clone())
+    }
+    pub fn browser_click(&self) -> BrowserClick {
+        BrowserClick::new(self.app_handle.clone(), self.browser_requests.clone())
+    }
+    pub fn browser_type(&self) -> BrowserType {
+        BrowserType::new(self.app_handle.clone(), self.browser_requests.clone())
+    }
     pub fn browser_get_content(&self) -> BrowserGetContent {
         BrowserGetContent::new(self.app_handle.clone(), self.browser_requests.clone())
     }

@@ -1,67 +1,103 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { inTauri } from "../lib/api";
-import { createMentionRegex } from "../lib/utils";
+import * as api from "../lib/api";
+import { createMentionRegex, isImagePath } from "../lib/utils";
 import FileTag from "./FileTag";
-import ExplorerIcon from "./ExplorerIcon";
 import CodeBlock from "./ui/CodeBlock";
 
 function extractText(node: React.ReactNode): string {
   if (typeof node === "string") return node;
   if (typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(extractText).join("");
-  if (React.isValidElement(node)) return extractText((node.props as { children?: React.ReactNode }).children);
+  if (React.isValidElement(node)) {
+    return extractText((node.props as { children?: React.ReactNode }).children);
+  }
   return "";
 }
 
-const ATTACHMENT_RE = /\[Attached (image|file):\s*([^—\n]+?)\s*—\s*([^\]\n]+)\]/g;
+function looksLikePath(value: string): boolean {
+  return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
+}
+
+function hasScheme(href: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href);
+}
+
+function isWorkspaceLink(href: string): boolean {
+  if (hasScheme(href)) return href.startsWith("file:");
+  if (href.startsWith("#") || href.startsWith("//")) return false;
+  return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
+}
 
 export function renderTextWithMentions(text: string): React.ReactNode {
   if (!text) return text;
-  const parts: React.ReactNode[] = [];
-  let lastIdx = 0;
-  const combinedRegex = new RegExp(`(?:${createMentionRegex().source})|(?:${ATTACHMENT_RE.source})`, "g");
-  let match: RegExpExecArray | null;
 
-  while ((match = combinedRegex.exec(text)) !== null) {
-    if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
-    if (match[1]) {
-      parts.push(<FileTag key={`mention-${match.index}`} path={match[1]} lineRange={match[2]} />);
-    } else if (match[3] && match[4] && match[5]) {
-      const isImg = match[3] === "image";
-      const name = match[4].trim();
-      const path = match[5].trim();
-      const imgSrc = isImg && inTauri() ? convertFileSrc(path) : `file://${path}`;
-      if (isImg) {
-        parts.push(
-          <span key={`attach-${match.index}`} className="AttachmentCard AttachmentCard-image" title={path}>
-            <span className="AttachmentCard-thumbWrap">
-              <img src={imgSrc} alt={name} className="AttachmentCard-thumb" onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }} />
-            </span>
-            <span className="AttachmentCard-name">{name}</span>
-          </span>
-        );
-      } else {
-        parts.push(
-          <span key={`attach-${match.index}`} className="AttachmentCard AttachmentCard-doc" title={path}>
-            <ExplorerIcon type="file" name={name} className="AttachmentCard-icon" style={{ width: 15, height: 15, flexShrink: 0 }} />
-            <span className="AttachmentCard-name">{name}</span>
-          </span>
-        );
-      }
-    }
-    lastIdx = match.index + match[0].length;
+  const regex = createMentionRegex();
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let matched = false;
+
+  while ((match = regex.exec(text)) !== null) {
+    const path = match[1] ?? match[2] ?? "";
+    if (!looksLikePath(path)) continue;
+    matched = true;
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push(
+      <FileTag key={`mention-${match.index}`} path={path} lineRange={match[3] ?? undefined} />
+    );
+    lastIndex = match.index + match[0].length;
   }
 
-  if (lastIdx === 0) return text;
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  if (!matched) return text;
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
   return <>{parts}</>;
 }
 
-const FILE_LINK_RE = /\.[a-zA-Z0-9]+(#L\d+)?$/;
+function withMentions(children: React.ReactNode): React.ReactNode {
+  return React.Children.map(children, (child) =>
+    typeof child === "string" ? renderTextWithMentions(child) : child
+  );
+}
+
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const [resolved, setResolved] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (hasScheme(src) && !src.startsWith("file:")) {
+      setResolved(src);
+      return;
+    }
+    const path = src.replace(/^file:\/\/\/?/, "");
+    if (!isImagePath(path)) {
+      setResolved(null);
+      return;
+    }
+    let active = true;
+    api
+      .readImageDataUrl(path)
+      .then((url) => {
+        if (active) setResolved(url);
+      })
+      .catch(() => {
+        if (active) setResolved(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [src]);
+
+  if (!resolved) return <FileTag path={src.replace(/^file:\/\/\/?/, "")} />;
+
+  return (
+    <span className="Markdown-imgCard" title={src}>
+      <img src={resolved} alt={alt} className="Markdown-imgThumb" />
+      {alt && <span className="Markdown-imgCaption">{alt}</span>}
+    </span>
+  );
+}
 
 export function Markdown({ children }: { children: string }) {
   return (
@@ -70,47 +106,58 @@ export function Markdown({ children }: { children: string }) {
         remarkPlugins={[remarkGfm]}
         components={{
           img({ src, alt }) {
-            if (!src) return null;
-            const isLocal = src.startsWith("file://") || src.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(src);
-            const cleanPath = src.replace(/^file:\/\/\/?/, "");
-            const resolvedSrc = isLocal && inTauri() ? convertFileSrc(cleanPath) : src;
-            return (
-              <span className="Markdown-imgCard" title={src}>
-                <img src={resolvedSrc} alt={alt ?? ""} className="Markdown-imgThumb" />
-                {alt && <span className="Markdown-imgCaption">{alt}</span>}
-              </span>
-            );
+            if (typeof src !== "string" || !src) return null;
+            return <MarkdownImage src={src} alt={alt ?? ""} />;
           },
-          code({ className, children: codeChildren }) {
-            const match = /language-(\w+)/.exec(className ?? "");
-            const value = extractText(codeChildren).replace(/\n$/, "");
-            if (match) return <CodeBlock language={match[1]} value={value} />;
-            if (value.includes("\n") || Boolean(className)) return <CodeBlock language="plaintext" value={value} />;
+          pre({ children: preChildren }) {
+            const child = Array.isArray(preChildren) ? preChildren[0] : preChildren;
+            if (!React.isValidElement(child)) return <pre>{preChildren}</pre>;
+            const props = child.props as { className?: string; children?: React.ReactNode };
+            const match = /language-([\w+-]+)/.exec(props.className ?? "");
+            const value = extractText(props.children).replace(/\n$/, "");
+            return <CodeBlock language={match ? match[1] : "text"} value={value} />;
+          },
+          code({ children: codeChildren }) {
             return <code className="Markdown-inlinecode">{codeChildren}</code>;
           },
           p({ children: pChildren }) {
-            return <p>{React.Children.map(pChildren, (child) => (typeof child === "string" ? renderTextWithMentions(child) : child))}</p>;
+            return <p>{withMentions(pChildren)}</p>;
           },
           li({ children: liChildren }) {
-            return <li>{React.Children.map(liChildren, (child) => (typeof child === "string" ? renderTextWithMentions(child) : child))}</li>;
+            return <li>{withMentions(liChildren)}</li>;
           },
           table({ children: tableChildren }) {
-            return <div className="Markdown-tableWrapper"><table>{tableChildren}</table></div>;
+            return (
+              <div className="Markdown-tableWrapper">
+                <table>{tableChildren}</table>
+              </div>
+            );
           },
           a({ href, children: aChildren }) {
-            const linkText = extractText(aChildren);
-            const isFileLink = href?.startsWith("file://") || FILE_LINK_RE.test(href ?? "") || FILE_LINK_RE.test(linkText);
-            if (isFileLink) {
-              const cleanPath = href?.replace(/^file:\/\/\/?/, "") || linkText;
-              const lineMatch = /#L\d+(?:-\d+)?/.exec(cleanPath);
-              const lineRange = lineMatch ? lineMatch[0] : undefined;
-              const basePath = cleanPath.replace(/#L\d+(?:-\d+)?$/, "");
-              return <FileTag path={basePath} lineRange={lineRange} />;
+            const target = href ?? "";
+            if (isWorkspaceLink(target)) {
+              const clean = target.replace(/^file:\/\/\/?/, "");
+              const lineMatch = /#L\d+(?:-\d+)?$/.exec(clean);
+              return (
+                <FileTag
+                  path={clean.replace(/#L\d+(?:-\d+)?$/, "")}
+                  lineRange={lineMatch ? lineMatch[0] : undefined}
+                />
+              );
             }
-            const handleClick = (e: React.MouseEvent) => {
-              if (href && inTauri()) { e.preventDefault(); void openUrl(href); }
-            };
-            return <a href={href} target="_blank" rel="noreferrer" onClick={handleClick}>{aChildren}</a>;
+            return (
+              <a
+                href={target}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (target) void openUrl(target);
+                }}
+              >
+                {aChildren}
+              </a>
+            );
           },
         }}
       >
@@ -119,3 +166,5 @@ export function Markdown({ children }: { children: string }) {
     </div>
   );
 }
+
+export default Markdown;

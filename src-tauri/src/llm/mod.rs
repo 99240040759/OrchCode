@@ -8,4 +8,4 @@ pub use agent::build_agent;
 pub use attachment::AttachmentRef;
 pub use client::build_client;
 pub use compaction::maybe_compact;
-pub use stream::{run_chat, TurnOutcome};
+pub use stream::{run_chat, RunRequest};

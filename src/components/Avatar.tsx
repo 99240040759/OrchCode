@@ -1,24 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 
-export function Avatar({ src, fallback, className }: { src?: string | null; fallback: string; className?: string }) {
-  const [hasError, setHasError] = useState(false);
-  const prevSrc = useRef<string | null | undefined>(undefined);
+export function Avatar({
+  src,
+  fallback,
+  className,
+}: {
+  src?: string | null;
+  fallback: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (prevSrc.current !== src) {
-      prevSrc.current = src;
-      setHasError(false);
-    }
+    setFailed(false);
   }, [src]);
 
   return (
     <span className={cn("Avatar", className)}>
-      {src && !hasError ? (
-        <img src={src} alt="" referrerPolicy="no-referrer" crossOrigin="anonymous" onError={() => setHasError(true)} />
+      {src && !failed ? (
+        <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
       ) : (
         fallback
       )}
     </span>
   );
 }
+
+export default Avatar;

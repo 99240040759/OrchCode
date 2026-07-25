@@ -1,7 +1,9 @@
 use std::path::PathBuf;
+
+use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use rig::tool::Tool;
+
 use super::ToolError;
 use crate::skills::load_all_skills;
 use crate::state::WorkspaceHandle;
@@ -12,13 +14,16 @@ pub struct ReadSkillArgs {
 }
 
 pub struct ReadSkill {
-    data_dir: Option<PathBuf>,
+    data_dir: PathBuf,
     workspace: WorkspaceHandle,
 }
 
 impl ReadSkill {
-    pub fn new(data_dir: Option<PathBuf>, workspace: WorkspaceHandle) -> Self {
-        Self { data_dir, workspace }
+    pub fn new(data_dir: PathBuf, workspace: WorkspaceHandle) -> Self {
+        Self {
+            data_dir,
+            workspace,
+        }
     }
 }
 
@@ -29,10 +34,11 @@ impl Tool for ReadSkill {
     type Output = String;
 
     fn description(&self) -> String {
-        "Load the complete step-by-step instructions for a named skill from the skills index. \
+        "Load the complete step-by-step instructions for a named skill. \
 Skills are reusable procedure guides — call this at the start of any task that matches a skill name. \
 The skill content replaces guesswork with a proven sequence of steps, tool calls, and verification checks. \
-Pass the skill name exactly as it appears in the SKILLS INDEX section of this system prompt.".to_string()
+Pass the skill name exactly as it appears in the SKILLS section of this system prompt."
+            .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -41,7 +47,7 @@ Pass the skill name exactly as it appears in the SKILLS INDEX section of this sy
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let workspace = self.workspace.read().ok().and_then(|g| g.clone());
-        let skills = load_all_skills(self.data_dir.as_deref(), workspace.as_deref());
+        let skills = load_all_skills(&self.data_dir, workspace.as_deref());
         let target = args.name.trim().to_lowercase();
         let skill = skills
             .into_iter()

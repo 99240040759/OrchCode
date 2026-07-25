@@ -25,7 +25,3 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
         }
     }
 }
-
-pub fn platform_name() -> &'static str {
-    "windows"
-}

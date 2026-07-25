@@ -1,88 +1,115 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { FiCheck, FiCopy } from "react-icons/fi";
 import { createHighlighterCore, createJavaScriptRegexEngine } from "shiki/core";
-import type { BundledTheme } from "shiki";
+import type { HighlighterCore, LanguageInput } from "shiki";
 
-const THEME: BundledTheme = "vitesse-dark";
+const THEME = "vitesse-dark";
+const BUILTIN_PLAIN = "text";
+const HIGHLIGHT_DEBOUNCE_MS = 60;
 
 const LANG_ALIAS: Record<string, string> = {
-  txt: "text",
-  plaintext: "text",
+  txt: BUILTIN_PLAIN,
+  plaintext: BUILTIN_PLAIN,
+  plain: BUILTIN_PLAIN,
+  log: BUILTIN_PLAIN,
   rs: "rust",
   py: "python",
   sh: "bash",
+  shell: "bash",
   zsh: "bash",
   js: "javascript",
   ts: "typescript",
   md: "markdown",
+  mdx: "markdown",
   yml: "yaml",
   cs: "csharp",
   rb: "ruby",
   kt: "kotlin",
   docker: "dockerfile",
   ps1: "powershell",
-  log: "text",
   less: "css",
   json5: "json",
-  mdx: "markdown",
-  cmake: "makefile",
+  gql: "graphql",
+  patch: "diff",
+  cfg: "ini",
   dotenv: "ini",
+  ex: "elixir",
+  exs: "elixir",
 };
 
-const highlighterPromise = createHighlighterCore({
-  themes: [import("@shikijs/themes/vitesse-dark")],
-  langs: [
-    import("@shikijs/langs/typescript"),
-    import("@shikijs/langs/tsx"),
-    import("@shikijs/langs/javascript"),
-    import("@shikijs/langs/jsx"),
-    import("@shikijs/langs/json"),
-    import("@shikijs/langs/jsonc"),
-    import("@shikijs/langs/html"),
-    import("@shikijs/langs/css"),
-    import("@shikijs/langs/scss"),
-    import("@shikijs/langs/rust"),
-    import("@shikijs/langs/python"),
-    import("@shikijs/langs/bash"),
-    import("@shikijs/langs/shellscript"),
-    import("@shikijs/langs/markdown"),
-    import("@shikijs/langs/yaml"),
-    import("@shikijs/langs/toml"),
-    import("@shikijs/langs/sql"),
-    import("@shikijs/langs/go"),
-    import("@shikijs/langs/java"),
-    import("@shikijs/langs/cpp"),
-    import("@shikijs/langs/c"),
-    import("@shikijs/langs/csharp"),
-    import("@shikijs/langs/ruby"),
-    import("@shikijs/langs/php"),
-    import("@shikijs/langs/swift"),
-    import("@shikijs/langs/kotlin"),
-    import("@shikijs/langs/xml"),
-    import("@shikijs/langs/graphql"),
-    import("@shikijs/langs/dockerfile"),
-    import("@shikijs/langs/ini"),
-    import("@shikijs/langs/powershell"),
-    import("@shikijs/langs/diff"),
-    import("@shikijs/langs/vue"),
-    import("@shikijs/langs/svelte"),
-    import("@shikijs/langs/zig"),
-    import("@shikijs/langs/elixir"),
-    import("@shikijs/langs/makefile"),
-  ],
-  engine: createJavaScriptRegexEngine(),
-});
+const LANG_LOADERS: Record<string, () => LanguageInput> = {
+  typescript: () => import("@shikijs/langs/typescript"),
+  tsx: () => import("@shikijs/langs/tsx"),
+  javascript: () => import("@shikijs/langs/javascript"),
+  jsx: () => import("@shikijs/langs/jsx"),
+  json: () => import("@shikijs/langs/json"),
+  jsonc: () => import("@shikijs/langs/jsonc"),
+  html: () => import("@shikijs/langs/html"),
+  css: () => import("@shikijs/langs/css"),
+  scss: () => import("@shikijs/langs/scss"),
+  rust: () => import("@shikijs/langs/rust"),
+  python: () => import("@shikijs/langs/python"),
+  bash: () => import("@shikijs/langs/bash"),
+  markdown: () => import("@shikijs/langs/markdown"),
+  yaml: () => import("@shikijs/langs/yaml"),
+  toml: () => import("@shikijs/langs/toml"),
+  sql: () => import("@shikijs/langs/sql"),
+  go: () => import("@shikijs/langs/go"),
+  java: () => import("@shikijs/langs/java"),
+  cpp: () => import("@shikijs/langs/cpp"),
+  c: () => import("@shikijs/langs/c"),
+  csharp: () => import("@shikijs/langs/csharp"),
+  ruby: () => import("@shikijs/langs/ruby"),
+  php: () => import("@shikijs/langs/php"),
+  swift: () => import("@shikijs/langs/swift"),
+  kotlin: () => import("@shikijs/langs/kotlin"),
+  xml: () => import("@shikijs/langs/xml"),
+  graphql: () => import("@shikijs/langs/graphql"),
+  dockerfile: () => import("@shikijs/langs/dockerfile"),
+  ini: () => import("@shikijs/langs/ini"),
+  powershell: () => import("@shikijs/langs/powershell"),
+  diff: () => import("@shikijs/langs/diff"),
+  vue: () => import("@shikijs/langs/vue"),
+  svelte: () => import("@shikijs/langs/svelte"),
+  zig: () => import("@shikijs/langs/zig"),
+  elixir: () => import("@shikijs/langs/elixir"),
+  makefile: () => import("@shikijs/langs/makefile"),
+};
 
-async function highlight(code: string, lang: string): Promise<string> {
-  const hl = await highlighterPromise;
-  const raw = (lang || "text").toLowerCase();
-  const targetLang = LANG_ALIAS[raw] ?? raw;
+let highlighterPromise: Promise<HighlighterCore> | null = null;
+const languageLoads = new Map<string, Promise<void>>();
 
-  try {
-    return hl.codeToHtml(code, { lang: targetLang, theme: THEME });
-  } catch {
-    return hl.codeToHtml(code, { lang: "plaintext", theme: THEME });
+function getHighlighter(): Promise<HighlighterCore> {
+  if (highlighterPromise === null) {
+    highlighterPromise = createHighlighterCore({
+      themes: [import("@shikijs/themes/vitesse-dark")],
+      langs: [],
+      engine: createJavaScriptRegexEngine(),
+    });
   }
+  return highlighterPromise;
+}
+
+function resolveLanguage(language: string): string {
+  const lower = language.toLowerCase();
+  const resolved = LANG_ALIAS[lower] ?? lower;
+  return LANG_LOADERS[resolved] ? resolved : BUILTIN_PLAIN;
+}
+
+async function highlight(code: string, language: string): Promise<string> {
+  const highlighter = await getHighlighter();
+  const lang = resolveLanguage(language);
+
+  if (lang !== BUILTIN_PLAIN) {
+    let pending = languageLoads.get(lang);
+    if (!pending) {
+      pending = highlighter.loadLanguage(LANG_LOADERS[lang]()).then(() => undefined);
+      languageLoads.set(lang, pending);
+    }
+    await pending;
+  }
+
+  return highlighter.codeToHtml(code, { lang, theme: THEME });
 }
 
 export interface CodeBlockProps {
@@ -93,7 +120,7 @@ export interface CodeBlockProps {
   className?: string;
 }
 
-function useCopyToClipboard(text: string) {
+export function useCopy(text: string) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -114,47 +141,53 @@ function useCopyToClipboard(text: string) {
 }
 
 export const CodeBlock = memo(function CodeBlock({
-  language,
+  language = BUILTIN_PLAIN,
   value,
   showLineNumbers = true,
   isEditor = false,
   className = "",
 }: CodeBlockProps) {
-  const lang = language || "text";
-  const { copied, copy } = useCopyToClipboard(value);
-  const [html, setHtml] = useState<string>("");
+  const { copied, copy } = useCopy(value);
+  const [html, setHtml] = useState("");
 
   useEffect(() => {
     let active = true;
+    setHtml("");
     const timer = setTimeout(() => {
-      highlight(value, lang).then((out) => {
-        if (active) setHtml(out);
-      });
-    }, 50);
+      highlight(value, language)
+        .then((out) => {
+          if (active) setHtml(out);
+        })
+        .catch(() => {
+          if (active) setHtml("");
+        });
+    }, HIGHLIGHT_DEBOUNCE_MS);
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [value, lang]);
+  }, [value, language]);
 
-  const shikiClass = `CodeBlock-shiki ${showLineNumbers ? "shiki-line-numbers" : ""}`;
-  const body = (
-    <div className={shikiClass} dangerouslySetInnerHTML={{ __html: html }} />
+  const body = html ? (
+    <div
+      className={`CodeBlock-shiki ${showLineNumbers ? "shiki-line-numbers" : ""}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  ) : (
+    <pre className="CodeBlock-pre">
+      <code>{value}</code>
+    </pre>
   );
 
   if (isEditor) {
-    return (
-      <div className={`CodeBlock CodeBlock-fullEditor ${className}`}>
-        {body}
-      </div>
-    );
+    return <div className={`CodeBlock CodeBlock-fullEditor ${className}`}>{body}</div>;
   }
 
   return (
     <div className={`CodeBlock ${className}`}>
       <div className="CodeBlock-header">
-        <span className="CodeBlock-lang">{lang}</span>
-        <button className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
+        <span className="CodeBlock-lang">{language}</span>
+        <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
           {copied ? (
             <>
               <FiCheck className="CodeBlock-copyIconDone" /> Copied
@@ -171,10 +204,4 @@ export const CodeBlock = memo(function CodeBlock({
   );
 });
 
-export function useCopy(text: string) {
-  return useCopyToClipboard(text);
-}
-
 export default CodeBlock;
-
-
