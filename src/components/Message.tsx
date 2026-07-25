@@ -94,6 +94,8 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
   const [open, setOpen] = useState(false);
   const output = tool.output?.trim() ?? "";
   const hasOutput = output.length > 0;
+  const isFileAction = Boolean(tool.displayInfo.filename);
+  const showToggle = hasOutput && (!isFileAction || tool.status === "error");
 
   return (
     <div className="ToolRow" data-status={tool.status}>
@@ -104,7 +106,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
         {tool.status === "error" && (
           <FiAlertTriangle className="ToolRow-errIcon" aria-label="Tool call failed" />
         )}
-        {hasOutput && (
+        {showToggle && (
           <button
             type="button"
             className="ToolRow-toggle"
@@ -117,7 +119,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
           </button>
         )}
       </div>
-      {open && hasOutput && <pre className="ToolRow-output">{output}</pre>}
+      {open && showToggle && <pre className="ToolRow-output">{output}</pre>}
     </div>
   );
 }

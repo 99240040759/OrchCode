@@ -1,4 +1,5 @@
-const REQUIRED_HTTPS: &[&str] = &["GCP_FUNCTIONS_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY"];
+const REQUIRED_HTTPS: &[&str] = &["GCP_FUNCTIONS_URL"];
+const REQUIRED_VARS: &[&str] = &["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN"];
 const OPTIONAL_VARS: &[&str] = &["SENTRY_DSN"];
 
 fn main() {
@@ -16,8 +17,17 @@ fn load_dotenv_for_compile() {
         if value.is_empty() {
             panic!("{key} is not set: define it in .env or the build environment before compiling");
         }
-        if *key != "SUPABASE_ANON_KEY" && !value.starts_with("https://") {
+        if !value.starts_with("https://") {
             panic!("{key} must be an https:// URL, got: {value}");
+        }
+        println!("cargo:rustc-env={key}={value}");
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+
+    for key in REQUIRED_VARS {
+        let value = std::env::var(key).unwrap_or_default();
+        if value.is_empty() {
+            panic!("{key} is not set: define it in .env or the build environment before compiling");
         }
         println!("cargo:rustc-env={key}={value}");
         println!("cargo:rerun-if-env-changed={key}");

@@ -2318,7 +2318,7 @@ body {
    font-family: inherit;
    font-size: inherit;
    background: transparent;
-   display: block;
+   display: grid;
 }
 
 .CodeBlock-pre {
@@ -2329,8 +2329,8 @@ body {
    line-height: 1.6;
    color: var(--text-med);
    background: transparent;
-   white-space: pre-wrap;
-   word-break: break-word;
+   white-space: pre;
+   word-break: normal;
    overflow-x: auto;
 }
 
@@ -2341,8 +2341,8 @@ body {
 }
 
 .CodeBlock-fullEditor .CodeBlock-shiki pre {
-   white-space: pre-wrap;
-   word-break: break-word;
+   white-space: pre;
+   word-break: normal;
 }
 
 .shiki-line-numbers pre {

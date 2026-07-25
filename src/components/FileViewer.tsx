@@ -180,7 +180,11 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
         </div>
       </div>
       <div className="FileViewerBody">
-        {error ? (
+        {loading ? (
+          <div className="FileViewerLoading flex items-center justify-center p-8">
+            <div className="Spinner" />
+          </div>
+        ) : error ? (
           <div className="FileContent-msg">{error}</div>
         ) : language === "markdown" ? (
           <div className="FileViewerMarkdown">

@@ -202,7 +202,7 @@ impl AppState {
             return Err(AppError::NoToken);
         };
 
-        let client = auth::SupabaseAuthClient::new();
+        let client = auth::FirebaseAuthClient::new();
         let session = client.refresh_session(&refresh_token).await?;
         if let Some(rt) = session.refresh_token.as_deref() {
             auth::save_refresh_token(rt)?;

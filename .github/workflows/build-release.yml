@@ -7,8 +7,8 @@ on:
 
 env:
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+  FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+  FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
   SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
@@ -60,8 +60,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build --target aarch64-apple-darwin
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
           GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
@@ -73,8 +73,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build --target x86_64-apple-darwin
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
           GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
@@ -127,8 +127,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npx tauri build
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
           GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 

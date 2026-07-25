@@ -2,12 +2,12 @@ pub fn gcp_functions_url() -> &'static str {
     env!("GCP_FUNCTIONS_URL")
 }
 
-pub fn supabase_url() -> &'static str {
-    env!("SUPABASE_URL")
+pub fn firebase_api_key() -> &'static str {
+    env!("FIREBASE_API_KEY")
 }
 
-pub fn supabase_anon_key() -> &'static str {
-    env!("SUPABASE_ANON_KEY")
+pub fn firebase_auth_domain() -> &'static str {
+    env!("FIREBASE_AUTH_DOMAIN")
 }
 
 pub fn sentry_dsn() -> &'static str {

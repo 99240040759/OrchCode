@@ -736,7 +736,7 @@ impl ConversationMemory for SqliteMemory {
                         let marker: CompactionMarker =
                             serde_json::from_str(&rows[idx].data).map_err(MemoryError::backend)?;
                         out.push(Message::user(format!(
-                            "[Conversation compacted — {} earlier messages summarised]\n\n{}",
+                            "[CONTEXT SUMMARY — {} prior turns summarized for memory efficiency]\n\n{}\n\n[END CONTEXT SUMMARY — Continue task with recent turns below]",
                             marker.original_message_count, marker.summary
                         )));
                         idx + 1

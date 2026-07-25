@@ -1,6 +1,6 @@
 use rig::client::CompletionClient;
 use rig::completion::{CompletionModel, Message};
-use rig::message::{AssistantContent, UserContent};
+use rig::message::{AssistantContent, ToolResultContent, UserContent};
 
 use crate::config;
 use crate::error::{AppError, AppResult};
@@ -9,7 +9,7 @@ use crate::llm::attachment::is_payload_part;
 use crate::llm::client::ChatClient;
 use crate::persistence::SqliteMemory;
 
-const KEEP_RECENT_USER_TURNS: usize = 1;
+const KEEP_RECENT_USER_TURNS: usize = 4;
 
 pub struct CompactionOutcome {
     pub original_message_count: usize,
@@ -77,17 +77,39 @@ fn render_transcript(messages: &[Message]) -> String {
         .iter()
         .filter_map(|m| match m {
             Message::User { content } => {
-                let text: String = content
+                let parts: Vec<String> = content
                     .iter()
                     .filter_map(|c| match c {
-                        UserContent::Text(t) if !is_payload_part(&t.text) => Some(t.text.as_str()),
+                        UserContent::Text(t) if !is_payload_part(&t.text) => {
+                            Some(format!("User: {}", t.text))
+                        }
+                        UserContent::ToolResult(tr) => {
+                            let text: String = tr
+                                .content
+                                .iter()
+                                .filter_map(|tc| match tc {
+                                    ToolResultContent::Text(t) => Some(t.text.as_str()),
+                                    _ => None,
+                                })
+                                .collect();
+                            if text.is_empty() {
+                                None
+                            } else {
+                                let snippet = if text.len() > 600 {
+                                    format!("{}...", &text[..600])
+                                } else {
+                                    text
+                                };
+                                Some(format!("Tool Result: {snippet}"))
+                            }
+                        }
                         _ => None,
                     })
                     .collect();
-                if text.is_empty() {
+                if parts.is_empty() {
                     None
                 } else {
-                    Some(format!("User: {text}"))
+                    Some(parts.join("\n"))
                 }
             }
             Message::Assistant { content, .. } => {

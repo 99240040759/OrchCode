@@ -10,18 +10,11 @@ const KEYRING_SERVICE: &str = "orchcode";
 const KEYRING_REFRESH_ACCOUNT: &str = "refresh_token";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserMetadata {
-    pub full_name: Option<String>,
-    pub name: Option<String>,
-    pub avatar_url: Option<String>,
-    pub picture: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserProfile {
     pub id: String,
     pub email: Option<String>,
-    pub user_metadata: Option<UserMetadata>,
+    pub display_name: Option<String>,
+    pub photo_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,14 +29,10 @@ pub struct UserDisplay {
 
 impl UserDisplay {
     pub fn from_profile(p: &UserProfile) -> Self {
-        let m = p.user_metadata.as_ref();
-        let display_name = m
-            .and_then(|m| {
-                m.full_name
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| m.name.as_deref().filter(|s| !s.is_empty()))
-            })
+        let display_name = p
+            .display_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
             .or_else(|| {
                 p.email
                     .as_deref()
@@ -53,13 +42,10 @@ impl UserDisplay {
             .unwrap_or("there")
             .to_string();
 
-        let avatar_url = m
-            .and_then(|m| {
-                m.avatar_url
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| m.picture.as_deref().filter(|s| !s.is_empty()))
-            })
+        let avatar_url = p
+            .photo_url
+            .as_deref()
+            .filter(|s| !s.is_empty())
             .map(str::to_string);
 
         let initial = display_name
@@ -85,39 +71,63 @@ pub struct AuthSession {
     pub user: Option<UserProfile>,
 }
 
-#[derive(Debug, Deserialize)]
-struct GoTrueTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    user: Option<UserProfile>,
-}
-
-pub struct SupabaseAuthClient {
+pub struct FirebaseAuthClient {
     client: Client,
 }
 
-impl SupabaseAuthClient {
+impl FirebaseAuthClient {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
         }
     }
 
-    pub fn get_google_oauth_url(&self, redirect_to: &str) -> String {
-        format!(
-            "{}/auth/v1/authorize?provider=google&redirect_to={}",
-            config::supabase_url(),
-            urlencoding::encode(redirect_to)
-        )
-    }
-
-    pub async fn get_user(&self, access_token: &str) -> AppResult<UserProfile> {
-        let url = format!("{}/auth/v1/user", config::supabase_url());
+    pub async fn get_google_oauth_url(&self, redirect_to: &str) -> AppResult<String> {
+        let url = format!(
+            "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key={}",
+            config::firebase_api_key()
+        );
         let resp = self
             .client
-            .get(&url)
-            .header("apikey", config::supabase_anon_key())
-            .header("Authorization", format!("Bearer {access_token}"))
+            .post(&url)
+            .json(&serde_json::json!({
+                "providerId": "google.com",
+                "continueUri": redirect_to
+            }))
+            .send()
+            .await
+            .map_err(|e| AppError::other(format!("auth uri fetch network error: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Gateway { status, body });
+        }
+
+        #[derive(Deserialize)]
+        struct CreateAuthUriResponse {
+            #[serde(rename = "authUri")]
+            auth_uri: Option<String>,
+        }
+
+        let res: CreateAuthUriResponse = resp
+            .json()
+            .await
+            .map_err(|e| AppError::other(format!("auth uri parse error: {e}")))?;
+
+        res.auth_uri
+            .ok_or_else(|| AppError::other("no authUri returned from Firebase".to_string()))
+    }
+
+    pub async fn get_user(&self, id_token: &str) -> AppResult<UserProfile> {
+        let url = format!(
+            "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={}",
+            config::firebase_api_key()
+        );
+        let resp = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "idToken": id_token }))
             .send()
             .await
             .map_err(|e| AppError::other(format!("user fetch network error: {e}")))?;
@@ -128,21 +138,125 @@ impl SupabaseAuthClient {
             return Err(AppError::Gateway { status, body });
         }
 
-        resp.json()
+        #[derive(Deserialize)]
+        struct FirebaseAccount {
+            #[serde(rename = "localId")]
+            local_id: String,
+            email: Option<String>,
+            #[serde(rename = "displayName")]
+            display_name: Option<String>,
+            #[serde(rename = "photoUrl")]
+            photo_url: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct LookupResponse {
+            users: Option<Vec<FirebaseAccount>>,
+        }
+
+        let lookup: LookupResponse = resp
+            .json()
             .await
-            .map_err(|e| AppError::other(format!("user JSON parse error: {e}")))
+            .map_err(|e| AppError::other(format!("user JSON parse error: {e}")))?;
+
+        let user = lookup
+            .users
+            .and_then(|u| u.into_iter().next())
+            .ok_or_else(|| AppError::other("user not found in Firebase response".to_string()))?;
+
+        Ok(UserProfile {
+            id: user.local_id,
+            email: user.email,
+            display_name: user.display_name,
+            photo_url: user.photo_url,
+        })
+    }
+
+    pub async fn sign_in_with_idp(
+        &self,
+        token_or_code: &str,
+        is_code: bool,
+        request_uri: &str,
+    ) -> AppResult<(AuthSession, UserProfile)> {
+        let url = format!(
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key={}",
+            config::firebase_api_key()
+        );
+        let encoded_token = urlencoding::encode(token_or_code);
+        let post_body = if is_code {
+            format!("code={}&providerId=google.com", encoded_token)
+        } else {
+            format!("id_token={}&providerId=google.com", encoded_token)
+        };
+        let resp = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({
+                "postBody": post_body,
+                "requestUri": request_uri,
+                "returnIdpCredential": true,
+                "returnSecureToken": true
+            }))
+            .send()
+            .await
+            .map_err(|e| AppError::other(format!("signInWithIdp network error: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Gateway { status, body });
+        }
+
+        #[derive(Deserialize)]
+        struct FirebaseIdpResponse {
+            #[serde(rename = "idToken")]
+            id_token: String,
+            #[serde(rename = "refreshToken")]
+            refresh_token: String,
+            #[serde(rename = "localId")]
+            local_id: String,
+            email: Option<String>,
+            #[serde(rename = "displayName")]
+            display_name: Option<String>,
+            #[serde(rename = "photoUrl")]
+            photo_url: Option<String>,
+        }
+
+        let res: FirebaseIdpResponse = resp
+            .json()
+            .await
+            .map_err(|e| AppError::other(format!("signInWithIdp parse error: {e}")))?;
+
+        let profile = UserProfile {
+            id: res.local_id,
+            email: res.email,
+            display_name: res.display_name,
+            photo_url: res.photo_url,
+        };
+
+        let session = AuthSession {
+            access_token: res.id_token,
+            refresh_token: Some(res.refresh_token),
+            user: Some(profile.clone()),
+        };
+
+        Ok((session, profile))
     }
 
     pub async fn refresh_session(&self, refresh_token: &str) -> AppResult<AuthSession> {
         let url = format!(
-            "{}/auth/v1/token?grant_type=refresh_token",
-            config::supabase_url()
+            "https://securetoken.googleapis.com/v1/token?key={}",
+            config::firebase_api_key()
+        );
+        let body_str = format!(
+            "grant_type=refresh_token&refresh_token={}",
+            urlencoding::encode(refresh_token)
         );
         let resp = self
             .client
             .post(&url)
-            .header("apikey", config::supabase_anon_key())
-            .json(&serde_json::json!({ "refresh_token": refresh_token }))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body_str)
             .send()
             .await
             .map_err(|e| AppError::other(format!("session refresh network error: {e}")))?;
@@ -153,15 +267,25 @@ impl SupabaseAuthClient {
             return Err(AppError::Gateway { status, body });
         }
 
-        let token_resp: GoTrueTokenResponse = resp
+        #[derive(Deserialize)]
+        struct FirebaseTokenResponse {
+            id_token: String,
+            refresh_token: Option<String>,
+        }
+
+        let token_resp: FirebaseTokenResponse = resp
             .json()
             .await
             .map_err(|e| AppError::other(format!("refresh parse error: {e}")))?;
 
+        let new_refresh = token_resp
+            .refresh_token
+            .or_else(|| Some(refresh_token.to_string()));
+
         Ok(AuthSession {
-            access_token: token_resp.access_token,
-            refresh_token: token_resp.refresh_token,
-            user: token_resp.user,
+            access_token: token_resp.id_token,
+            refresh_token: new_refresh,
+            user: None,
         })
     }
 }
@@ -203,7 +327,6 @@ fn delete_secret(account: &str) {
 
 pub fn save_refresh_token(token: &str) -> AppResult<()> {
     if token.is_empty() {
-        delete_secret(KEYRING_REFRESH_ACCOUNT);
         return Ok(());
     }
     store_secret(KEYRING_REFRESH_ACCOUNT, token)
@@ -231,6 +354,7 @@ pub struct AuthCallbackParams {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub error: Option<String>,
+    pub is_code: bool,
 }
 
 fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
@@ -238,8 +362,9 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
         return;
     }
     match key {
-        "access_token" if params.access_token.is_none() => {
-            params.access_token = Some(value.to_string())
+        "code" | "id_token" | "access_token" if params.access_token.is_none() => {
+            params.access_token = Some(value.to_string());
+            params.is_code = key == "code";
         }
         "refresh_token" if params.refresh_token.is_none() => {
             params.refresh_token = Some(value.to_string())
@@ -284,25 +409,36 @@ pub async fn handle_auth_callback(
         return Err(err);
     }
 
-    let access_token = params
+    let id_or_access_token = params
         .access_token
-        .ok_or_else(|| "No access token found in sign-in callback".to_string())?;
+        .ok_or_else(|| "No token found in sign-in callback".to_string())?;
 
-    let client = SupabaseAuthClient::new();
-    let profile = client
-        .get_user(&access_token)
-        .await
-        .map_err(|e| e.to_string())?;
-    let user = UserDisplay::from_profile(&profile);
+    let client = FirebaseAuthClient::new();
 
-    let refresh_token = params.refresh_token.ok_or_else(|| {
-        "Sign-in callback carried no refresh token, so the session could not be saved".to_string()
-    })?;
-    save_refresh_token(&refresh_token).map_err(|e| e.to_string())?;
+    let (firebase_id_token, firebase_refresh_token, user_display) = if let Some(rt) = params.refresh_token {
+        let profile = client.get_user(&id_or_access_token).await.map_err(|e| e.to_string())?;
+        (id_or_access_token, Some(rt), UserDisplay::from_profile(&profile))
+    } else if !params.is_code {
+        let (session, profile) = client
+            .sign_in_with_idp(&id_or_access_token, false, "https://orch.live/auth-callback")
+            .await
+            .map_err(|e| e.to_string())?;
+        (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
+    } else {
+        let (session, profile) = client
+            .sign_in_with_idp(&id_or_access_token, true, "https://orch.live/auth-callback")
+            .await
+            .map_err(|e| e.to_string())?;
+        (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
+    };
 
-    if let Ok(mut guard) = token.write() {
-        *guard = Some(access_token);
+    if let Some(rt) = firebase_refresh_token {
+        save_refresh_token(&rt).map_err(|e| e.to_string())?;
     }
 
-    Ok(user)
+    if let Ok(mut guard) = token.write() {
+        *guard = Some(firebase_id_token);
+    }
+
+    Ok(user_display)
 }

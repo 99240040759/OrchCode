@@ -96,7 +96,7 @@ fn workspace_info(state: &AppState) -> WorkspaceInfo {
 
 #[tauri::command]
 pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisplay>, String> {
-    let client = auth::SupabaseAuthClient::new();
+    let client = auth::FirebaseAuthClient::new();
 
     if let Some(token) = state.access_token() {
         if let Ok(profile) = client.get_user(&token).await {
@@ -135,11 +135,17 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
 }
 
 #[tauri::command]
-pub fn get_oauth_url(state: State<'_, AppState>, redirect_to: Option<String>) -> String {
+pub async fn get_oauth_url(
+    state: State<'_, AppState>,
+    redirect_to: Option<String>,
+) -> Result<String, String> {
     state.mark_sign_in_started();
-    let client = auth::SupabaseAuthClient::new();
+    let client = auth::FirebaseAuthClient::new();
     let target = redirect_to.unwrap_or_else(|| DEFAULT_REDIRECT_TO.to_string());
-    client.get_google_oauth_url(&target)
+    client
+        .get_google_oauth_url(&target)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
