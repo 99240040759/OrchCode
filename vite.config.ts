@@ -1,5 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 declare const process: { env: Record<string, string | undefined> };
 const host = process.env.TAURI_DEV_HOST;
@@ -7,9 +11,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [react()],
 
-  optimizeDeps: {
-    include: ["monaco-editor/esm/vs/editor/editor.worker"],
+  resolve: {
+    alias: {
+      // Allows @import "~monaco-editor/..." in CSS to resolve correctly in production
+      "~monaco-editor": path.resolve(__dirname, "node_modules/monaco-editor"),
+    },
   },
+
 
   worker: {
     format: "es",

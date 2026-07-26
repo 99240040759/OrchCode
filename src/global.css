@@ -1,4 +1,4 @@
-@import "../node_modules/monaco-editor/min/vs/editor/editor.main.css";
+@import "~monaco-editor/min/vs/editor/editor.main.css";
 
 :root {
    --bg-app: #121212;

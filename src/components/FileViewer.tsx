@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 
-import editorWorker from "monaco-editor/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/language/json/json.worker?worker";
-import cssWorker from "monaco-editor/language/css/css.worker?worker";
-import htmlWorker from "monaco-editor/language/html/html.worker?worker";
-import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import editorWorker from "monaco-editor/editor/editor.worker?worker&inline";
+import jsonWorker from "monaco-editor/language/json/json.worker?worker&inline";
+import cssWorker from "monaco-editor/language/css/css.worker?worker&inline";
+import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
+import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
 import { FiCheck, FiChevronRight, FiCopy, FiRefreshCw } from "react-icons/fi";
 
 self.MonacoEnvironment = {
