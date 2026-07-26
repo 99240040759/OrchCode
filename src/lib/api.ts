@@ -41,10 +41,6 @@ export type ToolIcon =
   | "search"
   | "globe"
   | "book"
-  | "cpu"
-  | "mousePointer"
-  | "keyboard"
-  | "eye"
   | "zapOff"
   | "database";
 

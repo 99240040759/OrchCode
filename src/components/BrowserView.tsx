@@ -6,6 +6,7 @@ import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import { DEFAULT_BROWSER_URL } from "../lib/artifacts";
+import { newId } from "../lib/utils";
 import { Button } from "./ui/Button";
 
 const OFFSCREEN = -100000;
@@ -19,8 +20,8 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
-export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: string }) {
-  const label = `browser-${id}`;
+export function BrowserView({ id: _id, initialUrl }: { id?: string; initialUrl?: string }) {
+  const [label] = useState(() => `browser-${newId()}`);
   const startUrl = normalizeUrl(initialUrl ?? DEFAULT_BROWSER_URL);
 
   const [input, setInput] = useState(startUrl);
@@ -93,7 +94,7 @@ export function BrowserView({ id, initialUrl }: { id: string; initialUrl?: strin
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       window.removeEventListener("resize", syncPosition);
-      void webview.close();
+      void webview.close().catch(() => {});
     };
   }, [label]);
 

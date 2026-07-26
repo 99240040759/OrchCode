@@ -5,7 +5,6 @@ import {
   PanelResizeHandle,
   type ImperativePanelHandle,
 } from "react-resizable-panels";
-import { FiX } from "react-icons/fi";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { ArtifactPanel } from "./ArtifactPanel";
@@ -14,8 +13,6 @@ import { MessageList } from "./MessageList";
 
 export function ChatPanel() {
   const hasMessages = useChatStore((s) => s.messages.length > 0);
-  const error = useChatStore((s) => s.error);
-  const dismissError = useChatStore((s) => s.dismissError);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
 
@@ -57,19 +54,6 @@ export function ChatPanel() {
         >
           <div className="ChatPane">
             {hasMessages && <MessageList />}
-            {error && (
-              <div className="ChatPane-error" role="alert">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  className="ChatPane-errorClose"
-                  aria-label="Dismiss error"
-                  onClick={dismissError}
-                >
-                  <FiX />
-                </button>
-              </div>
-            )}
             <div className={hasMessages ? "Composer-dock" : "EmptyState"}>
               <div className="Composer-wrapper">
                 <InputBar />

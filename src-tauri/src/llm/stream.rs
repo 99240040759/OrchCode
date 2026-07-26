@@ -31,6 +31,9 @@ pub struct RunResult {
     pub usage: Option<TurnOutcome>,
     pub reasoning_durations: Vec<u64>,
     pub completed: bool,
+    pub cumulative_input_tokens: u64,
+    pub cumulative_output_tokens: u64,
+    pub cumulative_total_tokens: u64,
 }
 
 pub struct RunRequest {
@@ -66,6 +69,9 @@ pub async fn run_chat(
     let mut reasoning_started: Option<Instant> = None;
     let mut reasoning_durations: Vec<u64> = Vec::new();
     let mut usage: Option<TurnOutcome> = None;
+    let mut cumulative_input: u64 = 0;
+    let mut cumulative_output: u64 = 0;
+    let mut cumulative_total: u64 = 0;
 
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -75,6 +81,9 @@ pub async fn run_chat(
                 usage,
                 reasoning_durations,
                 completed: false,
+                cumulative_input_tokens: cumulative_input,
+                cumulative_output_tokens: cumulative_output,
+                cumulative_total_tokens: cumulative_total,
             };
         }
 
@@ -143,15 +152,18 @@ pub async fn run_chat(
             Ok(MultiTurnStreamItem::FinalResponse(res)) => {
                 close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
                 let turn = res.usage();
+                cumulative_input += turn.input_tokens;
+                cumulative_output += turn.output_tokens;
+                cumulative_total += turn.total_tokens;
                 let _ = channel.send(ChatEvent::Usage {
-                    input_tokens: turn.input_tokens,
-                    output_tokens: turn.output_tokens,
-                    total_tokens: turn.total_tokens,
+                    input_tokens: cumulative_input,
+                    output_tokens: cumulative_output,
+                    total_tokens: cumulative_total,
                 });
                 usage = Some(TurnOutcome {
-                    input_tokens: turn.input_tokens,
-                    output_tokens: turn.output_tokens,
-                    total_tokens: turn.total_tokens,
+                    input_tokens: cumulative_input,
+                    output_tokens: cumulative_output,
+                    total_tokens: cumulative_total,
                 });
             }
             Ok(_) => {}
@@ -164,6 +176,9 @@ pub async fn run_chat(
                     usage,
                     reasoning_durations,
                     completed: false,
+                    cumulative_input_tokens: cumulative_input,
+                    cumulative_output_tokens: cumulative_output,
+                    cumulative_total_tokens: cumulative_total,
                 };
             }
         }
@@ -176,6 +191,9 @@ pub async fn run_chat(
         usage,
         reasoning_durations,
         completed: true,
+        cumulative_input_tokens: cumulative_input,
+        cumulative_output_tokens: cumulative_output,
+        cumulative_total_tokens: cumulative_total,
     }
 }
 

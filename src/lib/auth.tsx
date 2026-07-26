@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "./api";
 import type { UserDisplay } from "./api";
@@ -64,7 +65,6 @@ export const useAuthStore = create(
         s.initialized = true;
       });
 
-      const { listen } = await import("@tauri-apps/api/event");
       await listen<AuthChangedPayload>("auth-changed", (event) => {
         clearSignInTimeout();
         const { user, error } = event.payload;

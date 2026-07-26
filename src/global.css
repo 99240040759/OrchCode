@@ -59,13 +59,14 @@ body {
 
 * {
    box-sizing: inherit;
-   scrollbar-width: thin;
-   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+   scrollbar-width: none;
+   -ms-overflow-style: none;
 }
 
 *::-webkit-scrollbar {
-   width: 4px;
-   height: 4px;
+   display: none;
+   width: 0;
+   height: 0;
 }
 
 *::-webkit-scrollbar-track,
@@ -74,12 +75,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-   background: rgba(255, 255, 255, 0.12);
-   border-radius: var(--radius-full);
-}
-
-*::-webkit-scrollbar-thumb:hover {
-   background: rgba(255, 255, 255, 0.22);
+   background: transparent;
 }
 
 @keyframes spin {
@@ -113,18 +109,12 @@ body {
 }
 
 .Spinner {
-   width: 32px;
-   height: 32px;
+   width: 40px;
+   height: 40px;
    border-radius: 50%;
-   background: conic-gradient(from 0deg,
-         transparent 0deg,
-         transparent 260deg,
-         var(--color-secondary) 290deg,
-         #ffffff 315deg,
-         var(--color-primary) 360deg);
-   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #fff calc(100% - 3px));
-   mask: radial-gradient(farthest-side, transparent calc(100% - 3.5px), #fff calc(100% - 3px));
-   animation: spin .8s linear infinite;
+   border: 3px solid rgba(255, 255, 255, 0.1);
+   border-top-color: #3b82f6;
+   animation: spin 1s ease-in-out infinite;
 }
 
 .AppShell {
@@ -726,16 +716,40 @@ body {
 }
 
 .PanelResizeHandle {
-   width: 1px;
-   background: var(--border);
+   position: relative;
+   width: 8px;
+   margin: 0 -4px;
+   z-index: 50;
    cursor: col-resize;
    outline: none;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   touch-action: none;
+   flex-shrink: 0;
+}
+
+.PanelResizeHandle::after {
+   content: '';
+   display: block;
+   width: 1px;
+   height: 100%;
+   background: var(--border);
+   transition: background 0.15s ease, width 0.15s ease;
+}
+
+.PanelResizeHandle:hover::after,
+.PanelResizeHandle[data-resize-handle-state="hover"]::after,
+.PanelResizeHandle[data-resize-handle-state="drag"]::after {
+   width: 2px;
+   background: rgba(255, 255, 255, 0.3);
 }
 
 .WorkspacePanels[data-panel-open='false'] .PanelResizeHandle,
 .WorkspacePanels[data-maximized='true'] .PanelResizeHandle {
    pointer-events: none;
    width: 0;
+   margin: 0;
 }
 
 .ChatPane {
@@ -813,7 +827,7 @@ body {
 .MessageList-inner {
    max-width: var(--composer-w);
    width: 100%;
-   padding: 8px var(--spacing-lg);
+   padding: 8px var(--spacing-md);
    display: flex;
    flex-direction: column;
    gap: var(--spacing-md);
@@ -834,18 +848,21 @@ body {
    display: inline-flex;
    align-items: center;
    justify-content: center;
-   width: 30px;
-   height: 30px;
-   border-radius: 50%;
-   border: 1px solid var(--border);
+   width: 32px;
+   height: 32px;
+   border-radius: var(--radius-full);
    background: var(--bg-surface);
+   border: 1px solid var(--border);
    color: var(--text-high);
    cursor: pointer;
    box-shadow: var(--shadow-8);
+   transition: background 0.15s ease, transform 0.15s ease;
+   z-index: 20;
 }
 
 .MessageList-jump:hover {
-   background: rgba(255, 255, 255, 0.1);
+   background: var(--bg-card-hover);
+   transform: translateX(-50%) scale(1.05);
 }
 
 .MessageList-jump svg {
@@ -861,7 +878,7 @@ body {
    justify-content: center;
    width: 100%;
    min-height: 0;
-   padding: var(--spacing-lg);
+   padding: var(--spacing-sm);
    overflow-x: hidden;
 }
 
@@ -870,7 +887,7 @@ body {
    display: flex;
    flex-direction: column;
    align-items: center;
-   padding: 6px 12px 12px;
+   padding: 6px var(--spacing-sm) 12px;
    width: 100%;
    overflow-x: hidden;
 }
@@ -1009,10 +1026,7 @@ body {
 }
 
 .Reasoning-icon {
-   width: 13px;
-   height: 13px;
-   flex-shrink: 0;
-   opacity: .75;
+  display: none;
 }
 
 .Reasoning-label {
@@ -1121,24 +1135,19 @@ body {
 }
 
 .ToolRow-toggle {
-   display: inline-flex;
-   align-items: center;
-   gap: 2px;
-   margin-left: auto;
-   padding: 1px 4px;
-   border: none;
-   border-radius: 4px;
-   background: transparent;
-   color: var(--text-muted);
-   font-family: inherit;
-   font-size: 11px;
-   cursor: pointer;
-   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .ToolRow-toggle:hover {
-   background: rgba(255, 255, 255, 0.08);
-   color: var(--text-high);
+  color: var(--text-high);
 }
 
 .ToolRow-chevron {
@@ -1999,13 +2008,19 @@ body {
 }
 
 .ArtifactTabs {
-   display: flex;
-   align-items: center;
-   gap: 3px;
-   flex: 1;
-   min-width: 0;
-   overflow-x: auto;
-   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  height: 100%;
+  scrollbar-width: none;
+}
+
+.ArtifactTabs::-webkit-scrollbar {
+  display: none;
 }
 
 .ArtifactTab {
@@ -2084,6 +2099,184 @@ body {
 .ArtifactTabPanel[data-hidden='true'] {
    visibility: hidden;
    pointer-events: none;
+}
+
+.FileViewerFull {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.FileViewerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  height: 36px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.FileViewerBar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.FileViewerBar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.FileViewerBody {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.FileViewerLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.FileContent-msg {
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.FileContent-trunc {
+  font-size: 11px;
+  color: var(--color-warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.FileBreadcrumb {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.FileBreadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.FileBreadcrumb-sep {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  margin: 0 1px;
+}
+
+.FileBreadcrumb-folder {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.FileBreadcrumb-file {
+  font-size: 12px;
+  color: var(--text-high);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.FilePicker {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.FilePicker-input {
+  flex-shrink: 0;
+  margin: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-high);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.FilePicker-input:focus {
+  border-color: var(--color-primary);
+}
+
+.FilePicker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 10px;
+}
+
+.FilePicker-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.FilePicker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-high);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.FilePicker-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.FilePicker-icon {
+  flex-shrink: 0;
+}
+
+.FilePicker-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.FilePicker-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  text-align: right;
 }
 
 .Markdown {
@@ -2628,6 +2821,7 @@ body {
    width: 100%;
    background: var(--bg-app);
 }
+
 
 .FatalError {
    display: flex;

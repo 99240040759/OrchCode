@@ -19,7 +19,6 @@ use state::AppState;
 use tauri::{Emitter, Manager};
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const UNRESTRICTED_COMMAND: &str = "deliver_browser_content";
 
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     let state = app.state::<AppState>();
@@ -135,19 +134,8 @@ pub fn run() {
                 ipc::terminal_write,
                 ipc::terminal_resize,
                 ipc::terminal_close,
-                ipc::webview_navigate,
-                ipc::webview_history,
-                    ipc::deliver_browser_content,
                 ]);
             move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
-                let label = invoke.message.webview().label().to_string();
-                let command = invoke.message.command().to_string();
-                if label != MAIN_WINDOW_LABEL && command != UNRESTRICTED_COMMAND {
-                    invoke.resolver.reject(format!(
-                        "command '{command}' is not available to webview '{label}'"
-                    ));
-                    return true;
-                }
                 handler(invoke)
             }
         })

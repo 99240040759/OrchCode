@@ -1,12 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
+import Editor, { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/language/json/json.worker?worker";
+import cssWorker from "monaco-editor/language/css/css.worker?worker";
+import htmlWorker from "monaco-editor/language/html/html.worker?worker";
+import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { FiCheck, FiChevronRight, FiCopy, FiRefreshCw } from "react-icons/fi";
+
+self.MonacoEnvironment = {
+  getWorker(_, label) {
+    if (label === "json") return new jsonWorker();
+    if (label === "css" || label === "scss" || label === "less") return new cssWorker();
+    if (label === "html" || label === "handlebars" || label === "razor") return new htmlWorker();
+    if (label === "typescript" || label === "javascript") return new tsWorker();
+    return new editorWorker();
+  },
+};
+
+loader.config({ monaco });
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
-import { getBasename, getDirname, getLanguageFromPath, splitPathParts } from "../lib/utils";
+import { getBasename, getDirname, splitPathParts } from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
-import CodeBlock, { useCopy } from "./ui/CodeBlock";
+import { useCopy } from "./ui/CodeBlock";
 import ExplorerIcon from "./ExplorerIcon";
-import { Markdown } from "./Markdown";
 import { Button } from "./ui/Button";
 
 function FileBreadcrumb({ path }: { path: string }) {
@@ -99,6 +117,64 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
   );
 }
 
+const handleBeforeMount = (monaco: Parameters<NonNullable<React.ComponentProps<typeof Editor>["beforeMount"]>>[0]) => {
+  monaco.editor.defineTheme("app-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": "#121212",
+      "editor.foreground": "#dedede",
+      "editor.lineHighlightBackground": "#18181c",
+      "editorLineNumber.foreground": "#555555",
+      "editorLineNumber.activeForeground": "#dedede",
+      "editorGutter.background": "#121212",
+      "editorIndentGuide.background": "#ffffff10",
+      "editorIndentGuide.activeBackground": "#ffffff30",
+      "editor.selectionBackground": "#ffffff20",
+      "editor.inactiveSelectionBackground": "#ffffff10",
+      "scrollbarSlider.background": "#ffffff15",
+      "scrollbarSlider.hoverBackground": "#ffffff25",
+      "scrollbarSlider.activeBackground": "#ffffff35",
+      "minimap.background": "#121212",
+    },
+  });
+};
+
+const EDITOR_OPTIONS: React.ComponentProps<typeof Editor>["options"] = {
+  readOnly: true,
+  minimap: { enabled: true },
+  lineNumbers: "on",
+  lineNumbersMinChars: 4,
+  lineDecorationsWidth: 10,
+  padding: { top: 12, bottom: 12 },
+  scrollBeyondLastLine: false,
+  renderWhitespace: "none",
+  fontSize: 13,
+  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+  fontLigatures: true,
+  wordWrap: "on",
+  wrappingStrategy: "advanced",
+  scrollbar: {
+    horizontal: "hidden",
+    handleMouseWheel: true,
+  },
+  automaticLayout: true,
+  folding: true,
+  glyphMargin: false,
+  overviewRulerBorder: false,
+  renderLineHighlight: "gutter",
+  smoothScrolling: true,
+  cursorBlinking: "smooth",
+  contextmenu: false,
+};
+
+const LOADING_SPINNER = (
+  <div className="FileViewerLoading flex items-center justify-center p-8">
+    <div className="Spinner" />
+  </div>
+);
+
 export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const setTabPath = useArtifactsStore((s) => s.setTabPath);
   const version = useArtifactsStore((s) => (path ? s.fileVersions[path] ?? 0 : 0));
@@ -142,8 +218,6 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
     );
   }
 
-  const language = getLanguageFromPath(path);
-
   return (
     <div className="FileViewerFull">
       <div className="FileViewerBar">
@@ -180,18 +254,23 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
         </div>
       </div>
       <div className="FileViewerBody">
-        {loading ? (
+        {loading && !content ? (
           <div className="FileViewerLoading flex items-center justify-center p-8">
             <div className="Spinner" />
           </div>
         ) : error ? (
           <div className="FileContent-msg">{error}</div>
-        ) : language === "markdown" ? (
-          <div className="FileViewerMarkdown">
-            <Markdown>{content}</Markdown>
-          </div>
         ) : (
-          <CodeBlock language={language} value={content} showLineNumbers isEditor />
+          <Editor
+            key={path}
+            height="100%"
+            path={path}
+            defaultValue={content}
+            theme="app-dark"
+            beforeMount={handleBeforeMount}
+            loading={LOADING_SPINNER}
+            options={EDITOR_OPTIONS}
+          />
         )}
       </div>
     </div>

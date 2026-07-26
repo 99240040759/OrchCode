@@ -7,6 +7,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [react()],
 
+  optimizeDeps: {
+    include: ["monaco-editor/esm/vs/editor/editor.worker"],
+  },
+
+  worker: {
+    format: "es",
+  },
+
   build: {
     target: "esnext",
     sourcemap: false,
@@ -26,6 +34,11 @@ export default defineConfig({
           if (id.includes("node_modules/shiki") || id.includes("node_modules/@shikijs/")) {
             return "shiki";
           }
+          if (id.includes("node_modules/monaco-editor/")) {
+            if (id.includes("worker")) return undefined;
+            return "monaco";
+          }
+          if (id.includes("node_modules/@monaco-editor/")) return "monaco-react";
           return undefined;
         },
       },

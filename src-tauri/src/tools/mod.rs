@@ -1,4 +1,3 @@
-pub mod browser;
 pub mod command_manager;
 pub mod display;
 pub mod fs_util;
@@ -16,11 +15,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::gateway::Gateway;
-use crate::state::{BrowserRequestsHandle, WorkspaceHandle};
+use crate::state::WorkspaceHandle;
 use crate::tools::command_manager::CommandManager;
 use crate::vector_store::WorkspaceIndex;
 
-pub use browser::{BrowserClick, BrowserGetContent, BrowserNavigate, BrowserType};
 pub use display::parse_display_info;
 pub use get_command_status::GetCommandStatus;
 pub use multi_replace::MultiReplaceFileContent;
@@ -73,7 +71,6 @@ pub struct ToolContext {
     pub gateway: Arc<Gateway>,
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
-    pub browser_requests: BrowserRequestsHandle,
     pub data_dir: PathBuf,
     pub workspace_index: WorkspaceIndex,
 }
@@ -105,17 +102,5 @@ impl ToolContext {
     }
     pub fn stop_command(&self) -> StopCommand {
         StopCommand::new(self.command_manager.clone())
-    }
-    pub fn browser_navigate(&self) -> BrowserNavigate {
-        BrowserNavigate::new(self.app_handle.clone())
-    }
-    pub fn browser_click(&self) -> BrowserClick {
-        BrowserClick::new(self.app_handle.clone(), self.browser_requests.clone())
-    }
-    pub fn browser_type(&self) -> BrowserType {
-        BrowserType::new(self.app_handle.clone(), self.browser_requests.clone())
-    }
-    pub fn browser_get_content(&self) -> BrowserGetContent {
-        BrowserGetContent::new(self.app_handle.clone(), self.browser_requests.clone())
     }
 }

@@ -154,41 +154,6 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             }
         }
 
-        "browser_navigate" => ToolDisplayInfo {
-            label: "Navigated".to_string(),
-            target_text: str_arg(&args, "url"),
-            icon: ToolIcon::Globe,
-            opens_artifact: true,
-            ..Default::default()
-        },
-
-        "browser_click" => ToolDisplayInfo {
-            label: "Clicked".to_string(),
-            target_text: str_arg(&args, "selector"),
-            icon: ToolIcon::MousePointer,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
-        "browser_type" => {
-            let selector = str_arg(&args, "selector").unwrap_or_default();
-            let text = str_arg(&args, "text").unwrap_or_default();
-            ToolDisplayInfo {
-                label: "Typed".to_string(),
-                target_text: Some(format!("'{text}' into {selector}")),
-                icon: ToolIcon::Keyboard,
-                opens_artifact: false,
-                ..Default::default()
-            }
-        }
-
-        "browser_get_content" => ToolDisplayInfo {
-            label: "Browser Text".to_string(),
-            icon: ToolIcon::Eye,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
         other => ToolDisplayInfo {
             label: other.to_string(),
             target_text: Some(args_json.chars().take(120).collect()),

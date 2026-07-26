@@ -35,10 +35,6 @@ pub fn build_agent(
         .tool(ctx.run_command())
         .tool(ctx.get_command_status())
         .tool(ctx.stop_command())
-        .tool(ctx.browser_navigate())
-        .tool(ctx.browser_click())
-        .tool(ctx.browser_type())
-        .tool(ctx.browser_get_content())
         .memory(memory);
 
     if model.max_tokens > 0 {

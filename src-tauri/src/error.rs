@@ -18,8 +18,6 @@ pub enum AppError {
     Audio(String),
     #[error("a run is already active for this session")]
     RunConflict,
-    #[error("no pending browser content request")]
-    NoBrowserRequest,
     #[error("file too large to process: {0}")]
     FileTooLarge(String),
     #[error("{0}")]

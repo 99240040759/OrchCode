@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager};
-use tokio::sync::oneshot;
 
 use crate::auth;
 use crate::config;
@@ -17,7 +16,6 @@ use crate::tools::command_manager::CommandManager;
 use crate::vector_store::WorkspaceIndex;
 
 pub type WorkspaceHandle = Arc<RwLock<Option<PathBuf>>>;
-pub type BrowserRequestsHandle = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
 
 pub struct RunHandle {
     pub run_id: String,
@@ -36,7 +34,6 @@ pub struct AppState {
     pub runs: Mutex<HashMap<String, RunHandle>>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Mutex<HashMap<String, crate::terminal::TerminalSession>>,
-    pub browser_requests: BrowserRequestsHandle,
     pub command_manager: Arc<CommandManager>,
     current_user_id: RwLock<Option<String>>,
     sign_in_started_at: Mutex<Option<Instant>>,
@@ -65,7 +62,6 @@ impl AppState {
             runs: Mutex::new(HashMap::new()),
             dictation: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
-            browser_requests: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
             current_user_id: RwLock::new(None),
             sign_in_started_at: Mutex::new(None),
@@ -289,20 +285,6 @@ impl AppState {
         if let Some(run) = guard.get(session_id) {
             run.cancel
                 .store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    pub fn fulfill_browser_request(&self, request_id: &str, content: String) -> AppResult<()> {
-        let mut guard = self
-            .browser_requests
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        match guard.remove(request_id) {
-            Some(tx) => {
-                let _ = tx.send(content);
-                Ok(())
-            }
-            None => Err(AppError::NoBrowserRequest),
         }
     }
 

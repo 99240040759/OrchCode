@@ -259,7 +259,6 @@ pub async fn start_chat(
         gateway: state.gateway.clone(),
         app_handle: app.clone(),
         command_manager: (*state.command_manager).clone(),
-        browser_requests: state.browser_requests.clone(),
         data_dir: state.data_dir.clone(),
         workspace_index: state.workspace_index.clone(),
     };
@@ -320,14 +319,14 @@ pub async fn start_chat(
         }
     }
 
-    if let Some(usage) = result.usage {
+    if result.cumulative_total_tokens > 0 {
         if let Err(e) = state
             .memory
             .update_session_tokens(
                 &session_id,
-                usage.input_tokens,
-                usage.output_tokens,
-                usage.total_tokens,
+                result.cumulative_input_tokens,
+                result.cumulative_output_tokens,
+                result.cumulative_total_tokens,
             )
             .await
         {
@@ -340,7 +339,7 @@ pub async fn start_chat(
                 &client,
                 &model_info,
                 &session_id,
-                usage.total_tokens,
+                result.cumulative_total_tokens,
             )
             .await
             {
@@ -537,65 +536,4 @@ pub fn terminal_close(state: State<'_, AppState>, id: String) {
     if let Some(mut session) = guard.remove(&id) {
         session.kill();
     }
-}
-
-fn resolve_browser_webview(
-    app: &tauri::AppHandle,
-    label: &str,
-) -> Result<tauri::Webview, String> {
-    use tauri::Manager;
-    if !label.starts_with("browser-") {
-        return Err(format!("not a browser webview label: {label}"));
-    }
-    app.webviews()
-        .get(label)
-        .cloned()
-        .ok_or_else(|| format!("webview not found: {label}"))
-}
-
-#[tauri::command]
-pub fn webview_navigate(
-    app: tauri::AppHandle,
-    label: String,
-    url: String,
-) -> Result<(), String> {
-    let parsed: tauri::Url = url.parse().map_err(|e| format!("invalid url: {e}"))?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err("only http:// and https:// URLs are permitted".to_string());
-    }
-    resolve_browser_webview(&app, &label)?
-        .navigate(parsed)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn webview_history(
-    app: tauri::AppHandle,
-    label: String,
-    action: String,
-) -> Result<(), String> {
-    let script = match action.as_str() {
-        "back" => "history.back()",
-        "forward" => "history.forward()",
-        "reload" => "location.reload()",
-        other => return Err(format!("unknown history action: {other}")),
-    };
-    resolve_browser_webview(&app, &label)?
-        .eval(script)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn deliver_browser_content(
-    webview: tauri::Webview,
-    state: State<'_, AppState>,
-    request_id: String,
-    text: String,
-) -> Result<(), String> {
-    if !webview.label().starts_with("browser-") {
-        return Err("command is only available to browser webviews".to_string());
-    }
-    state
-        .fulfill_browser_request(&request_id, text)
-        .map_err(|e| e.to_string())
 }

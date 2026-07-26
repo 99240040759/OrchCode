@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { listen } from "@tauri-apps/api/event";
+import { useArtifactsStore } from "./artifacts";
 import * as api from "./api";
 import { newId } from "./utils";
 import type {
@@ -203,7 +205,6 @@ export const useChatStore = create(
 
       void get().refreshBudget();
 
-      const { listen } = await import("@tauri-apps/api/event");
       if (!sessionsListenerBound) {
         sessionsListenerBound = true;
         await listen("sessions-updated", () => {
@@ -453,10 +454,7 @@ export const useChatStore = create(
               event.displayInfo.icon === "globe" &&
               event.displayInfo.targetText
             ) {
-              const url = event.displayInfo.targetText;
-              void import("./artifacts").then(({ useArtifactsStore }) => {
-                useArtifactsStore.getState().openBrowser(url);
-              });
+              useArtifactsStore.getState().openBrowser(event.displayInfo.targetText);
             }
             break;
           case "toolResult":
@@ -611,6 +609,12 @@ export const useChatStore = create(
         const sessions = await api.listSessions();
         set((s) => {
           s.sessions = sessions;
+          if (!s.streaming) {
+            const current = sessions.find((sess) => sess.id === s.currentSessionId);
+            if (current) {
+              s.sessionTokens = usageFrom(current);
+            }
+          }
         });
       } catch {
         return;

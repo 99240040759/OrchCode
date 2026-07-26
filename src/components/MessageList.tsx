@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { FiArrowDown } from "react-icons/fi";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
@@ -9,13 +9,12 @@ export function MessageList() {
   const messages = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
   const containerRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
     pinnedRef.current = true;
     setShowJump(false);
   }, []);
@@ -28,10 +27,9 @@ export function MessageList() {
     setShowJump(!pinned);
   }, []);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !pinnedRef.current) return;
-    el.scrollTop = el.scrollHeight;
+  useLayoutEffect(() => {
+    if (!pinnedRef.current) return;
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
   }, [messages, streaming]);
 
   return (
@@ -41,7 +39,7 @@ export function MessageList() {
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          <div className="MessageList-bottomSpacer" />
+          <div ref={bottomRef} className="MessageList-bottomSpacer" />
         </div>
       </div>
       {showJump && (

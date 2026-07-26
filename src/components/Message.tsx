@@ -3,15 +3,11 @@ import {
   FiAlertTriangle,
   FiBook,
   FiChevronRight,
-  FiCpu,
   FiDatabase,
-  FiEye,
   FiGlobe,
   FiMinimize2,
-  FiMousePointer,
   FiSearch,
   FiTerminal,
-  FiType,
   FiZapOff,
 } from "react-icons/fi";
 import type { ToolIcon } from "../lib/api";
@@ -34,12 +30,8 @@ const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ classN
   search: FiSearch,
   globe: FiGlobe,
   book: FiBook,
-  cpu: FiCpu,
-  mousePointer: FiMousePointer,
-  keyboard: FiType,
-  eye: FiEye,
-  zapOff: FiZapOff,
   database: FiDatabase,
+  zapOff: FiZapOff,
 };
 
 function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
@@ -115,7 +107,6 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
             onClick={() => setOpen((value) => !value)}
           >
             <FiChevronRight className="ToolRow-chevron" />
-            <span>{open ? "Hide output" : "Show output"}</span>
           </button>
         )}
       </div>
@@ -170,7 +161,6 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
         aria-expanded={isOpen}
         onClick={() => setUserToggled(!isOpen)}
       >
-        <FiCpu className="Reasoning-icon" />
         <span className="Reasoning-label">{label}</span>
         {item.active && <span className="Reasoning-spinner" aria-hidden="true" />}
         <FiChevronRight className="Reasoning-chevron" />
