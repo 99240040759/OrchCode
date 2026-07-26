@@ -13,9 +13,6 @@ env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
   GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-  # sccache — compiler-level caching, survives dep-version changes better than artifact caching alone
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: sccache
 
 jobs:
   create-release:
@@ -31,16 +28,13 @@ jobs:
           draft: false
           prerelease: false
 
-  # ─── macOS ────────────────────────────────────────────────────────────────
-  # arm64 and x64 now run in parallel on separate runners instead of sequentially.
-  # This alone cuts macOS wall-clock time roughly in half.
   build-mac:
     name: Build & Publish macOS (${{ matrix.target }})
     if: ${{ !cancelled() }}
     runs-on: macos-latest
     needs: create-release
     strategy:
-      fail-fast: false   # don't cancel the other arch if one fails
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
@@ -50,31 +44,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # sccache caches at the compiler-unit level — survives Cargo.lock bumps
-      # better than artifact caching alone, because unchanged crates stay cached
-      # even when one dep updates.
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.5
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # rust-cache caches the full target/ directory (compiled deps).
-      # Works alongside sccache: rust-cache restores big dep artifacts,
-      # sccache handles incremental recompilation of changed units.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
           shared-key: "orchcode-release-mac-${{ matrix.target }}"
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm   # caches ~/.npm (the registry download cache)
+          cache: npm
 
-      # Cache node_modules separately — skips the extraction step entirely
-      # on cache hit, which saves ~30–60s vs re-extracting from npm cache.
       - name: Cache node_modules
         uses: actions/cache@v4
         with:
@@ -84,9 +68,6 @@ jobs:
 
       - run: npm ci --prefer-offline
 
-      # Seed cache on main pushes with an actual RELEASE build (not cargo check).
-      # cargo check produces different artifacts than --release, so the old seeder
-      # was useless for tag builds. Now the cache is warm for the next tag push.
       - name: Cache Seeder (Release Build)
         if: github.ref == 'refs/heads/main'
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
@@ -108,7 +89,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: ${{ matrix.artifact }}
 
-  # ─── Windows ──────────────────────────────────────────────────────────────
   build-windows:
     name: Build & Publish Windows
     if: ${{ !cancelled() }}
@@ -121,15 +101,13 @@ jobs:
         shell: powershell
         run: Set-MpPreference -DisableRealtimeMonitoring $true
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.5
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
           shared-key: "orchcode-release-win"
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -177,7 +155,6 @@ jobs:
             }
           }
           $json = $manifest | ConvertTo-Json -Depth 6
-          # WriteAllText emits UTF-8 without BOM so Tauri can parse the manifest.
           [System.IO.File]::WriteAllText("$PWD\latest.json", $json)
 
       - name: Publish Windows Asset & Updater Manifest
