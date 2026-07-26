@@ -63,8 +63,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-mac-${{ hashFiles('package-lock.json') }}
-          restore-keys: node-modules-mac-
+          key: node-modules-mac-${{ matrix.target }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            node-modules-mac-${{ matrix.target }}-
+            node-modules-mac-
 
       - run: npm ci --prefer-offline
 
