@@ -350,7 +350,11 @@ pub async fn start_chat(
                     });
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("[compaction] failed for session {session_id}: {e}"),
+                Err(e) => {
+                    let _ = on_event.send(ChatEvent::Error {
+                        message: format!("compaction failed: {e}"),
+                    });
+                }
             }
         }
     }

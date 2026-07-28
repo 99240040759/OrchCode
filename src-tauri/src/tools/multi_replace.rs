@@ -88,8 +88,16 @@ On success, returns a summary of how many replacements were applied and how many
                     args.path
                 )));
             }
+            if count > 1 {
+                return Err(ToolError::msg(format!(
+                    "replacement #{} is ambiguous: old_string matches {count} locations in {}. \
+Expand the context in old_string until it is unique.",
+                    i + 1,
+                    args.path
+                )));
+            }
             content = content.replace(&r.old_string, &r.new_string);
-            total += count;
+            total += 1;
         }
 
         fs_util::atomic_write(&path, content.as_bytes()).await?;

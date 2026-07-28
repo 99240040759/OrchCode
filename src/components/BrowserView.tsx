@@ -38,6 +38,7 @@ export function BrowserView({ id: _id, initialUrl }: { id?: string; initialUrl?:
     if (!host) return;
 
     let disposed = false;
+    let visible = true;
     const appWindow = getCurrentWindow();
     const rect = host.getBoundingClientRect();
 
@@ -59,40 +60,44 @@ export function BrowserView({ id: _id, initialUrl }: { id?: string; initialUrl?:
     const syncPosition = () => {
       if (disposed) return;
       const bounds = host.getBoundingClientRect();
-      const visible = host.offsetParent !== null && bounds.width > 1 && bounds.height > 1;
       void webview.setPosition(
         new LogicalPosition(
-          visible ? Math.round(bounds.left) : OFFSCREEN,
-          visible ? Math.round(bounds.top) : OFFSCREEN
+          visible && bounds.width > 1 && bounds.height > 1
+            ? Math.round(bounds.left)
+            : OFFSCREEN,
+          visible && bounds.width > 1 && bounds.height > 1
+            ? Math.round(bounds.top)
+            : OFFSCREEN
         )
       );
-      if (visible) {
+      if (visible && bounds.width > 1 && bounds.height > 1) {
         void webview.setSize(
           new LogicalSize(Math.round(bounds.width), Math.round(bounds.height))
         );
       }
     };
 
-    syncPosition();
+    const intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        visible = entries[entries.length - 1].intersectionRatio > 0;
+        syncPosition();
+      },
+      { threshold: 0 }
+    );
+    intersectionObserver.observe(host);
 
     const resizeObserver = new ResizeObserver(syncPosition);
     resizeObserver.observe(host);
     if (host.parentElement) resizeObserver.observe(host.parentElement);
 
-    const mutationObserver = new MutationObserver(syncPosition);
-    mutationObserver.observe(document.body, {
-      attributes: true,
-      attributeFilter: ["style", "class", "data-hidden"],
-      subtree: true,
-    });
-
     window.addEventListener("resize", syncPosition);
+    syncPosition();
 
     return () => {
       disposed = true;
       setReady(false);
+      intersectionObserver.disconnect();
       resizeObserver.disconnect();
-      mutationObserver.disconnect();
       window.removeEventListener("resize", syncPosition);
       void webview.close().catch(() => {});
     };

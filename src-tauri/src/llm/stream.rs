@@ -72,6 +72,8 @@ pub async fn run_chat(
     let mut cumulative_input: u64 = 0;
     let mut cumulative_output: u64 = 0;
     let mut cumulative_total: u64 = 0;
+    let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
+    let mut deadline = Instant::now() + chunk_timeout;
 
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -90,10 +92,29 @@ pub async fn run_chat(
         let item = tokio::select! {
             biased;
             next = stream.next() => match next {
-                Some(item) => item,
+                Some(item) => {
+                    deadline = Instant::now() + chunk_timeout;
+                    item
+                }
                 None => break,
             },
-            _ = tokio::time::sleep(Duration::from_millis(CANCEL_POLL_MS)) => continue,
+            _ = tokio::time::sleep(Duration::from_millis(CANCEL_POLL_MS)) => {
+                if Instant::now() >= deadline {
+                    close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
+                    let _ = channel.send(ChatEvent::Error {
+                        message: "stream timed out: no data received from the model for 120 s".to_string(),
+                    });
+                    return RunResult {
+                        usage,
+                        reasoning_durations,
+                        completed: false,
+                        cumulative_input_tokens: cumulative_input,
+                        cumulative_output_tokens: cumulative_output,
+                        cumulative_total_tokens: cumulative_total,
+                    };
+                }
+                continue;
+            },
         };
 
         match item {

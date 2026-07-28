@@ -58,9 +58,19 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let finished = finished.clone();
         let samples = samples.clone();
         let sample_rate = sample_rate.clone();
+        let finished_on_panic = finished.clone();
+        let channel_on_panic = channel.clone();
         tauri::async_runtime::spawn(async move {
-            transcribe_when_stopped(gateway, channel, recording, finished, samples, sample_rate)
-                .await;
+            let handle = tauri::async_runtime::spawn(async move {
+                transcribe_when_stopped(gateway, channel, recording, finished, samples, sample_rate)
+                    .await;
+            });
+            if handle.await.is_err() {
+                finished_on_panic.store(true, Ordering::SeqCst);
+                let _ = channel_on_panic.send(DictationEvent::Error {
+                    message: "dictation transcription task panicked".to_string(),
+                });
+            }
         });
     }
 

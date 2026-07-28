@@ -59,11 +59,10 @@ pub fn strip_tool_error_sentinel(output: &str) -> &str {
 }
 
 pub fn workspace_root(handle: &WorkspaceHandle) -> Result<PathBuf, ToolError> {
-    handle
-        .read()
-        .ok()
-        .and_then(|g| g.clone())
-        .ok_or_else(|| ToolError::msg("no workspace is open"))
+    match handle.read() {
+        Err(_) => Err(ToolError::msg("workspace state lock is poisoned")),
+        Ok(guard) => guard.clone().ok_or_else(|| ToolError::msg("no workspace is open")),
+    }
 }
 
 pub struct ToolContext {

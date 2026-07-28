@@ -263,7 +263,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
           <div className="FileContent-msg">{error}</div>
         ) : (
           <Editor
-            key={path}
+            key={`${path}:${version}`}
             height="100%"
             path={path}
             defaultValue={content}

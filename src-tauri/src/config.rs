@@ -54,3 +54,4 @@ pub const TOKEN_REFRESH_SKEW_SECS: i64 = 300;
 pub const SIGN_IN_WINDOW_SECS: u64 = 600;
 pub const EMBEDDING_MODEL: &str = "gemini-embedding-2";
 pub const EMBEDDING_BATCH_SIZE: usize = 64;
+pub const STREAM_CHUNK_TIMEOUT_SECS: u64 = 120;
