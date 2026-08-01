@@ -7,7 +7,7 @@ import jsonWorker from "monaco-editor/language/json/json.worker?worker&inline";
 import cssWorker from "monaco-editor/language/css/css.worker?worker&inline";
 import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
 import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
-import { FiCheck, FiChevronRight, FiCopy, FiRefreshCw } from "react-icons/fi";
+import { VscCheck, VscChevronRight, VscCopy, VscRefresh } from "react-icons/vsc";
 
 self.MonacoEnvironment = {
   getWorker(_, label) {
@@ -34,7 +34,7 @@ function FileBreadcrumb({ path }: { path: string }) {
     <div className="FileBreadcrumb">
       {parts.map((part, index) => (
         <span key={`${part}-${index}`} className="FileBreadcrumb-item">
-          {index > 0 && <FiChevronRight className="FileBreadcrumb-sep" />}
+          {index > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
           <span
             className={
               index === parts.length - 1 ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"
@@ -124,20 +124,20 @@ const handleBeforeMount = (monaco: Parameters<NonNullable<React.ComponentProps<t
     inherit: true,
     rules: [],
     colors: {
-      "editor.background": "#121212",
-      "editor.foreground": "#dedede",
-      "editor.lineHighlightBackground": "#18181c",
-      "editorLineNumber.foreground": "#555555",
-      "editorLineNumber.activeForeground": "#dedede",
-      "editorGutter.background": "#121212",
-      "editorIndentGuide.background": "#ffffff10",
-      "editorIndentGuide.activeBackground": "#ffffff30",
-      "editor.selectionBackground": "#ffffff20",
-      "editor.inactiveSelectionBackground": "#ffffff10",
-      "scrollbarSlider.background": "#ffffff15",
-      "scrollbarSlider.hoverBackground": "#ffffff25",
-      "scrollbarSlider.activeBackground": "#ffffff35",
-      "minimap.background": "#121212",
+      "editor.background": "#181818",
+      "editor.foreground": "#F0F0F0",
+      "editor.lineHighlightBackground": "#262626",
+      "editorLineNumber.foreground": "#F0F0F05C",
+      "editorLineNumber.activeForeground": "#F0F0F0",
+      "editorGutter.background": "#181818",
+      "editorIndentGuide.background": "#F0F0F013",
+      "editorIndentGuide.activeBackground": "#F0F0F030",
+      "editor.selectionBackground": "#40404099",
+      "editor.inactiveSelectionBackground": "#40404077",
+      "scrollbarSlider.background": "#F0F0F011",
+      "scrollbarSlider.hoverBackground": "#F0F0F01E",
+      "scrollbarSlider.activeBackground": "#F0F0F01E",
+      "minimap.background": "#181818",
     },
   });
 };
@@ -233,7 +233,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
             onClick={() => void load(path)}
             disabled={loading}
           >
-            <FiRefreshCw />
+            <VscRefresh />
           </Button>
           <button
             type="button"
@@ -244,11 +244,11 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
           >
             {copied ? (
               <>
-                <FiCheck className="CodeBlock-copyIconDone" /> Copied
+                <VscCheck className="CodeBlock-copyIconDone" /> Copied
               </>
             ) : (
               <>
-                <FiCopy /> Copy
+                <VscCopy /> Copy
               </>
             )}
           </button>

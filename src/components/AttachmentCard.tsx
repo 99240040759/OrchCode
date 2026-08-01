@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FiX } from "react-icons/fi";
+import { VscClose } from "react-icons/vsc";
 import * as api from "../lib/api";
 import ExplorerIcon from "./ExplorerIcon";
 
@@ -69,7 +69,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
           aria-label={`Remove ${name}`}
           onClick={onRemove}
         >
-          <FiX />
+          <VscClose />
         </button>
       )}
     </div>

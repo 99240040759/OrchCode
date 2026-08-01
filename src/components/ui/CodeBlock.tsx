@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { FiCheck, FiCopy } from "react-icons/fi";
+import { VscCheck, VscCopy } from "react-icons/vsc";
 import { createHighlighterCore, createJavaScriptRegexEngine } from "shiki/core";
 import type { HighlighterCore, LanguageInput } from "shiki";
 
@@ -190,11 +190,11 @@ export const CodeBlock = memo(function CodeBlock({
         <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
           {copied ? (
             <>
-              <FiCheck className="CodeBlock-copyIconDone" /> Copied
+              <VscCheck className="CodeBlock-copyIconDone" /> Copied
             </>
           ) : (
             <>
-              <FiCopy /> Copy
+              <VscCopy /> Copy
             </>
           )}
         </button>

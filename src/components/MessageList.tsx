@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { FiArrowDown } from "react-icons/fi";
+import { VscArrowDown } from "react-icons/vsc";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
 
@@ -49,7 +49,7 @@ export function MessageList() {
           aria-label="Scroll to latest message"
           onClick={scrollToBottom}
         >
-          <FiArrowDown />
+          <VscArrowDown />
         </button>
       )}
     </div>

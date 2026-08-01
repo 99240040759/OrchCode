@@ -1,5 +1,15 @@
-import { FiFile, FiMaximize2, FiMinimize2, FiPlus, FiSidebar, FiTerminal, FiX } from "react-icons/fi";
-import { VscLayoutSidebarRight, VscLayoutSidebarRightOff } from "react-icons/vsc";
+import {
+  VscAdd,
+  VscClose,
+  VscFile,
+  VscLayoutSidebarLeft,
+  VscLayoutSidebarLeftOff,
+  VscLayoutSidebarRight,
+  VscLayoutSidebarRightOff,
+  VscScreenFull,
+  VscScreenNormal,
+  VscTerminal,
+} from "react-icons/vsc";
 import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { getBasename } from "../lib/utils";
@@ -14,9 +24,9 @@ import {
 } from "./ui/DropdownMenu";
 
 const KIND_ICON: Record<ArtifactKind, React.ComponentType<{ className?: string }>> = {
-  file: FiFile,
+  file: VscFile,
   browser: ChromeIcon,
-  terminal: FiTerminal,
+  terminal: VscTerminal,
 };
 
 interface TopBarProps {
@@ -50,7 +60,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
           data-active={sidebarOpen}
           onClick={onToggleSidebar}
         >
-          <FiSidebar />
+          {sidebarOpen ? <VscLayoutSidebarLeftOff /> : <VscLayoutSidebarLeft />}
         </Button>
         <span className="TopBar-title">{title}</span>
       </div>
@@ -92,7 +102,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                         closeTab(tab.id);
                       }}
                     >
-                      <FiX />
+                      <VscClose />
                     </Button>
                   </div>
                 );
@@ -103,18 +113,18 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button className="IconBtn" aria-label="New artifact">
-                    <FiPlus />
+                    <VscAdd />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent sideOffset={6} align="end">
                   <DropdownMenuItem onSelect={() => openFile()}>
-                    <FiFile /> File
+                    <VscFile /> File
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => openBrowser()}>
                     <ChromeIcon /> Browser
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => openTerminal()}>
-                    <FiTerminal /> Terminal
+                    <VscTerminal /> Terminal
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -124,7 +134,7 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                 aria-label={maximized ? "Restore panel size" : "Maximize panel"}
                 onClick={toggleMaximized}
               >
-                {maximized ? <FiMinimize2 /> : <FiMaximize2 />}
+                {maximized ? <VscScreenNormal /> : <VscScreenFull />}
               </Button>
             </div>
           </div>

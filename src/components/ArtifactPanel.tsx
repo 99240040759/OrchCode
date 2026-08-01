@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { FiFile, FiTerminal } from "react-icons/fi";
+import { VscFile, VscTerminal } from "react-icons/vsc";
 import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { BrowserView } from "./BrowserView";
@@ -13,9 +13,9 @@ const EMPTY_CARDS: {
   label: string;
   Icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { kind: "file", label: "File", Icon: FiFile },
+  { kind: "file", label: "File", Icon: VscFile },
   { kind: "browser", label: "Browser", Icon: ChromeIcon },
-  { kind: "terminal", label: "Terminal", Icon: FiTerminal },
+  { kind: "terminal", label: "Terminal", Icon: VscTerminal },
 ];
 
 function useAutoOpenWrittenFiles() {

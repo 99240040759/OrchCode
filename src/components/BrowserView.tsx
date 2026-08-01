@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FiArrowLeft, FiArrowRight, FiExternalLink, FiRotateCw } from "react-icons/fi";
+import { VscArrowLeft, VscArrowRight, VscLinkExternal, VscRefresh } from "react-icons/vsc";
 import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -129,7 +129,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
     <div className="BrowserView">
       <div className="BrowserBar">
         <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
-          <FiArrowLeft />
+          <VscArrowLeft />
         </Button>
         <Button
           className="IconBtn"
@@ -137,7 +137,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
           onClick={() => runHistory("forward")}
           disabled={!ready}
         >
-          <FiArrowRight />
+          <VscArrowRight />
         </Button>
         <Button
           className="IconBtn"
@@ -145,7 +145,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
           onClick={() => runHistory("reload")}
           disabled={!ready}
         >
-          <FiRotateCw />
+          <VscRefresh />
         </Button>
         <input
           className="BrowserBar-url"
@@ -163,7 +163,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
           aria-label="Open in system browser"
           onClick={() => void openUrl(normalizeUrl(input))}
         >
-          <FiExternalLink />
+          <VscLinkExternal />
         </Button>
       </div>
       {error && (

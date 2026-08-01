@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FiCheck, FiEdit, FiLogOut, FiTrash2, FiX } from "react-icons/fi";
+import { VscCheck, VscClose, VscEdit, VscSignOut, VscTrash } from "react-icons/vsc";
 import { Avatar } from "./Avatar";
 import { Button } from "./ui/Button";
 import { useAuthStore } from "../lib/auth";
@@ -36,7 +36,7 @@ export function Sidebar() {
   return (
     <aside className="Sidebar">
       <Button className="Sidebar-newchat" onClick={newChat} disabled={streaming}>
-        <FiEdit />
+        <VscEdit />
         <span>New chat</span>
       </Button>
 
@@ -84,14 +84,14 @@ export function Sidebar() {
                       void deleteSession(session.id);
                     }}
                   >
-                    <FiCheck />
+                    <VscCheck />
                   </Button>
                   <Button
                     className="ThreadItem-confirmNo"
                     aria-label="Cancel delete"
                     onClick={() => setPendingDelete(null)}
                   >
-                    <FiX />
+                    <VscClose />
                   </Button>
                 </div>
               ) : (
@@ -100,7 +100,7 @@ export function Sidebar() {
                   aria-label={`Delete chat ${session.title || "New chat"}`}
                   onClick={() => setPendingDelete(session.id)}
                 >
-                  <FiTrash2 />
+                  <VscTrash />
                 </Button>
               )}
             </div>
@@ -140,7 +140,7 @@ export function Sidebar() {
             title="Sign out"
             onClick={() => void signOut()}
           >
-            <FiLogOut />
+            <VscSignOut />
           </Button>
         </div>
       </div>

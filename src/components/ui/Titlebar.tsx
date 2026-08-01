@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { FiCopy, FiMinus, FiRefreshCw, FiSquare, FiX } from "react-icons/fi";
 import {
   VscChromeClose,
   VscChromeMaximize,
   VscChromeMinimize,
   VscChromeRestore,
+  VscClose,
+  VscCopy,
+  VscDash,
+  VscPrimitiveSquare,
+  VscRefresh,
 } from "react-icons/vsc";
 import { useUpdaterStore } from "../../lib/updater";
 import { cn } from "../../lib/utils";
@@ -26,7 +30,7 @@ function UpdateBadge() {
         className="Titlebar-update-badge Titlebar-update-downloading"
         title={`Downloading update v${version}`}
       >
-        <FiRefreshCw className="Titlebar-spinner" />
+        <VscRefresh className="Titlebar-spinner" />
         <span>{percent > 0 && percent < 100 ? `${percent}%` : "Downloading…"}</span>
       </span>
     );
@@ -39,7 +43,7 @@ function UpdateBadge() {
         onClick={() => void apply()}
         title={`v${version} downloaded — restart to apply`}
       >
-        <FiRefreshCw />
+        <VscRefresh />
         <span>Restart to update</span>
       </Button>
     );
@@ -48,7 +52,7 @@ function UpdateBadge() {
   if (status === "installing") {
     return (
       <span className="Titlebar-update-badge Titlebar-update-downloading" title="Applying update">
-        <FiRefreshCw className="Titlebar-spinner" />
+        <VscRefresh className="Titlebar-spinner" />
         <span>Restarting…</span>
       </span>
     );
@@ -83,17 +87,17 @@ function WindowControls() {
     return (
       <div className="MacControls">
         <Button className="MacBtn MacBtn-close" aria-label="Close" onClick={close}>
-          <FiX />
+          <VscClose />
         </Button>
         <Button className="MacBtn" aria-label="Minimize" onClick={minimize}>
-          <FiMinus />
+          <VscDash />
         </Button>
         <Button
           className="MacBtn"
           aria-label={isMaximized ? "Restore" : "Maximize"}
           onClick={toggleMaximize}
         >
-          {isMaximized ? <FiCopy /> : <FiSquare />}
+          {isMaximized ? <VscCopy /> : <VscPrimitiveSquare />}
         </Button>
       </div>
     );

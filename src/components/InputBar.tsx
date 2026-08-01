@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FiArrowUp,
-  FiCheck,
-  FiChevronDown,
-  FiFile,
-  FiImage,
-  FiMic,
-  FiMonitor,
-  FiPlus,
-  FiSquare,
-} from "react-icons/fi";
+  VscAdd,
+  VscArrowUp,
+  VscCheck,
+  VscChevronDown,
+  VscDebugStop,
+  VscFile,
+  VscFileMedia,
+  VscMic,
+  VscWindow,
+} from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
@@ -429,7 +429,7 @@ export function InputBar() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="Composer-plus" aria-label="Add attachment">
-                <FiPlus />
+                <VscAdd />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent sideOffset={6} align="start">
@@ -439,11 +439,11 @@ export function InputBar() {
                   if (modelSupportsImages) void pickFiles(true);
                 }}
               >
-                <FiImage />
+                <VscFileMedia />
                 <span>Image</span>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void pickFiles(false)}>
-                <FiFile />
+                <VscFile />
                 <span>File</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -456,7 +456,7 @@ export function InputBar() {
                 {selectedModel?.badge && (
                   <span className="Composer-badge">{selectedModel.badge}</span>
                 )}
-                <FiChevronDown />
+                <VscChevronDown />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent sideOffset={6} align="start">
@@ -469,7 +469,7 @@ export function InputBar() {
                     data-selected={selected}
                     onSelect={() => setSelectedModel(model.key)}
                   >
-                    {selected && <FiCheck className="DropdownItem-check" />}
+                    {selected && <VscCheck className="DropdownItem-check" />}
                     <span className="ModelItem-name">{model.name}</span>
                     {model.badge && <span className="Composer-badge">{model.badge}</span>}
                   </DropdownMenuItem>
@@ -482,7 +482,7 @@ export function InputBar() {
             <DropdownMenuTrigger asChild>
               <Button className="Composer-model" title={`Reasoning effort: ${reasoningEffort}`}>
                 <span className="Composer-effort-label">{reasoningEffort}</span>
-                <FiChevronDown />
+                <VscChevronDown />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent sideOffset={6} align="start">
@@ -520,7 +520,7 @@ export function InputBar() {
             data-active={recording}
             onClick={() => void toggleDictation()}
           >
-            <FiMic />
+            <VscMic />
           </Button>
 
           {maxContext > 0 && (
@@ -542,7 +542,7 @@ export function InputBar() {
                   cy="11"
                   r="8.5"
                   fill="none"
-                  stroke={fillPct > 85 ? "#ff5252" : fillPct > 60 ? "#ffb74d" : "#bb86fc"}
+                  stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
                   strokeWidth="2.5"
                   strokeDasharray={RING_CIRCUMFERENCE}
                   strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
@@ -556,7 +556,7 @@ export function InputBar() {
 
           {streaming ? (
             <Button className="Composer-send Composer-stop" aria-label="Stop generating" onClick={cancel}>
-              <FiSquare />
+              <VscDebugStop />
             </Button>
           ) : (
             <Button
@@ -565,7 +565,7 @@ export function InputBar() {
               disabled={!canSend}
               onClick={() => void doSend()}
             >
-              <FiArrowUp />
+              <VscArrowUp />
             </Button>
           )}
         </div>
@@ -574,9 +574,9 @@ export function InputBar() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="Composer-repo">
-                <FiMonitor />
+                <VscWindow />
                 <span>{workspace?.name ?? "Workspace"}</span>
-                <FiChevronDown />
+                <VscChevronDown />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent sideOffset={6} align="start">

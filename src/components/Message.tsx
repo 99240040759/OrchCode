@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  FiAlertTriangle,
-  FiBook,
-  FiChevronRight,
-  FiDatabase,
-  FiGlobe,
-  FiMinimize2,
-  FiSearch,
-  FiTerminal,
-  FiZapOff,
-} from "react-icons/fi";
+  VscBook,
+  VscChevronRight,
+  VscDatabase,
+  VscFlame,
+  VscGlobe,
+  VscScreenNormal,
+  VscSearch,
+  VscTerminal,
+  VscWarning,
+} from "react-icons/vsc";
 import type { ToolIcon } from "../lib/api";
 import type {
   ChatMessage,
@@ -26,12 +26,12 @@ import FileTag from "./FileTag";
 import { ThinkingShimmer } from "./ThinkingShimmer";
 
 const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ className?: string }>> = {
-  terminal: FiTerminal,
-  search: FiSearch,
-  globe: FiGlobe,
-  book: FiBook,
-  database: FiDatabase,
-  zapOff: FiZapOff,
+  terminal: VscTerminal,
+  search: VscSearch,
+  globe: VscGlobe,
+  book: VscBook,
+  database: VscDatabase,
+  zapOff: VscFlame,
 };
 
 function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
@@ -41,7 +41,7 @@ function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
       className="CompactionNotice"
       title={`${item.originalMessageCount} earlier messages were summarised to free up context`}
     >
-      <FiMinimize2 className="CompactionNotice-icon" />
+      <VscScreenNormal className="CompactionNotice-icon" />
       <span>
         Context compacted — {item.originalMessageCount} messages summarised · {time}
       </span>
@@ -96,7 +96,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
         <ToolTarget tool={tool} />
         {tool.status === "running" && <span className="ToolRow-spinner" role="status" />}
         {tool.status === "error" && (
-          <FiAlertTriangle className="ToolRow-errIcon" aria-label="Tool call failed" />
+          <VscWarning className="ToolRow-errIcon" aria-label="Tool call failed" />
         )}
         {showToggle && (
           <button
@@ -106,7 +106,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
           >
-            <FiChevronRight className="ToolRow-chevron" />
+            <VscChevronRight className="ToolRow-chevron" />
           </button>
         )}
       </div>
@@ -163,7 +163,7 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
       >
         <span className="Reasoning-label">{label}</span>
         {item.active && <span className="Reasoning-spinner" aria-hidden="true" />}
-        <FiChevronRight className="Reasoning-chevron" />
+        <VscChevronRight className="Reasoning-chevron" />
       </button>
       {isOpen && (
         <div className="Reasoning-body" ref={bodyRef}>
@@ -255,7 +255,7 @@ export function Message({ message }: { message: ChatMessage }) {
       {message.streaming && message.items.length === 0 && <ThinkingShimmer />}
       {message.error && (
         <div className="Msg-error" role="alert">
-          <FiAlertTriangle aria-hidden="true" />
+          <VscWarning aria-hidden="true" />
           <span>{message.error}</span>
         </div>
       )}
