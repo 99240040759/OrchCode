@@ -92,7 +92,7 @@ export function ArtifactPanel() {
             <div key={tab.id} className="ArtifactTabPanel" data-hidden={tab.id !== active}>
               {tab.kind === "terminal" && <TerminalView id={tab.id} />}
               {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
-              {tab.kind === "browser" && <BrowserView id={tab.id} initialUrl={tab.url} />}
+              {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
             </div>
           ))
         )}

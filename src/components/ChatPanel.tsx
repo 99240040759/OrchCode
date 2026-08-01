@@ -49,7 +49,7 @@ export function ChatPanel() {
           ref={chatRef}
           collapsible
           collapsedSize={0}
-          defaultSize={100}
+          defaultSize={60}
           minSize={25}
         >
           <div className="ChatPane">
@@ -68,7 +68,7 @@ export function ChatPanel() {
           ref={artifactRef}
           collapsible
           collapsedSize={0}
-          defaultSize={0}
+          defaultSize={40}
           minSize={25}
         >
           <ArtifactPanel />

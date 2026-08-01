@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { listen } from "@tauri-apps/api/event";
-import { useArtifactsStore } from "./artifacts";
 import * as api from "./api";
 import { newId } from "./utils";
 import type {
@@ -449,13 +448,6 @@ export const useChatStore = create(
                 status: "running",
               });
             });
-            if (
-              event.displayInfo.opensArtifact &&
-              event.displayInfo.icon === "globe" &&
-              event.displayInfo.targetText
-            ) {
-              useArtifactsStore.getState().openBrowser(event.displayInfo.targetText);
-            }
             break;
           case "toolResult":
             patch((m) => {

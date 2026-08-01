@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod browser;
 pub mod config;
 pub mod dictation;
 pub mod error;
@@ -110,6 +111,8 @@ pub fn run() {
         .invoke_handler({
             let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
                 Box::new(tauri::generate_handler![
+                browser::webview_navigate,
+                browser::webview_history,
                 fsapi::list_workspace_files,
                 fsapi::read_text_file,
                 fsapi::read_image_data_url,

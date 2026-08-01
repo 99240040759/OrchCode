@@ -20,7 +20,7 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
-export function BrowserView({ id: _id, initialUrl }: { id?: string; initialUrl?: string }) {
+export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const [label] = useState(() => `browser-${newId()}`);
   const startUrl = normalizeUrl(initialUrl ?? DEFAULT_BROWSER_URL);
 
