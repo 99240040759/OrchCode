@@ -38,9 +38,6 @@ pub fn tavily_url() -> String {
     format!("{}/tavily", gcp_functions_url())
 }
 
-pub fn embeddings_url() -> String {
-    format!("{}/embeddings", gcp_functions_url())
-}
 
 pub const DEFAULT_MAX_TURNS: usize = 1000;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;
@@ -52,6 +49,4 @@ pub const MODEL_CATALOG_REFRESH_INTERVAL_SECS: u64 = 300;
 pub const TOKEN_REFRESH_CHECK_INTERVAL_SECS: u64 = 120;
 pub const TOKEN_REFRESH_SKEW_SECS: i64 = 300;
 pub const SIGN_IN_WINDOW_SECS: u64 = 600;
-pub const EMBEDDING_MODEL: &str = "gemini-embedding-2";
-pub const EMBEDDING_BATCH_SIZE: usize = 64;
 pub const STREAM_CHUNK_TIMEOUT_SECS: u64 = 120;

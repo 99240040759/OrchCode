@@ -13,7 +13,6 @@ use crate::error::{AppError, AppResult};
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
 use crate::persistence::SqliteMemory;
 use crate::tools::command_manager::CommandManager;
-use crate::vector_store::WorkspaceIndex;
 
 pub type WorkspaceHandle = Arc<RwLock<Option<PathBuf>>>;
 
@@ -30,7 +29,6 @@ pub struct AppState {
     pub gateway: Arc<Gateway>,
     pub catalog: RwLock<Option<ModelCatalog>>,
     pub memory: SqliteMemory,
-    pub workspace_index: WorkspaceIndex,
     pub runs: Mutex<HashMap<String, RunHandle>>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Mutex<HashMap<String, crate::terminal::TerminalSession>>,
@@ -41,12 +39,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(data_dir: &Path) -> AppResult<Self> {
-        let db_path = data_dir.join("orchcode.db");
+        let db_path = data_dir.join("orch.db");
         let token: TokenHandle = Arc::new(RwLock::new(None));
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
-        let workspace_index = WorkspaceIndex::open(&db_path, gateway.clone())?;
-
         let sandbox = data_dir.join("sandbox");
         std::fs::create_dir_all(&sandbox)?;
 
@@ -58,7 +54,6 @@ impl AppState {
             gateway,
             catalog: RwLock::new(None),
             memory,
-            workspace_index,
             runs: Mutex::new(HashMap::new()),
             dictation: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
@@ -96,7 +91,6 @@ impl AppState {
         if let Ok(mut guard) = self.catalog.write() {
             *guard = None;
         }
-        self.workspace_index.invalidate();
     }
 
     pub fn set_authenticated_user(&self, user_id: &str) {
@@ -112,7 +106,6 @@ impl AppState {
             if let Ok(mut cat) = self.catalog.write() {
                 *cat = None;
             }
-            self.workspace_index.invalidate();
         }
     }
 
@@ -143,12 +136,8 @@ impl AppState {
     }
 
     pub fn set_workspace(&self, path: PathBuf) {
-        let changed = self.workspace().as_deref() != Some(path.as_path());
         if let Ok(mut guard) = self.workspace.write() {
             *guard = Some(path);
-        }
-        if changed {
-            self.workspace_index.invalidate();
         }
     }
 

@@ -260,7 +260,6 @@ pub async fn start_chat(
         app_handle: app.clone(),
         command_manager: (*state.command_manager).clone(),
         data_dir: state.data_dir.clone(),
-        workspace_index: state.workspace_index.clone(),
     };
 
     let agent = build_agent(

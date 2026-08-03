@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   VscBook,
   VscChevronRight,
-  VscDatabase,
   VscFlame,
   VscGlobe,
   VscScreenNormal,
@@ -30,7 +29,6 @@ const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ classN
   search: VscSearch,
   globe: VscGlobe,
   book: VscBook,
-  database: VscDatabase,
   zapOff: VscFlame,
 };
 

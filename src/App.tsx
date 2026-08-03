@@ -17,7 +17,7 @@ function AppShell() {
 
   return (
     <div className="AppShell">
-      <Titlebar title="Orch Code" />
+      <Titlebar title="Orch" />
       <TopBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((open) => !open)} />
       <div className="AppShell-body">
         {sidebarOpen && <Sidebar />}

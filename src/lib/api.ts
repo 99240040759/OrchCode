@@ -41,8 +41,7 @@ export type ToolIcon =
   | "search"
   | "globe"
   | "book"
-  | "zapOff"
-  | "database";
+  | "zapOff";
 
 export interface ToolDisplayInfo {
   label: string;

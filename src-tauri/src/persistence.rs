@@ -44,41 +44,9 @@ const BASELINE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS messages (
      duration_seconds INTEGER NOT NULL,
      PRIMARY KEY (conversation_id, item_id)
  );
- CREATE TABLE IF NOT EXISTS vector_chunks (
-     id           TEXT PRIMARY KEY,
-     workspace    TEXT NOT NULL,
-     file_path    TEXT NOT NULL,
-     start_line   INTEGER NOT NULL,
-     end_line     INTEGER NOT NULL,
-     content      TEXT NOT NULL,
-     content_hash TEXT NOT NULL,
-     embedding    BLOB NOT NULL,
-     indexed_at   INTEGER NOT NULL
- );
- CREATE INDEX IF NOT EXISTS idx_vector_chunks_workspace ON vector_chunks(workspace);
- CREATE INDEX IF NOT EXISTS idx_vector_chunks_file ON vector_chunks(workspace, file_path);";
-
-const VECTOR_SCHEMA: &str = "DROP TABLE IF EXISTS vector_chunks;
- CREATE TABLE vector_chunks (
-     id         TEXT PRIMARY KEY,
-     workspace  TEXT NOT NULL,
-     file_path  TEXT NOT NULL,
-     start_line INTEGER NOT NULL,
-     end_line   INTEGER NOT NULL,
-     content    TEXT NOT NULL,
-     embedding  BLOB NOT NULL
- );
- CREATE INDEX idx_vector_chunks_workspace ON vector_chunks(workspace);
- CREATE INDEX idx_vector_chunks_file ON vector_chunks(workspace, file_path);
- CREATE TABLE vector_files (
-     workspace    TEXT NOT NULL,
-     file_path    TEXT NOT NULL,
-     content_hash TEXT NOT NULL,
-     mtime_ms     INTEGER NOT NULL,
-     size_bytes   INTEGER NOT NULL,
-     PRIMARY KEY (workspace, file_path)
- );
  CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);";
+
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompactionMarker {
@@ -166,7 +134,6 @@ impl SqliteMemory {
 
         let migration_list = vec![
             rusqlite_migration::M::up(BASELINE_SCHEMA),
-            rusqlite_migration::M::up(VECTOR_SCHEMA),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);

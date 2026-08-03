@@ -14,7 +14,6 @@ pub mod skills;
 pub mod state;
 pub mod terminal;
 pub mod tools;
-pub mod vector_store;
 
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -67,7 +66,7 @@ pub fn run() {
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 for arg in args {
-                    if arg.starts_with("orchcode://") {
+                    if arg.starts_with("orch://") {
                         handle_deep_link_url(&app_handle, &arg).await;
                     }
                 }

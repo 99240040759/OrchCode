@@ -23,7 +23,7 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(token: TokenHandle) -> AppResult<Self> {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("orchcode/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("orch/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(AppError::Http)?;
         Ok(Self { http, token })
@@ -95,41 +95,6 @@ impl Gateway {
             .await?;
         let resp = check_status(resp).await?;
         Ok(resp.json().await?)
-    }
-
-    pub async fn embed(&self, texts: Vec<String>) -> AppResult<Vec<Vec<f32>>> {
-        let token = self.require_token()?;
-        let expected = texts.len();
-        let resp = self
-            .http
-            .post(config::embeddings_url())
-            .bearer_auth(token)
-            .json(&json!({ "input": texts, "model": config::EMBEDDING_MODEL }))
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-
-        #[derive(Deserialize)]
-        struct EmbeddingItem {
-            embedding: Vec<f32>,
-            #[serde(default)]
-            index: usize,
-        }
-
-        #[derive(Deserialize)]
-        struct EmbedResponse {
-            data: Vec<EmbeddingItem>,
-        }
-
-        let mut parsed: EmbedResponse = resp.json().await?;
-        if parsed.data.len() != expected {
-            return Err(AppError::other(format!(
-                "embedding count mismatch: requested {expected}, received {}",
-                parsed.data.len()
-            )));
-        }
-        parsed.data.sort_by_key(|e| e.index);
-        Ok(parsed.data.into_iter().map(|e| e.embedding).collect())
     }
 
     pub async fn generate_title(&self, prompt: &str) -> AppResult<String> {

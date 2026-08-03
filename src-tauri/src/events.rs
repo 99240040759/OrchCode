@@ -28,7 +28,6 @@ pub enum ToolIcon {
     Keyboard,
     Eye,
     ZapOff,
-    Database,
 }
 
 #[derive(Clone, Serialize)]

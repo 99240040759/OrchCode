@@ -1,17 +1,12 @@
 !macro NSIS_HOOK_POSTINSTALL
-  CreateShortCut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
-  CreateDirectory "$SMPROGRAMS\${PRODUCTNAME}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCTNAME}\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  Delete "$DESKTOP\${PRODUCTNAME}.lnk"
-  Delete "$SMPROGRAMS\${PRODUCTNAME}\${PRODUCTNAME}.lnk"
-  RMDir "$SMPROGRAMS\${PRODUCTNAME}"
-  RMDir /r "$APPDATA\${BUNDLEID}"
-  RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
-  RMDir /r "$APPDATA\com.orch.live"
-  RMDir /r "$LOCALAPPDATA\com.orch.live"
-  RMDir /r "$APPDATA\orchcode"
-  RMDir /r "$LOCALAPPDATA\orchcode"
+  RMDir /r "$APPDATA\orch"
+  RMDir /r "$LOCALAPPDATA\orch"
 !macroend
+
+
+
+
+

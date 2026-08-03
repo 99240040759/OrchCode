@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    let dsn = orchcode_lib::config::sentry_dsn();
+    let dsn = orch_lib::config::sentry_dsn();
     let _guard = if !dsn.is_empty() && !cfg!(debug_assertions) {
         Some(sentry::init((
             dsn,
@@ -15,5 +15,5 @@ fn main() {
         None
     };
 
-    orchcode_lib::run();
+    orch_lib::run();
 }

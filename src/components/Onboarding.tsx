@@ -30,7 +30,7 @@ export function Onboarding() {
       <Titlebar className="Onboarding-titlebar" />
       <div className="Onboarding-content">
         <img src="/icon.png" alt="" className="Onboarding-logo-img" />
-        <h1 className="Onboarding-title">Welcome to Orch Code</h1>
+        <h1 className="Onboarding-title">Welcome to Orch</h1>
         <p className="Onboarding-sub">
           Your AI software engineer, right on your desktop. Sign in to start planning, building,
           and shipping.

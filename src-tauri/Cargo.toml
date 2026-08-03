@@ -1,12 +1,12 @@
 [package]
-name = "orchcode"
+name = "orch"
 version = "0.0.2"
-description = "Orch Code Desktop Application"
+description = "Orch Desktop Application"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "orchcode_lib"
+name = "orch_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use crate::gateway::Gateway;
 use crate::state::WorkspaceHandle;
 use crate::tools::command_manager::CommandManager;
-use crate::vector_store::WorkspaceIndex;
 
 pub use display::parse_display_info;
 pub use get_command_status::GetCommandStatus;
@@ -71,7 +70,6 @@ pub struct ToolContext {
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
     pub data_dir: PathBuf,
-    pub workspace_index: WorkspaceIndex,
 }
 
 impl ToolContext {
@@ -88,7 +86,7 @@ impl ToolContext {
         MultiReplaceFileContent::new(self.workspace.clone())
     }
     pub fn search_workspace(&self) -> SearchWorkspace {
-        SearchWorkspace::new(self.workspace.clone(), self.workspace_index.clone())
+        SearchWorkspace::new(self.workspace.clone())
     }
     pub fn web_search(&self) -> WebSearch {
         WebSearch::new(self.gateway.clone())

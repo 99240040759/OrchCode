@@ -130,29 +130,13 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             ..Default::default()
         },
 
-        "search_workspace" => {
-            let semantic = args
-                .get("mode")
-                .and_then(|v| v.as_str())
-                .map(|m| m == "semantic")
-                .unwrap_or(false);
-            ToolDisplayInfo {
-                label: if semantic {
-                    "Semantic Search"
-                } else {
-                    "Searched Code"
-                }
-                .to_string(),
-                target_text: str_arg(&args, "query"),
-                icon: if semantic {
-                    ToolIcon::Database
-                } else {
-                    ToolIcon::Search
-                },
-                opens_artifact: false,
-                ..Default::default()
-            }
-        }
+        "search_workspace" => ToolDisplayInfo {
+            label: "Searched Code".to_string(),
+            target_text: str_arg(&args, "query"),
+            icon: ToolIcon::Search,
+            opens_artifact: false,
+            ..Default::default()
+        },
 
         other => ToolDisplayInfo {
             label: other.to_string(),
