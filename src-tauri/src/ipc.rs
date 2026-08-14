@@ -460,10 +460,8 @@ pub fn start_dictation(
         return Err("not authenticated".to_string());
     }
     let mut guard = state.dictation.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(existing) = guard.as_ref() {
-        if !existing.is_finished() {
-            return Err("dictation is already active".to_string());
-        }
+    if let Some(existing) = guard.take() {
+        existing.stop();
     }
     let handle = dictation::start(state.gateway.clone(), on_event).map_err(|e| e.to_string())?;
     *guard = Some(handle);
@@ -477,13 +475,10 @@ pub fn stop_dictation(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
-    match handle {
-        Some(h) => {
-            h.stop();
-            Ok(())
-        }
-        None => Err("dictation is not active".to_string()),
+    if let Some(h) = handle {
+        h.stop();
     }
+    Ok(())
 }
 
 #[tauri::command]

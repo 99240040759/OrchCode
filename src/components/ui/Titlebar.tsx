@@ -11,9 +11,11 @@ import {
   VscPrimitiveSquare,
   VscRefresh,
 } from "react-icons/vsc";
-import { useUpdaterStore } from "../../lib/updater";
-import { cn } from "../../lib/utils";
+import { useUpdaterStore } from "../../lib/store";
+import { cn } from "../../lib/api";
 import { Button } from "./Button";
+
+import { Tooltip } from "./Tooltip";
 
 export const IS_MAC =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
@@ -26,35 +28,37 @@ function UpdateBadge() {
 
   if (status === "downloading") {
     return (
-      <span
-        className="Titlebar-update-badge Titlebar-update-downloading"
-        title={`Downloading update v${version}`}
-      >
-        <VscRefresh className="Titlebar-spinner" />
-        <span>{percent > 0 && percent < 100 ? `${percent}%` : "Downloading…"}</span>
-      </span>
+      <Tooltip content={`Downloading update v${version}`} side="bottom">
+        <span className="Titlebar-update-badge Titlebar-update-downloading">
+          <VscRefresh className="Titlebar-spinner" />
+          <span>{percent > 0 && percent < 100 ? `${percent}%` : "Downloading…"}</span>
+        </span>
+      </Tooltip>
     );
   }
 
   if (status === "readyToRestart") {
     return (
-      <Button
-        className="Titlebar-update-badge Titlebar-update-ready"
-        onClick={() => void apply()}
-        title={`v${version} downloaded — restart to apply`}
-      >
-        <VscRefresh />
-        <span>Restart to update</span>
-      </Button>
+      <Tooltip content={`v${version} downloaded — restart to apply`} side="bottom">
+        <Button
+          className="Titlebar-update-badge Titlebar-update-ready"
+          onClick={() => void apply()}
+        >
+          <VscRefresh />
+          <span>Restart to update</span>
+        </Button>
+      </Tooltip>
     );
   }
 
   if (status === "installing") {
     return (
-      <span className="Titlebar-update-badge Titlebar-update-downloading" title="Applying update">
-        <VscRefresh className="Titlebar-spinner" />
-        <span>Restarting…</span>
-      </span>
+      <Tooltip content="Applying update" side="bottom">
+        <span className="Titlebar-update-badge Titlebar-update-downloading">
+          <VscRefresh className="Titlebar-spinner" />
+          <span>Restarting…</span>
+        </span>
+      </Tooltip>
     );
   }
 
@@ -125,31 +129,16 @@ function WindowControls() {
 export function Titlebar({ title, className }: { title?: string; className?: string }) {
   return (
     <div className={cn("Titlebar", IS_MAC && "Titlebar-mac", className)} data-tauri-drag-region>
-      {IS_MAC ? (
-        <>
-          <WindowControls />
-          {title && (
-            <span className="Titlebar-title Titlebar-title-mac" data-tauri-drag-region>
-              {title}
-            </span>
-          )}
-          <div className="Titlebar-right">
-            <UpdateBadge />
-          </div>
-        </>
-      ) : (
-        <>
-          {title && (
-            <span className="Titlebar-title" data-tauri-drag-region>
-              {title}
-            </span>
-          )}
-          <div className="Titlebar-right">
-            <UpdateBadge />
-            <WindowControls />
-          </div>
-        </>
+      {IS_MAC && <WindowControls />}
+      {title && (
+        <span className={cn("Titlebar-title", IS_MAC && "Titlebar-title-mac")} data-tauri-drag-region>
+          {title}
+        </span>
       )}
+      <div className="Titlebar-right">
+        <UpdateBadge />
+        {!IS_MAC && <WindowControls />}
+      </div>
     </div>
   );
 }

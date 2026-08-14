@@ -24,9 +24,6 @@ pub enum ToolIcon {
     Globe,
     Book,
     Cpu,
-    MousePointer,
-    Keyboard,
-    Eye,
     ZapOff,
 }
 

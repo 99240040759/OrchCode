@@ -6,8 +6,9 @@ import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import { DEFAULT_BROWSER_URL } from "../lib/artifacts";
-import { newId } from "../lib/utils";
+import { newId } from "../lib/api";
 import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
 
 const OFFSCREEN = -100000;
 
@@ -20,8 +21,14 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
-export function BrowserView({ initialUrl }: { initialUrl?: string }) {
-  const [label] = useState(() => `browser-${newId()}`);
+export function BrowserView({
+  initialUrl,
+  active = true,
+}: {
+  initialUrl?: string;
+  active?: boolean;
+}) {
+  const [label, setLabel] = useState("");
   const startUrl = normalizeUrl(initialUrl ?? DEFAULT_BROWSER_URL);
 
   const [input, setInput] = useState(startUrl);
@@ -32,26 +39,39 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const initialUrlRef = useRef(startUrl);
   const lastPropUrl = useRef(startUrl);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const syncRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
+    const currentLabel = `browser-${newId()}`;
+    setLabel(currentLabel);
+
     let disposed = false;
     let visible = true;
     const appWindow = getCurrentWindow();
-    const rect = host.getBoundingClientRect();
 
-    const webview = new Webview(appWindow, label, {
+    const webview = new Webview(appWindow, currentLabel, {
       url: initialUrlRef.current,
-      x: Math.round(rect.left),
-      y: Math.round(rect.top),
-      width: Math.max(1, Math.round(rect.width)),
-      height: Math.max(1, Math.round(rect.height)),
+      x: OFFSCREEN,
+      y: OFFSCREEN,
+      width: 1,
+      height: 1,
     });
 
     void webview.once("tauri://created", () => {
-      if (!disposed) setReady(true);
+      if (disposed) {
+        void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
+        void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
+        void webview.close().catch(() => {});
+        void api.webviewClose(currentLabel).catch(() => {});
+        return;
+      }
+      setReady(true);
+      syncPosition();
     });
     void webview.once("tauri://error", (event) => {
       if (!disposed) setError(String(event.payload));
@@ -59,23 +79,33 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
 
     const syncPosition = () => {
       if (disposed) return;
+      if (!activeRef.current) {
+        void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
+        void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
+        return;
+      }
       const bounds = host.getBoundingClientRect();
-      void webview.setPosition(
-        new LogicalPosition(
-          visible && bounds.width > 1 && bounds.height > 1
-            ? Math.round(bounds.left)
-            : OFFSCREEN,
-          visible && bounds.width > 1 && bounds.height > 1
-            ? Math.round(bounds.top)
-            : OFFSCREEN
-        )
-      );
-      if (visible && bounds.width > 1 && bounds.height > 1) {
-        void webview.setSize(
-          new LogicalSize(Math.round(bounds.width), Math.round(bounds.height))
-        );
+      const isValid =
+        visible &&
+        bounds.width > 20 &&
+        bounds.height > 20 &&
+        bounds.top >= 0 &&
+        bounds.left >= 0;
+
+      if (isValid) {
+        void webview
+          .setPosition(new LogicalPosition(Math.round(bounds.left), Math.round(bounds.top)))
+          .catch(() => {});
+        void webview
+          .setSize(new LogicalSize(Math.round(bounds.width), Math.round(bounds.height)))
+          .catch(() => {});
+      } else {
+        void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
+        void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       }
     };
+
+    syncRef.current = syncPosition;
 
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
@@ -99,9 +129,16 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       intersectionObserver.disconnect();
       resizeObserver.disconnect();
       window.removeEventListener("resize", syncPosition);
+      void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
+      void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       void webview.close().catch(() => {});
+      void api.webviewClose(currentLabel).catch(() => {});
     };
-  }, [label]);
+  }, []);
+
+  useEffect(() => {
+    syncRef.current?.();
+  }, [active]);
 
   const navigate = useCallback((next: string) => {
     setInput(next);
@@ -116,7 +153,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   }, [initialUrl, navigate]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !label) return;
     api.webviewNavigate(label, committedUrl).catch((e) => setError(api.errorMessage(e)));
   }, [committedUrl, ready, label]);
 
@@ -128,25 +165,31 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   return (
     <div className="BrowserView">
       <div className="BrowserBar">
-        <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
-          <VscArrowLeft />
-        </Button>
-        <Button
-          className="IconBtn"
-          aria-label="Forward"
-          onClick={() => runHistory("forward")}
-          disabled={!ready}
-        >
-          <VscArrowRight />
-        </Button>
-        <Button
-          className="IconBtn"
-          aria-label="Reload"
-          onClick={() => runHistory("reload")}
-          disabled={!ready}
-        >
-          <VscRefresh />
-        </Button>
+        <Tooltip content="Back" side="bottom">
+          <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
+            <VscArrowLeft />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Forward" side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label="Forward"
+            onClick={() => runHistory("forward")}
+            disabled={!ready}
+          >
+            <VscArrowRight />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Reload" side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label="Reload"
+            onClick={() => runHistory("reload")}
+            disabled={!ready}
+          >
+            <VscRefresh />
+          </Button>
+        </Tooltip>
         <input
           className="BrowserBar-url"
           value={input}
@@ -158,13 +201,15 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
           aria-label="Address bar"
           spellCheck={false}
         />
-        <Button
-          className="IconBtn"
-          aria-label="Open in system browser"
-          onClick={() => void openUrl(normalizeUrl(input))}
-        >
-          <VscLinkExternal />
-        </Button>
+        <Tooltip content="Open in browser" side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label="Open in system browser"
+            onClick={() => void openUrl(normalizeUrl(input))}
+          >
+            <VscLinkExternal />
+          </Button>
+        </Tooltip>
       </div>
       {error && (
         <div className="BrowserView-error" role="alert">

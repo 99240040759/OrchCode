@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   VscBook,
   VscChevronRight,
   VscFlame,
   VscGlobe,
+  VscMcp,
   VscScreenNormal,
   VscSearch,
   VscTerminal,
@@ -19,31 +20,32 @@ import type {
   ToolCallItem,
 } from "../lib/store";
 import { Markdown, renderTextWithMentions } from "./Markdown";
-import AttachmentCard from "./AttachmentCard";
-import ExplorerIcon from "./ExplorerIcon";
-import FileTag from "./FileTag";
-import { ThinkingShimmer } from "./ThinkingShimmer";
+import { AttachmentCard, ExplorerIcon, FileTag, ThinkingShimmer } from "./ChatPrimitives";
+import { Tooltip } from "./ui/Tooltip";
 
 const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ className?: string }>> = {
   terminal: VscTerminal,
   search: VscSearch,
   globe: VscGlobe,
   book: VscBook,
+  cpu: VscMcp,
   zapOff: VscFlame,
 };
 
 function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
   const time = new Date(item.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
-    <div
-      className="CompactionNotice"
-      title={`${item.originalMessageCount} earlier messages were summarised to free up context`}
+    <Tooltip
+      content={`${item.originalMessageCount} earlier messages were summarised to free up context`}
+      side="top"
     >
-      <VscScreenNormal className="CompactionNotice-icon" />
-      <span>
-        Context compacted — {item.originalMessageCount} messages summarised · {time}
-      </span>
-    </div>
+      <div className="CompactionNotice">
+        <VscScreenNormal className="CompactionNotice-icon" />
+        <span>
+          Context compacted — {item.originalMessageCount} messages summarised · {time}
+        </span>
+      </div>
+    </Tooltip>
   );
 }
 
@@ -97,15 +99,17 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
           <VscWarning className="ToolRow-errIcon" aria-label="Tool call failed" />
         )}
         {showToggle && (
-          <button
-            type="button"
-            className="ToolRow-toggle"
-            data-open={open}
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-          >
-            <VscChevronRight className="ToolRow-chevron" />
-          </button>
+          <Tooltip content={open ? "Hide output" : "Show output"} side="top">
+            <button
+              type="button"
+              className="ToolRow-toggle"
+              data-open={open}
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <VscChevronRight className="ToolRow-chevron" />
+            </button>
+          </Tooltip>
         )}
       </div>
       {open && showToggle && <pre className="ToolRow-output">{output}</pre>}
@@ -201,7 +205,7 @@ function groupItems(items: MessageItem[]): Group[] {
   return groups;
 }
 
-export function Message({ message }: { message: ChatMessage }) {
+export const Message = React.memo(function Message({ message }: { message: ChatMessage }) {
   if (message.role === "system") {
     const notice = message.items.find(
       (i): i is CompactionNoticeItem => i.type === "compactionNotice"
@@ -259,6 +263,6 @@ export function Message({ message }: { message: ChatMessage }) {
       )}
     </div>
   );
-}
+});
 
 export default Message;

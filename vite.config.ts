@@ -13,11 +13,9 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      // Allows @import "~monaco-editor/..." in CSS to resolve correctly in production
       "~monaco-editor": path.resolve(__dirname, "node_modules/monaco-editor"),
     },
   },
-
 
   worker: {
     format: "es",
@@ -34,14 +32,10 @@ export default defineConfig({
             return "react";
           }
           if (id.includes("node_modules/@radix-ui/")) return "radix";
-          if (id.includes("node_modules/react-markdown/") || id.includes("node_modules/remark-")) {
-            return "markdown";
-          }
           if (id.includes("node_modules/@xterm/")) return "xterm";
-          if (id.includes("node_modules/@shikijs/langs/")) return undefined;
-          if (id.includes("node_modules/shiki") || id.includes("node_modules/@shikijs/")) {
-            return "shiki";
-          }
+          if (id.includes("node_modules/@react-symbols/")) return "symbols";
+          if (id.includes("node_modules/react-icons/")) return "icons";
+          if (id.includes("node_modules/prismjs/")) return "prism";
           if (id.includes("node_modules/monaco-editor/")) {
             if (id.includes("worker")) return undefined;
             return "monaco";

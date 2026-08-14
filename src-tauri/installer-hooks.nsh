@@ -2,8 +2,8 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  RMDir /r "$APPDATA\orch"
-  RMDir /r "$LOCALAPPDATA\orch"
+  RMDir /r "$APPDATA\Orch"
+  RMDir /r "$LOCALAPPDATA\Orch"
 !macroend
 
 

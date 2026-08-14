@@ -66,7 +66,7 @@ pub fn run() {
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 for arg in args {
-                    if arg.starts_with("orch://") {
+                    if arg.to_lowercase().starts_with("orch://") {
                         handle_deep_link_url(&app_handle, &arg).await;
                     }
                 }
@@ -88,6 +88,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
+                #[cfg(target_os = "windows")]
                 app.deep_link().register_all()?;
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
@@ -112,6 +113,7 @@ pub fn run() {
                 Box::new(tauri::generate_handler![
                 browser::webview_navigate,
                 browser::webview_history,
+                browser::webview_close,
                 fsapi::list_workspace_files,
                 fsapi::read_text_file,
                 fsapi::read_image_data_url,
@@ -146,6 +148,11 @@ pub fn run() {
 
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
+            for (label, webview) in handle.webviews() {
+                if label.starts_with("browser-") {
+                    let _ = webview.close();
+                }
+            }
             handle.state::<AppState>().shutdown();
         }
     });

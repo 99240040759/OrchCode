@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { newId } from "./utils";
+import { newId } from "./api";
 
 export type ArtifactKind = "file" | "browser" | "terminal";
 
@@ -143,6 +143,7 @@ export const useArtifactsStore = create(
     toggleMaximized: () => {
       set((s) => {
         s.maximized = !s.maximized;
+        if (s.maximized) s.panelOpen = true;
       });
     },
 

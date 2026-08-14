@@ -12,10 +12,10 @@ import {
 } from "react-icons/vsc";
 import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
-import { getBasename } from "../lib/utils";
-import { ChromeIcon } from "./ChromeIcon";
-import FileTag from "./FileTag";
+import { getBasename } from "../lib/api";
+import { ChromeIcon, FileTag } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,14 +54,16 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
   return (
     <div className="TopBar">
       <div className="TopBar-left">
-        <Button
-          className="IconBtn"
-          aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-          data-active={sidebarOpen}
-          onClick={onToggleSidebar}
-        >
-          {sidebarOpen ? <VscLayoutSidebarLeftOff /> : <VscLayoutSidebarLeft />}
-        </Button>
+        <Tooltip content={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            data-active={sidebarOpen}
+            onClick={onToggleSidebar}
+          >
+            {sidebarOpen ? <VscLayoutSidebarLeftOff /> : <VscLayoutSidebarLeft />}
+          </Button>
+        </Tooltip>
         <span className="TopBar-title">{title}</span>
       </div>
 
@@ -94,16 +96,18 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                         <span className="ArtifactTab-title">{tabName}</span>
                       </>
                     )}
-                    <Button
-                      className="ArtifactTab-close"
-                      aria-label={`Close ${tabName}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeTab(tab.id);
-                      }}
-                    >
-                      <VscClose />
-                    </Button>
+                    <Tooltip content={`Close ${tabName}`} side="bottom">
+                      <Button
+                        className="ArtifactTab-close"
+                        aria-label={`Close ${tabName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          closeTab(tab.id);
+                        }}
+                      >
+                        <VscClose />
+                      </Button>
+                    </Tooltip>
                   </div>
                 );
               })}
@@ -111,11 +115,13 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
 
             <div className="ArtifactPanel-actions">
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button className="IconBtn" aria-label="New artifact">
-                    <VscAdd />
-                  </Button>
-                </DropdownMenuTrigger>
+                <Tooltip content="New tab" side="bottom">
+                  <DropdownMenuTrigger asChild>
+                    <Button className="IconBtn" aria-label="New artifact">
+                      <VscAdd />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </Tooltip>
                 <DropdownMenuContent sideOffset={6} align="end">
                   <DropdownMenuItem onSelect={() => openFile()}>
                     <VscFile /> File
@@ -129,25 +135,29 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button
-                className="IconBtn"
-                aria-label={maximized ? "Restore panel size" : "Maximize panel"}
-                onClick={toggleMaximized}
-              >
-                {maximized ? <VscScreenNormal /> : <VscScreenFull />}
-              </Button>
+              <Tooltip content={maximized ? "Restore panel size" : "Maximize panel"} side="bottom">
+                <Button
+                  className="IconBtn"
+                  aria-label={maximized ? "Restore panel size" : "Maximize panel"}
+                  onClick={toggleMaximized}
+                >
+                  {maximized ? <VscScreenNormal /> : <VscScreenFull />}
+                </Button>
+              </Tooltip>
             </div>
           </div>
         )}
 
-        <Button
-          className="IconBtn"
-          aria-label={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
-          data-active={panelOpen}
-          onClick={() => setPanelOpen(!panelOpen)}
-        >
-          {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
-        </Button>
+        <Tooltip content={panelOpen ? "Hide artifact panel" : "Show artifact panel"} side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
+            data-active={panelOpen}
+            onClick={() => setPanelOpen(!panelOpen)}
+          >
+            {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
+          </Button>
+        </Tooltip>
       </div>
     </div>
   );

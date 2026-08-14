@@ -3,7 +3,7 @@ import {
   Panel,
   PanelGroup,
   PanelResizeHandle,
-  type ImperativePanelHandle,
+  type ImperativePanelGroupHandle,
 } from "react-resizable-panels";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
@@ -16,28 +16,28 @@ export function ChatPanel() {
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
 
-  const chatRef = useRef<ImperativePanelHandle>(null);
-  const artifactRef = useRef<ImperativePanelHandle>(null);
+  const groupRef = useRef<ImperativePanelGroupHandle>(null);
 
   useEffect(() => {
-    const chat = chatRef.current;
-    const artifact = artifactRef.current;
-    if (!chat || !artifact) return;
+    const group = groupRef.current;
+    if (!group) return;
 
     if (!panelOpen) {
-      artifact.collapse();
-      chat.expand();
+      group.setLayout([100, 0]);
       return;
     }
 
-    artifact.expand();
-    if (maximized) chat.collapse();
-    else chat.expand();
+    if (maximized) {
+      group.setLayout([0, 100]);
+    } else {
+      group.setLayout([60, 40]);
+    }
   }, [panelOpen, maximized]);
 
   return (
     <div className="Workspace">
       <PanelGroup
+        ref={groupRef}
         direction="horizontal"
         className="WorkspacePanels"
         data-panel-open={panelOpen}
@@ -46,11 +46,10 @@ export function ChatPanel() {
         <Panel
           id="chat"
           order={1}
-          ref={chatRef}
           collapsible
           collapsedSize={0}
           defaultSize={60}
-          minSize={25}
+          minSize={0}
         >
           <div className="ChatPane">
             {hasMessages && <MessageList />}
@@ -65,11 +64,10 @@ export function ChatPanel() {
         <Panel
           id="artifacts"
           order={2}
-          ref={artifactRef}
           collapsible
           collapsedSize={0}
           defaultSize={40}
-          minSize={25}
+          minSize={0}
         >
           <ArtifactPanel />
         </Panel>

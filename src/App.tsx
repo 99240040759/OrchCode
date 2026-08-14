@@ -3,14 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ErrorBoundary } from "react-error-boundary";
 import { useAuthStore } from "./lib/auth";
 import { useChatStore } from "./lib/store";
-import { useUpdaterStore } from "./lib/updater";
+import { useUpdaterStore } from "./lib/store";
 import { ChatPanel } from "./components/ChatPanel";
-import { Greeting } from "./components/Greeting";
-import { Onboarding } from "./components/Onboarding";
+import { Greeting, Onboarding } from "./components/screens";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Button } from "./components/ui/Button";
 import { Titlebar } from "./components/ui/Titlebar";
+import { TooltipProvider } from "./components/ui/Tooltip";
 
 function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -89,7 +89,9 @@ function Root() {
 export default function App() {
   return (
     <ErrorBoundary FallbackComponent={AppError}>
-      <Root />
+      <TooltipProvider delayDuration={120} disableHoverableContent>
+        <Root />
+      </TooltipProvider>
     </ErrorBoundary>
   );
 }

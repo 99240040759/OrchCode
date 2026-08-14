@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager};
+use tokio_util::sync::CancellationToken;
 
 use crate::auth;
 use crate::config;
@@ -12,13 +12,13 @@ use crate::dictation::DictationHandle;
 use crate::error::{AppError, AppResult};
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
 use crate::persistence::SqliteMemory;
-use crate::tools::command_manager::CommandManager;
+use crate::tools::CommandManager;
 
 pub type WorkspaceHandle = Arc<RwLock<Option<PathBuf>>>;
 
 pub struct RunHandle {
     pub run_id: String,
-    pub cancel: Arc<AtomicBool>,
+    pub cancel: CancellationToken,
 }
 
 pub struct AppState {
@@ -39,7 +39,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(data_dir: &Path) -> AppResult<Self> {
-        let db_path = data_dir.join("orch.db");
+        let db_path = data_dir.join("Orch.db");
         let token: TokenHandle = Arc::new(RwLock::new(None));
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
@@ -241,13 +241,13 @@ impl AppState {
         });
     }
 
-    pub fn start_run(&self, session_id: &str) -> AppResult<(String, Arc<AtomicBool>)> {
+    pub fn start_run(&self, session_id: &str) -> AppResult<(String, CancellationToken)> {
         let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         if guard.contains_key(session_id) {
             return Err(AppError::RunConflict);
         }
         let run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = CancellationToken::new();
         guard.insert(
             session_id.to_string(),
             RunHandle {
@@ -272,8 +272,7 @@ impl AppState {
     pub fn cancel_run(&self, session_id: &str) {
         let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(run) = guard.get(session_id) {
-            run.cancel
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            run.cancel.cancel();
         }
     }
 

@@ -6,7 +6,7 @@ use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::gateway::TokenHandle;
 
-const KEYRING_SERVICE: &str = "orch";
+const KEYRING_SERVICE: &str = "Orch";
 const KEYRING_REFRESH_ACCOUNT: &str = "refresh_token";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,7 +377,12 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
 }
 
 pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
-    let normalized = raw.replacen("orch://", "http://localhost/", 1);
+    let raw_lower = raw.to_lowercase();
+    let normalized = if raw_lower.starts_with("orch://") {
+        raw.replacen(&raw[..7], "http://localhost/", 1)
+    } else {
+        raw.to_string()
+    };
     let mut params = AuthCallbackParams::default();
 
     if let Ok(url) = reqwest::Url::parse(&normalized) {

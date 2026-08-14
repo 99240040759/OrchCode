@@ -1,10 +1,10 @@
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND,
-};
-
+#[cfg(target_os = "windows")]
 pub fn setup_native_window(window: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWCP_ROUND,
+    };
     if let Ok(hwnd_ptr) = window.hwnd() {
         let hwnd = HWND(hwnd_ptr.0 as _);
         unsafe {
@@ -25,3 +25,6 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
         }
     }
 }
+
+#[cfg(not(target_os = "windows"))]
+pub fn setup_native_window(_window: &tauri::WebviewWindow) {}

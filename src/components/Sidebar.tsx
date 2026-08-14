@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { VscCheck, VscClose, VscEdit, VscSignOut, VscTrash } from "react-icons/vsc";
-import { Avatar } from "./Avatar";
+import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
-import { formatRelativeTime, formatUsd } from "../lib/utils";
+import { formatRelativeTime, formatUsd } from "../lib/api";
 
 const BUDGET_WARN_PCT = 75;
 const BUDGET_DANGER_PCT = 90;
@@ -76,32 +77,38 @@ export function Sidebar() {
 
               {confirming ? (
                 <div className="ThreadItem-confirm">
-                  <Button
-                    className="ThreadItem-confirmYes"
-                    aria-label={`Confirm delete ${session.title || "New chat"}`}
-                    onClick={() => {
-                      setPendingDelete(null);
-                      void deleteSession(session.id);
-                    }}
-                  >
-                    <VscCheck />
-                  </Button>
-                  <Button
-                    className="ThreadItem-confirmNo"
-                    aria-label="Cancel delete"
-                    onClick={() => setPendingDelete(null)}
-                  >
-                    <VscClose />
-                  </Button>
+                  <Tooltip content="Confirm delete" side="top">
+                    <Button
+                      className="ThreadItem-confirmYes"
+                      aria-label={`Confirm delete ${session.title || "New chat"}`}
+                      onClick={() => {
+                        setPendingDelete(null);
+                        void deleteSession(session.id);
+                      }}
+                    >
+                      <VscCheck />
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content="Cancel" side="top">
+                    <Button
+                      className="ThreadItem-confirmNo"
+                      aria-label="Cancel delete"
+                      onClick={() => setPendingDelete(null)}
+                    >
+                      <VscClose />
+                    </Button>
+                  </Tooltip>
                 </div>
               ) : (
-                <Button
-                  className="ThreadItem-del"
-                  aria-label={`Delete chat ${session.title || "New chat"}`}
-                  onClick={() => setPendingDelete(session.id)}
-                >
-                  <VscTrash />
-                </Button>
+                <Tooltip content="Delete chat" side="right">
+                  <Button
+                    className="ThreadItem-del"
+                    aria-label={`Delete chat ${session.title || "New chat"}`}
+                    onClick={() => setPendingDelete(session.id)}
+                  >
+                    <VscTrash />
+                  </Button>
+                </Tooltip>
               )}
             </div>
           );
@@ -109,24 +116,33 @@ export function Sidebar() {
       </nav>
 
       <div className="Sidebar-footer">
-        <div className="BudgetBar" data-level={budgetLevel}>
-          <div className="BudgetBar-top">
-            <span>{budget ? `Usage this ${budget.period}` : "Usage"}</span>
-            <span>{budget ? budgetLabel(budget.costUsd, budget.limitUsd) : "—"}</span>
+        <Tooltip
+          content={
+            budget
+              ? `${formatUsd(budget.costUsd)} spent of ${formatUsd(budget.limitUsd)} limit (${Math.round(usedPct)}%)`
+              : "Usage tracking"
+          }
+          side="top"
+        >
+          <div className="BudgetBar" data-level={budgetLevel}>
+            <div className="BudgetBar-top">
+              <span>{budget ? `Usage this ${budget.period}` : "Usage"}</span>
+              <span>{budget ? budgetLabel(budget.costUsd, budget.limitUsd) : "—"}</span>
+            </div>
+            <div
+              className="BudgetBar-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(usedPct)}
+            >
+              <div className="BudgetBar-fill" style={{ width: `${usedPct}%` }} />
+            </div>
+            {budget && !budget.allowed && (
+              <span className="BudgetBar-blocked">Usage limit reached</span>
+            )}
           </div>
-          <div
-            className="BudgetBar-track"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(usedPct)}
-          >
-            <div className="BudgetBar-fill" style={{ width: `${usedPct}%` }} />
-          </div>
-          {budget && !budget.allowed && (
-            <span className="BudgetBar-blocked">Usage limit reached</span>
-          )}
-        </div>
+        </Tooltip>
 
         <div className="Account">
           <Avatar src={user?.avatarUrl} fallback={user?.initial ?? "?"} />
@@ -134,14 +150,15 @@ export function Sidebar() {
             <span className="Account-name">{user?.displayName ?? "You"}</span>
             <span className="Account-plan">{user?.email ?? "Signed in"}</span>
           </span>
-          <Button
-            className="IconBtn Account-logout"
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => void signOut()}
-          >
-            <VscSignOut />
-          </Button>
+          <Tooltip content="Sign out" side="top">
+            <Button
+              className="IconBtn Account-logout"
+              aria-label="Sign out"
+              onClick={() => void signOut()}
+            >
+              <VscSignOut />
+            </Button>
+          </Tooltip>
         </div>
       </div>
     </aside>

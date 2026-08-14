@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 
@@ -22,11 +22,31 @@ self.MonacoEnvironment = {
 loader.config({ monaco });
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
-import { getBasename, getDirname, splitPathParts } from "../lib/utils";
+import { getBasename, getDirname, splitPathParts } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
-import { useCopy } from "./ui/CodeBlock";
-import ExplorerIcon from "./ExplorerIcon";
+import { ExplorerIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
+
+function useCopy(text: string) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const copy = useCallback(() => {
+    void navigator.clipboard.writeText(text);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return { copied, copy };
+}
 
 function FileBreadcrumb({ path }: { path: string }) {
   const parts = splitPathParts(path);
@@ -227,31 +247,35 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
           {truncated && <span className="FileContent-trunc">truncated</span>}
         </div>
         <div className="FileViewerBar-right">
-          <Button
-            className="IconBtn"
-            aria-label="Reload file"
-            onClick={() => void load(path)}
-            disabled={loading}
-          >
-            <VscRefresh />
-          </Button>
-          <button
-            type="button"
-            className="CodeBlock-copy"
-            onClick={copy}
-            aria-label="Copy file content"
-            disabled={!content}
-          >
-            {copied ? (
-              <>
-                <VscCheck className="CodeBlock-copyIconDone" /> Copied
-              </>
-            ) : (
-              <>
-                <VscCopy /> Copy
-              </>
-            )}
-          </button>
+          <Tooltip content="Reload file" side="bottom">
+            <Button
+              className="IconBtn"
+              aria-label="Reload file"
+              onClick={() => void load(path)}
+              disabled={loading}
+            >
+              <VscRefresh />
+            </Button>
+          </Tooltip>
+          <Tooltip content={copied ? "Copied" : "Copy content"} side="bottom">
+            <button
+              type="button"
+              className="CodeBlock-copy"
+              onClick={copy}
+              aria-label="Copy file content"
+              disabled={!content}
+            >
+              {copied ? (
+                <>
+                  <VscCheck className="CodeBlock-copyIconDone" /> Copied
+                </>
+              ) : (
+                <>
+                  <VscCopy /> Copy
+                </>
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
       <div className="FileViewerBody">

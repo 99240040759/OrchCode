@@ -1,41 +1,42 @@
-import React, { useEffect, useState } from "react";
+import React, { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import * as api from "../lib/api";
-import { createMentionRegex, isImagePath } from "../lib/utils";
-import FileTag from "./FileTag";
-import CodeBlock from "./ui/CodeBlock";
+import { VscCheck, VscCopy } from "react-icons/vsc";
+import Prism from "prismjs";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-rust";
+import "prismjs/components/prism-python";
+import "prismjs/components/prism-bash";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-yaml";
+import "prismjs/components/prism-toml";
+import "prismjs/components/prism-sql";
+import "prismjs/components/prism-c";
+import "prismjs/components/prism-cpp";
+import "prismjs/components/prism-csharp";
+import "prismjs/components/prism-go";
+import "prismjs/components/prism-java";
+import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-diff";
+import "prismjs/components/prism-graphql";
+import "prismjs/components/prism-docker";
 
-function extractText(node: React.ReactNode): string {
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join("");
-  if (React.isValidElement(node)) {
-    return extractText((node.props as { children?: React.ReactNode }).children);
-  }
-  return "";
-}
+import * as api from "../lib/api";
+import { FileTag } from "./ChatPrimitives";
+import { Tooltip } from "./ui/Tooltip";
 
 function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
 }
 
-function hasScheme(href: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href);
-}
-
-function isWorkspaceLink(href: string): boolean {
-  if (hasScheme(href)) return href.startsWith("file:");
-  if (href.startsWith("#") || href.startsWith("//")) return false;
-  return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
-}
-
 export function renderTextWithMentions(text: string): React.ReactNode {
   if (!text) return text;
 
-  const regex = createMentionRegex();
   const parts: React.ReactNode[] = [];
+  const regex = api.createMentionRegex();
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let matched = false;
@@ -56,107 +57,163 @@ export function renderTextWithMentions(text: string): React.ReactNode {
   return <>{parts}</>;
 }
 
-function withMentions(children: React.ReactNode): React.ReactNode {
-  return React.Children.map(children, (child) =>
-    typeof child === "string" ? renderTextWithMentions(child) : child
-  );
+function isWorkspaceLink(href: string): boolean {
+  if (href.startsWith("file:")) return true;
+  if (href.startsWith("#") || href.startsWith("//") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
+    return false;
+  }
+  return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
 }
 
-function MarkdownImage({ src, alt }: { src: string; alt: string }) {
-  const [resolved, setResolved] = useState<string | null>(null);
+function getPrismGrammar(lang: string): { grammar: Prism.Grammar; name: string } | null {
+  const norm = lang.toLowerCase();
+  const aliasMap: Record<string, string> = {
+    js: "javascript",
+    ts: "typescript",
+    py: "python",
+    rs: "rust",
+    sh: "bash",
+    shell: "bash",
+    zsh: "bash",
+    yml: "yaml",
+    md: "markdown",
+    cs: "csharp",
+    "c++": "cpp",
+    rb: "ruby",
+    dockerfile: "docker",
+    golang: "go",
+  };
+  const target = aliasMap[norm] || norm;
+  const grammar = Prism.languages[target];
+  if (grammar) {
+    return { grammar, name: target };
+  }
+  return null;
+}
 
-  useEffect(() => {
-    if (hasScheme(src) && !src.startsWith("file:")) {
-      setResolved(src);
-      return;
-    }
-    const path = src.replace(/^file:\/\/\/?/, "");
-    if (!isImagePath(path)) {
-      setResolved(null);
-      return;
-    }
-    let active = true;
-    api
-      .readImageDataUrl(path)
-      .then((url) => {
-        if (active) setResolved(url);
-      })
-      .catch(() => {
-        if (active) setResolved(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [src]);
+const CodeBlockComponent = React.memo(function CodeBlockComponent({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  const match = /language-([a-zA-Z0-9_-]+)/.exec(className || "");
+  const rawLang = match ? match[1].toLowerCase() : "";
+  const codeString = String(children || "").replace(/\n$/, "");
+  const isInline = !match && !codeString.includes("\n");
 
-  if (!resolved) return <FileTag path={src.replace(/^file:\/\/\/?/, "")} />;
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(codeString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const parsed = useMemo(() => (rawLang ? getPrismGrammar(rawLang) : null), [rawLang]);
+  const highlightedHtml = useMemo(() => {
+    if (!parsed || !codeString) return null;
+    return Prism.highlight(codeString, parsed.grammar, parsed.name);
+  }, [codeString, parsed]);
+
+  if (isInline) {
+    return <code className={className}>{children}</code>;
+  }
 
   return (
-    <span className="Markdown-imgCard" title={src}>
-      <img src={resolved} alt={alt} className="Markdown-imgThumb" />
-      {alt && <span className="Markdown-imgCaption">{alt}</span>}
-    </span>
+    <div className="CodeBlock">
+      <div className="CodeBlock-header">
+        <span className="CodeBlock-lang">{rawLang || "text"}</span>
+        <Tooltip content={copied ? "Copied" : "Copy code"} side="top">
+          <button
+            type="button"
+            className="CodeBlock-copy"
+            onClick={handleCopy}
+            aria-label="Copy code"
+          >
+            {copied ? (
+              <>
+                <VscCheck className="CodeBlock-copyIconDone" />
+                <span>Copied</span>
+              </>
+            ) : (
+              <>
+                <VscCopy />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+        </Tooltip>
+      </div>
+      <pre className="CodeBlock-pre">
+        {highlightedHtml ? (
+          <code
+            className={`language-${parsed?.name || "text"}`}
+            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+          />
+        ) : (
+          <code>{codeString}</code>
+        )}
+      </pre>
+    </div>
   );
-}
+});
 
-export function Markdown({ children }: { children: string }) {
+export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
+  if (!children) return null;
+
   return (
     <div className="Markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          img({ src, alt }) {
-            if (typeof src !== "string" || !src) return null;
-            return <MarkdownImage src={src} alt={alt ?? ""} />;
+          pre({ children }) {
+            return <>{children}</>;
           },
-          pre({ children: preChildren }) {
-            const child = Array.isArray(preChildren) ? preChildren[0] : preChildren;
-            if (!React.isValidElement(child)) return <pre>{preChildren}</pre>;
-            const props = child.props as { className?: string; children?: React.ReactNode };
-            const match = /language-([\w+-]+)/.exec(props.className ?? "");
-            const value = extractText(props.children).replace(/\n$/, "");
-            return <CodeBlock language={match ? match[1] : "text"} value={value} />;
-          },
-          code({ children: codeChildren }) {
-            return <code className="Markdown-inlinecode">{codeChildren}</code>;
-          },
-          p({ children: pChildren }) {
-            return <p>{withMentions(pChildren)}</p>;
-          },
-          li({ children: liChildren }) {
-            return <li>{withMentions(liChildren)}</li>;
-          },
-          table({ children: tableChildren }) {
+          code({ className, children }) {
             return (
-              <div className="Markdown-tableWrapper">
-                <table>{tableChildren}</table>
-              </div>
+              <CodeBlockComponent className={className}>
+                {children}
+              </CodeBlockComponent>
             );
           },
-          a({ href, children: aChildren }) {
-            const target = href ?? "";
-            if (isWorkspaceLink(target)) {
-              const clean = target.replace(/^file:\/\/\/?/, "");
-              const lineMatch = /#L\d+(?:-\d+)?$/.exec(clean);
+          a({ href, children, ...props }) {
+            const link = href || "";
+            if (link && !isWorkspaceLink(link)) {
               return (
-                <FileTag
-                  path={clean.replace(/#L\d+(?:-\d+)?$/, "")}
-                  lineRange={lineMatch ? lineMatch[0] : undefined}
-                />
+                <a
+                  href={link}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openUrl(link);
+                  }}
+                  target="_blank"
+                  rel="noreferrer"
+                  {...props}
+                >
+                  {children}
+                </a>
               );
             }
             return (
-              <a
-                href={target}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (target) void openUrl(target);
-                }}
-              >
-                {aChildren}
+              <a href={link} {...props}>
+                {children}
               </a>
+            );
+          },
+          img({ src, alt, ...props }) {
+            return (
+              <div className="Markdown-imgCard">
+                <img
+                  src={src}
+                  alt={alt}
+                  className="Markdown-imgThumb"
+                  loading="lazy"
+                  {...props}
+                />
+                {alt && <span className="Markdown-imgCaption">{alt}</span>}
+              </div>
             );
           },
         }}
@@ -165,6 +222,6 @@ export function Markdown({ children }: { children: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 export default Markdown;

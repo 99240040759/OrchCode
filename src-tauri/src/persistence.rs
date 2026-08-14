@@ -15,7 +15,7 @@ use rig::message::{AssistantContent, DocumentSourceKind, MimeType, UserContent};
 
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
-use crate::llm::attachment::{is_payload_part, payload_part_label};
+use crate::llm::{is_payload_part, payload_part_label};
 use crate::tools::{parse_display_info, strip_tool_error_sentinel, tool_output_is_error};
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

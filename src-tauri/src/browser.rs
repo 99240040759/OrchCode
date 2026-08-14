@@ -46,3 +46,9 @@ pub fn webview_history(
         .eval(script)
         .map_err(|e| format!("browser history action failed: {e}"))
 }
+
+#[tauri::command]
+pub fn webview_close(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let webview = browser_webview(&app, &label)?;
+    webview.close().map_err(|e| format!("browser close failed: {e}"))
+}

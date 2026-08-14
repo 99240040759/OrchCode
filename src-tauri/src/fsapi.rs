@@ -1,6 +1,8 @@
-use std::path::PathBuf;
+
 
 use base64::Engine;
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
 use tauri::State;
 
@@ -24,25 +26,6 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
-fn match_score(name_lower: &str, path_lower: &str, query: &str) -> Option<u8> {
-    if query.is_empty() {
-        return Some(0);
-    }
-    if name_lower == query {
-        return Some(4);
-    }
-    if name_lower.starts_with(query) {
-        return Some(3);
-    }
-    if name_lower.contains(query) {
-        return Some(2);
-    }
-    if path_lower.contains(query) {
-        return Some(1);
-    }
-    None
-}
-
 #[tauri::command]
 pub async fn list_workspace_files(
     state: State<'_, AppState>,
@@ -50,12 +33,19 @@ pub async fn list_workspace_files(
     limit: Option<usize>,
 ) -> Result<Vec<FileEntry>, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
-    let query = query.unwrap_or_default().trim().to_lowercase();
+    let query_str = query.unwrap_or_default().trim().to_string();
     let limit = limit.unwrap_or(100).clamp(1, 1000);
 
     tokio::task::spawn_blocking(move || {
-        let mut scored: Vec<(u8, usize, FileEntry)> = Vec::new();
+        let mut scored: Vec<(u32, usize, FileEntry)> = Vec::new();
         let mut scanned = 0usize;
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = if !query_str.is_empty() {
+            Some(Pattern::parse(&query_str, CaseMatching::Ignore, Normalization::Smart))
+        } else {
+            None
+        };
 
         for entry in fs_util::workspace_walker(&root).build().flatten() {
             if scanned >= MAX_SCANNED_FILES {
@@ -68,10 +58,16 @@ pub async fn list_workspace_files(
 
             let rel = fs_util::display_relative(&root, entry.path());
             let name = entry.file_name().to_string_lossy().to_string();
-            let name_lower = name.to_lowercase();
-            let path_lower = rel.to_lowercase();
 
-            if let Some(score) = match_score(&name_lower, &path_lower, &query) {
+            let score = if let Some(ref pat) = pattern {
+                let mut buf = Vec::new();
+                let utf32 = Utf32Str::new(&rel, &mut buf);
+                pat.score(utf32, &mut matcher)
+            } else {
+                Some(0)
+            };
+
+            if let Some(score) = score {
                 let depth = rel.matches('/').count();
                 scored.push((score, depth, FileEntry { path: rel, name }));
             }
@@ -127,23 +123,12 @@ pub async fn read_text_file(
 }
 
 #[tauri::command]
-pub async fn read_image_data_url(path: String) -> Result<String, String> {
-    let resolved = PathBuf::from(&path);
-    let ext = resolved
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_lowercase())
-        .unwrap_or_default();
-
-    let mime = match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        "svg" => "image/svg+xml",
-        other => return Err(format!("unsupported image type: {other}")),
-    };
+pub async fn read_image_data_url(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let root = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_in_workspace(&root, &path).map_err(|e| e.to_string())?;
 
     let meta = tokio::fs::metadata(&resolved)
         .await
@@ -158,6 +143,37 @@ pub async fn read_image_data_url(path: String) -> Result<String, String> {
     let bytes = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    let (mime, final_bytes) = if let Ok(img) = image::load_from_memory(&bytes) {
+        if img.width() > 1200 || img.height() > 1200 {
+            let resized = img.thumbnail(1200, 1200);
+            let mut cursor = std::io::Cursor::new(Vec::new());
+            if resized.write_to(&mut cursor, image::ImageFormat::WebP).is_ok() {
+                ("image/webp", cursor.into_inner())
+            } else {
+                ("image/png", bytes)
+            }
+        } else {
+            let ext_mime = match resolved
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_lowercase())
+                .as_deref()
+            {
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("webp") => "image/webp",
+                Some("gif") => "image/gif",
+                Some("bmp") => "image/bmp",
+                Some("svg") => "image/svg+xml",
+                _ => "image/png",
+            };
+            (ext_mime, bytes)
+        }
+    } else {
+        ("image/png", bytes)
+    };
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&final_bytes);
     Ok(format!("data:{mime};base64,{b64}"))
 }

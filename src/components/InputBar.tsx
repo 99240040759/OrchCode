@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   VscAdd,
   VscArrowUp,
-  VscCheck,
   VscChevronDown,
   VscDebugStop,
   VscFile,
@@ -12,12 +11,13 @@ import {
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useDebouncedCallback } from "use-debounce";
+import getCaretCoordinates from "textarea-caret";
 import * as api from "../lib/api";
 import { useChatStore, type ReasoningEffort } from "../lib/store";
-import { getBasename, getDirname, isImagePath } from "../lib/utils";
+import { getBasename, getDirname, isImagePath } from "../lib/api";
 import { Button } from "./ui/Button";
-import AttachmentCard from "./AttachmentCard";
-import ExplorerIcon from "./ExplorerIcon";
+import { Tooltip } from "./ui/Tooltip";
+import { AttachmentCard, ExplorerIcon } from "./ChatPrimitives";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +75,7 @@ export function InputBar() {
   const [fileHits, setFileHits] = useState<api.FileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [popoverCoords, setPopoverCoords] = useState<{ left: number } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dictationBase = useRef("");
@@ -169,6 +170,7 @@ export function InputBar() {
     setFileHits([]);
     setLoadingFiles(false);
     setHighlighted(0);
+    setPopoverCoords(null);
   }, []);
 
   const syncToken = useCallback((text: string, caret: number) => {
@@ -177,6 +179,17 @@ export function InputBar() {
     setQuery(token.query);
     setTokenStart(token.start);
     setHighlighted(0);
+
+    if (token.trigger && textareaRef.current) {
+      try {
+        const coords = getCaretCoordinates(textareaRef.current, caret);
+        setPopoverCoords({ left: coords.left });
+      } catch {
+        setPopoverCoords(null);
+      }
+    } else {
+      setPopoverCoords(null);
+    }
   }, []);
 
   const insertMention = useCallback(
@@ -268,7 +281,7 @@ export function InputBar() {
       try {
         await api.stopDictation();
       } catch (e) {
-        setNotice(api.errorMessage(e));
+        console.error("Failed to stop dictation:", e);
       }
       return;
     }
@@ -317,7 +330,19 @@ export function InputBar() {
       data-recording={recording || undefined}
     >
       {popoverOpen && (
-        <div className="MentionPopover" role="listbox">
+        <div
+          className="MentionPopover"
+          role="listbox"
+          style={
+            popoverCoords
+              ? {
+                  left: `${Math.min(Math.max(8, popoverCoords.left), 280)}px`,
+                  right: "auto",
+                  minWidth: "280px",
+                }
+              : undefined
+          }
+        >
           {trigger === "@" ? (
             loadingFiles ? (
               <div className="MentionItem MentionItem-empty">Searching workspace…</div>
@@ -412,26 +437,15 @@ export function InputBar() {
           }
         />
 
-        {recording && (
-          <div className="Composer-recBadge" aria-live="polite">
-            <span className="Composer-recDot" />
-            <span className="Composer-recBars">
-              <span />
-              <span />
-              <span />
-              <span />
-            </span>
-            <span className="Composer-recLabel">Recording</span>
-          </div>
-        )}
-
         <div className="Composer-row">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="Composer-plus" aria-label="Add attachment">
-                <VscAdd />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip content="Add files or images" side="top">
+              <DropdownMenuTrigger asChild>
+                <Button className="Composer-plus" aria-label="Add attachment">
+                  <VscAdd />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent sideOffset={6} align="start">
               <DropdownMenuItem
                 disabled={!modelSupportsImages}
@@ -450,135 +464,138 @@ export function InputBar() {
           </DropdownMenu>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="Composer-model">
-                <span>{selectedModel?.name ?? "Model"}</span>
-                {selectedModel?.badge && (
-                  <span className="Composer-badge">{selectedModel.badge}</span>
-                )}
-                <VscChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip content="Select AI model" side="top">
+              <DropdownMenuTrigger asChild>
+                <Button className="Composer-model">
+                  <span>{selectedModel?.name ?? "Model"}</span>
+                  {selectedModel?.badge && (
+                    <span className="Composer-badge">{selectedModel.badge}</span>
+                  )}
+                  <VscChevronDown />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent sideOffset={6} align="start">
               {models.length === 0 && <DropdownMenuItem disabled>No models available</DropdownMenuItem>}
-              {models.map((model) => {
-                const selected = model.key === selectedModel?.key;
-                return (
-                  <DropdownMenuItem
-                    key={model.key}
-                    data-selected={selected}
-                    onSelect={() => setSelectedModel(model.key)}
-                  >
-                    {selected && <VscCheck className="DropdownItem-check" />}
-                    <span className="ModelItem-name">{model.name}</span>
-                    {model.badge && <span className="Composer-badge">{model.badge}</span>}
-                  </DropdownMenuItem>
-                );
-              })}
+              {models.map((model) => (
+                <DropdownMenuItem
+                  key={model.key}
+                  onSelect={() => setSelectedModel(model.key)}
+                >
+                  <span className="ModelItem-name">{model.name}</span>
+                  {model.badge && <span className="Composer-badge">{model.badge}</span>}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="Composer-model" title={`Reasoning effort: ${reasoningEffort}`}>
-                <span className="Composer-effort-label">{reasoningEffort}</span>
-                <VscChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip content={`Reasoning effort: ${reasoningEffort}`} side="top">
+              <DropdownMenuTrigger asChild>
+                <Button className="Composer-model">
+                  <span className="Composer-effort-label">{reasoningEffort}</span>
+                  <VscChevronDown />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent sideOffset={6} align="start">
-              <div className="EffortSliderPanel">
-                <div className="EffortSliderPanel-header">
-                  <span className="EffortSliderPanel-title">Reasoning effort</span>
-                  <span className="EffortSliderPanel-value">{reasoningEffort}</span>
-                </div>
-                <input
-                  type="range"
-                  className="EffortSlider-input"
-                  min={0}
-                  max={EFFORT_LEVELS.length - 1}
-                  step={1}
-                  value={EFFORT_LEVELS.indexOf(reasoningEffort)}
-                  onChange={(event) =>
-                    setReasoningEffort(EFFORT_LEVELS[Number(event.target.value)])
-                  }
-                  aria-label="Reasoning effort"
-                />
-                <div className="EffortSliderPanel-ticks">
-                  <span>Low</span>
-                  <span>Med</span>
-                  <span>High</span>
-                </div>
-              </div>
+              {EFFORT_LEVELS.map((level) => (
+                <DropdownMenuItem
+                  key={level}
+                  onSelect={() => setReasoningEffort(level)}
+                >
+                  <span style={{ textTransform: "capitalize" }}>{level}</span>
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
 
           <span className="Composer-rowspacer" />
 
-          <Button
-            className="Composer-mic"
-            aria-label={recording ? "Stop dictation" : "Start dictation"}
-            data-active={recording}
-            onClick={() => void toggleDictation()}
-          >
-            <VscMic />
-          </Button>
+          <Tooltip content={recording ? "Stop dictation" : "Voice dictation"} side="top">
+            <Button
+              className="Composer-mic"
+              aria-label={recording ? "Stop dictation" : "Start dictation"}
+              data-active={recording}
+              onClick={() => void toggleDictation()}
+            >
+              {recording ? (
+                <span className="Composer-micWaves" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              ) : (
+                <VscMic />
+              )}
+            </Button>
+          </Tooltip>
 
           {maxContext > 0 && (
-            <div
-              className="TokenRing"
-              title={`Context: ${sessionTokens.totalTokens.toLocaleString()} of ${maxContext.toLocaleString()} tokens`}
+            <Tooltip
+              content={`Context: ${sessionTokens.totalTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+              side="top"
             >
-              <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                <circle
-                  cx="11"
-                  cy="11"
-                  r="8.5"
-                  fill="none"
-                  stroke="rgba(255,255,255,0.08)"
-                  strokeWidth="2.5"
-                />
-                <circle
-                  cx="11"
-                  cy="11"
-                  r="8.5"
-                  fill="none"
-                  stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
-                  strokeWidth="2.5"
-                  strokeDasharray={RING_CIRCUMFERENCE}
-                  strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
-                  strokeLinecap="round"
-                  transform="rotate(-90 11 11)"
-                />
-              </svg>
-              <span className="TokenRing-label">{fillPct}%</span>
-            </div>
+              <div className="TokenRing">
+                <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="8.5"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.08)"
+                    strokeWidth="2.5"
+                  />
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="8.5"
+                    fill="none"
+                    stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
+                    strokeWidth="2.5"
+                    strokeDasharray={RING_CIRCUMFERENCE}
+                    strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
+                    strokeLinecap="round"
+                    transform="rotate(-90 11 11)"
+                  />
+                </svg>
+                <span className="TokenRing-label">{fillPct}%</span>
+              </div>
+            </Tooltip>
           )}
 
           {streaming ? (
-            <Button className="Composer-send Composer-stop" aria-label="Stop generating" onClick={cancel}>
-              <VscDebugStop />
-            </Button>
+            <Tooltip content="Stop generating" side="top">
+              <Button className="Composer-send Composer-stop" aria-label="Stop generating" onClick={cancel}>
+                <VscDebugStop />
+              </Button>
+            </Tooltip>
           ) : (
-            <Button
-              className="Composer-send"
-              aria-label="Send message"
-              disabled={!canSend}
-              onClick={() => void doSend()}
-            >
-              <VscArrowUp />
-            </Button>
+            <Tooltip content="Send message (Enter)" side="top">
+              <Button
+                className="Composer-send"
+                aria-label="Send message"
+                disabled={!canSend}
+                onClick={() => void doSend()}
+              >
+                <VscArrowUp />
+              </Button>
+            </Tooltip>
           )}
         </div>
 
         <div className="Composer-subrow">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="Composer-repo">
-                <VscWindow />
-                <span>{workspace?.name ?? "Workspace"}</span>
-                <VscChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip content="Workspace directory" side="top">
+              <DropdownMenuTrigger asChild>
+                <Button className="Composer-repo">
+                  <VscWindow />
+                  <span>{workspace?.name ?? "Workspace"}</span>
+                  <VscChevronDown />
+                </Button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent sideOffset={6} align="start">
               <DropdownMenuItem onSelect={() => void pickWorkspace()}>
                 Open folder…

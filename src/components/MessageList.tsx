@@ -24,7 +24,7 @@ export function MessageList() {
     if (!el) return;
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     pinnedRef.current = pinned;
-    setShowJump(!pinned);
+    setShowJump((prev) => (prev !== !pinned ? !pinned : prev));
   }, []);
 
   useLayoutEffect(() => {

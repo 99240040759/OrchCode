@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { cn } from "../../lib/utils";
+import { cn } from "../../lib/api";
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 

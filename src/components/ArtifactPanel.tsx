@@ -3,7 +3,7 @@ import { VscFile, VscTerminal } from "react-icons/vsc";
 import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { BrowserView } from "./BrowserView";
-import { ChromeIcon } from "./ChromeIcon";
+import { ChromeIcon } from "./ChatPrimitives";
 import { FileViewer } from "./FileViewer";
 import { TerminalView } from "./TerminalView";
 import { Button } from "./ui/Button";
@@ -57,6 +57,7 @@ function useAutoOpenWrittenFiles() {
 export function ArtifactPanel() {
   const tabs = useArtifactsStore((s) => s.tabs);
   const active = useArtifactsStore(activeTabId);
+  const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
   const openFile = useArtifactsStore((s) => s.openFile);
   const openBrowser = useArtifactsStore((s) => s.openBrowser);
@@ -88,13 +89,18 @@ export function ArtifactPanel() {
             </p>
           </div>
         ) : (
-          tabs.map((tab) => (
-            <div key={tab.id} className="ArtifactTabPanel" data-hidden={tab.id !== active}>
-              {tab.kind === "terminal" && <TerminalView id={tab.id} />}
-              {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
-              {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
-            </div>
-          ))
+          tabs.map((tab) => {
+            const isTabActive = tab.id === active && panelOpen;
+            return (
+              <div key={tab.id} className="ArtifactTabPanel" data-hidden={!isTabActive}>
+                {tab.kind === "terminal" && <TerminalView id={tab.id} />}
+                {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
+                {tab.kind === "browser" && (
+                  <BrowserView initialUrl={tab.url} active={isTabActive} />
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </aside>

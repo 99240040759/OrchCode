@@ -1,4 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { formatDistanceToNowStrict } from "date-fns";
 
 export interface WorkspaceInfo {
   path: string;
@@ -41,6 +42,7 @@ export type ToolIcon =
   | "search"
   | "globe"
   | "book"
+  | "cpu"
   | "zapOff";
 
 export interface ToolDisplayInfo {
@@ -256,8 +258,61 @@ export function webviewHistory(label: string, action: HistoryAction): Promise<vo
   return invoke("webview_history", { label, action });
 }
 
+export function webviewClose(label: string): Promise<void> {
+  return invoke("webview_close", { label });
+}
+
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+export { clsx as cn } from "clsx";
+
+export function newId(): string {
+  return crypto.randomUUID();
+}
+
+export function splitPathParts(pathStr: string): string[] {
+  return pathStr.replace(/\\/g, "/").split("/").filter(Boolean);
+}
+
+export function getBasename(pathStr: string): string {
+  if (!pathStr) return "";
+  const parts = pathStr.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || pathStr;
+}
+
+export function getDirname(pathStr: string): string {
+  if (!pathStr) return "";
+  const parts = pathStr.replace(/\\/g, "/").split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+export const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
+
+export function createMentionRegex(): RegExp {
+  return new RegExp(MENTION_PATTERN, "g");
+}
+
+const USD_FORMAT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+export function formatUsd(amount: number): string {
+  return USD_FORMAT.format(amount);
+}
+
+export function formatRelativeTime(ts?: number): string {
+  if (!ts) return "now";
+  return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });
+}
+
+const IMAGE_EXT_PATTERN = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+export function isImagePath(pathStr: string): boolean {
+  return IMAGE_EXT_PATTERN.test(pathStr);
 }
