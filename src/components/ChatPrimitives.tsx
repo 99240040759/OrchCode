@@ -38,10 +38,10 @@ export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
   name: string;
 }
 
-export const ExplorerIcon: React.FC<ExplorerIconProps> = ({ type, name, ...svgProps }) => {
+export function ExplorerIcon({ type, name, ...svgProps }: ExplorerIconProps) {
   if (type === "folder") return <FolderIcon folderName={name} {...svgProps} />;
   return <FileIcon fileName={name} autoAssign {...svgProps} />;
-};
+}
 
 export function ChromeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
@@ -63,17 +63,15 @@ export interface AttachmentCardProps {
 }
 
 export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: AttachmentCardProps) {
-  const [src, setSrc] = useState<string | null>(dataUrl ?? null);
+  const [fetchedSrc, setFetchedSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
+  const src = dataUrl ?? fetchedSrc;
+
   useEffect(() => {
-    if (dataUrl) {
-      setSrc(dataUrl);
+    if (dataUrl || !isImage || !path) {
+      setFetchedSrc(null);
       setFailed(false);
-      return;
-    }
-    if (!isImage || !path) {
-      setSrc(null);
       return;
     }
     let active = true;
@@ -81,7 +79,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
     api
       .readImageDataUrl(path)
       .then((url) => {
-        if (active) setSrc(url);
+        if (active) setFetchedSrc(url);
       })
       .catch(() => {
         if (active) setFailed(true);
@@ -135,9 +133,10 @@ export interface FileTagProps {
   removed?: number;
   interactive?: boolean;
   className?: string;
+  onRemove?: () => void;
 }
 
-export const FileTag: React.FC<FileTagProps> = ({
+export function FileTag({
   path,
   name,
   lineRange,
@@ -145,7 +144,8 @@ export const FileTag: React.FC<FileTagProps> = ({
   removed,
   interactive = true,
   className = "",
-}) => {
+  onRemove,
+}: FileTagProps) {
   const openFile = useArtifactsStore((s) => s.openFile);
   const filename = name || getBasename(path);
   const clickable = interactive && Boolean(path);
@@ -185,6 +185,19 @@ export const FileTag: React.FC<FileTagProps> = ({
       {typeof added === "number" && added > 0 && <span className="FileTag-added">+{added}</span>}
       {typeof removed === "number" && removed > 0 && (
         <span className="FileTag-removed">-{removed}</span>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          className="FileTag-remove"
+          aria-label={`Remove ${filename}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+        >
+          <VscClose />
+        </button>
       )}
     </span>
   );

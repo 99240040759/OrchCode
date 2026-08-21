@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
 import {
   VscAdd,
   VscArrowUp,
@@ -11,9 +12,9 @@ import {
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useDebouncedCallback } from "use-debounce";
-import getCaretCoordinates from "textarea-caret";
 import * as api from "../lib/api";
 import { useChatStore, type ReasoningEffort } from "../lib/store";
+import { useArtifactsStore } from "../lib/artifacts";
 import { getBasename, getDirname, isImagePath } from "../lib/api";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
@@ -25,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from "./ui/DropdownMenu";
 
-const TEXTAREA_MAX_HEIGHT = 200;
 const EFFORT_LEVELS: ReasoningEffort[] = ["low", "medium", "high"];
 const RING_CIRCUMFERENCE = 53.4;
 
@@ -50,6 +50,102 @@ function activeToken(text: string, caret: number) {
   return { trigger: null as Trigger, query: "", start: caret };
 }
 
+function createMentionNode(path: string): { node: HTMLSpanElement; space: Text } {
+  const filename = getBasename(path) || path;
+  const container = document.createElement("span");
+  container.className = "FileTag FileTag-clickable";
+  container.contentEditable = "false";
+  container.setAttribute("data-path", path);
+  container.title = path;
+
+  const root = createRoot(container);
+  root.render(
+    <>
+      <ExplorerIcon type="file" name={filename} width={14} height={14} className="FileTag-icon" />
+      <span className="FileTag-name">{filename}</span>
+    </>
+  );
+
+  const space = document.createTextNode("\u00A0");
+  return { node: container, space };
+}
+
+function getTextFromEditor(el: HTMLElement): string {
+  let text = "";
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.nodeValue ?? "";
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement;
+      if (element.hasAttribute("data-path")) {
+        const path = element.getAttribute("data-path") || "";
+        text += path.includes(" ") ? `@[${path}] ` : `@${path} `;
+      } else if (element.tagName === "BR") {
+        text += "\n";
+      } else if (element.tagName === "DIV" || element.tagName === "P") {
+        const inner = getTextFromEditor(element);
+        text += (text.length > 0 && !text.endsWith("\n") ? "\n" : "") + inner;
+      } else {
+        text += getTextFromEditor(element);
+      }
+    }
+  }
+  return text;
+}
+
+function insertMentionAtCaret(path: string) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+
+  let node: Node = range.startContainer;
+  let offset = range.startOffset;
+
+  if (node.nodeType !== Node.TEXT_NODE && node.childNodes.length > 0 && offset > 0) {
+    const prev = node.childNodes[offset - 1];
+    if (prev && prev.nodeType === Node.TEXT_NODE) {
+      node = prev;
+      offset = (prev as Text).nodeValue?.length || 0;
+    }
+  }
+
+  const { node: mentionNode, space: spaceNode } = createMentionNode(path);
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const textNode = node as Text;
+    const str = textNode.nodeValue || "";
+    const before = str.slice(0, offset);
+    const after = str.slice(offset);
+    const atIndex = before.lastIndexOf("@");
+    if (atIndex !== -1) {
+      textNode.nodeValue = before.slice(0, atIndex);
+      const parent = textNode.parentNode;
+      if (parent) {
+        const next = textNode.nextSibling;
+        parent.insertBefore(mentionNode, next);
+        parent.insertBefore(spaceNode, next);
+        if (after) {
+          parent.insertBefore(document.createTextNode(after), next);
+        }
+        const newRange = document.createRange();
+        newRange.setStart(spaceNode, 1);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        return;
+      }
+    }
+  }
+
+  range.deleteContents();
+  range.insertNode(spaceNode);
+  range.insertNode(mentionNode);
+  range.setStartAfter(spaceNode);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export function InputBar() {
   const send = useChatStore((s) => s.send);
   const cancel = useChatStore((s) => s.cancel);
@@ -64,6 +160,7 @@ export function InputBar() {
   const resetToSandbox = useChatStore((s) => s.resetToSandbox);
   const newChat = useChatStore((s) => s.newChat);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const openFile = useArtifactsStore((s) => s.openFile);
 
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<api.AttachmentRef[]>([]);
@@ -71,13 +168,11 @@ export function InputBar() {
   const [recording, setRecording] = useState(false);
   const [trigger, setTrigger] = useState<Trigger>(null);
   const [query, setQuery] = useState("");
-  const [tokenStart, setTokenStart] = useState(0);
   const [fileHits, setFileHits] = useState<api.FileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
-  const [popoverCoords, setPopoverCoords] = useState<{ left: number } | null>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const dictationBase = useRef("");
 
   const maxContext = selectedModel?.contextWindow ?? 0;
@@ -86,13 +181,6 @@ export function InputBar() {
       ? Math.min(100, Math.max(0, Math.round((sessionTokens.totalTokens / maxContext) * 100)))
       : 0;
   const modelSupportsImages = selectedModel?.capabilities.includes("images") ?? false;
-
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
-  }, [value, attachments.length]);
 
   const addAttachments = useCallback(
     (paths: string[]) => {
@@ -170,50 +258,59 @@ export function InputBar() {
     setFileHits([]);
     setLoadingFiles(false);
     setHighlighted(0);
-    setPopoverCoords(null);
   }, []);
 
-  const syncToken = useCallback((text: string, caret: number) => {
-    const token = activeToken(text, caret);
-    setTrigger(token.trigger);
-    setQuery(token.query);
-    setTokenStart(token.start);
-    setHighlighted(0);
+  const syncEditor = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const text = getTextFromEditor(editor);
+    if (!text.trim() && !editor.querySelector("[data-path]")) {
+      if (editor.innerHTML !== "") editor.innerHTML = "";
+    }
+    setValue(text);
 
-    if (token.trigger && textareaRef.current) {
-      try {
-        const coords = getCaretCoordinates(textareaRef.current, caret);
-        setPopoverCoords({ left: coords.left });
-      } catch {
-        setPopoverCoords(null);
-      }
-    } else {
-      setPopoverCoords(null);
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) {
+      setTrigger(null);
+      setQuery("");
+      return;
+    }
+
+    try {
+      const range = sel.getRangeAt(0);
+      const preRange = range.cloneRange();
+      preRange.selectNodeContents(editor);
+      preRange.setEnd(range.endContainer, range.endOffset);
+      const preText = getTextFromEditor(preRange.cloneContents() as unknown as HTMLElement);
+      const token = activeToken(text, preText.length);
+      setTrigger(token.trigger);
+      setQuery(token.query);
+      setHighlighted(0);
+    } catch {
+      setTrigger(null);
+      setQuery("");
     }
   }, []);
 
   const insertMention = useCallback(
-    (insertText: string) => {
-      const el = textareaRef.current;
-      const caret = el?.selectionStart ?? value.length;
-      const before = value.slice(0, tokenStart);
-      const after = value.slice(caret);
-      const next = `${before}${insertText}${after}`;
-      setValue(next);
+    (filePath: string) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      insertMentionAtCaret(filePath);
       closePopover();
-      requestAnimationFrame(() => {
-        const position = (before + insertText).length;
-        el?.focus();
-        el?.setSelectionRange(position, position);
-      });
+      syncEditor();
+      editor.focus();
     },
-    [value, tokenStart, closePopover]
+    [closePopover, syncEditor]
   );
 
   const runCommand = useCallback(
     (command: CommandItem) => {
       if (command.key === "clear") {
         newChat();
+        if (editorRef.current) {
+          editorRef.current.innerHTML = "";
+        }
         setValue("");
         setAttachments([]);
         setNotice(null);
@@ -224,16 +321,25 @@ export function InputBar() {
   );
 
   const doSend = useCallback(async () => {
+    const editor = editorRef.current;
     const text = value.trim();
     if (!text && attachments.length === 0) return;
     const pending = attachments;
+
+    if (editor) {
+      editor.innerHTML = "";
+    }
     setValue("");
     setAttachments([]);
     setNotice(null);
     closePopover();
+
     const ok = await send(text, pending);
     if (!ok) {
-      setValue(value);
+      if (editor) {
+        editor.innerText = text;
+      }
+      setValue(text);
       setAttachments(pending);
     }
   }, [value, attachments, send, closePopover]);
@@ -242,7 +348,7 @@ export function InputBar() {
   const hits: (api.FileEntry | CommandItem)[] = trigger === "@" ? fileHits : commandHits;
   const activeIndex = hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (popoverOpen) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -263,8 +369,11 @@ export function InputBar() {
         if (event.key === "Enter" || event.key === "Tab") {
           event.preventDefault();
           const hit = hits[activeIndex];
-          if (trigger === "@") insertMention(`@${(hit as api.FileEntry).path} `);
-          else runCommand(hit as CommandItem);
+          if (trigger === "@") {
+            insertMention((hit as api.FileEntry).path);
+          } else {
+            runCommand(hit as CommandItem);
+          }
           return;
         }
       }
@@ -273,6 +382,27 @@ export function InputBar() {
       event.preventDefault();
       void doSend();
     }
+  };
+
+  const onEditorClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const mentionEl = target.closest<HTMLElement>("[data-path]");
+    if (mentionEl) {
+      const path = mentionEl.getAttribute("data-path");
+      if (path) {
+        openFile(path);
+        return;
+      }
+    }
+    syncEditor();
+  };
+
+  const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const text = event.clipboardData.getData("text/plain");
+    if (!text) return;
+    document.execCommand("insertText", false, text);
+    syncEditor();
   };
 
   const toggleDictation = useCallback(async () => {
@@ -292,7 +422,10 @@ export function InputBar() {
       await api.startDictation((event) => {
         setRecording(false);
         if (event.type === "final") {
-          if (event.text) setValue(dictationBase.current + event.text);
+          if (event.text && editorRef.current) {
+            document.execCommand("insertText", false, event.text);
+            syncEditor();
+          }
         } else {
           setNotice(event.message);
         }
@@ -301,7 +434,7 @@ export function InputBar() {
       setRecording(false);
       setNotice(api.errorMessage(e));
     }
-  }, [recording, value]);
+  }, [recording, value, syncEditor]);
 
   const pickFiles = useCallback(
     async (imagesOnly: boolean) => {
@@ -330,19 +463,7 @@ export function InputBar() {
       data-recording={recording || undefined}
     >
       {popoverOpen && (
-        <div
-          className="MentionPopover"
-          role="listbox"
-          style={
-            popoverCoords
-              ? {
-                  left: `${Math.min(Math.max(8, popoverCoords.left), 280)}px`,
-                  right: "auto",
-                  minWidth: "280px",
-                }
-              : undefined
-          }
-        >
+        <div className="MentionPopover" role="listbox">
           {trigger === "@" ? (
             loadingFiles ? (
               <div className="MentionItem MentionItem-empty">Searching workspace…</div>
@@ -363,7 +484,7 @@ export function InputBar() {
                     className="MentionItem"
                     data-active={index === activeIndex}
                     onMouseEnter={() => setHighlighted(index)}
-                    onClick={() => insertMention(`@${file.path} `)}
+                    onClick={() => insertMention(file.path)}
                   >
                     <ExplorerIcon
                       type="file"
@@ -422,19 +543,18 @@ export function InputBar() {
           </div>
         )}
 
-        <textarea
-          ref={textareaRef}
+        <div
+          ref={editorRef}
           className="Composer-input"
-          placeholder="Ask anything, @ to mention a file, / for actions"
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-            syncToken(event.target.value, event.target.selectionStart ?? event.target.value.length);
-          }}
+          contentEditable
+          role="textbox"
+          aria-multiline="true"
+          data-placeholder="Ask anything, @ to mention a file, / for actions"
+          data-empty={value.length === 0 ? "true" : undefined}
+          onInput={syncEditor}
           onKeyDown={onKeyDown}
-          onClick={(event) =>
-            syncToken(value, event.currentTarget.selectionStart ?? value.length)
-          }
+          onClick={onEditorClick}
+          onPaste={onPaste}
         />
 
         <div className="Composer-row">

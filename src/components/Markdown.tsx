@@ -28,10 +28,6 @@ import * as api from "../lib/api";
 import { FileTag } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
 
-function looksLikePath(value: string): boolean {
-  return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
-}
-
 export function renderTextWithMentions(text: string): React.ReactNode {
   if (!text) return text;
 
@@ -43,7 +39,7 @@ export function renderTextWithMentions(text: string): React.ReactNode {
 
   while ((match = regex.exec(text)) !== null) {
     const path = match[1] ?? match[2] ?? "";
-    if (!looksLikePath(path)) continue;
+    if (!api.looksLikePath(path)) continue;
     matched = true;
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
     parts.push(
@@ -112,9 +108,26 @@ const CodeBlockComponent = React.memo(function CodeBlockComponent({
   };
 
   const parsed = useMemo(() => (rawLang ? getPrismGrammar(rawLang) : null), [rawLang]);
-  const highlightedHtml = useMemo(() => {
+
+  const renderToken = (token: Prism.Token | string, key: string): React.ReactNode => {
+    if (typeof token === "string") return token;
+    
+    const aliases = token.alias ? (Array.isArray(token.alias) ? token.alias.join(" ") : token.alias) : "";
+    const tokenClass = `token ${token.type} ${aliases}`.trim();
+    
+    return (
+      <span key={key} className={tokenClass}>
+        {Array.isArray(token.content)
+          ? token.content.map((t, i) => renderToken(t, `${key}-${i}`))
+          : renderToken(token.content as Prism.Token | string, `${key}-content`)}
+      </span>
+    );
+  };
+
+  const renderedTokens = useMemo(() => {
     if (!parsed || !codeString) return null;
-    return Prism.highlight(codeString, parsed.grammar, parsed.name);
+    const tokens = Prism.tokenize(codeString, parsed.grammar);
+    return tokens.map((t, i) => renderToken(t, `tok-${i}`));
   }, [codeString, parsed]);
 
   if (isInline) {
@@ -147,11 +160,10 @@ const CodeBlockComponent = React.memo(function CodeBlockComponent({
         </Tooltip>
       </div>
       <pre className="CodeBlock-pre">
-        {highlightedHtml ? (
-          <code
-            className={`language-${parsed?.name || "text"}`}
-            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-          />
+        {renderedTokens ? (
+          <code className={`language-${parsed?.name || "text"}`}>
+            {renderedTokens}
+          </code>
         ) : (
           <code>{codeString}</code>
         )}

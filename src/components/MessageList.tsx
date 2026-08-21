@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { VscArrowDown } from "react-icons/vsc";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
@@ -7,15 +7,12 @@ const NEAR_BOTTOM_PX = 120;
 
 export function MessageList() {
   const messages = useChatStore((s) => s.messages);
-  const streaming = useChatStore((s) => s.streaming);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const pinnedRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
-    pinnedRef.current = true;
     setShowJump(false);
   }, []);
 
@@ -23,23 +20,34 @@ export function MessageList() {
     const el = containerRef.current;
     if (!el) return;
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-    pinnedRef.current = pinned;
-    setShowJump((prev) => (prev !== !pinned ? !pinned : prev));
+    setShowJump(!pinned);
   }, []);
 
-  useLayoutEffect(() => {
-    if (!pinnedRef.current) return;
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
-  }, [messages, streaming]);
+  useEffect(() => {
+    // Initial scroll to bottom on mount if we have messages
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, []); // Only on mount
 
   return (
     <div className="MessageListWrap">
-      <div className="MessageList" ref={containerRef} onScroll={handleScroll}>
+      <div 
+        className="MessageList" 
+        ref={containerRef} 
+        onScroll={handleScroll}
+        style={{ overflowAnchor: 'none' }}
+      >
         <div className="MessageList-inner">
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          <div ref={bottomRef} className="MessageList-bottomSpacer" />
+          {/* CSS Scroll Anchor */}
+          <div 
+            ref={bottomRef} 
+            className="MessageList-bottomSpacer" 
+            style={{ overflowAnchor: 'auto', height: 1 }}
+          />
         </div>
       </div>
       {showJump && (

@@ -13,7 +13,7 @@ import {
 import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { getBasename } from "../lib/api";
-import { ChromeIcon, FileTag } from "./ChatPrimitives";
+import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import {
@@ -88,26 +88,35 @@ export function TopBar({ sidebarOpen, onToggleSidebar }: TopBarProps) {
                     data-active={tab.id === active}
                     onClick={() => setActive(tab.id)}
                   >
-                    {tab.kind === "file" && tab.path ? (
-                      <FileTag path={tab.path} name={tabName} interactive={false} />
-                    ) : (
-                      <>
-                        <Icon className="ArtifactTab-icon" />
-                        <span className="ArtifactTab-title">{tabName}</span>
-                      </>
-                    )}
                     <Tooltip content={`Close ${tabName}`} side="bottom">
-                      <Button
-                        className="ArtifactTab-close"
+                      <button
+                        type="button"
+                        className="ArtifactTab-iconWrap"
                         aria-label={`Close ${tabName}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           closeTab(tab.id);
                         }}
                       >
-                        <VscClose />
-                      </Button>
+                        <span className="ArtifactTab-iconMain">
+                          {tab.kind === "file" && tab.path ? (
+                            <ExplorerIcon
+                              type="file"
+                              name={tabName}
+                              className="ArtifactTab-icon"
+                              width={14}
+                              height={14}
+                            />
+                          ) : (
+                            <Icon className="ArtifactTab-icon" />
+                          )}
+                        </span>
+                        <span className="ArtifactTab-iconClose" aria-hidden="true">
+                          <VscClose />
+                        </span>
+                      </button>
                     </Tooltip>
+                    <span className="ArtifactTab-title">{tabName}</span>
                   </div>
                 );
               })}
