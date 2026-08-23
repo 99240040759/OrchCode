@@ -7,7 +7,8 @@ import jsonWorker from "monaco-editor/language/json/json.worker?worker&inline";
 import cssWorker from "monaco-editor/language/css/css.worker?worker&inline";
 import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
 import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
-import { VscCheck, VscChevronRight, VscCopy, VscRefresh } from "react-icons/vsc";
+import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
+import { Markdown } from "./Markdown";
 
 self.MonacoEnvironment = {
   getWorker(_, label) {
@@ -191,7 +192,7 @@ const EDITOR_OPTIONS: React.ComponentProps<typeof Editor>["options"] = {
 };
 
 const LOADING_SPINNER = (
-  <div className="FileViewerLoading flex items-center justify-center p-8">
+  <div className="FileViewerLoading">
     <div className="Spinner" />
   </div>
 );
@@ -200,6 +201,8 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const setTabPath = useArtifactsStore((s) => s.setTabPath);
   const version = useArtifactsStore((s) => (path ? s.fileVersions[path] ?? 0 : 0));
 
+  const isMd = Boolean(path && /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path));
+  const [mode, setMode] = useState<"preview" | "code">("preview");
   const [content, setContent] = useState("");
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +231,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       setError(null);
       return;
     }
+    setMode("preview");
     void load(path);
   }, [path, version, load]);
 
@@ -247,6 +251,20 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
           {truncated && <span className="FileContent-trunc">truncated</span>}
         </div>
         <div className="FileViewerBar-right">
+          {isMd && (
+            <Tooltip
+              content={mode === "preview" ? "View source code" : "Preview markdown"}
+              side="bottom"
+            >
+              <Button
+                className="IconBtn"
+                aria-label={mode === "preview" ? "View source code" : "Preview markdown"}
+                onClick={() => setMode((m) => (m === "preview" ? "code" : "preview"))}
+              >
+                {mode === "preview" ? <VscCode /> : <VscPreview />}
+              </Button>
+            </Tooltip>
+          )}
           <Tooltip content="Reload file" side="bottom">
             <Button
               className="IconBtn"
@@ -280,11 +298,15 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       </div>
       <div className="FileViewerBody">
         {loading && !content ? (
-          <div className="FileViewerLoading flex items-center justify-center p-8">
+          <div className="FileViewerLoading">
             <div className="Spinner" />
           </div>
         ) : error ? (
           <div className="FileContent-msg">{error}</div>
+        ) : isMd && mode === "preview" ? (
+          <div className="FileViewerMarkdown">
+            <Markdown>{content}</Markdown>
+          </div>
         ) : (
           <Editor
             key={`${path}:${version}`}

@@ -14,7 +14,7 @@ function ExternalLink({ href, children }: { href: string; children: React.ReactN
   return (
     <a
       href={href}
-      style={{ color: "#3794ff", textDecoration: "underline" }}
+      className="ExternalLink"
       onClick={(event) => {
         event.preventDefault();
         void openUrl(href);
