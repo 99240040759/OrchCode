@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { VscCheck, VscClose, VscEdit, VscSignOut, VscTrash } from "react-icons/vsc";
+import {
+  VscCheck,
+  VscClose,
+  VscEditSparkle,
+  VscSignOut,
+  VscTrash,
+} from "react-icons/vsc";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
@@ -36,43 +42,48 @@ export function Sidebar() {
 
   return (
     <aside className="Sidebar">
-      <Button className="Sidebar-newchat" onClick={newChat} disabled={streaming}>
-        <VscEdit />
-        <span>New chat</span>
-      </Button>
 
-      <div className="Sidebar-section">
-        <span className="Sidebar-sectiontitle">Chats</span>
+      {/* New chat button */}
+      <div className="Sidebar-header">
+        <Button
+          className="Sidebar-newchat"
+          onClick={newChat}
+          disabled={streaming}
+          aria-label="New chat"
+        >
+          <VscEditSparkle />
+          <span>New chat</span>
+        </Button>
       </div>
 
-      <nav className="Sidebar-threads">
+      {/* Thread list */}
+      <nav className="Sidebar-threads" aria-label="Conversations">
         {sessions.length === 0 && (
-          <p className="Sidebar-empty">No conversations yet. Start one below.</p>
+          <p className="Sidebar-empty">No conversations yet.</p>
         )}
         {sessions.map((session) => {
           const confirming = pendingDelete === session.id;
+          const isActive = session.id === currentSessionId;
           return (
             <div
               key={session.id}
               className="ThreadItem"
-              data-active={session.id === currentSessionId}
+              data-active={isActive}
               data-confirming={confirming}
             >
               <button
                 type="button"
                 className="ThreadItem-btn"
-                aria-current={session.id === currentSessionId ? "page" : undefined}
+                aria-current={isActive ? "page" : undefined}
                 disabled={streaming}
                 onClick={() => void selectSession(session.id)}
               >
-                <div className="ThreadItem-content">
-                  <div className="ThreadItem-topRow">
-                    <span className="ThreadItem-title">{session.title || "New chat"}</span>
-                    <span className="ThreadItem-time">
-                      {formatRelativeTime(session.updatedAt)}
-                    </span>
-                  </div>
-                </div>
+                <span className="ThreadItem-title">
+                  {session.title || "New chat"}
+                </span>
+                <span className="ThreadItem-time">
+                  {formatRelativeTime(session.updatedAt)}
+                </span>
               </button>
 
               {confirming ? (
@@ -100,10 +111,10 @@ export function Sidebar() {
                   </Tooltip>
                 </div>
               ) : (
-                <Tooltip content="Delete chat" side="right">
+                <Tooltip content="Delete" side="right">
                   <Button
                     className="ThreadItem-del"
-                    aria-label={`Delete chat ${session.title || "New chat"}`}
+                    aria-label={`Delete ${session.title || "New chat"}`}
                     onClick={() => setPendingDelete(session.id)}
                   >
                     <VscTrash />
@@ -115,34 +126,33 @@ export function Sidebar() {
         })}
       </nav>
 
+      {/* Footer */}
       <div className="Sidebar-footer">
-        <Tooltip
-          content={
-            budget
-              ? `${formatUsd(budget.costUsd)} spent of ${formatUsd(budget.limitUsd)} limit (${Math.round(usedPct)}%)`
-              : "Usage tracking"
-          }
-          side="top"
-        >
-          <div className="BudgetBar" data-level={budgetLevel}>
-            <div className="BudgetBar-top">
-              <span>{budget ? `Usage this ${budget.period}` : "Usage"}</span>
-              <span>{budget ? budgetLabel(budget.costUsd, budget.limitUsd) : "—"}</span>
+        {budget && (
+          <Tooltip
+            content={`${formatUsd(budget.costUsd)} spent of ${formatUsd(budget.limitUsd)} limit (${Math.round(usedPct)}%)`}
+            side="top"
+          >
+            <div className="BudgetBar" data-level={budgetLevel}>
+              <div className="BudgetBar-top">
+                <span>Usage this {budget.period}</span>
+                <span>{budgetLabel(budget.costUsd, budget.limitUsd)}</span>
+              </div>
+              <div
+                className="BudgetBar-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(usedPct)}
+              >
+                <div className="BudgetBar-fill" style={{ width: `${usedPct}%` }} />
+              </div>
+              {!budget.allowed && (
+                <span className="BudgetBar-blocked">Usage limit reached</span>
+              )}
             </div>
-            <div
-              className="BudgetBar-track"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(usedPct)}
-            >
-              <div className="BudgetBar-fill" style={{ width: `${usedPct}%` }} />
-            </div>
-            {budget && !budget.allowed && (
-              <span className="BudgetBar-blocked">Usage limit reached</span>
-            )}
-          </div>
-        </Tooltip>
+          </Tooltip>
+        )}
 
         <div className="Account">
           <Avatar src={user?.avatarUrl} fallback={user?.initial ?? "?"} />

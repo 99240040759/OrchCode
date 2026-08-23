@@ -7,7 +7,6 @@ import { useUpdaterStore } from "./lib/store";
 import { ChatPanel } from "./components/ChatPanel";
 import { Greeting, Onboarding } from "./components/screens";
 import { Sidebar } from "./components/Sidebar";
-import { TopBar } from "./components/TopBar";
 import { Button } from "./components/ui/Button";
 import { Titlebar } from "./components/ui/Titlebar";
 import { TooltipProvider } from "./components/ui/Tooltip";
@@ -17,8 +16,11 @@ function AppShell() {
 
   return (
     <div className="AppShell">
-      <Titlebar title="Orch" />
-      <TopBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((open) => !open)} />
+      <Titlebar
+        title="Orch"
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((open) => !open)}
+      />
       <div className="AppShell-body">
         {sidebarOpen && <Sidebar />}
         <div className="Main">

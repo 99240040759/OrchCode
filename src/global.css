@@ -125,8 +125,7 @@
   --font: "SF Pro", "SF Pro Text", "SF Pro Display";
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
 
-  --titlebar-h: 30px;
-  --topbar-h: 36px;
+  --titlebar-h: 38px;
   --sidebar-w: 256px;
   --composer-w: 640px;
 
@@ -311,35 +310,52 @@ svg {
   height: var(--titlebar-h);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 0 0 12px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 0;
+  background: var(--bg-app);
+  border-bottom: none;
   user-select: none;
   position: relative;
 }
 
-.Titlebar-mac { padding: 0 12px; }
+.Titlebar-mac { padding: 0; }
 
-.Titlebar-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-med);
-  letter-spacing: .3px;
+.Titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+  flex: 0 0 auto;
+  height: 100%;
 }
 
-.Titlebar-title-mac {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+.Titlebar-drag {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+}
+
+.Titlebar-session-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-hi);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+  padding: 0 4px;
   pointer-events: none;
 }
+
+.Titlebar-iconBtn {
+  flex: 0 0 auto;
+}
+
 
 .Titlebar-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  flex: 0 0 auto;
   height: 100%;
 }
 
@@ -434,43 +450,19 @@ svg {
   will-change: transform;
 }
 
-.TopBar {
+
+/* ArtifactPanel owns its own header strip — tabs + actions */
+.ArtifactPanel-header {
   flex: 0 0 auto;
-  height: var(--topbar-h);
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 4px;
+  padding: 0 4px 0 8px;
   background: var(--bg-app);
   border-bottom: 1px solid var(--border);
   user-select: none;
-}
-
-.TopBar-left,
-.TopBar-artifactHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.TopBar-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-hi);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 400px;
-}
-
-.TopBar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  justify-content: flex-end;
   min-width: 0;
 }
 
@@ -484,43 +476,44 @@ svg {
   border-right: 1px solid var(--border);
 }
 
+/* ── New chat ── */
+
+.Sidebar-header {
+  flex: 0 0 auto;
+  padding: 6px 6px 4px;
+}
+
 .Sidebar-newchat {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 36px;
-  margin: var(--sp-2);
+  width: 100%;
+  height: 34px;
   padding: 0 var(--sp-3);
   border-radius: var(--r-md);
-  border: 1px solid rgba(204,204,204,.22);
-  background: rgba(204,204,204,.09);
-  color: var(--c-primary);
+  border: 1px solid rgba(204,204,204,.14);
+  background: rgba(204,204,204,.06);
+  color: var(--text-med);
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background var(--dur) var(--ease);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
   flex-shrink: 0;
+  justify-content: flex-start;
 }
 
-.Sidebar-newchat:hover:not(:disabled) { background: rgba(204,204,204,.16); }
-
-.Sidebar-newchat:disabled { opacity: .5; cursor: default; }
-
-.Sidebar-newchat svg { width: 15px; height: 15px; }
-
-.Sidebar-section {
-  padding: var(--sp-1) var(--sp-3);
-  flex-shrink: 0;
+.Sidebar-newchat:hover:not(:disabled) {
+  background: rgba(204,204,204,.12);
+  color: var(--text-hi);
+  border-color: rgba(204,204,204,.22);
 }
 
-.Sidebar-sectiontitle {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .6px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
+.Sidebar-newchat:disabled { opacity: .45; cursor: default; }
+
+.Sidebar-newchat svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+/* ── Thread list ── */
 
 .Sidebar-threads {
   flex: 1;
@@ -528,29 +521,38 @@ svg {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 0 var(--sp-2);
+  gap: 1px;
+  padding: 4px var(--sp-1);
   will-change: scroll-position;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.08) transparent;
 }
 
+.Sidebar-threads::-webkit-scrollbar { width: 4px; }
+.Sidebar-threads::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 4px; }
+
 .Sidebar-empty {
-  margin: 8px 4px;
+  margin: 16px 8px;
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
+  line-height: 1.5;
 }
+
+/* ── Footer ── */
 
 .Sidebar-footer {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-2);
+  gap: 6px;
+  padding: 8px 8px 10px;
   border-top: 1px solid var(--border);
 }
 
+/* ── ThreadItem ── */
+
 .ThreadItem {
-  position: relative;
   display: flex;
   align-items: center;
   border-radius: var(--r-md);
@@ -563,8 +565,8 @@ svg {
 
 .ThreadItem-btn {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  flex-direction: column;
+  gap: 2px;
   flex: 1;
   min-width: 0;
   padding: 7px var(--sp-2);
@@ -574,26 +576,9 @@ svg {
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  border-radius: var(--r-md);
 }
 
 .ThreadItem-btn:disabled { cursor: default; }
-
-.ThreadItem-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ThreadItem-topRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  line-height: 1.3;
-}
 
 .ThreadItem-title {
   font-size: 12.5px;
@@ -602,12 +587,13 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
 }
 
 .ThreadItem-time {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--text-muted);
-  flex-shrink: 0;
+  line-height: 1.2;
 }
 
 .ThreadItem-del {
@@ -618,11 +604,11 @@ svg {
   padding: 0;
   border: none;
   border-radius: 4px;
-  background: rgba(0,0,0,.6);
-  color: var(--text-med);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
-  margin-right: 4px;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+  margin-right: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -632,8 +618,8 @@ svg {
 .ThreadItem-del:focus-visible { opacity: 1; }
 
 .ThreadItem-del:hover {
-  background: rgba(227,70,113,.85);
-  color: #fff;
+  background: rgba(227,70,113,.15);
+  color: var(--c-removed);
 }
 
 .ThreadItem-del svg { width: 13px; height: 13px; }
@@ -641,8 +627,9 @@ svg {
 .ThreadItem-confirm {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-right: 4px;
+  gap: 3px;
+  margin-right: 6px;
+  flex-shrink: 0;
 }
 
 .ThreadItem-confirmYes,
@@ -656,21 +643,26 @@ svg {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  transition: background var(--dur) var(--ease);
 }
 
-.ThreadItem-confirmYes { background: rgba(227,70,113,.85); color: #fff; }
+.ThreadItem-confirmYes { background: rgba(227,70,113,.2); color: var(--c-removed); }
+.ThreadItem-confirmYes:hover { background: rgba(227,70,113,.35); }
 
-.ThreadItem-confirmNo { background: rgba(255,255,255,.12); color: var(--text-hi); }
+.ThreadItem-confirmNo { background: rgba(255,255,255,.08); color: var(--text-hi); }
+.ThreadItem-confirmNo:hover { background: rgba(255,255,255,.14); }
 
 .ThreadItem-confirmYes svg,
 .ThreadItem-confirmNo svg { width: 13px; height: 13px; }
+
+/* ── Account ── */
 
 .Account {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 4px 6px;
+  padding: 4px 4px;
   border-radius: var(--r-sm);
 }
 
@@ -684,6 +676,7 @@ svg {
 
 .Account-name {
   font-size: 12px;
+  font-weight: 500;
   color: var(--text-hi);
   white-space: nowrap;
   overflow: hidden;
@@ -692,7 +685,7 @@ svg {
 
 .Account-plan {
   font-size: 11px;
-  color: var(--text-med);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -702,19 +695,23 @@ svg {
 
 .Account-logout svg { width: 15px; height: 15px; }
 
+/* ── Avatar ── */
+
 .Avatar {
   flex: 0 0 auto;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--c-primary);
-  color: #141414;
+  background: rgba(204,204,204,.14);
+  color: var(--text-hi);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 600;
+  font-size: 11px;
   width: 26px;
   height: 26px;
+  border: 1px solid rgba(255,255,255,.1);
+  flex-shrink: 0;
 }
 
 .Avatar img {
@@ -724,11 +721,16 @@ svg {
   display: block;
 }
 
+/* ── BudgetBar ── */
+
 .BudgetBar {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 2px 4px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
 }
 
 .BudgetBar-top {
@@ -736,11 +738,11 @@ svg {
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
-  color: var(--text-med);
+  color: var(--text-muted);
 }
 
 .BudgetBar-track {
-  height: 4px;
+  height: 3px;
   border-radius: var(--r-full);
   background: rgba(255,255,255,.07);
   overflow: hidden;
@@ -763,6 +765,7 @@ svg {
   font-weight: 600;
   color: var(--c-error);
 }
+
 
 .PanelResizeHandle {
   position: relative;
@@ -1245,7 +1248,6 @@ svg {
   align-items: center;
   padding: 6px var(--sp-2) 12px;
   width: 100%;
-  overflow-x: hidden;
 }
 
 .Composer-wrapper {

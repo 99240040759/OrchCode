@@ -8,13 +8,17 @@ import {
   VscClose,
   VscCopy,
   VscDash,
+  VscLayoutSidebarLeft,
+  VscLayoutSidebarLeftOff,
+  VscLayoutSidebarRight,
+  VscLayoutSidebarRightOff,
   VscPrimitiveSquare,
   VscRefresh,
 } from "react-icons/vsc";
-import { useUpdaterStore } from "../../lib/store";
+import { useArtifactsStore } from "../../lib/artifacts";
+import { useUpdaterStore, useChatStore } from "../../lib/store";
 import { cn } from "../../lib/api";
 import { Button } from "./Button";
-
 import { Tooltip } from "./Tooltip";
 
 export const IS_MAC =
@@ -126,17 +130,66 @@ function WindowControls() {
   );
 }
 
-export function Titlebar({ title, className }: { title?: string; className?: string }) {
+interface TitlebarProps {
+  title?: string;
+  className?: string;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+}
+
+export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: TitlebarProps) {
+  const sessions = useChatStore((s) => s.sessions);
+  const currentSessionId = useChatStore((s) => s.currentSessionId);
+  const sessionTitle = sessions.find((s) => s.id === currentSessionId)?.title;
+
+  const panelOpen = useArtifactsStore((s) => s.panelOpen);
+  const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
+
   return (
     <div className={cn("Titlebar", IS_MAC && "Titlebar-mac", className)} data-tauri-drag-region>
       {IS_MAC && <WindowControls />}
-      {title && (
-        <span className={cn("Titlebar-title", IS_MAC && "Titlebar-title-mac")} data-tauri-drag-region>
-          {title}
-        </span>
-      )}
+
+      {/* Left controls — sidebar toggle + session title */}
+      <div className="Titlebar-left">
+        {onToggleSidebar && (
+          <Tooltip content={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
+            <Button
+              className="IconBtn Titlebar-iconBtn"
+              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              data-active={sidebarOpen}
+              onClick={onToggleSidebar}
+            >
+              {sidebarOpen ? <VscLayoutSidebarLeftOff /> : <VscLayoutSidebarLeft />}
+            </Button>
+          </Tooltip>
+        )}
+        {sessionTitle && (
+          <span className="Titlebar-session-title" data-tauri-drag-region>
+            {sessionTitle}
+          </span>
+        )}
+        {title && !sessionTitle && (
+          <span className={cn("Titlebar-title", IS_MAC && "Titlebar-title-mac")} data-tauri-drag-region>
+            {title}
+          </span>
+        )}
+      </div>
+
+      {/* Drag region filler */}
+      <div className="Titlebar-drag" data-tauri-drag-region />
+
       <div className="Titlebar-right">
         <UpdateBadge />
+        <Tooltip content={panelOpen ? "Hide artifact panel" : "Show artifact panel"} side="bottom">
+          <Button
+            className="IconBtn Titlebar-iconBtn"
+            aria-label={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
+            data-active={panelOpen}
+            onClick={() => setPanelOpen(!panelOpen)}
+          >
+            {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
+          </Button>
+        </Tooltip>
         {!IS_MAC && <WindowControls />}
       </div>
     </div>
