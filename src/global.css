@@ -460,7 +460,7 @@ svg {
   justify-content: space-between;
   gap: 4px;
   padding: 0 4px 0 8px;
-  background: var(--bg-app);
+  background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
   user-select: none;
   min-width: 0;
@@ -471,9 +471,15 @@ svg {
   flex: 0 0 var(--sidebar-w);
   display: flex;
   flex-direction: column;
-  background: var(--bg-app);
+  background: var(--bg-surface);
   overflow: hidden;
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: 2px 2px 14px rgba(0,0,0,.24);
+  position: relative;
+  z-index: 5;
+  margin: 0 0 6px 6px;
+  height: calc(100% - 6px);
 }
 
 /* ── New chat ── */
@@ -777,8 +783,7 @@ svg {
   touch-action: none;
   flex-shrink: 0;
   user-select: none;
-  background: var(--border);
-  transition: background var(--dur) var(--ease);
+  background: transparent;
 }
 
 .PanelResizeHandle::before {
@@ -790,13 +795,6 @@ svg {
   right: -4px;
   z-index: 10;
   cursor: col-resize;
-}
-
-.PanelResizeHandle:hover,
-.PanelResizeHandle[data-resize-handle-state="hover"],
-.PanelResizeHandle[data-resize-handle-state="drag"],
-.PanelResizeHandle[data-resize-handle-active] {
-  background: rgba(255,255,255,.38);
 }
 
 .WorkspacePanels[data-panel-open='false'] .PanelResizeHandle,
@@ -1737,13 +1735,25 @@ svg {
 .ModelItem-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ArtifactPanel {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-app);
+  background: var(--bg-surface);
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: -2px 2px 14px rgba(0,0,0,.24);
+  position: relative;
+  z-index: 5;
+  margin: 0 6px 6px 0;
+}
+
+.ArtifactPanel[data-maximized='true'] {
+  width: calc(100% - 12px);
+  margin: 0 6px 6px 6px;
+  box-shadow: 0 2px 14px rgba(0,0,0,.24);
 }
 
 .ArtifactPanel-body {
