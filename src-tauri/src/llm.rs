@@ -27,10 +27,10 @@ pub type ChatClient = rig::providers::openai::CompletionsClient;
 pub type ChatModel = rig::providers::openai::completion::CompletionModel<reqwest::Client>;
 pub type ChatAgent = Agent<ChatModel>;
 
-pub fn build_client(jwt: &str) -> AppResult<ChatClient> {
+pub fn build_client(jwt: &str, provider: &str) -> AppResult<ChatClient> {
     let client = rig::providers::openai::Client::builder()
         .api_key(jwt)
-        .base_url(&config::inference_base_url())
+        .base_url(&config::inference_base_url(provider))
         .build()
         .map_err(|e| AppError::other(format!("failed to build inference client: {e:?}")))?
         .completions_api();

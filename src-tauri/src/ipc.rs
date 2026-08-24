@@ -243,7 +243,7 @@ pub async fn start_chat(
     let supports_images = model_info.supports_images();
 
     let workspace = state.workspace();
-    let client = build_client(&jwt).map_err(|e| e.to_string())?;
+    let client = build_client(&jwt, &model_info.provider).map_err(|e| e.to_string())?;
 
     let ctx = ToolContext {
         workspace: state.workspace.clone(),

@@ -14,8 +14,13 @@ pub fn sentry_dsn() -> &'static str {
     env!("SENTRY_DSN")
 }
 
-pub fn inference_base_url() -> String {
-    format!("{}/opencode/v1", gcp_functions_url())
+pub fn inference_base_url(provider: &str) -> String {
+    let clean_provider = if provider.trim().is_empty() {
+        "opencode"
+    } else {
+        provider.trim()
+    };
+    format!("{}/{}/v1", gcp_functions_url(), clean_provider)
 }
 
 pub fn models_url() -> String {

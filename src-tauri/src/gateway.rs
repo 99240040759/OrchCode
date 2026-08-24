@@ -32,9 +32,12 @@ impl ModelInfo {
     }
 
     pub fn target_model_id(&self) -> &str {
-        match self.id.rfind('/') {
-            Some(pos) => &self.id[pos + 1..],
-            None => &self.id,
+        match self.provider.as_str() {
+            "opencode" => match self.id.rfind('/') {
+                Some(pos) => &self.id[pos + 1..],
+                None => &self.id,
+            },
+            _ => &self.id,
         }
     }
 }
