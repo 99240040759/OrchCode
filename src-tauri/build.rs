@@ -1,6 +1,18 @@
 const REQUIRED_HTTPS: &[&str] = &["GCP_FUNCTIONS_URL"];
 const REQUIRED_VARS: &[&str] = &["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN"];
-const OPTIONAL_VARS: &[&str] = &["SENTRY_DSN"];
+const OPTIONAL_VARS: &[&str] = &[
+    "SENTRY_DSN",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "NOTION_CLIENT_ID",
+    "NOTION_CLIENT_SECRET",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "JIRA_CLIENT_ID",
+    "JIRA_CLIENT_SECRET",
+];
 
 fn main() {
     load_dotenv_for_compile();

@@ -17,7 +17,6 @@ use crate::tools::ToolContext;
 use rig::memory::ConversationMemory;
 
 const DEFAULT_REDIRECT_TO: &str = "https://orch.live/auth-callback";
-const VALID_REASONING_EFFORTS: &[&str] = &["low", "medium", "high"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,8 +148,9 @@ pub async fn get_oauth_url(
 }
 
 #[tauri::command]
-pub fn sign_out_auth(state: State<'_, AppState>) {
-    state.clear_credentials();
+pub async fn sign_out_auth(state: State<'_, AppState>) -> Result<(), String> {
+    state.clear_credentials_full().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -209,7 +209,6 @@ pub async fn start_chat(
     session_id: String,
     model: String,
     prompt: String,
-    reasoning_effort: Option<String>,
     attachments: Vec<AttachmentRef>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
@@ -221,11 +220,6 @@ pub async fn start_chat(
     }
     if prompt.trim().is_empty() && attachments.is_empty() {
         return Err("a prompt or at least one attachment is required".to_string());
-    }
-    if let Some(effort) = reasoning_effort.as_deref() {
-        if !VALID_REASONING_EFFORTS.contains(&effort) {
-            return Err(format!("unsupported reasoning effort: {effort}"));
-        }
     }
 
     state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
@@ -242,13 +236,10 @@ pub async fn start_chat(
     }
 
     let catalog = state.catalog().await.map_err(|e| e.to_string())?;
-    let mut model_info = catalog
+    let model_info = catalog
         .resolve(&model)
         .cloned()
         .ok_or_else(|| format!("model not found: {model}"))?;
-    if let Some(effort) = reasoning_effort {
-        model_info.reasoning_effort = Some(effort);
-    }
     let supports_images = model_info.supports_images();
 
     let workspace = state.workspace();
@@ -260,7 +251,11 @@ pub async fn start_chat(
         app_handle: app.clone(),
         command_manager: (*state.command_manager).clone(),
         data_dir: state.data_dir.clone(),
+        memory: state.memory.clone(),
+        connector_manager: state.connector_manager.clone(),
     };
+
+    let enabled_connectors = state.connector_manager.enabled_ids();
 
     let agent = build_agent(
         &client,
@@ -269,6 +264,7 @@ pub async fn start_chat(
         state.memory.clone(),
         &state.data_dir,
         workspace.as_deref(),
+        &enabled_connectors,
     );
 
     let (run_id, cancel) = state.start_run(&session_id).map_err(|e| e.to_string())?;
@@ -356,6 +352,10 @@ pub async fn start_chat(
                 }
             }
         }
+    }
+
+    if result.completed {
+        let _ = on_event.send(ChatEvent::Done);
     }
 
     state.finish_run(&session_id, &run_id);
@@ -490,8 +490,19 @@ pub fn terminal_open(
     on_event: Channel<TerminalEvent>,
 ) -> Result<(), String> {
     let workspace = state.workspace().unwrap_or_else(|| state.sandbox.clone());
-    let session =
-        terminal::open(&workspace, cols.max(1), rows.max(1), on_event).map_err(|e| e.to_string())?;
+    let terminals = state.terminals.clone();
+    let id_cleanup = id.clone();
+    let session = terminal::open(
+        &workspace,
+        cols.max(1),
+        rows.max(1),
+        on_event,
+        Box::new(move || {
+            let mut guard = terminals.lock().unwrap_or_else(|e| e.into_inner());
+            guard.remove(&id_cleanup);
+        }),
+    )
+    .map_err(|e| e.to_string())?;
     let mut guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(mut old) = guard.insert(id, session) {
         old.kill();
@@ -534,4 +545,211 @@ pub fn terminal_close(state: State<'_, AppState>, id: String) {
     if let Some(mut session) = guard.remove(&id) {
         session.kill();
     }
+}
+
+use crate::connectors::{self, ConnectorDef, CONNECTOR_DEFS};
+use crate::persistence::ConnectorRecord;
+use serde::Deserialize;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorDto {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub auth_kind: String,
+    pub is_configured: bool,
+    pub enabled: bool,
+    pub has_token: bool,
+    pub token_expires_at: Option<i64>,
+    pub error: Option<String>,
+}
+
+fn connector_dto(def: &ConnectorDef, rec: Option<&ConnectorRecord>) -> ConnectorDto {
+    ConnectorDto {
+        id: def.id.to_string(),
+        name: def.name.to_string(),
+        description: def.description.to_string(),
+        category: def.category.to_string(),
+        auth_kind: def.auth_kind.as_str().to_string(),
+        is_configured: def.is_configured(),
+        enabled: rec.map(|r| r.enabled).unwrap_or(false),
+        has_token: rec.map(|r| r.has_token).unwrap_or(false),
+        token_expires_at: rec.and_then(|r| r.token_expires_at),
+        error: rec.and_then(|r| r.error.clone()),
+    }
+}
+
+#[tauri::command]
+pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<ConnectorDto>, String> {
+    let records = state
+        .memory
+        .list_connectors()
+        .await
+        .map_err(|e| e.to_string())?;
+    let record_map: std::collections::HashMap<&str, &ConnectorRecord> =
+        records.iter().map(|r| (r.id.as_str(), r)).collect();
+
+    let dtos = CONNECTOR_DEFS
+        .iter()
+        .map(|def| connector_dto(def, record_map.get(def.id).copied()))
+        .collect();
+
+    Ok(dtos)
+}
+
+#[tauri::command]
+pub async fn get_connector_auth_url(
+    _state: State<'_, AppState>,
+    connector_id: String,
+) -> Result<String, String> {
+    let def = connectors::find_def(&connector_id)
+        .ok_or_else(|| format!("Connector not found: {connector_id}"))?;
+    let state_param = uuid::Uuid::new_v4().to_string();
+    connectors::build_auth_url(def, &state_param).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct CompleteConnectorAuthArgs {
+    pub connector_id: String,
+    pub code: String,
+}
+
+#[tauri::command]
+pub async fn complete_connector_auth(
+    state: State<'_, AppState>,
+    connector_id: String,
+    code: String,
+) -> Result<ConnectorDto, String> {
+    let def = connectors::find_def(&connector_id)
+        .ok_or_else(|| format!("Connector not found: {connector_id}"))?;
+
+    let redirect_uri = connectors::connector_redirect_uri(&def.deep_link_id);
+    let tokens = connectors::exchange_code(def, &code, &redirect_uri, state.connector_manager.http())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    state
+        .connector_manager
+        .store_tokens(&connector_id, &tokens, &state.memory)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let records = state.memory.list_connectors().await.map_err(|e| e.to_string())?;
+    let rec = records.iter().find(|r| r.id == connector_id);
+    Ok(connector_dto(def, rec))
+}
+
+#[tauri::command]
+pub async fn disconnect_connector(
+    state: State<'_, AppState>,
+    connector_id: String,
+) -> Result<(), String> {
+    state
+        .connector_manager
+        .disconnect(&connector_id, &state.memory)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+use crate::document::ingest_document;
+use crate::persistence::{DocumentRecord, SearchHit};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestResultDto {
+    pub document_id: String,
+    pub title: String,
+    pub file_type: String,
+    pub passage_count: usize,
+    pub word_count: usize,
+    pub page_count: Option<usize>,
+    pub was_update: bool,
+}
+
+#[tauri::command]
+pub async fn ipc_ingest_document(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<IngestResultDto, String> {
+    let p = std::path::Path::new(&path);
+    let result = ingest_document(p, &state.memory)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = app.emit("documents-updated", ());
+
+    Ok(IngestResultDto {
+        document_id: result.document_id,
+        title: result.title,
+        file_type: result.file_type,
+        passage_count: result.passage_count,
+        word_count: result.word_count,
+        page_count: result.page_count,
+        was_update: result.was_update,
+    })
+}
+
+#[tauri::command]
+pub async fn ipc_list_documents(
+    state: State<'_, AppState>,
+    source: Option<String>,
+    file_type: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Vec<DocumentRecord>, String> {
+    state
+        .memory
+        .list_documents(source, file_type, limit.unwrap_or(50), offset.unwrap_or(0))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ipc_get_document(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Option<DocumentRecord>, String> {
+    state
+        .memory
+        .get_document(&document_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ipc_delete_document(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<(), String> {
+    let res = state
+        .memory
+        .delete_document(&document_id)
+        .await
+        .map_err(|e| e.to_string());
+    if res.is_ok() {
+        let _ = app.emit("documents-updated", ());
+    }
+    res
+}
+
+#[tauri::command]
+pub async fn ipc_search_documents(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<SearchHit>, String> {
+    state
+        .memory
+        .search_documents(&query, limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ipc_count_documents(state: State<'_, AppState>) -> Result<i64, String> {
+    state.memory.count_documents().await.map_err(|e| e.to_string())
 }

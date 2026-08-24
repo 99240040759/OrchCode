@@ -33,7 +33,7 @@ tokio = { version = "1.53.0", features = ["full"] }
 tokio-util = "0.7"
 futures = "0.3"
 
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "multipart", "form"] }
 
 cpal = "0.15"
 hound = "3"
@@ -61,6 +61,19 @@ gray_matter = "0.2"
 command-group = { version = "5.0", features = ["with-tokio"] }
 circular-buffer = "0.1"
 path-clean = "1.0"
+
+# Document parsing
+calamine = { version = "0.26", features = ["dates"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+lopdf = "0.34"
+encoding_rs = "0.8"
+mime_guess = "2"
+
+# HTTP / OAuth helpers
+url = "2"
+chrono = { version = "0.4", features = ["serde"] }
+oauth2 = "4"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }

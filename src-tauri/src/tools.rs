@@ -287,6 +287,15 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             ..Default::default()
         },
 
+        "list_dir" => ToolDisplayInfo {
+            label: "Listed Dir".to_string(),
+            target_text: str_arg(&args, "path"),
+            full_path: str_arg(&args, "path"),
+            icon: ToolIcon::Folder,
+            opens_artifact: false,
+            ..Default::default()
+        },
+
         other => ToolDisplayInfo {
             label: other.to_string(),
             target_text: Some(args_json.chars().take(120).collect()),
@@ -1290,15 +1299,103 @@ impl Tool for WebSearch {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct ListDirArgs {
+    pub path: String,
+}
+
+pub struct ListDir {
+    workspace: WorkspaceHandle,
+}
+
+impl ListDir {
+    pub fn new(workspace: WorkspaceHandle) -> Self {
+        Self { workspace }
+    }
+}
+
+impl Tool for ListDir {
+    const NAME: &'static str = "list_dir";
+    type Error = ToolError;
+    type Args = ListDirArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "List files and folders inside a directory. \
+Returns the names, whether it is a directory or a file, and the size if it is a file. \
+Useful to explore the codebase structure."
+            .to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(ListDirArgs)).unwrap_or_default()
+    }
+
+    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let root = workspace_root(&self.workspace)?;
+        let resolved = fs_util::resolve_in_workspace(&root, &args.path)?;
+
+        if !resolved.exists() {
+            return Err(ToolError::msg(format!("Directory not found: {}", args.path)));
+        }
+        if !resolved.is_dir() {
+            return Err(ToolError::msg(format!("Path is not a directory: {}", args.path)));
+        }
+
+        let mut out = format!("Contents of {}:\n\n", args.path);
+        let mut count = 0;
+
+        match std::fs::read_dir(&resolved) {
+            Ok(entries) => {
+                let mut paths: Vec<_> = entries.filter_map(Result::ok).collect();
+                paths.sort_by_key(|e| e.file_name());
+
+                for entry in paths {
+                    if count >= 200 {
+                        out.push_str("... (truncated. too many files)\n");
+                        break;
+                    }
+                    count += 1;
+
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let metadata = entry.metadata().ok();
+                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                    
+                    if is_dir {
+                        out.push_str(&format!("[DIR]  {}\n", name));
+                    } else {
+                        let size = metadata.map(|m| m.len()).unwrap_or(0);
+                        let size_str = if size < 1024 {
+                            format!("{} B", size)
+                        } else if size < 1024 * 1024 {
+                            format!("{} KB", size / 1024)
+                        } else {
+                            format!("{} MB", size / (1024 * 1024))
+                        };
+                        out.push_str(&format!("[FILE] {} ({})\n", name, size_str));
+                    }
+                }
+            }
+            Err(e) => return Err(ToolError::msg(format!("Failed to read directory: {}", e))),
+        }
+        Ok(out)
+    }
+}
+
 pub struct ToolContext {
     pub workspace: WorkspaceHandle,
     pub gateway: Arc<Gateway>,
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
     pub data_dir: PathBuf,
+    pub memory: crate::persistence::SqliteMemory,
+    pub connector_manager: Arc<crate::connectors::ConnectorManager>,
 }
 
 impl ToolContext {
+    pub fn list_dir(&self) -> ListDir {
+        ListDir::new(self.workspace.clone())
+    }
     pub fn read_file(&self) -> ReadFile {
         ReadFile::new(self.workspace.clone())
     }
@@ -1326,4 +1423,312 @@ impl ToolContext {
     pub fn stop_command(&self) -> StopCommand {
         StopCommand::new(self.command_manager.clone())
     }
+    pub fn search_documents(&self) -> SearchDocuments {
+        SearchDocuments { memory: self.memory.clone() }
+    }
+    pub fn list_documents(&self) -> ListDocuments {
+        ListDocuments { memory: self.memory.clone() }
+    }
+    pub fn ingest_document_tool(&self) -> IngestDocumentTool {
+        IngestDocumentTool {
+            memory: self.memory.clone(),
+            workspace: self.workspace.clone(),
+        }
+    }
+
+    pub fn google_drive_list(&self) -> crate::connector_tools::google_drive::GoogleDriveListFiles {
+        crate::connector_tools::google_drive::GoogleDriveListFiles {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn google_drive_read(&self) -> crate::connector_tools::google_drive::GoogleDriveReadFile {
+        crate::connector_tools::google_drive::GoogleDriveReadFile {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn google_drive_search(&self) -> crate::connector_tools::google_drive::GoogleDriveSearchFiles {
+        crate::connector_tools::google_drive::GoogleDriveSearchFiles {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn notion_list(&self) -> crate::connector_tools::notion::NotionListPages {
+        crate::connector_tools::notion::NotionListPages {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn notion_read(&self) -> crate::connector_tools::notion::NotionReadPage {
+        crate::connector_tools::notion::NotionReadPage {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn notion_search(&self) -> crate::connector_tools::notion::NotionSearchPages {
+        crate::connector_tools::notion::NotionSearchPages {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn github_list(&self) -> crate::connector_tools::github::GitHubListRepos {
+        crate::connector_tools::github::GitHubListRepos {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn github_read(&self) -> crate::connector_tools::github::GitHubReadFile {
+        crate::connector_tools::github::GitHubReadFile {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn github_search(&self) -> crate::connector_tools::github::GitHubSearchCode {
+        crate::connector_tools::github::GitHubSearchCode {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn slack_list(&self) -> crate::connector_tools::slack::SlackListChannels {
+        crate::connector_tools::slack::SlackListChannels {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn slack_read(&self) -> crate::connector_tools::slack::SlackReadMessages {
+        crate::connector_tools::slack::SlackReadMessages {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn slack_search(&self) -> crate::connector_tools::slack::SlackSearchMessages {
+        crate::connector_tools::slack::SlackSearchMessages {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn jira_list(&self) -> crate::connector_tools::jira::JiraListIssues {
+        crate::connector_tools::jira::JiraListIssues {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn jira_get(&self) -> crate::connector_tools::jira::JiraGetIssue {
+        crate::connector_tools::jira::JiraGetIssue {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn jira_search(&self) -> crate::connector_tools::jira::JiraSearchIssues {
+        crate::connector_tools::jira::JiraSearchIssues {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn gmail_list(&self) -> crate::connector_tools::gmail::GmailListEmails {
+        crate::connector_tools::gmail::GmailListEmails {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn gmail_read(&self) -> crate::connector_tools::gmail::GmailReadEmail {
+        crate::connector_tools::gmail::GmailReadEmail {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
+    pub fn gmail_search(&self) -> crate::connector_tools::gmail::GmailSearchEmails {
+        crate::connector_tools::gmail::GmailSearchEmails {
+            manager: self.connector_manager.clone(),
+            memory: self.memory.clone(),
+        }
+    }
 }
+
+pub struct SearchDocuments {
+    pub memory: crate::persistence::SqliteMemory,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchDocumentsArgs {
+    pub query: String,
+    pub limit: Option<usize>,
+}
+
+impl Tool for SearchDocuments {
+    const NAME: &'static str = "search_documents";
+
+    type Args = SearchDocumentsArgs;
+    type Output = String;
+    type Error = ToolError;
+
+    fn description(&self) -> String {
+        "Search the company knowledge library (PDFs, Word docs, Excel files, presentations, etc.) using full-text search. Returns matching passages with document names, file types, and page numbers.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
+    }
+
+    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let limit = args.limit.unwrap_or(10).min(20);
+        let hits = self
+            .memory
+            .search_documents(&args.query, limit)
+            .await
+            .map_err(|e| ToolError::msg(e.to_string()))?;
+
+        if hits.is_empty() {
+            return Ok(format!("No documents found matching '{}'.", args.query));
+        }
+
+        let mut out = format!("Found {} matching passage(s) for '{}':\n\n", hits.len(), args.query);
+        for (i, hit) in hits.iter().enumerate() {
+            let page_info = hit.page_number
+                .map(|p| format!(" (page {p})"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "{}. **{}** [{}]{}\n   Source: {}\n   {}\n\n",
+                i + 1,
+                hit.document_title,
+                hit.file_type,
+                page_info,
+                hit.source,
+                hit.snippet
+            ));
+        }
+
+        Ok(out)
+    }
+}
+
+pub fn parse_display_info_search_documents() -> crate::events::ToolDisplayInfo {
+    crate::events::ToolDisplayInfo {
+        label: "Searching documents".to_string(),
+        icon: crate::events::ToolIcon::Search,
+        ..Default::default()
+    }
+}
+
+pub struct ListDocuments {
+    pub memory: crate::persistence::SqliteMemory,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListDocumentsArgs {
+    pub source: Option<String>,
+    pub file_type: Option<String>,
+    pub page: Option<usize>,
+}
+
+impl Tool for ListDocuments {
+    const NAME: &'static str = "list_documents";
+
+    type Args = ListDocumentsArgs;
+    type Output = String;
+    type Error = ToolError;
+
+    fn description(&self) -> String {
+        "List documents in the knowledge library. Filter by source or file type.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
+    }
+
+    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let page = args.page.unwrap_or(0);
+        let limit = 20usize;
+        let offset = page * limit;
+
+        let docs = self
+            .memory
+            .list_documents(args.source, args.file_type, limit, offset)
+            .await
+            .map_err(|e| ToolError::msg(e.to_string()))?;
+
+        if docs.is_empty() {
+            return Ok("No documents in the library (matching filters).".to_string());
+        }
+
+        let mut out = format!("Documents (page {page}, showing {}):\n\n", docs.len());
+        for doc in &docs {
+            let pages = doc.page_count.map(|p| format!(", {p} pages")).unwrap_or_default();
+            let words = doc.word_count.map(|w| format!(", ~{w} words")).unwrap_or_default();
+            let path = doc.file_path.as_deref().unwrap_or("(remote)");
+            out.push_str(&format!(
+                "• **{}** [{}]{}{}\n  Source: {} | Path: {}\n\n",
+                doc.title, doc.file_type, pages, words, doc.source, path
+            ));
+        }
+
+        Ok(out)
+    }
+}
+
+pub struct IngestDocumentTool {
+    pub memory: crate::persistence::SqliteMemory,
+    pub workspace: std::sync::Arc<std::sync::RwLock<Option<std::path::PathBuf>>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IngestDocumentToolArgs {
+    pub path: String,
+}
+
+impl Tool for IngestDocumentTool {
+    const NAME: &'static str = "ingest_document";
+
+    type Args = IngestDocumentToolArgs;
+    type Output = String;
+    type Error = ToolError;
+
+    fn description(&self) -> String {
+        "Add a document file (PDF, DOCX, XLSX, PPTX, TXT, MD) to the knowledge library so it can be searched and queried.".to_string()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
+    }
+
+    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let p = std::path::PathBuf::from(&args.path);
+        let resolved = if p.exists() {
+            p
+        } else if let Ok(guard) = self.workspace.read() {
+            if let Some(ws) = guard.as_ref() {
+                if let Ok(r) = fs_util::resolve_in_workspace(ws, &args.path) {
+                    if r.exists() {
+                        r
+                    } else {
+                        p
+                    }
+                } else {
+                    p
+                }
+            } else {
+                p
+            }
+        } else {
+            p
+        };
+
+        if !resolved.exists() {
+            return Err(ToolError::msg(format!("File not found: {}", args.path)));
+        }
+
+        let result = crate::document::ingest_document(&resolved, &self.memory)
+            .await
+            .map_err(|e| ToolError::msg(e.to_string()))?;
+
+        let action = if result.was_update { "Re-indexed" } else { "Indexed" };
+        let pages = result.page_count.map(|p| format!(", {p} pages")).unwrap_or_default();
+
+        Ok(format!(
+            "{action} **{}** ({}{pages})\n• {} passages created\n• ~{} words\n• Document ID: {}",
+            result.title, result.file_type, result.passage_count, result.word_count, result.document_id
+        ))
+    }
+}
+

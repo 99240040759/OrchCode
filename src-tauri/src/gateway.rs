@@ -24,8 +24,6 @@ pub struct ModelInfo {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub badge: Option<String>,
-    #[serde(rename = "reasoningEffort", default)]
-    pub reasoning_effort: Option<String>,
 }
 
 impl ModelInfo {

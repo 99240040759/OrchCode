@@ -20,6 +20,16 @@ pub enum AppError {
     RunConflict,
     #[error("file too large to process: {0}")]
     FileTooLarge(String),
+    #[error("connector not found: {0}")]
+    ConnectorNotFound(String),
+    #[error("connector '{0}' is not configured (missing OAuth client credentials)")]
+    ConnectorNotConfigured(String),
+    #[error("connector auth error: {0}")]
+    ConnectorAuthError(String),
+    #[error("document parse error: {0}")]
+    DocumentParseError(String),
+    #[error("unsupported file type: {0}")]
+    UnsupportedFileType(String),
     #[error("{0}")]
     Other(String),
 }

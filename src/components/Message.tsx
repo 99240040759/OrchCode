@@ -23,7 +23,7 @@ import { Markdown, renderTextWithMentions } from "./Markdown";
 import { AttachmentCard, ExplorerIcon, FileTag, ThinkingShimmer } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
 
-const TOOL_ICONS: Record<Exclude<ToolIcon, "file">, React.ComponentType<{ className?: string }>> = {
+const TOOL_ICONS: Record<Exclude<ToolIcon, "file" | "folder">, React.ComponentType<{ className?: string }>> = {
   terminal: VscTerminal,
   search: VscSearch,
   globe: VscGlobe,
@@ -51,26 +51,32 @@ function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
 
 function ToolTarget({ tool }: { tool: ToolCallItem }) {
   const info = tool.displayInfo;
-  if (info.filename) {
+  const isFileAction = Boolean(info.filename);
+  if (isFileAction) {
     return (
       <FileTag
-        path={info.fullPath ?? info.filename}
-        name={info.filename}
+        path={info.fullPath ?? ""}
+        name={info.filename!}
         lineRange={info.lineRange ?? undefined}
         added={info.addedLines ?? undefined}
         removed={info.removedLines ?? undefined}
+        interactive={info.opensArtifact}
       />
     );
   }
 
-  const Icon = info.icon === "file" ? null : TOOL_ICONS[info.icon];
+  const isFolder = info.icon === "folder";
+  const Icon = (!isFolder && info.icon !== "file") 
+    ? TOOL_ICONS[info.icon as Exclude<ToolIcon, "file" | "folder">] 
+    : null;
+
   return (
-    <span className="ToolRow-target">
+    <span className="ToolRow-targetText">
       {Icon ? (
         <Icon className="ToolRow-icon" />
       ) : (
         <ExplorerIcon
-          type="file"
+          type={isFolder ? "folder" : "file"}
           name={info.targetText ?? ""}
           className="ToolRow-icon"
           width={13}

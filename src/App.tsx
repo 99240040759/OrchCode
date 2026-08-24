@@ -7,12 +7,17 @@ import { useUpdaterStore } from "./lib/store";
 import { ChatPanel } from "./components/ChatPanel";
 import { Greeting, Onboarding } from "./components/screens";
 import { Sidebar } from "./components/Sidebar";
+import { LibraryView } from "./components/LibraryView";
+import { ConnectorsView } from "./components/ConnectorsView";
 import { Button } from "./components/ui/Button";
 import { Titlebar } from "./components/ui/Titlebar";
 import { TooltipProvider } from "./components/ui/Tooltip";
 
+export type AppView = "chat" | "library" | "connectors";
+
 function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [view, setView] = useState<AppView>("chat");
 
   return (
     <div className="AppShell">
@@ -22,9 +27,11 @@ function AppShell() {
         onToggleSidebar={() => setSidebarOpen((open) => !open)}
       />
       <div className="AppShell-body">
-        {sidebarOpen && <Sidebar />}
+        {sidebarOpen && <Sidebar currentView={view} onViewChange={setView} />}
         <div className="Main">
-          <ChatPanel />
+          {view === "chat" && <ChatPanel />}
+          {view === "library" && <LibraryView />}
+          {view === "connectors" && <ConnectorsView />}
         </div>
       </div>
     </div>

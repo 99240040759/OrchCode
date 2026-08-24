@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod browser;
 pub mod config;
+pub mod connector_tools;
+pub mod connectors;
 pub mod dictation;
+pub mod document;
 pub mod error;
 pub mod events;
 pub mod fsapi;
@@ -21,6 +24,39 @@ use tauri::{Emitter, Manager};
 const MAIN_WINDOW_LABEL: &str = "main";
 
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
+    if let Some(rest) = raw_url.strip_prefix("orch://oauth/") {
+        let state = app.state::<AppState>();
+        let (connector_id, code) = parse_connector_oauth_callback(rest);
+        if !connector_id.is_empty() && !code.is_empty() {
+            match ipc::complete_connector_auth(
+                state.clone(),
+                connector_id.clone(),
+                code,
+            )
+            .await
+            {
+                Ok(dto) => {
+                    let _ = app.emit(
+                        "connector-changed",
+                        serde_json::json!({ "connector": dto, "error": null }),
+                    );
+                }
+                Err(err) => {
+                    let _ = app.emit(
+                        "connector-changed",
+                        serde_json::json!({ "connector": null, "error": err, "connectorId": connector_id }),
+                    );
+                }
+            }
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            return;
+        }
+    }
+
     let state = app.state::<AppState>();
 
     if !state.consume_sign_in_window() {
@@ -57,6 +93,22 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     }
 }
 
+fn parse_connector_oauth_callback(rest: &str) -> (String, String) {
+    let (connector_id, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let code = query
+        .split('&')
+        .find_map(|part| {
+            let (k, v) = part.split_once('=')?;
+            if k == "code" {
+                Some(urlencoding::decode(v).unwrap_or_default().into_owned())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    (connector_id.to_string(), code)
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
@@ -83,6 +135,19 @@ pub fn run() {
 
             let app_state = AppState::new(&data_dir)?;
             app.manage(app_state);
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app_handle.state::<AppState>();
+                if let Err(e) = state
+                    .connector_manager
+                    .initialize(&state.memory)
+                    .await
+                {
+                    eprintln!("connector manager init failed: {e}");
+                }
+            });
+
             AppState::spawn_background_loops(app.handle().clone());
 
             #[cfg(desktop)]
@@ -117,6 +182,9 @@ pub fn run() {
                 fsapi::list_workspace_files,
                 fsapi::read_text_file,
                 fsapi::read_image_data_url,
+                fsapi::read_binary_file_as_data_url,
+                fsapi::read_document_metadata,
+                fsapi::read_parsed_document,
                 ipc::get_auth_user,
                 ipc::get_oauth_url,
                 ipc::sign_out_auth,
@@ -138,6 +206,16 @@ pub fn run() {
                 ipc::terminal_write,
                 ipc::terminal_resize,
                 ipc::terminal_close,
+                ipc::list_connectors,
+                ipc::get_connector_auth_url,
+                ipc::complete_connector_auth,
+                ipc::disconnect_connector,
+                ipc::ipc_ingest_document,
+                ipc::ipc_list_documents,
+                ipc::ipc_get_document,
+                ipc::ipc_delete_document,
+                ipc::ipc_search_documents,
+                ipc::ipc_count_documents,
                 ]);
             move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
                 handler(invoke)

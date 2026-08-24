@@ -5,6 +5,8 @@ import {
   VscEditSparkle,
   VscSignOut,
   VscTrash,
+  VscLibrary,
+  VscExtensions,
 } from "react-icons/vsc";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
@@ -12,6 +14,7 @@ import { Tooltip } from "./ui/Tooltip";
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
 import { formatRelativeTime, formatUsd } from "../lib/api";
+import type { AppView } from "../App";
 
 const BUDGET_WARN_PCT = 75;
 const BUDGET_DANGER_PCT = 90;
@@ -20,7 +23,12 @@ function budgetLabel(cost: number, limit: number): string {
   return limit > 0 ? `${formatUsd(cost)} / ${formatUsd(limit)}` : formatUsd(cost);
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  currentView: AppView;
+  onViewChange: (view: AppView) => void;
+}
+
+export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const sessions = useChatStore((s) => s.sessions);
@@ -43,11 +51,10 @@ export function Sidebar() {
   return (
     <aside className="Sidebar">
 
-      {/* New chat button */}
       <div className="Sidebar-header">
         <Button
           className="Sidebar-newchat"
-          onClick={newChat}
+          onClick={() => { newChat(); onViewChange("chat"); }}
           disabled={streaming}
           aria-label="New chat"
         >
@@ -56,7 +63,33 @@ export function Sidebar() {
         </Button>
       </div>
 
-      {/* Thread list */}
+      <nav className="Sidebar-viewnav" aria-label="Views">
+        <Tooltip content="Knowledge Library" side="right">
+          <button
+            type="button"
+            className="Sidebar-viewbtn"
+            data-active={currentView === "library"}
+            onClick={() => onViewChange("library")}
+            aria-label="Knowledge Library"
+          >
+            <VscLibrary />
+            <span>Library</span>
+          </button>
+        </Tooltip>
+        <Tooltip content="Integrations" side="right">
+          <button
+            type="button"
+            className="Sidebar-viewbtn"
+            data-active={currentView === "connectors"}
+            onClick={() => onViewChange("connectors")}
+            aria-label="Integrations"
+          >
+            <VscExtensions />
+            <span>Integrations</span>
+          </button>
+        </Tooltip>
+      </nav>
+
       <nav className="Sidebar-threads" aria-label="Conversations">
         {sessions.length === 0 && (
           <p className="Sidebar-empty">No conversations yet.</p>
@@ -76,7 +109,10 @@ export function Sidebar() {
                 className="ThreadItem-btn"
                 aria-current={isActive ? "page" : undefined}
                 disabled={streaming}
-                onClick={() => void selectSession(session.id)}
+                onClick={() => {
+                  void selectSession(session.id);
+                  onViewChange("chat");
+                }}
               >
                 <span className="ThreadItem-title">
                   {session.title || "New chat"}
@@ -126,7 +162,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
       <div className="Sidebar-footer">
         {budget && (
           <Tooltip

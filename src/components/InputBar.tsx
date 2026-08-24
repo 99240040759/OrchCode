@@ -13,7 +13,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
-import { useChatStore, type ReasoningEffort } from "../lib/store";
+import { useChatStore } from "../lib/store";
 import { useArtifactsStore } from "../lib/artifacts";
 import { getBasename, getDirname, isImagePath } from "../lib/api";
 import { Button } from "./ui/Button";
@@ -26,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from "./ui/DropdownMenu";
 
-const EFFORT_LEVELS: ReasoningEffort[] = ["low", "medium", "high"];
 const RING_CIRCUMFERENCE = 53.4;
 
 interface CommandItem {
@@ -153,8 +152,6 @@ export function InputBar() {
   const models = useChatStore((s) => s.models);
   const selectedModel = useChatStore((s) => s.selectedModel);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
-  const reasoningEffort = useChatStore((s) => s.reasoningEffort);
-  const setReasoningEffort = useChatStore((s) => s.setReasoningEffort);
   const workspace = useChatStore((s) => s.workspace);
   const pickWorkspace = useChatStore((s) => s.pickWorkspace);
   const resetToSandbox = useChatStore((s) => s.resetToSandbox);
@@ -604,27 +601,6 @@ export function InputBar() {
                 >
                   <span className="ModelItem-name">{model.name}</span>
                   {model.badge && <span className="Composer-badge">{model.badge}</span>}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
-            <Tooltip content={`Reasoning effort: ${reasoningEffort}`} side="top">
-              <DropdownMenuTrigger asChild>
-                <Button className="Composer-model">
-                  <span className="Composer-effort-label">{reasoningEffort}</span>
-                  <VscChevronDown />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent sideOffset={6} align="start">
-              {EFFORT_LEVELS.map((level) => (
-                <DropdownMenuItem
-                  key={level}
-                  onSelect={() => setReasoningEffort(level)}
-                >
-                  <span style={{ textTransform: "capitalize" }}>{level}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

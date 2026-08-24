@@ -19,6 +19,7 @@ pub struct ToolDisplayInfo {
 pub enum ToolIcon {
     #[default]
     File,
+    Folder,
     Terminal,
     Search,
     Globe,

@@ -2,7 +2,9 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { newId } from "./api";
 
-export type ArtifactKind = "file" | "browser" | "terminal";
+export type ArtifactKind = "file" | "browser" | "terminal" | "pdf" | "docx" | "xlsx" | "pptx";
+
+export const DOCUMENT_KINDS: ArtifactKind[] = ["pdf", "docx", "xlsx", "pptx"];
 
 export const DEFAULT_BROWSER_URL = "https://www.google.com";
 
@@ -11,6 +13,8 @@ export interface ArtifactTab {
   kind: ArtifactKind;
   path?: string;
   url?: string;
+  documentId?: string;
+  label?: string;
 }
 
 interface ArtifactsState {
@@ -25,6 +29,7 @@ interface ArtifactsActions {
   openFile: (path?: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
+  openDocument: (path: string, kind: ArtifactKind, label?: string, documentId?: string) => void;
   setTabPath: (id: string, path: string) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -55,15 +60,23 @@ export const useArtifactsStore = create(
 
     openFile: (path?: string) => {
       set((s) => {
+        let kind: ArtifactKind = "file";
+        if (path) {
+          const ext = path.split(".").pop()?.toLowerCase();
+          if (ext === "pdf") kind = "pdf";
+          else if (ext === "docx" || ext === "doc") kind = "docx";
+          else if (ext === "xlsx" || ext === "xls") kind = "xlsx";
+          else if (ext === "pptx" || ext === "ppt") kind = "pptx";
+        }
         const existing = path
-          ? s.tabs.find((t) => t.kind === "file" && t.path === path)
+          ? s.tabs.find((t) => t.kind === kind && t.path === path)
           : s.tabs.find((t) => t.kind === "file" && !t.path);
         if (existing) {
           s.activeId = existing.id;
           s.panelOpen = true;
           return;
         }
-        const tab: ArtifactTab = { id: newId(), kind: "file", path };
+        const tab: ArtifactTab = { id: newId(), kind, path };
         s.tabs.push(tab);
         s.activeId = tab.id;
         s.panelOpen = true;
@@ -105,10 +118,33 @@ export const useArtifactsStore = create(
       });
     },
 
+    openDocument: (path: string, kind: ArtifactKind, label?: string, documentId?: string) => {
+      set((s) => {
+        const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
+        if (existing) {
+          s.activeId = existing.id;
+          s.panelOpen = true;
+          return;
+        }
+        const tab: ArtifactTab = { id: newId(), kind, path, label, documentId };
+        s.tabs.push(tab);
+        s.activeId = tab.id;
+        s.panelOpen = true;
+      });
+    },
+
     setTabPath: (id: string, path: string) => {
       set((s) => {
         const tab = s.tabs.find((t) => t.id === id);
-        if (tab && tab.kind === "file") tab.path = path;
+        if (tab) {
+          const ext = path.split(".").pop()?.toLowerCase();
+          if (ext === "pdf") tab.kind = "pdf";
+          else if (ext === "docx" || ext === "doc") tab.kind = "docx";
+          else if (ext === "xlsx" || ext === "xls") tab.kind = "xlsx";
+          else if (ext === "pptx" || ext === "ppt") tab.kind = "pptx";
+          else tab.kind = "file";
+          tab.path = path;
+        }
       });
     },
 

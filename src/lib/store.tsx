@@ -16,10 +16,6 @@ import type {
   WorkspaceInfo,
 } from "./api";
 
-export type ReasoningEffort = "low" | "medium" | "high";
-
-const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high"];
-
 export interface MessageAttachment {
   name: string;
   isImage: boolean;
@@ -132,7 +128,6 @@ interface ChatState {
   sessionTokens: TokenUsage;
   models: ModelDto[];
   selectedModel: ModelDto | null;
-  reasoningEffort: ReasoningEffort;
   budget: Budget | null;
   workspace: WorkspaceInfo | null;
   error: string | null;
@@ -148,7 +143,6 @@ interface ChatActions {
   send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
   cancel: () => void;
   setSelectedModel: (key: string) => void;
-  setReasoningEffort: (effort: ReasoningEffort) => void;
   pickWorkspace: () => Promise<void>;
   resetToSandbox: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -168,7 +162,6 @@ const INITIAL_STATE: ChatState = {
   sessionTokens: ZERO_USAGE,
   models: [],
   selectedModel: null,
-  reasoningEffort: "medium",
   budget: null,
   workspace: null,
   error: null,
@@ -185,12 +178,11 @@ export const useChatStore = create(
         s.initialized = true;
       });
 
-      const [sessions, workspace, models, savedModel, savedEffort] = await Promise.all([
+      const [sessions, workspace, models, savedModel] = await Promise.all([
         api.listSessions().catch(() => [] as SessionSummary[]),
         api.getWorkspaceInfo().catch(() => null),
         api.listModels().catch(() => [] as ModelDto[]),
         api.getUserPref("selectedModel").catch(() => null),
-        api.getUserPref("reasoningEffort").catch(() => null),
       ]);
 
       set((s) => {
@@ -199,9 +191,6 @@ export const useChatStore = create(
         s.models = models;
         const preferred = savedModel ? models.find((m) => m.key === savedModel) : undefined;
         s.selectedModel = preferred ?? models[0] ?? null;
-        if (savedEffort && (REASONING_EFFORTS as string[]).includes(savedEffort)) {
-          s.reasoningEffort = savedEffort as ReasoningEffort;
-        }
       });
 
       void get().refreshBudget();
@@ -261,11 +250,11 @@ export const useChatStore = create(
         try {
           const info = await api.setWorkspace(target.workspacePath);
           set((s) => {
-            s.workspace = info;
+            if (s.currentSessionId === id) s.workspace = info;
           });
         } catch (e) {
           set((s) => {
-            s.error = api.errorMessage(e);
+            if (s.currentSessionId === id) s.error = api.errorMessage(e);
           });
         }
       }
@@ -319,7 +308,7 @@ export const useChatStore = create(
     },
 
     send: async (prompt: string, attachments: AttachmentRef[]) => {
-      const { streaming, currentSessionId, selectedModel, reasoningEffort } = get();
+      const { streaming, currentSessionId, selectedModel } = get();
       const text = prompt.trim();
       if (streaming) return false;
       if (!text && attachments.length === 0) return false;
@@ -531,7 +520,6 @@ export const useChatStore = create(
           sessionId,
           selectedModel.key,
           text,
-          reasoningEffort,
           attachments,
           handleEvent
         );
@@ -566,13 +554,6 @@ export const useChatStore = create(
         s.selectedModel = model;
       });
       void api.setUserPref("selectedModel", key).catch(() => undefined);
-    },
-
-    setReasoningEffort: (effort: ReasoningEffort) => {
-      set((s) => {
-        s.reasoningEffort = effort;
-      });
-      void api.setUserPref("reasoningEffort", effort).catch(() => undefined);
     },
 
     pickWorkspace: async () => {

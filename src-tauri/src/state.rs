@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::auth;
 use crate::config;
+use crate::connectors::ConnectorManager;
 use crate::dictation::DictationHandle;
 use crate::error::{AppError, AppResult};
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
@@ -31,10 +32,13 @@ pub struct AppState {
     pub memory: SqliteMemory,
     pub runs: Mutex<HashMap<String, RunHandle>>,
     pub dictation: Mutex<Option<DictationHandle>>,
-    pub terminals: Mutex<HashMap<String, crate::terminal::TerminalSession>>,
+    pub terminals: Arc<Mutex<HashMap<String, crate::terminal::TerminalSession>>>,
     pub command_manager: Arc<CommandManager>,
+    pub connector_manager: Arc<ConnectorManager>,
     current_user_id: RwLock<Option<String>>,
     sign_in_started_at: Mutex<Option<Instant>>,
+    token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
+    catalog_fetch_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -56,10 +60,13 @@ impl AppState {
             memory,
             runs: Mutex::new(HashMap::new()),
             dictation: Mutex::new(None),
-            terminals: Mutex::new(HashMap::new()),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
+            connector_manager: Arc::new(ConnectorManager::new()),
             current_user_id: RwLock::new(None),
             sign_in_started_at: Mutex::new(None),
+            token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
+            catalog_fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -91,6 +98,12 @@ impl AppState {
         if let Ok(mut guard) = self.catalog.write() {
             *guard = None;
         }
+        crate::connectors::clear_all_connector_tokens_keyring();
+    }
+
+    pub async fn clear_credentials_full(&self) {
+        self.clear_credentials();
+        let _ = self.connector_manager.logout_all(&self.memory).await;
     }
 
     pub fn set_authenticated_user(&self, user_id: &str) {
@@ -150,13 +163,26 @@ impl AppState {
     }
 
     pub async fn catalog(&self) -> AppResult<ModelCatalog> {
-        if let Ok(guard) = self.catalog.read() {
+        {
+            let guard = self.catalog.read().unwrap_or_else(|e| e.into_inner());
             if let Some(cat) = guard.as_ref() {
                 if !cat.is_empty() {
                     return Ok(cat.clone());
                 }
             }
         }
+
+        let _fetch_guard = self.catalog_fetch_lock.lock().await;
+
+        {
+            let guard = self.catalog.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(cat) = guard.as_ref() {
+                if !cat.is_empty() {
+                    return Ok(cat.clone());
+                }
+            }
+        }
+
         self.refresh_catalog().await
     }
 
@@ -178,9 +204,25 @@ impl AppState {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        match auth::jwt_expiry(&current) {
-            Some(exp) if exp - now > config::TOKEN_REFRESH_SKEW_SECS => return Ok(()),
-            _ => {}
+        if let Some(exp) = auth::jwt_expiry(&current) {
+            if exp - now > config::TOKEN_REFRESH_SKEW_SECS {
+                return Ok(());
+            }
+        }
+
+        let _guard = self.token_refresh_lock.lock().await;
+
+        let Some(current) = self.access_token() else {
+            return Err(AppError::NoToken);
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        if let Some(exp) = auth::jwt_expiry(&current) {
+            if exp - now > config::TOKEN_REFRESH_SKEW_SECS {
+                return Ok(());
+            }
         }
 
         let Some(refresh_token) = auth::load_refresh_token() else {

@@ -38,6 +38,7 @@ export interface SessionSummary {
 
 export type ToolIcon =
   | "file"
+  | "folder"
   | "terminal"
   | "search"
   | "globe"
@@ -185,7 +186,6 @@ export function startChat(
   sessionId: string,
   model: string,
   prompt: string,
-  reasoningEffort: string,
   attachments: AttachmentRef[],
   onEvent: (evt: ChatStreamEvent) => void
 ): Promise<void> {
@@ -195,7 +195,6 @@ export function startChat(
     sessionId,
     model,
     prompt,
-    reasoningEffort,
     attachments,
     onEvent: channel,
   });
@@ -215,6 +214,22 @@ export function readTextFile(path: string): Promise<FileContent> {
 
 export function readImageDataUrl(path: string): Promise<string> {
   return invoke("read_image_data_url", { path });
+}
+
+export function readBinaryFileAsDataUrl(path: string): Promise<string> {
+  return invoke("read_binary_file_as_data_url", { path });
+}
+
+export interface DocumentFileMeta {
+  name: string;
+  size_bytes: number;
+  extension: string;
+  mime: string;
+  modified: number | null;
+}
+
+export function readDocumentMetadata(path: string): Promise<DocumentFileMeta> {
+  return invoke("read_document_metadata", { path });
 }
 
 export function startDictation(onEvent: (evt: DictationEvent) => void): Promise<void> {
@@ -319,4 +334,135 @@ const IMAGE_EXT_PATTERN = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 export function isImagePath(pathStr: string): boolean {
   return IMAGE_EXT_PATTERN.test(pathStr);
+}
+
+export interface ConnectorDto {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  authKind: string;
+  isConfigured: boolean;
+  enabled: boolean;
+  hasToken: boolean;
+  tokenExpiresAt?: number | null;
+  error?: string | null;
+}
+
+export function listConnectors(): Promise<ConnectorDto[]> {
+  return invoke("list_connectors");
+}
+
+export function getConnectorAuthUrl(connectorId: string): Promise<string> {
+  return invoke("get_connector_auth_url", { connectorId });
+}
+
+export function completeConnectorAuth(
+  connectorId: string,
+  code: string
+): Promise<ConnectorDto> {
+  return invoke("complete_connector_auth", { connectorId, code });
+}
+
+export function disconnectConnector(connectorId: string): Promise<void> {
+  return invoke("disconnect_connector", { connectorId });
+}
+
+export interface DocumentRecord {
+  id: string;
+  title: string;
+  filePath?: string | null;
+  source: string;
+  sourceId?: string | null;
+  fileType: string;
+  sizeBytes: number;
+  pageCount?: number | null;
+  wordCount?: number | null;
+  metadata: unknown;
+  indexedAt: number;
+  updatedAt: number;
+}
+
+export interface SearchHit {
+  documentId: string;
+  documentTitle: string;
+  fileType: string;
+  source: string;
+  passageId: string;
+  snippet: string;
+  pageNumber?: number | null;
+  score: number;
+}
+
+export interface IngestResultDto {
+  documentId: string;
+  title: string;
+  fileType: string;
+  passageCount: number;
+  wordCount: number;
+  pageCount?: number | null;
+  wasUpdate: boolean;
+}
+
+export function ingestDocument(path: string): Promise<IngestResultDto> {
+  return invoke("ipc_ingest_document", { path });
+}
+
+export function listDocuments(opts?: {
+  source?: string;
+  fileType?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<DocumentRecord[]> {
+  return invoke("ipc_list_documents", {
+    source: opts?.source ?? null,
+    fileType: opts?.fileType ?? null,
+    limit: opts?.limit ?? 50,
+    offset: opts?.offset ?? 0,
+  });
+}
+
+export function getDocument(documentId: string): Promise<DocumentRecord | null> {
+  return invoke("ipc_get_document", { documentId });
+}
+
+export function deleteDocument(documentId: string): Promise<void> {
+  return invoke("ipc_delete_document", { documentId });
+}
+
+export function searchDocuments(
+  query: string,
+  limit?: number
+): Promise<SearchHit[]> {
+  return invoke("ipc_search_documents", { query, limit: limit ?? 20 });
+}
+
+export function countDocuments(): Promise<number> {
+  return invoke("ipc_count_documents");
+}
+
+export interface ParsedDocumentDto {
+  title?: string | null;
+  fileType: string;
+  pageCount?: number | null;
+  fullText: string;
+}
+
+export function readParsedDocument(path: string): Promise<ParsedDocumentDto> {
+  return invoke("read_parsed_document", { path });
+}
+
+export const DOCUMENT_FILE_TYPES: Record<string, { label: string; icon: string }> = {
+  pdf: { label: "PDF", icon: "📄" },
+  docx: { label: "Word", icon: "📝" },
+  xlsx: { label: "Excel", icon: "📊" },
+  pptx: { label: "PowerPoint", icon: "📑" },
+  txt: { label: "Text", icon: "📃" },
+  md: { label: "Markdown", icon: "📋" },
+  csv: { label: "CSV", icon: "📊" },
+  json: { label: "JSON", icon: "🔧" },
+};
+
+export function documentTypeLabel(fileType: string): string {
+  return DOCUMENT_FILE_TYPES[fileType]?.label ?? fileType.toUpperCase();
 }

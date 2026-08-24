@@ -46,6 +46,75 @@ const BASELINE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS messages (
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);";
 
+const KNOWLEDGE_SCHEMA: &str = "
+ CREATE TABLE IF NOT EXISTS connectors (
+     id           TEXT PRIMARY KEY,
+     name         TEXT NOT NULL,
+     enabled      INTEGER NOT NULL DEFAULT 0,
+     auth_kind    TEXT NOT NULL DEFAULT 'none',
+     has_token    INTEGER NOT NULL DEFAULT 0,
+     token_expires_at INTEGER,
+     error        TEXT,
+     updated_at   INTEGER NOT NULL DEFAULT 0
+ );
+
+ CREATE TABLE IF NOT EXISTS documents (
+     id           TEXT PRIMARY KEY,
+     title        TEXT NOT NULL,
+     file_path    TEXT,
+     source       TEXT NOT NULL DEFAULT 'local',
+     source_id    TEXT,
+     file_type    TEXT NOT NULL,
+     size_bytes   INTEGER NOT NULL DEFAULT 0,
+     page_count   INTEGER,
+     word_count   INTEGER,
+     metadata     TEXT NOT NULL DEFAULT '{}',
+     indexed_at   INTEGER NOT NULL,
+     updated_at   INTEGER NOT NULL
+ );
+
+ CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
+ CREATE INDEX IF NOT EXISTS idx_documents_file_type ON documents(file_type);
+ CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at DESC);
+
+ CREATE TABLE IF NOT EXISTS passages (
+     id           TEXT PRIMARY KEY,
+     document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+     seq          INTEGER NOT NULL,
+     text         TEXT NOT NULL,
+     page_number  INTEGER,
+     char_start   INTEGER,
+     char_end     INTEGER
+ );
+
+ CREATE INDEX IF NOT EXISTS idx_passages_document ON passages(document_id, seq);
+
+ CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5(
+     text,
+     document_id UNINDEXED,
+     passage_id UNINDEXED,
+     content='passages',
+     content_rowid='rowid'
+ );
+
+ CREATE TRIGGER IF NOT EXISTS passages_ai AFTER INSERT ON passages BEGIN
+     INSERT INTO passages_fts(rowid, text, document_id, passage_id)
+     VALUES (new.rowid, new.text, new.document_id, new.id);
+ END;
+
+ CREATE TRIGGER IF NOT EXISTS passages_ad AFTER DELETE ON passages BEGIN
+     INSERT INTO passages_fts(passages_fts, rowid, text, document_id, passage_id)
+     VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+ END;
+
+ CREATE TRIGGER IF NOT EXISTS passages_au AFTER UPDATE ON passages BEGIN
+     INSERT INTO passages_fts(passages_fts, rowid, text, document_id, passage_id)
+     VALUES ('delete', old.rowid, old.text, old.document_id, old.id);
+     INSERT INTO passages_fts(rowid, text, document_id, passage_id)
+     VALUES (new.rowid, new.text, new.document_id, new.id);
+ END;
+";
+
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +203,7 @@ impl SqliteMemory {
 
         let migration_list = vec![
             rusqlite_migration::M::up(BASELINE_SCHEMA),
+            rusqlite_migration::M::up(KNOWLEDGE_SCHEMA),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -907,4 +977,363 @@ fn mem_sql(e: rusqlite::Error) -> MemoryError {
 
 fn mem_lock<T>(_: std::sync::PoisonError<T>) -> MemoryError {
     MemoryError::Internal("sqlite connection lock poisoned".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentRecord {
+    pub id: String,
+    pub title: String,
+    pub file_path: Option<String>,
+    pub source: String,
+    pub source_id: Option<String>,
+    pub file_type: String,
+    pub size_bytes: i64,
+    pub page_count: Option<i64>,
+    pub word_count: Option<i64>,
+    pub metadata: serde_json::Value,
+    pub indexed_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageRecord {
+    pub id: String,
+    pub document_id: String,
+    pub seq: i64,
+    pub text: String,
+    pub page_number: Option<i64>,
+    pub char_start: Option<i64>,
+    pub char_end: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub document_id: String,
+    pub passage_id: String,
+    pub document_title: String,
+    pub file_type: String,
+    pub source: String,
+    pub file_path: Option<String>,
+    pub snippet: String,
+    pub rank: f64,
+    pub page_number: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorRecord {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub auth_kind: String,
+    pub has_token: bool,
+    pub token_expires_at: Option<i64>,
+    pub error: Option<String>,
+    pub updated_at: i64,
+}
+
+impl SqliteMemory {
+    pub async fn upsert_document(&self, doc: DocumentRecord) -> AppResult<()> {
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let meta = serde_json::to_string(&doc.metadata).unwrap_or_else(|_| "{}".to_string());
+            c.execute(
+                "INSERT INTO documents (id, title, file_path, source, source_id, file_type,
+                  size_bytes, page_count, word_count, metadata, indexed_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                 ON CONFLICT(id) DO UPDATE SET
+                   title=excluded.title, file_path=excluded.file_path,
+                   size_bytes=excluded.size_bytes, page_count=excluded.page_count,
+                   word_count=excluded.word_count, metadata=excluded.metadata,
+                   updated_at=excluded.updated_at",
+                rusqlite::params![
+                    doc.id, doc.title, doc.file_path, doc.source, doc.source_id,
+                    doc.file_type, doc.size_bytes, doc.page_count, doc.word_count,
+                    meta, doc.indexed_at, doc.updated_at
+                ],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn insert_passages(&self, passages: Vec<PassageRecord>) -> AppResult<()> {
+        if passages.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let mut c = conn.lock().map_err(lock_err)?;
+            let tx = c.transaction().map_err(sql_err)?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT OR REPLACE INTO passages (id, document_id, seq, text, page_number, char_start, char_end)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)"
+                ).map_err(sql_err)?;
+                for p in &passages {
+                    stmt.execute(rusqlite::params![
+                        p.id, p.document_id, p.seq, p.text, p.page_number, p.char_start, p.char_end
+                    ]).map_err(sql_err)?;
+                }
+            }
+            tx.commit().map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn delete_document(&self, document_id: &str) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let did = document_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute("DELETE FROM documents WHERE id=?1", rusqlite::params![did])
+                .map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn list_documents(
+        &self,
+        source: Option<String>,
+        file_type: Option<String>,
+        limit: usize,
+        offset: usize,
+    ) -> AppResult<Vec<DocumentRecord>> {
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let mut sql = String::from(
+                "SELECT id, title, file_path, source, source_id, file_type,
+                        size_bytes, page_count, word_count, metadata, indexed_at, updated_at
+                 FROM documents WHERE 1=1"
+            );
+            let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            if let Some(s) = source {
+                sql.push_str(" AND source=?");
+                values.push(Box::new(s));
+            }
+            if let Some(ft) = file_type {
+                sql.push_str(" AND file_type=?");
+                values.push(Box::new(ft));
+            }
+            sql.push_str(" ORDER BY updated_at DESC LIMIT ? OFFSET ?");
+            values.push(Box::new(limit as i64));
+            values.push(Box::new(offset as i64));
+
+            let refs: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+            let mut stmt = c.prepare(&sql).map_err(sql_err)?;
+            let rows = stmt.query_map(refs.as_slice(), map_document_row).map_err(sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(sql_err)?);
+            }
+            Ok(out)
+        }).await
+    }
+
+    pub async fn get_document(&self, document_id: &str) -> AppResult<Option<DocumentRecord>> {
+        let conn = self.conn.clone();
+        let did = document_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let mut stmt = c.prepare(
+                "SELECT id, title, file_path, source, source_id, file_type,
+                        size_bytes, page_count, word_count, metadata, indexed_at, updated_at
+                 FROM documents WHERE id=?1"
+            ).map_err(sql_err)?;
+            let mut rows = stmt.query_map(rusqlite::params![did], map_document_row).map_err(sql_err)?;
+            if let Some(r) = rows.next() {
+                Ok(Some(r.map_err(sql_err)?))
+            } else {
+                Ok(None)
+            }
+        }).await
+    }
+
+    pub async fn document_exists_by_path(&self, path: &str) -> AppResult<Option<String>> {
+        let conn = self.conn.clone();
+        let p = path.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let mut stmt = c.prepare("SELECT id FROM documents WHERE file_path=?1 LIMIT 1")
+                .map_err(sql_err)?;
+            let mut rows = stmt.query_map(rusqlite::params![p], |row| row.get::<_, String>(0))
+                .map_err(sql_err)?;
+            if let Some(r) = rows.next() {
+                Ok(Some(r.map_err(sql_err)?))
+            } else {
+                Ok(None)
+            }
+        }).await
+    }
+
+    pub async fn search_documents(&self, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
+        let conn = self.conn.clone();
+        let q = query.to_string();
+        let lim = limit;
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let mut stmt = c.prepare(
+                "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
+                        snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
+                        bm25(passages_fts),
+                        p.page_number
+                 FROM passages_fts
+                 JOIN passages p ON p.id = passages_fts.passage_id
+                 JOIN documents d ON d.id = p.document_id
+                 WHERE passages_fts MATCH ?1
+                 ORDER BY bm25(passages_fts)
+                 LIMIT ?2"
+            ).map_err(sql_err)?;
+            let rows = stmt.query_map(
+                rusqlite::params![q, lim as i64],
+                |row| {
+                    Ok(SearchHit {
+                        document_id: row.get(0)?,
+                        passage_id: row.get(1)?,
+                        document_title: row.get(2)?,
+                        file_type: row.get(3)?,
+                        source: row.get(4)?,
+                        file_path: row.get(5)?,
+                        snippet: row.get(6)?,
+                        rank: row.get(7)?,
+                        page_number: row.get(8)?,
+                    })
+                }
+            ).map_err(sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(sql_err)?);
+            }
+            Ok(out)
+        }).await
+    }
+
+    pub async fn count_documents(&self) -> AppResult<i64> {
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
+                .map_err(sql_err)
+        }).await
+    }
+
+    pub async fn upsert_connector(&self, rec: ConnectorRecord) -> AppResult<()> {
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute(
+                "INSERT INTO connectors (id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, enabled=excluded.enabled,
+                   auth_kind=excluded.auth_kind, has_token=excluded.has_token,
+                   token_expires_at=excluded.token_expires_at,
+                   error=excluded.error, updated_at=excluded.updated_at",
+                rusqlite::params![
+                    rec.id, rec.name, rec.enabled as i64, rec.auth_kind,
+                    rec.has_token as i64, rec.token_expires_at, rec.error, rec.updated_at
+                ],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn list_connectors(&self) -> AppResult<Vec<ConnectorRecord>> {
+        let conn = self.conn.clone();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            let mut stmt = c.prepare(
+                "SELECT id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at
+                 FROM connectors ORDER BY id"
+            ).map_err(sql_err)?;
+            let rows = stmt.query_map([], |row| {
+                Ok(ConnectorRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    enabled: row.get::<_, i64>(2)? != 0,
+                    auth_kind: row.get(3)?,
+                    has_token: row.get::<_, i64>(4)? != 0,
+                    token_expires_at: row.get(5)?,
+                    error: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            }).map_err(sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(sql_err)?);
+            }
+            Ok(out)
+        }).await
+    }
+
+    pub async fn set_connector_enabled(&self, id: &str, enabled: bool) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let cid = id.to_string();
+        let ts = now_millis();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute(
+                "UPDATE connectors SET enabled=?1, updated_at=?2 WHERE id=?3",
+                rusqlite::params![enabled as i64, ts, cid],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn set_connector_token_state(
+        &self,
+        id: &str,
+        has_token: bool,
+        expires_at: Option<i64>,
+        error: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let cid = id.to_string();
+        let ts = now_millis();
+        let err = error.map(|s| s.to_string());
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute(
+                "UPDATE connectors SET has_token=?1, token_expires_at=?2, error=?3, updated_at=?4 WHERE id=?5",
+                rusqlite::params![has_token as i64, expires_at, err, ts, cid],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn clear_all_connector_tokens(&self) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let ts = now_millis();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.execute(
+                "UPDATE connectors SET enabled=0, has_token=0, token_expires_at=NULL, error=NULL, updated_at=?1",
+                rusqlite::params![ts],
+            ).map_err(sql_err)?;
+            Ok(())
+        }).await
+    }
+}
+
+fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
+    let meta_str: String = row.get(9)?;
+    let metadata = serde_json::from_str(&meta_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    Ok(DocumentRecord {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        file_path: row.get(2)?,
+        source: row.get(3)?,
+        source_id: row.get(4)?,
+        file_type: row.get(5)?,
+        size_bytes: row.get(6)?,
+        page_count: row.get(7)?,
+        word_count: row.get(8)?,
+        metadata,
+        indexed_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
 }

@@ -75,12 +75,14 @@ pub fn build_agent(
     memory: impl ConversationMemory + 'static,
     data_dir: &Path,
     workspace: Option<&Path>,
+    enabled_connectors: &[String],
 ) -> ChatAgent {
-    let preamble = build_preamble(data_dir, workspace);
+    let preamble = build_preamble(data_dir, workspace, enabled_connectors);
     let mut builder = client
         .agent(model.target_model_id())
         .preamble(&preamble)
         .default_max_turns(config::DEFAULT_MAX_TURNS)
+        .tool(ctx.list_dir())
         .tool(ctx.read_file())
         .tool(ctx.read_skill())
         .tool(ctx.write_file())
@@ -90,25 +92,81 @@ pub fn build_agent(
         .tool(ctx.run_command())
         .tool(ctx.get_command_status())
         .tool(ctx.stop_command())
-        .memory(memory);
+        .tool(ctx.search_documents())
+        .tool(ctx.list_documents())
+        .tool(ctx.ingest_document_tool());
+
+    for conn_id in enabled_connectors {
+        match conn_id.as_str() {
+            "google_drive" => {
+                builder = builder
+                    .tool(ctx.google_drive_list())
+                    .tool(ctx.google_drive_read())
+                    .tool(ctx.google_drive_search());
+            }
+            "gmail" => {
+                builder = builder
+                    .tool(ctx.gmail_list())
+                    .tool(ctx.gmail_read())
+                    .tool(ctx.gmail_search());
+            }
+            "github" => {
+                builder = builder
+                    .tool(ctx.github_list())
+                    .tool(ctx.github_read())
+                    .tool(ctx.github_search());
+            }
+            "notion" => {
+                builder = builder
+                    .tool(ctx.notion_list())
+                    .tool(ctx.notion_read())
+                    .tool(ctx.notion_search());
+            }
+            "slack" => {
+                builder = builder
+                    .tool(ctx.slack_list())
+                    .tool(ctx.slack_read())
+                    .tool(ctx.slack_search());
+            }
+            "jira" => {
+                builder = builder
+                    .tool(ctx.jira_list())
+                    .tool(ctx.jira_get())
+                    .tool(ctx.jira_search());
+            }
+            _ => {}
+        }
+    }
+
+    builder = builder.memory(memory);
 
     if model.max_tokens > 0 {
         builder = builder.max_tokens(model.max_tokens);
     }
 
-    if let Some(effort) = model.reasoning_effort.as_deref() {
-        builder = builder.additional_params(serde_json::json!({ "reasoning_effort": effort }));
-    }
-
     builder.build()
 }
 
-fn build_preamble(data_dir: &Path, workspace: Option<&Path>) -> String {
+fn build_preamble(data_dir: &Path, workspace: Option<&Path>, enabled_connectors: &[String]) -> String {
     let workspace_line = match workspace {
         Some(p) => format!("Active Workspace: {}", p.display()),
         None => "No workspace is open. Ask the user to open a folder before making file changes."
             .to_string(),
     };
+
+    let mut connector_section = String::new();
+    if !enabled_connectors.is_empty() {
+        connector_section.push_str("\n## CONNECTED KNOWLEDGE SOURCES\n");
+        connector_section.push_str("The following external knowledge sources are connected and their tools are available:\n");
+        for id in enabled_connectors {
+            if let Some(def) = crate::connectors::find_def(id) {
+                connector_section.push_str(&format!("- **{}**: {}\n", def.name, def.description));
+            }
+        }
+        connector_section.push_str("\nUse the appropriate connector tools to search and read content from these sources when the user asks about documents, files, messages, or issues from these systems.\n");
+    }
+    connector_section.push_str("\n## KNOWLEDGE LIBRARY\n");
+    connector_section.push_str("You have access to a local knowledge library via `search_documents`, `list_documents`, and `ingest_document` tools. When the user asks to find documents, search reports, or query company knowledge, use `search_documents` first before asking the user to provide files.\n");
 
     let all_skills = crate::skills::load_all_skills(data_dir);
     let mut skills_section = String::new();
@@ -132,6 +190,7 @@ you think, call a tool, receive the result, and continue until the task is compl
 Never stop at just planning — act.
 
 {workspace_line}
+{connector_section}
 {skills_section}
 ## HOW YOUR LOOP WORKS
 
@@ -392,7 +451,6 @@ pub async fn run_chat(
     }
 
     close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-    let _ = channel.send(ChatEvent::Done);
 
     RunResult {
         usage,

@@ -7,13 +7,17 @@ import {
   VscScreenNormal,
   VscTerminal,
 } from "react-icons/vsc";
-import { activeTabId, useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
+import { activeTabId, useArtifactsStore, type ArtifactKind, type ArtifactTab } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
 import { getBasename } from "../lib/api";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { FileViewer } from "./FileViewer";
 import { TerminalView } from "./TerminalView";
+import { PdfViewer } from "./viewers/PdfViewer";
+import { DocxViewer } from "./viewers/DocxViewer";
+import { XlsxViewer } from "./viewers/XlsxViewer";
+import { PptxViewer } from "./viewers/PptxViewer";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import {
@@ -23,11 +27,24 @@ import {
   DropdownMenuTrigger,
 } from "./ui/DropdownMenu";
 
-const KIND_ICON: Record<ArtifactKind, React.ComponentType<{ className?: string }>> = {
-  file: VscFile,
-  browser: ChromeIcon,
-  terminal: VscTerminal,
-};
+function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
+  if (tab.kind === "browser") {
+    return <ChromeIcon className="ArtifactTab-icon" />;
+  }
+  if (tab.kind === "terminal") {
+    return <VscTerminal className="ArtifactTab-icon" />;
+  }
+  const name = tab.path ? getBasename(tab.path) : `${tabName}.${tab.kind}`;
+  return (
+    <ExplorerIcon
+      type="file"
+      name={name}
+      className="ArtifactTab-icon"
+      width={14}
+      height={14}
+    />
+  );
+}
 
 const EMPTY_CARDS: {
   kind: ArtifactKind;
@@ -41,6 +58,7 @@ const EMPTY_CARDS: {
 
 function useAutoOpenWrittenFiles() {
   const openFile = useArtifactsStore((s) => s.openFile);
+  const openDocument = useArtifactsStore((s) => s.openDocument);
   const bumpFile = useArtifactsStore((s) => s.bumpFile);
   const messages = useChatStore((s) => s.messages);
   const generation = useChatStore((s) => s.sessionGeneration);
@@ -68,11 +86,19 @@ function useAutoOpenWrittenFiles() {
         const path = item.displayInfo.fullPath;
         if (!path || opened.current.has(item.id)) continue;
         opened.current.add(item.id);
-        openFile(path);
-        bumpFile(path);
+
+        const ext = path.split(".").pop()?.toLowerCase() ?? "";
+        if (ext === "pdf") openDocument(path, "pdf");
+        else if (ext === "docx") openDocument(path, "docx");
+        else if (ext === "xlsx") openDocument(path, "xlsx");
+        else if (ext === "pptx") openDocument(path, "pptx");
+        else {
+          openFile(path);
+          bumpFile(path);
+        }
       }
     }
-  }, [messages, generation, openFile, bumpFile]);
+  }, [messages, generation, openFile, openDocument, bumpFile]);
 }
 
 function ArtifactPanelHeader() {
@@ -86,13 +112,10 @@ function ArtifactPanelHeader() {
   const setActive = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
 
-
   return (
     <div className="ArtifactPanel-header">
-      {/* Tabs */}
       <div className="ArtifactTabs">
         {tabs.map((tab) => {
-          const Icon = KIND_ICON[tab.kind];
           const tabName =
             tab.kind === "file"
               ? tab.path
@@ -100,7 +123,9 @@ function ArtifactPanelHeader() {
                 : "Untitled file"
               : tab.kind === "browser"
                 ? "Browser"
-                : "Terminal";
+                : tab.kind === "terminal"
+                  ? "Terminal"
+                  : tab.label ?? (tab.path ? getBasename(tab.path) : tab.kind.toUpperCase());
           return (
             <div
               key={tab.id}
@@ -119,17 +144,7 @@ function ArtifactPanelHeader() {
                   }}
                 >
                   <span className="ArtifactTab-iconMain">
-                    {tab.kind === "file" && tab.path ? (
-                      <ExplorerIcon
-                        type="file"
-                        name={tabName}
-                        className="ArtifactTab-icon"
-                        width={14}
-                        height={14}
-                      />
-                    ) : (
-                      <Icon className="ArtifactTab-icon" />
-                    )}
+                    <ArtifactTabIcon tab={tab} tabName={tabName} />
                   </span>
                   <span className="ArtifactTab-iconClose" aria-hidden="true">
                     <VscClose />
@@ -142,7 +157,6 @@ function ArtifactPanelHeader() {
         })}
       </div>
 
-      {/* Right actions */}
       <div className="ArtifactPanel-actions">
         <DropdownMenu>
           <Tooltip content="New tab" side="bottom">
@@ -224,6 +238,12 @@ export function ArtifactPanel() {
                 {tab.kind === "browser" && (
                   <BrowserView initialUrl={tab.url} active={isTabActive} />
                 )}
+                {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
+                {tab.kind === "docx" && tab.path && (
+                  <DocxViewer path={tab.path} documentId={tab.documentId} />
+                )}
+                {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
+                {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
               </div>
             );
           })

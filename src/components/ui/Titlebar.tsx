@@ -149,7 +149,6 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
     <div className={cn("Titlebar", IS_MAC && "Titlebar-mac", className)} data-tauri-drag-region>
       {IS_MAC && <WindowControls />}
 
-      {/* Left controls — sidebar toggle + session title */}
       <div className="Titlebar-left">
         {onToggleSidebar && (
           <Tooltip content={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
@@ -175,7 +174,6 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
         )}
       </div>
 
-      {/* Drag region filler */}
       <div className="Titlebar-drag" data-tauri-drag-region />
 
       <div className="Titlebar-right">

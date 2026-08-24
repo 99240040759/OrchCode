@@ -177,3 +177,133 @@ pub async fn read_image_data_url(
     let b64 = base64::engine::general_purpose::STANDARD.encode(&final_bytes);
     Ok(format!("data:{mime};base64,{b64}"))
 }
+
+fn resolve_any_path(state: &AppState, raw_path: &str) -> std::path::PathBuf {
+    let p = std::path::PathBuf::from(raw_path);
+    if p.exists() {
+        return p;
+    }
+    if let Some(ws) = state.workspace() {
+        if let Ok(resolved) = fs_util::resolve_in_workspace(&ws, raw_path) {
+            if resolved.exists() {
+                return resolved;
+            }
+        }
+    }
+    p
+}
+
+#[tauri::command]
+pub async fn read_binary_file_as_data_url(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let p = resolve_any_path(&state, &path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+
+    let ext = p
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    let mime = match ext.as_str() {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" | "md" | "csv" => "text/plain",
+        _ => "application/octet-stream",
+    };
+
+    let bytes =
+        tokio::fs::read(&p).await.map_err(|e| format!("Failed to read {path}: {e}"))?;
+
+    const MAX_SIZE: usize = 50 * 1024 * 1024;
+    if bytes.len() > MAX_SIZE {
+        return Err(format!(
+            "File too large ({} MB). Maximum is 50 MB.",
+            bytes.len() / 1_048_576
+        ));
+    }
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+#[derive(serde::Serialize)]
+pub struct DocumentFileMeta {
+    pub name: String,
+    pub size_bytes: u64,
+    pub extension: String,
+    pub mime: String,
+    pub modified: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn read_document_metadata(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<DocumentFileMeta, String> {
+    let p = resolve_any_path(&state, &path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+
+    let meta = tokio::fs::metadata(&p)
+        .await
+        .map_err(|e| format!("Metadata error: {e}"))?;
+
+    let ext = p
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    let name = p
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&path)
+        .to_string();
+
+    let mime = match ext.as_str() {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    };
+
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+
+    Ok(DocumentFileMeta {
+        name,
+        size_bytes: meta.len(),
+        extension: ext,
+        mime: mime.to_string(),
+        modified,
+    })
+}
+
+#[tauri::command]
+pub async fn read_parsed_document(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<crate::document::ParsedDocumentDto, String> {
+    let p = resolve_any_path(&state, &path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    crate::document::parse_document_file(&p).map_err(|e| e.to_string())
+}

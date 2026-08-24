@@ -24,11 +24,10 @@ export function MessageList() {
   }, []);
 
   useEffect(() => {
-    // Initial scroll to bottom on mount if we have messages
     if (messages.length > 0) {
       scrollToBottom();
     }
-  }, []); // Only on mount
+  }, []);
 
   return (
     <div className="MessageListWrap">
@@ -42,7 +41,6 @@ export function MessageList() {
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          {/* CSS Scroll Anchor */}
           <div 
             ref={bottomRef} 
             className="MessageList-bottomSpacer" 

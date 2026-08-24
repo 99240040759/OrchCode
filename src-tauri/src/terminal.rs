@@ -31,6 +31,7 @@ pub fn open(
     cols: u16,
     rows: u16,
     channel: Channel<TerminalEvent>,
+    on_exit: Box<dyn FnOnce() + Send + 'static>,
 ) -> AppResult<TerminalSession> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -67,6 +68,7 @@ pub fn open(
                 }
             }
             let _ = channel.send(TerminalEvent::Exit);
+            on_exit();
         });
     }
 

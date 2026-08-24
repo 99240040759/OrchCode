@@ -231,9 +231,14 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       setError(null);
       return;
     }
+    const ext = path.split(".").pop()?.toLowerCase();
+    if (ext === "pdf" || ext === "docx" || ext === "doc" || ext === "xlsx" || ext === "xls" || ext === "pptx" || ext === "ppt") {
+      setTabPath(tabId, path);
+      return;
+    }
     setMode("preview");
     void load(path);
-  }, [path, version, load]);
+  }, [path, tabId, setTabPath, version, load]);
 
   if (!path) {
     return (
