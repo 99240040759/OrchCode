@@ -882,7 +882,7 @@ svg {
 }
 
 .MessageList-bottomSpacer {
-  height: 20px;
+  height: 100px;
   flex-shrink: 0;
   width: 100%;
 }
@@ -938,9 +938,9 @@ svg {
 .Msg-user .Msg-bubble {
   max-width: 85%;
   padding: 10px 14px;
-  border-radius: 14px 14px 4px 14px;
-  background: rgba(204,204,204,.13);
-  border: 1px solid rgba(204,204,204,.2);
+  border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg);
+  background: var(--bg-active);
+  border: 1px solid var(--border-strong);
   color: var(--text-hi);
   font-size: 14px;
   line-height: 1.55;
@@ -1045,17 +1045,6 @@ svg {
 .Reasoning-toggle:hover { color: var(--text-hi); }
 
 .Reasoning-label { font-size: 12px; }
-
-.Reasoning-spinner {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,.15);
-  border-top-color: var(--c-primary);
-  animation: spin .8s linear infinite;
-  will-change: transform;
-  margin-left: 2px;
-}
 
 .Reasoning-chevron {
   width: 13px;
@@ -1907,11 +1896,6 @@ svg {
   width: 100%;
   min-height: 0;
   overflow: hidden;
-}
-
-.ArtifactTabPanel[data-hidden='true'] {
-  visibility: hidden;
-  pointer-events: none;
 }
 
 .FileViewerFull {

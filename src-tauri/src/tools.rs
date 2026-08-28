@@ -120,6 +120,15 @@ pub mod fs_util {
         Ok(cleaned)
     }
 
+    pub fn resolve_existing_file(root: &Path, input: &str) -> AppResult<PathBuf> {
+        let resolved = resolve_in_workspace(root, input)?;
+        let metadata = std::fs::metadata(&resolved)?;
+        if !metadata.is_file() {
+            return Err(AppError::Other(format!("not a file: {input}")));
+        }
+        Ok(resolved)
+    }
+
     pub fn check_file_size(path: &Path) -> AppResult<u64> {
         let meta = std::fs::metadata(path)?;
         let size = meta.len();
@@ -288,7 +297,7 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
         },
 
         "list_dir" => ToolDisplayInfo {
-            label: "Listed Dir".to_string(),
+            label: "Listed".to_string(),
             target_text: str_arg(&args, "path"),
             full_path: str_arg(&args, "path"),
             icon: ToolIcon::Folder,

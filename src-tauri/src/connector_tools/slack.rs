@@ -1,9 +1,10 @@
+use super::request_json;
+
 use std::sync::Arc;
 
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::connectors::ConnectorManager;
 use crate::persistence::SqliteMemory;
@@ -42,17 +43,11 @@ impl Tool for SlackListChannels {
             "{SLACK_API}/conversations.list?limit={limit}&exclude_archived=true&types=public_channel,private_channel"
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Slack",
+        )
+        .await?;
 
         if !json["ok"].as_bool().unwrap_or(false) {
             let err = json["error"].as_str().unwrap_or("unknown error");
@@ -123,17 +118,11 @@ impl Tool for SlackReadMessages {
             url.push_str(&format!("&oldest={oldest}"));
         }
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Slack",
+        )
+        .await?;
 
         if !json["ok"].as_bool().unwrap_or(false) {
             let err = json["error"].as_str().unwrap_or("unknown");
@@ -190,17 +179,11 @@ impl Tool for SlackSearchMessages {
             urlencoding::encode(&args.query)
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Slack",
+        )
+        .await?;
 
         if !json["ok"].as_bool().unwrap_or(false) {
             let err = json["error"].as_str().unwrap_or("unknown");

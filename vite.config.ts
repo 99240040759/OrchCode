@@ -1,21 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 declare const process: { env: Record<string, string | undefined> };
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react()],
-
-  resolve: {
-    alias: {
-      "~monaco-editor": path.resolve(__dirname, "node_modules/monaco-editor"),
-    },
-  },
 
   worker: {
     format: "es",

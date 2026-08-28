@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
 import {
   VscAdd,
   VscArrowUp,
@@ -15,7 +14,7 @@ import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
 import { useChatStore } from "../lib/store";
 import { useArtifactsStore } from "../lib/artifacts";
-import { getBasename, getDirname, isImagePath } from "../lib/api";
+import { getBasename, getDirname, IMAGE_EXTENSIONS, isImagePath } from "../lib/api";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { AttachmentCard, ExplorerIcon } from "./ChatPrimitives";
@@ -57,13 +56,10 @@ function createMentionNode(path: string): { node: HTMLSpanElement; space: Text }
   container.setAttribute("data-path", path);
   container.title = path;
 
-  const root = createRoot(container);
-  root.render(
-    <>
-      <ExplorerIcon type="file" name={filename} width={14} height={14} className="FileTag-icon" />
-      <span className="FileTag-name">{filename}</span>
-    </>
-  );
+  const name = document.createElement("span");
+  name.className = "FileTag-name";
+  name.textContent = filename;
+  container.append(name);
 
   const space = document.createTextNode("\u00A0");
   return { node: container, space };
@@ -170,7 +166,6 @@ export function InputBar() {
   const [highlighted, setHighlighted] = useState(0);
 
   const editorRef = useRef<HTMLDivElement>(null);
-  const dictationBase = useRef("");
 
   const maxContext = selectedModel?.contextWindow ?? 0;
   const fillPct =
@@ -412,7 +407,6 @@ export function InputBar() {
       }
       return;
     }
-    dictationBase.current = value ? `${value.trimEnd()} ` : "";
     setRecording(true);
     setNotice(null);
     try {
@@ -431,7 +425,7 @@ export function InputBar() {
       setRecording(false);
       setNotice(api.errorMessage(e));
     }
-  }, [recording, value, syncEditor]);
+  }, [recording, syncEditor]);
 
   const pickFiles = useCallback(
     async (imagesOnly: boolean) => {
@@ -439,7 +433,7 @@ export function InputBar() {
       const selected = await open({
         multiple: true,
         filters: imagesOnly
-          ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"] }]
+          ? [{ name: "Images", extensions: [...IMAGE_EXTENSIONS] }]
           : undefined,
       });
       if (!selected) return;

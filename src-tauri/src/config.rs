@@ -16,7 +16,7 @@ pub fn sentry_dsn() -> &'static str {
 
 pub fn inference_base_url(provider: &str) -> String {
     let clean_provider = if provider.trim().is_empty() {
-        "opencode"
+        "nvidia"
     } else {
         provider.trim()
     };

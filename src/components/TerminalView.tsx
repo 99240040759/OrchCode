@@ -11,6 +11,7 @@ export function TerminalView({ id }: { id: string }) {
     const container = containerRef.current;
     if (!container) return;
 
+    const sessionId = `${id}:${api.newId()}`;
     let disposed = false;
 
     const term = new XTerm({
@@ -55,25 +56,28 @@ export function TerminalView({ id }: { id: string }) {
 
     let opened = false;
     api
-      .terminalOpen(id, term.cols, term.rows, (event) => {
+      .terminalOpen(sessionId, term.cols, term.rows, (event) => {
         if (disposed) return;
         if (event.type === "data") term.write(event.data);
         else term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
       })
       .then(() => {
         opened = true;
+        if (disposed) {
+          void api.terminalClose(sessionId).catch(() => undefined);
+        }
       })
       .catch((e) => {
         term.write(`\r\n\x1b[31m${api.errorMessage(e)}\x1b[0m\r\n`);
       });
 
     const dataSubscription = term.onData((data) => {
-      void api.terminalWrite(id, data).catch(() => undefined);
+      void api.terminalWrite(sessionId, data).catch(() => undefined);
     });
 
     const observer = new ResizeObserver(() => {
       if (disposed || !safeFit()) return;
-      void api.terminalResize(id, term.cols, term.rows).catch(() => undefined);
+      void api.terminalResize(sessionId, term.cols, term.rows).catch(() => undefined);
     });
     observer.observe(container);
 
@@ -81,8 +85,8 @@ export function TerminalView({ id }: { id: string }) {
       disposed = true;
       dataSubscription.dispose();
       observer.disconnect();
-      if (opened) void api.terminalClose(id).catch(() => undefined);
-      term.dispose();
+      if (opened) void api.terminalClose(sessionId).catch(() => undefined);
+      window.setTimeout(() => term.dispose(), 0);
     };
   }, [id]);
 

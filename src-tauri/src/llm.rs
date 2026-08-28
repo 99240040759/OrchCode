@@ -267,19 +267,13 @@ Never tell the user a task is done based on reasoning alone. Show the evidence."
     )
 }
 
-pub struct TurnOutcome {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
-}
-
 pub struct RunResult {
-    pub usage: Option<TurnOutcome>,
     pub reasoning_durations: Vec<u64>,
     pub completed: bool,
     pub cumulative_input_tokens: u64,
     pub cumulative_output_tokens: u64,
     pub cumulative_total_tokens: u64,
+    pub last_turn_input_tokens: u64,
 }
 
 pub struct RunRequest {
@@ -288,6 +282,9 @@ pub struct RunRequest {
     pub attachments: Vec<AttachmentRef>,
     pub supports_images: bool,
     pub workspace: Option<PathBuf>,
+    pub prior_input_tokens: u64,
+    pub prior_output_tokens: u64,
+    pub prior_total_tokens: u64,
 }
 
 pub async fn run_chat(
@@ -314,10 +311,10 @@ pub async fn run_chat(
 
     let mut reasoning_started: Option<Instant> = None;
     let mut reasoning_durations: Vec<u64> = Vec::new();
-    let mut usage: Option<TurnOutcome> = None;
-    let mut cumulative_input: u64 = 0;
-    let mut cumulative_output: u64 = 0;
-    let mut cumulative_total: u64 = 0;
+    let mut cumulative_input: u64 = request.prior_input_tokens;
+    let mut cumulative_output: u64 = request.prior_output_tokens;
+    let mut cumulative_total: u64 = request.prior_total_tokens;
+    let mut last_turn_input: u64 = 0;
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let mut deadline = tokio::time::Instant::now() + chunk_timeout;
 
@@ -328,12 +325,12 @@ pub async fn run_chat(
                 close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
                 let _ = channel.send(ChatEvent::Cancelled);
                 return RunResult {
-                    usage,
                     reasoning_durations,
                     completed: false,
                     cumulative_input_tokens: cumulative_input,
                     cumulative_output_tokens: cumulative_output,
                     cumulative_total_tokens: cumulative_total,
+                    last_turn_input_tokens: last_turn_input,
                 };
             }
             _ = tokio::time::sleep_until(deadline) => {
@@ -342,12 +339,12 @@ pub async fn run_chat(
                     message: "stream timed out: no data received from the model for 120 s".to_string(),
                 });
                 return RunResult {
-                    usage,
                     reasoning_durations,
                     completed: false,
                     cumulative_input_tokens: cumulative_input,
                     cumulative_output_tokens: cumulative_output,
                     cumulative_total_tokens: cumulative_total,
+                    last_turn_input_tokens: last_turn_input,
                 };
             }
             next = stream.next() => match next {
@@ -419,15 +416,11 @@ pub async fn run_chat(
             Ok(MultiTurnStreamItem::FinalResponse(res)) => {
                 close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
                 let turn = res.usage();
+                last_turn_input = turn.input_tokens;
                 cumulative_input += turn.input_tokens;
                 cumulative_output += turn.output_tokens;
                 cumulative_total += turn.total_tokens;
                 let _ = channel.send(ChatEvent::Usage {
-                    input_tokens: cumulative_input,
-                    output_tokens: cumulative_output,
-                    total_tokens: cumulative_total,
-                });
-                usage = Some(TurnOutcome {
                     input_tokens: cumulative_input,
                     output_tokens: cumulative_output,
                     total_tokens: cumulative_total,
@@ -439,12 +432,12 @@ pub async fn run_chat(
                 let message = humanize_llm_error(&e.to_string());
                 let _ = channel.send(ChatEvent::Error { message });
                 return RunResult {
-                    usage,
                     reasoning_durations,
                     completed: false,
                     cumulative_input_tokens: cumulative_input,
                     cumulative_output_tokens: cumulative_output,
                     cumulative_total_tokens: cumulative_total,
+                    last_turn_input_tokens: last_turn_input,
                 };
             }
         }
@@ -453,12 +446,12 @@ pub async fn run_chat(
     close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
 
     RunResult {
-        usage,
         reasoning_durations,
         completed: true,
         cumulative_input_tokens: cumulative_input,
         cumulative_output_tokens: cumulative_output,
         cumulative_total_tokens: cumulative_total,
+        last_turn_input_tokens: last_turn_input,
     }
 }
 
@@ -473,12 +466,13 @@ fn close_reasoning(
     let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
 }
 
-fn image_media_type(ext: &str) -> ImageMediaType {
+fn image_media_type(ext: &str) -> Option<ImageMediaType> {
     match ext {
-        "jpg" | "jpeg" => ImageMediaType::JPEG,
-        "webp" => ImageMediaType::WEBP,
-        "gif" => ImageMediaType::GIF,
-        _ => ImageMediaType::PNG,
+        "png" => Some(ImageMediaType::PNG),
+        "jpg" | "jpeg" => Some(ImageMediaType::JPEG),
+        "webp" => Some(ImageMediaType::WEBP),
+        "gif" => Some(ImageMediaType::GIF),
+        _ => None,
     }
 }
 
@@ -515,20 +509,24 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<PathBu
     let Some(ws) = workspace else {
         return Vec::new();
     };
-    let Ok(re) = regex::Regex::new(r"(?:@|@\[)([^\s\]]+)\]?") else {
+    let Ok(re) = regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\]|@(?P<plain>[^\s@]+)") else {
         return Vec::new();
     };
 
     let mut out = Vec::new();
     for cap in re.captures_iter(prompt) {
-        let candidate = cap[1].trim();
+        let Some(candidate) = cap
+            .name("bracket")
+            .or_else(|| cap.name("plain"))
+            .map(|value| value.as_str().trim())
+        else {
+            continue;
+        };
         if candidate.is_empty() {
             continue;
         }
-        if let Ok(resolved) = crate::tools::fs_util::resolve_in_workspace(ws, candidate) {
-            if resolved.is_file() {
-                out.push(resolved);
-            }
+        if let Ok(resolved) = crate::tools::fs_util::resolve_existing_file(ws, candidate) {
+            out.push(resolved);
         }
     }
     out
@@ -550,54 +548,51 @@ async fn build_user_message(
         parts.push(UserContent::text(prompt.to_string()));
     }
 
-    let declared: Vec<(PathBuf, String, bool)> = attachments
-        .iter()
-        .map(|a| (PathBuf::from(&a.path), a.name.clone(), a.is_image))
-        .collect();
-    let mentioned: Vec<(PathBuf, String, bool)> = collect_mentioned_paths(workspace, prompt)
+    let mut declared: Vec<(PathBuf, String)> = Vec::new();
+    for attachment in attachments {
+        let Some(ws) = workspace else {
+            notes.push(format!("workspace required for attachment: {}", attachment.name));
+            continue;
+        };
+        match crate::tools::fs_util::resolve_existing_file(ws, &attachment.path) {
+            Ok(path) => declared.push((path, attachment.name.clone())),
+            Err(_) => notes.push(format!("attachment not found in workspace: {}", attachment.name)),
+        }
+    }
+    let mentioned: Vec<(PathBuf, String)> = collect_mentioned_paths(workspace, prompt)
         .into_iter()
         .map(|p| {
             let name = p
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            (p, name, false)
+            (p, name)
         })
         .collect();
 
-    let canonical_ws = workspace.and_then(|ws| dunce::canonicalize(ws).ok());
-
-    for (path, display_name, declared_image) in declared.into_iter().chain(mentioned) {
-        let canonical = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    for (path, display_name) in declared.into_iter().chain(mentioned) {
+        let canonical = dunce::canonicalize(&path)
+            .map_err(|e| format!("cannot resolve attachment {display_name}: {e}"));
+        let canonical = match canonical {
+            Ok(path) => path,
+            Err(message) => {
+                notes.push(message);
+                continue;
+            }
+        };
         if !seen.insert(canonical.clone()) {
             continue;
         }
 
-        if let Some(ref cws) = canonical_ws {
-            if !canonical.starts_with(cws) {
-                notes.push(format!("attachment escapes workspace: {display_name}"));
-                continue;
-            }
-        }
-
-        if !path.is_file() {
-            notes.push(format!("attached file not found: {display_name}"));
-            continue;
-        }
-
-        let ext = path
+        let ext = canonical
             .extension()
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
-        let label = display_label(&path, workspace);
-        let is_image = (declared_image && ext != "svg")
-            || matches!(
-                ext.as_str(),
-                "png" | "jpg" | "jpeg" | "webp" | "gif"
-            );
+        let label = display_label(&canonical, workspace);
+        let is_image = image_media_type(&ext).is_some();
 
-        let size = match tokio::fs::metadata(&path).await {
+        let size = match tokio::fs::metadata(&canonical).await {
             Ok(m) => m.len() as usize,
             Err(e) => {
                 notes.push(format!("cannot read attachment {label}: {e}"));
@@ -606,7 +601,7 @@ async fn build_user_message(
         };
 
         if ext == "pdf" {
-            match extract_pdf_text(&path) {
+            match extract_pdf_text(&canonical) {
                 Some(text) => {
                     parts.push(UserContent::text(format!("{PDF_PART_PREFIX}{label}>\n{text}")))
                 }
@@ -627,20 +622,22 @@ async fn build_user_message(
                 ));
                 continue;
             }
-            match tokio::fs::read(&path).await {
+            match tokio::fs::read(&canonical).await {
                 Ok(bytes) => {
                     let b64 = base64::Engine::encode(
                         &base64::engine::general_purpose::STANDARD,
                         &bytes,
                     );
-                    images.push((b64, image_media_type(&ext)));
+                    if let Some(media) = image_media_type(&ext) {
+                        images.push((b64, media));
+                    }
                 }
                 Err(e) => notes.push(format!("cannot read image {label}: {e}")),
             }
             continue;
         }
 
-        match tokio::fs::read_to_string(&path).await {
+        match tokio::fs::read_to_string(&canonical).await {
             Ok(content) => parts.push(UserContent::text(format!(
                 "{FILE_PART_PREFIX}{label}>\n{content}"
             ))),
@@ -700,13 +697,13 @@ pub async fn maybe_compact(
     client: &ChatClient,
     model_info: &ModelInfo,
     session_id: &str,
-    total_tokens: u64,
+    input_tokens: u64,
 ) -> AppResult<Option<CompactionOutcome>> {
     if model_info.context_window == 0 {
         return Ok(None);
     }
 
-    let ratio = total_tokens as f64 / model_info.context_window as f64;
+    let ratio = input_tokens as f64 / model_info.context_window as f64;
     if ratio < config::COMPACTION_THRESHOLD_RATIO {
         return Ok(None);
     }

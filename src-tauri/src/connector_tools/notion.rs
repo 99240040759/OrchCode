@@ -1,3 +1,5 @@
+use super::{request_json, truncate_text};
+
 use std::sync::Arc;
 
 use rig::tool::Tool;
@@ -41,7 +43,7 @@ impl Tool for NotionListPages {
 
         let limit = args.max_results.unwrap_or(20).min(50);
 
-        let json: Value = if let Some(db_id) = args.database_id {
+        let request = if let Some(db_id) = args.database_id {
             let url = format!("{NOTION_API}/databases/{db_id}/query");
             let body = serde_json::json!({ "page_size": limit });
             self.manager
@@ -50,12 +52,6 @@ impl Tool for NotionListPages {
                 .bearer_auth(&token)
                 .header("Notion-Version", NOTION_VERSION)
                 .json(&body)
-                .send()
-                .await
-                .map_err(|e| ToolError::msg(e.to_string()))?
-                .json()
-                .await
-                .map_err(|e| ToolError::msg(e.to_string()))?
         } else {
             let url = format!("{NOTION_API}/search");
             let body = serde_json::json!({
@@ -69,13 +65,8 @@ impl Tool for NotionListPages {
                 .bearer_auth(&token)
                 .header("Notion-Version", NOTION_VERSION)
                 .json(&body)
-                .send()
-                .await
-                .map_err(|e| ToolError::msg(e.to_string()))?
-                .json()
-                .await
-                .map_err(|e| ToolError::msg(e.to_string()))?
         };
+        let json = request_json(request, "Notion").await?;
 
         let results = json["results"].as_array().cloned().unwrap_or_default();
         if results.is_empty() {
@@ -141,34 +132,28 @@ impl Tool for NotionReadPage {
             .await
             .map_err(|e| ToolError::msg(format!("Notion auth: {e}")))?;
 
-        let meta: Value = self
-            .manager
-            .http()
-            .get(format!("{NOTION_API}/pages/{}", args.page_id))
-            .bearer_auth(&token)
-            .header("Notion-Version", NOTION_VERSION)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let meta: Value = request_json(
+            self.manager
+                .http()
+                .get(format!("{NOTION_API}/pages/{}", args.page_id))
+                .bearer_auth(&token)
+                .header("Notion-Version", NOTION_VERSION),
+            "Notion",
+        )
+        .await?;
 
         let title = extract_notion_title(&meta);
 
         let blocks_url = format!("{NOTION_API}/blocks/{}/children?page_size=100", args.page_id);
-        let blocks_json: Value = self
-            .manager
-            .http()
-            .get(&blocks_url)
-            .bearer_auth(&token)
-            .header("Notion-Version", NOTION_VERSION)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let blocks_json: Value = request_json(
+            self.manager
+                .http()
+                .get(&blocks_url)
+                .bearer_auth(&token)
+                .header("Notion-Version", NOTION_VERSION),
+            "Notion",
+        )
+        .await?;
 
         let blocks = blocks_json["results"].as_array().cloned().unwrap_or_default();
         let mut content = format!("# {title}\n\n");
@@ -180,12 +165,7 @@ impl Tool for NotionReadPage {
             }
         }
 
-        const MAX_CHARS: usize = 40_000;
-        if content.len() > MAX_CHARS {
-            content.truncate(MAX_CHARS);
-            content.push_str("\n\n[Content truncated]");
-        }
-
+        let content = truncate_text(&content, 40_000, "\n\n[Content truncated]");
         Ok(content)
     }
 }
@@ -254,19 +234,16 @@ impl Tool for NotionSearchPages {
             "page_size": limit
         });
 
-        let json: Value = self
-            .manager
-            .http()
-            .post(format!("{NOTION_API}/search"))
-            .bearer_auth(&token)
-            .header("Notion-Version", NOTION_VERSION)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json: Value = request_json(
+            self.manager
+                .http()
+                .post(format!("{NOTION_API}/search"))
+                .bearer_auth(&token)
+                .header("Notion-Version", NOTION_VERSION)
+                .json(&body),
+            "Notion",
+        )
+        .await?;
 
         let results = json["results"].as_array().cloned().unwrap_or_default();
         if results.is_empty() {

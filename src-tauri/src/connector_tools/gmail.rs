@@ -1,3 +1,5 @@
+use super::{request_json, truncate_text};
+
 use std::sync::Arc;
 
 use rig::tool::Tool;
@@ -44,17 +46,11 @@ impl Tool for GmailListEmails {
             url.push_str(&format!("&q={}", urlencoding::encode(filter)));
         }
 
-        let list_json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let list_json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Gmail",
+        )
+        .await?;
 
         let messages = list_json["messages"].as_array().cloned().unwrap_or_default();
         if messages.is_empty() {
@@ -67,24 +63,24 @@ impl Tool for GmailListEmails {
             let meta_url = format!(
                 "{GMAIL_API}/messages/{id}?format=metadata&metadataHeaders=Subject,From,Date"
             );
-            if let Ok(resp) = self
-                .manager
-                .http()
-                .get(&meta_url)
-                .bearer_auth(&token)
-                .send()
-                .await
+            if let Ok(meta) = request_json(
+                self.manager.http().get(&meta_url).bearer_auth(&token),
+                "Gmail",
+            )
+            .await
             {
-                if let Ok(meta) = resp.json::<Value>().await {
                     let headers = meta["payload"]["headers"].as_array().cloned().unwrap_or_default();
                     let subject = header_value(&headers, "Subject");
                     let from = header_value(&headers, "From");
                     let date = header_value(&headers, "Date");
-                    let snippet = meta["snippet"].as_str().unwrap_or("").chars().take(120).collect::<String>();
+                    let snippet = truncate_text(
+                        meta["snippet"].as_str().unwrap_or(""),
+                        120,
+                        "…",
+                    );
                     out.push_str(&format!(
                         "• ID: {id}\n  Subject: {subject}\n  From: {from}\n  Date: {date}\n  Snippet: {snippet}\n\n"
                     ));
-                }
             }
         }
 
@@ -128,17 +124,11 @@ impl Tool for GmailReadEmail {
             .map_err(|e| ToolError::msg(format!("Gmail auth: {e}")))?;
 
         let url = format!("{GMAIL_API}/messages/{}?format=full", args.message_id);
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Gmail",
+        )
+        .await?;
 
         if let Some(err) = json["error"]["message"].as_str() {
             return Err(ToolError::msg(format!("Gmail error: {err}")));
@@ -159,11 +149,7 @@ impl Tool for GmailReadEmail {
             "Subject: {subject}\nFrom: {from}\nTo: {to}\nDate: {date}\n\n---\n\n{body}"
         );
 
-        const MAX_CHARS: usize = 20_000;
-        if out.len() > MAX_CHARS {
-            out.truncate(MAX_CHARS);
-            out.push_str("\n\n[Truncated]");
-        }
+        let out = truncate_text(&out, 20_000, "\n\n[Truncated]");
 
         Ok(out)
     }

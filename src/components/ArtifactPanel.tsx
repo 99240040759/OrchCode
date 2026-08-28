@@ -9,7 +9,7 @@ import {
 } from "react-icons/vsc";
 import { activeTabId, useArtifactsStore, type ArtifactKind, type ArtifactTab } from "../lib/artifacts";
 import { useChatStore } from "../lib/store";
-import { getBasename } from "../lib/api";
+import { documentArtifactKindForPath, getBasename } from "../lib/api";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { FileViewer } from "./FileViewer";
@@ -87,11 +87,8 @@ function useAutoOpenWrittenFiles() {
         if (!path || opened.current.has(item.id)) continue;
         opened.current.add(item.id);
 
-        const ext = path.split(".").pop()?.toLowerCase() ?? "";
-        if (ext === "pdf") openDocument(path, "pdf");
-        else if (ext === "docx") openDocument(path, "docx");
-        else if (ext === "xlsx") openDocument(path, "xlsx");
-        else if (ext === "pptx") openDocument(path, "pptx");
+        const kind = documentArtifactKindForPath(path);
+        if (kind) openDocument(path, kind);
         else {
           openFile(path);
           bumpFile(path);
@@ -196,6 +193,7 @@ function ArtifactPanelHeader() {
 export function ArtifactPanel() {
   const tabs = useArtifactsStore((s) => s.tabs);
   const active = useArtifactsStore(activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === active);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
   const openFile = useArtifactsStore((s) => s.openFile);
@@ -228,26 +226,21 @@ export function ArtifactPanel() {
               Open a file, browser, or terminal. Files the agent edits show up here too.
             </p>
           </div>
-        ) : (
-          tabs.map((tab) => {
-            const isTabActive = tab.id === active && panelOpen;
-            return (
-              <div key={tab.id} className="ArtifactTabPanel" data-hidden={!isTabActive}>
-                {tab.kind === "terminal" && <TerminalView id={tab.id} />}
-                {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
-                {tab.kind === "browser" && (
-                  <BrowserView initialUrl={tab.url} active={isTabActive} />
-                )}
-                {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
-                {tab.kind === "docx" && tab.path && (
-                  <DocxViewer path={tab.path} documentId={tab.documentId} />
-                )}
-                {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
-                {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
-              </div>
-            );
-          })
-        )}
+        ) : activeTab && panelOpen ? (
+          <div key={activeTab.id} className="ArtifactTabPanel">
+            {activeTab.kind === "terminal" && <TerminalView id={activeTab.id} />}
+            {activeTab.kind === "file" && (
+              <FileViewer tabId={activeTab.id} path={activeTab.path} />
+            )}
+            {activeTab.kind === "browser" && <BrowserView initialUrl={activeTab.url} />}
+            {activeTab.kind === "pdf" && activeTab.path && <PdfViewer path={activeTab.path} />}
+            {activeTab.kind === "docx" && activeTab.path && (
+              <DocxViewer path={activeTab.path} documentId={activeTab.documentId} />
+            )}
+            {activeTab.kind === "xlsx" && activeTab.path && <XlsxViewer path={activeTab.path} />}
+            {activeTab.kind === "pptx" && activeTab.path && <PptxViewer path={activeTab.path} />}
+          </div>
+        ) : null}
       </div>
     </aside>
   );

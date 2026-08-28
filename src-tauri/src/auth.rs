@@ -6,7 +6,6 @@ use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::gateway::TokenHandle;
 
-const KEYRING_SERVICE: &str = "Orch";
 const KEYRING_REFRESH_ACCOUNT: &str = "refresh_token";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,54 +289,19 @@ impl FirebaseAuthClient {
     }
 }
 
-fn keyring_entry(account: &str) -> AppResult<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| {
-        AppError::other(format!("credential store unavailable for {account}: {e}"))
-    })
-}
-
-fn store_secret(account: &str, value: &str) -> AppResult<()> {
-    keyring_entry(account)?.set_password(value).map_err(|e| {
-        AppError::other(format!("could not save {account} to the credential store: {e}"))
-    })
-}
-
-fn read_secret(account: &str) -> Option<String> {
-    let entry = keyring_entry(account).ok()?;
-    match entry.get_password() {
-        Ok(value) if !value.is_empty() => Some(value),
-        Ok(_) => None,
-        Err(keyring::Error::NoEntry) => None,
-        Err(e) => {
-            eprintln!("[auth] could not read {account} from the credential store: {e}");
-            None
-        }
-    }
-}
-
-fn delete_secret(account: &str) {
-    let Ok(entry) = keyring_entry(account) else {
-        return;
-    };
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => {}
-        Err(e) => eprintln!("[auth] could not delete {account} from the credential store: {e}"),
-    }
-}
-
 pub fn save_refresh_token(token: &str) -> AppResult<()> {
     if token.is_empty() {
         return Ok(());
     }
-    store_secret(KEYRING_REFRESH_ACCOUNT, token)
+    crate::credentials::save(KEYRING_REFRESH_ACCOUNT, token)
 }
 
 pub fn load_refresh_token() -> Option<String> {
-    read_secret(KEYRING_REFRESH_ACCOUNT)
+    crate::credentials::load(KEYRING_REFRESH_ACCOUNT)
 }
 
 pub fn clear_tokens() {
-    delete_secret(KEYRING_REFRESH_ACCOUNT);
+    crate::credentials::delete(KEYRING_REFRESH_ACCOUNT);
 }
 
 pub fn jwt_expiry(token: &str) -> Option<i64> {

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { VscArrowDown } from "react-icons/vsc";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
@@ -7,6 +7,7 @@ const NEAR_BOTTOM_PX = 120;
 
 export function MessageList() {
   const messages = useChatStore((s) => s.messages);
+  const streaming = useChatStore((s) => s.streaming);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
@@ -29,6 +30,12 @@ export function MessageList() {
     }
   }, []);
 
+  useLayoutEffect(() => {
+    if (streaming && messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages, messages.length, scrollToBottom, streaming]);
+
   return (
     <div className="MessageListWrap">
       <div 
@@ -44,7 +51,7 @@ export function MessageList() {
           <div 
             ref={bottomRef} 
             className="MessageList-bottomSpacer" 
-            style={{ overflowAnchor: 'auto', height: 1 }}
+            style={{ overflowAnchor: 'auto' }}
           />
         </div>
       </div>

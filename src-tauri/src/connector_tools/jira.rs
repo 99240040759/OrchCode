@@ -1,3 +1,5 @@
+use super::request_json;
+
 use std::sync::Arc;
 
 use rig::tool::Tool;
@@ -12,17 +14,16 @@ use crate::tools::ToolError;
 const JIRA_CLOUD_API: &str = "https://api.atlassian.com/ex/jira";
 
 async fn get_jira_cloud_id(manager: &ConnectorManager, token: &str) -> Result<String, ToolError> {
-    let resources: Vec<Value> = manager
-        .http()
-        .get("https://api.atlassian.com/oauth/token/accessible-resources")
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| ToolError::msg(e.to_string()))?
-        .json()
-        .await
-        .map_err(|e| ToolError::msg(e.to_string()))?;
+    let json = request_json(
+        manager
+            .http()
+            .get("https://api.atlassian.com/oauth/token/accessible-resources")
+            .bearer_auth(token)
+            .header("Accept", "application/json"),
+        "Jira",
+    )
+    .await?;
+    let resources = json.as_array().cloned().unwrap_or_default();
 
     resources
         .first()
@@ -81,18 +82,15 @@ impl Tool for JiraListIssues {
             urlencoding::encode(&jql)
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .header("Accept", "application/json")
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/json"),
+            "Jira",
+        )
+        .await?;
 
         if let Some(err) = json["errorMessages"].as_array() {
             if !err.is_empty() {
@@ -158,17 +156,15 @@ impl Tool for JiraGetIssue {
             args.issue_key
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json: Value = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/json"),
+            "Jira",
+        )
+        .await?;
 
         if let Some(err) = json["errorMessages"].as_array() {
             if !err.is_empty() {
@@ -272,18 +268,15 @@ impl Tool for JiraSearchIssues {
             urlencoding::encode(&args.jql)
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .header("Accept", "application/json")
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/json"),
+            "Jira",
+        )
+        .await?;
 
         if let Some(errs) = json["errorMessages"].as_array() {
             if !errs.is_empty() {

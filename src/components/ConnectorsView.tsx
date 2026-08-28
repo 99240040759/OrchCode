@@ -79,14 +79,12 @@ function ConnectorCard({ connector, onConnect, onDisconnect, loading }: Connecto
   );
 }
 
-type FilterCategory = "all" | "connected" | "Cloud Storage" | "Communication" | "Dev Tools" | "Productivity";
-
 export function ConnectorsView() {
   const [connectors, setConnectors] = useState<ConnectorDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState<FilterCategory>("all");
+  const [activeFilter, setActiveFilter] = useState("all");
 
   const refresh = useCallback(async () => {
     try {
@@ -100,8 +98,10 @@ export function ConnectorsView() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
     void refresh();
-    const unlisten = listen<{ connector: ConnectorDto | null; error: string | null }>(
+    void listen<{ connector: ConnectorDto | null; error: string | null }>(
       "connector-changed",
       (event) => {
         if (event.payload.error) {
@@ -110,9 +110,16 @@ export function ConnectorsView() {
         void refresh();
         setActionId(null);
       }
-    );
+    ).then((stop) => {
+      if (disposed) {
+        stop();
+      } else {
+        unlisten = stop;
+      }
+    });
     return () => {
-      void unlisten.then((fn) => fn());
+      disposed = true;
+      unlisten?.();
     };
   }, [refresh]);
 
@@ -153,30 +160,18 @@ export function ConnectorsView() {
     return connectors.filter((c) => c.category === activeFilter);
   }, [connectors, activeFilter]);
 
-  const filterTabs: { id: FilterCategory; label: string; count: number }[] = [
-    { id: "all", label: "All", count: connectors.length },
-    { id: "connected", label: "Connected", count: connectedCount },
-    {
-      id: "Cloud Storage",
-      label: "Cloud Storage",
-      count: connectors.filter((c) => c.category === "Cloud Storage").length,
-    },
-    {
-      id: "Communication",
-      label: "Communication",
-      count: connectors.filter((c) => c.category === "Communication").length,
-    },
-    {
-      id: "Dev Tools",
-      label: "Developer Tools",
-      count: connectors.filter((c) => c.category === "Dev Tools").length,
-    },
-    {
-      id: "Productivity",
-      label: "Productivity",
-      count: connectors.filter((c) => c.category === "Productivity").length,
-    },
-  ];
+  const filterTabs = useMemo(() => {
+    const categories = Array.from(new Set(connectors.map((connector) => connector.category))).sort();
+    return [
+      { id: "all", label: "All", count: connectors.length },
+      { id: "connected", label: "Connected", count: connectedCount },
+      ...categories.map((category) => ({
+        id: category,
+        label: category,
+        count: connectors.filter((connector) => connector.category === category).length,
+      })),
+    ];
+  }, [connectors, connectedCount]);
 
   if (loading) {
     return (

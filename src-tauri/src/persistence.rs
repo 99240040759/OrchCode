@@ -34,9 +34,9 @@ const BASELINE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS messages (
      workspace_path     TEXT,
      created_at         INTEGER NOT NULL,
      updated_at         INTEGER NOT NULL,
-     last_input_tokens   INTEGER NOT NULL DEFAULT 0,
-     last_output_tokens  INTEGER NOT NULL DEFAULT 0,
-     last_total_tokens   INTEGER NOT NULL DEFAULT 0
+     last_input_tokens  INTEGER NOT NULL DEFAULT 0,
+     last_output_tokens INTEGER NOT NULL DEFAULT 0,
+     last_total_tokens  INTEGER NOT NULL DEFAULT 0
  );
  CREATE TABLE IF NOT EXISTS reasoning_durations (
      conversation_id  TEXT NOT NULL,
@@ -45,6 +45,12 @@ const BASELINE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS messages (
      PRIMARY KEY (conversation_id, item_id)
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);";
+
+const RENAME_TOKEN_COLUMNS: &str = "
+ ALTER TABLE sessions RENAME COLUMN last_input_tokens  TO total_input_tokens;
+ ALTER TABLE sessions RENAME COLUMN last_output_tokens TO total_output_tokens;
+ ALTER TABLE sessions RENAME COLUMN last_total_tokens  TO total_tokens;
+";
 
 const KNOWLEDGE_SCHEMA: &str = "
  CREATE TABLE IF NOT EXISTS connectors (
@@ -130,9 +136,9 @@ pub struct SessionSummary {
     pub title: Option<String>,
     pub workspace_path: Option<String>,
     pub updated_at: i64,
-    pub last_input_tokens: i64,
-    pub last_output_tokens: i64,
-    pub last_total_tokens: i64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_tokens: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +210,7 @@ impl SqliteMemory {
         let migration_list = vec![
             rusqlite_migration::M::up(BASELINE_SCHEMA),
             rusqlite_migration::M::up(KNOWLEDGE_SCHEMA),
+            rusqlite_migration::M::up(RENAME_TOKEN_COLUMNS),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -233,7 +240,7 @@ impl SqliteMemory {
             let c = conn.lock().map_err(lock_err)?;
             let mut stmt = c
                 .prepare(
-                    "SELECT id, title, workspace_path, updated_at, last_input_tokens, last_output_tokens, last_total_tokens
+                    "SELECT id, title, workspace_path, updated_at, total_input_tokens, total_output_tokens, total_tokens
                      FROM sessions ORDER BY updated_at DESC",
                 )
                 .map_err(sql_err)?;
@@ -244,9 +251,9 @@ impl SqliteMemory {
                         title: row.get(1)?,
                         workspace_path: row.get(2)?,
                         updated_at: row.get(3)?,
-                        last_input_tokens: row.get(4)?,
-                        last_output_tokens: row.get(5)?,
-                        last_total_tokens: row.get(6)?,
+                        total_input_tokens: row.get(4)?,
+                        total_output_tokens: row.get(5)?,
+                        total_tokens: row.get(6)?,
                     })
                 })
                 .map_err(sql_err)?;
@@ -328,11 +335,35 @@ impl SqliteMemory {
             let c = conn.lock().map_err(lock_err)?;
             let now = now_millis();
             c.execute(
-                "UPDATE sessions SET last_input_tokens = ?1, last_output_tokens = ?2, last_total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
+                "UPDATE sessions SET total_input_tokens = ?1, total_output_tokens = ?2, total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
                 params![input_tokens as i64, output_tokens as i64, total_tokens as i64, now, cid],
             )
             .map_err(sql_err)?;
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn get_session_tokens(
+        &self,
+        conversation_id: &str,
+    ) -> AppResult<(u64, u64, u64)> {
+        let conn = self.conn.clone();
+        let cid = conversation_id.to_string();
+        run_db_task(move || {
+            let c = conn.lock().map_err(lock_err)?;
+            c.query_row(
+                "SELECT total_input_tokens, total_output_tokens, total_tokens FROM sessions WHERE id = ?1",
+                params![cid],
+                |row| {
+                    let i: i64 = row.get(0)?;
+                    let o: i64 = row.get(1)?;
+                    let t: i64 = row.get(2)?;
+                    Ok((i.max(0) as u64, o.max(0) as u64, t.max(0) as u64))
+                },
+            )
+            .map_err(sql_err)
+            .or(Ok((0, 0, 0)))
         })
         .await
     }
@@ -866,6 +897,8 @@ impl ConversationMemory for SqliteMemory {
 }
 
 pub fn configure_connection(conn: &Connection) -> AppResult<()> {
+    conn.pragma_update(None, "foreign_keys", true)
+        .map_err(|e| AppError::other(format!("sqlite foreign_keys failed: {e}")))?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| AppError::other(format!("sqlite journal_mode failed: {e}")))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
@@ -1018,7 +1051,7 @@ pub struct SearchHit {
     pub source: String,
     pub file_path: Option<String>,
     pub snippet: String,
-    pub rank: f64,
+    pub score: f64,
     pub page_number: Option<i64>,
 }
 
@@ -1036,52 +1069,72 @@ pub struct ConnectorRecord {
 }
 
 impl SqliteMemory {
-    pub async fn upsert_document(&self, doc: DocumentRecord) -> AppResult<()> {
-        let conn = self.conn.clone();
-        run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            let meta = serde_json::to_string(&doc.metadata).unwrap_or_else(|_| "{}".to_string());
-            c.execute(
-                "INSERT INTO documents (id, title, file_path, source, source_id, file_type,
-                  size_bytes, page_count, word_count, metadata, indexed_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
-                 ON CONFLICT(id) DO UPDATE SET
-                   title=excluded.title, file_path=excluded.file_path,
-                   size_bytes=excluded.size_bytes, page_count=excluded.page_count,
-                   word_count=excluded.word_count, metadata=excluded.metadata,
-                   updated_at=excluded.updated_at",
-                rusqlite::params![
-                    doc.id, doc.title, doc.file_path, doc.source, doc.source_id,
-                    doc.file_type, doc.size_bytes, doc.page_count, doc.word_count,
-                    meta, doc.indexed_at, doc.updated_at
-                ],
-            ).map_err(sql_err)?;
-            Ok(())
-        }).await
-    }
-
-    pub async fn insert_passages(&self, passages: Vec<PassageRecord>) -> AppResult<()> {
-        if passages.is_empty() {
-            return Ok(());
-        }
+    pub async fn replace_document_with_passages(
+        &self,
+        doc: DocumentRecord,
+        passages: Vec<PassageRecord>,
+    ) -> AppResult<()> {
         let conn = self.conn.clone();
         run_db_task(move || {
             let mut c = conn.lock().map_err(lock_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-            {
-                let mut stmt = tx.prepare(
-                    "INSERT OR REPLACE INTO passages (id, document_id, seq, text, page_number, char_start, char_end)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7)"
-                ).map_err(sql_err)?;
-                for p in &passages {
+            let document_id = doc.id.clone();
+            tx.execute(
+                "DELETE FROM documents WHERE id = ?1",
+                rusqlite::params![document_id],
+            )
+            .map_err(sql_err)?;
+
+            let meta = serde_json::to_string(&doc.metadata).map_err(|e| {
+                AppError::other(format!("document metadata serialization failed: {e}"))
+            })?;
+            tx.execute(
+                "INSERT INTO documents (id, title, file_path, source, source_id, file_type,
+                  size_bytes, page_count, word_count, metadata, indexed_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                rusqlite::params![
+                    doc.id,
+                    doc.title,
+                    doc.file_path,
+                    doc.source,
+                    doc.source_id,
+                    doc.file_type,
+                    doc.size_bytes,
+                    doc.page_count,
+                    doc.word_count,
+                    meta,
+                    doc.indexed_at,
+                    doc.updated_at
+                ],
+            )
+            .map_err(sql_err)?;
+
+            if !passages.is_empty() {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO passages (id, document_id, seq, text, page_number, char_start, char_end)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    )
+                    .map_err(sql_err)?;
+                for passage in passages {
                     stmt.execute(rusqlite::params![
-                        p.id, p.document_id, p.seq, p.text, p.page_number, p.char_start, p.char_end
-                    ]).map_err(sql_err)?;
+                        passage.id,
+                        passage.document_id,
+                        passage.seq,
+                        passage.text,
+                        passage.page_number,
+                        passage.char_start,
+                        passage.char_end
+                    ])
+                    .map_err(sql_err)?;
                 }
+                drop(stmt);
             }
+
             tx.commit().map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn delete_document(&self, document_id: &str) -> AppResult<()> {
@@ -1199,7 +1252,7 @@ impl SqliteMemory {
                         source: row.get(4)?,
                         file_path: row.get(5)?,
                         snippet: row.get(6)?,
-                        rank: row.get(7)?,
+                        score: row.get(7)?,
                         page_number: row.get(8)?,
                     })
                 }

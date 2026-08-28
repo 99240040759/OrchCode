@@ -1,10 +1,11 @@
+use super::{request_json, truncate_text};
+
 use std::sync::Arc;
 
 use base64::Engine as _;
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::connectors::ConnectorManager;
 use crate::persistence::SqliteMemory;
@@ -46,19 +47,17 @@ impl Tool for GitHubListRepos {
             "{GITHUB_API}/user/repos?type={visibility}&sort=updated&per_page={limit}"
         );
 
-        let repos: Vec<Value> = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let repos_json = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28"),
+            "GitHub",
+        )
+        .await?;
+        let repos = repos_json.as_array().cloned().unwrap_or_default();
 
         if repos.is_empty() {
             return Ok("No repositories found.".to_string());
@@ -115,19 +114,16 @@ impl Tool for GitHubReadFile {
             url.push_str(&format!("?ref={r}"));
         }
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28"),
+            "GitHub",
+        )
+        .await?;
 
         if let Some(err) = json["message"].as_str() {
             return Err(ToolError::msg(format!("GitHub API: {err}")));
@@ -146,16 +142,11 @@ impl Tool for GitHubReadFile {
             content_raw.to_string()
         };
 
-        const MAX_CHARS: usize = 40_000;
-        let truncated = if content.len() > MAX_CHARS {
-            format!(
-                "{}\n\n[Truncated: showing {MAX_CHARS} of {} chars]",
-                &content[..MAX_CHARS],
-                content.len()
-            )
-        } else {
-            content
-        };
+        let truncated = truncate_text(
+            &content,
+            40_000,
+            &format!("\n\n[Truncated: showing first 40,000 of {} chars]", content.chars().count()),
+        );
 
         let name = json["name"].as_str().unwrap_or(&args.path);
         let sha = json["sha"].as_str().unwrap_or("—");
@@ -197,19 +188,16 @@ impl Tool for GitHubSearchCode {
             urlencoding::encode(&args.query)
         );
 
-        let json: Value = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager
+                .http()
+                .get(&url)
+                .bearer_auth(&token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28"),
+            "GitHub",
+        )
+        .await?;
 
         if let Some(err) = json["message"].as_str() {
             return Err(ToolError::msg(format!("GitHub search: {err}")));

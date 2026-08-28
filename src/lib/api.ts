@@ -31,9 +31,9 @@ export interface SessionSummary {
   title?: string | null;
   workspacePath?: string | null;
   updatedAt: number;
-  lastInputTokens: number;
-  lastOutputTokens: number;
-  lastTotalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
 }
 
 export type ToolIcon =
@@ -222,7 +222,7 @@ export function readBinaryFileAsDataUrl(path: string): Promise<string> {
 
 export interface DocumentFileMeta {
   name: string;
-  size_bytes: number;
+  sizeBytes: number;
   extension: string;
   mime: string;
   modified: number | null;
@@ -330,10 +330,11 @@ export function formatRelativeTime(ts?: number): string {
   return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });
 }
 
-const IMAGE_EXT_PATTERN = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 
 export function isImagePath(pathStr: string): boolean {
-  return IMAGE_EXT_PATTERN.test(pathStr);
+  const extension = pathStr.replace(/\\/g, "/").split("/").pop()?.split(".").pop()?.toLowerCase();
+  return extension ? IMAGE_EXTENSIONS.includes(extension) : false;
 }
 
 export interface ConnectorDto {
@@ -359,9 +360,10 @@ export function getConnectorAuthUrl(connectorId: string): Promise<string> {
 
 export function completeConnectorAuth(
   connectorId: string,
-  code: string
+  code: string,
+  oauthState: string
 ): Promise<ConnectorDto> {
-  return invoke("complete_connector_auth", { connectorId, code });
+  return invoke("complete_connector_auth", { connectorId, code, oauthState });
 }
 
 export function disconnectConnector(connectorId: string): Promise<void> {
@@ -388,6 +390,7 @@ export interface SearchHit {
   documentTitle: string;
   fileType: string;
   source: string;
+  filePath?: string | null;
   passageId: string;
   snippet: string;
   pageNumber?: number | null;
@@ -450,6 +453,28 @@ export interface ParsedDocumentDto {
 
 export function readParsedDocument(path: string): Promise<ParsedDocumentDto> {
   return invoke("read_parsed_document", { path });
+}
+
+export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
+
+const DOCUMENT_ARTIFACT_KINDS: Record<string, DocumentArtifactKind> = {
+  pdf: "pdf",
+  doc: "docx",
+  docx: "docx",
+  xls: "xlsx",
+  xlsx: "xlsx",
+  ppt: "pptx",
+  pptx: "pptx",
+};
+
+export function documentArtifactKind(fileType: string): DocumentArtifactKind | undefined {
+  return DOCUMENT_ARTIFACT_KINDS[fileType.toLowerCase()];
+}
+
+export function documentArtifactKindForPath(path: string): DocumentArtifactKind | undefined {
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const extension = name.split(".").pop() ?? "";
+  return documentArtifactKind(extension);
 }
 
 export const DOCUMENT_FILE_TYPES: Record<string, { label: string; icon: string }> = {

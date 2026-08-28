@@ -12,7 +12,7 @@ use crate::llm::{build_agent, build_client, maybe_compact, run_chat, AttachmentR
 use crate::persistence::{MessageView, SessionSummary};
 use crate::state::AppState;
 use crate::terminal;
-use crate::tools::ToolContext;
+use crate::tools::{fs_util, ToolContext};
 
 use rig::memory::ConversationMemory;
 
@@ -290,6 +290,12 @@ pub async fn start_chat(
 
     let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
 
+    let (prior_input, prior_output, prior_total) = state
+        .memory
+        .get_session_tokens(&session_id)
+        .await
+        .unwrap_or((0, 0, 0));
+
     let result = run_chat(
         agent,
         RunRequest {
@@ -298,6 +304,9 @@ pub async fn start_chat(
             attachments,
             supports_images,
             workspace,
+            prior_input_tokens: prior_input,
+            prior_output_tokens: prior_output,
+            prior_total_tokens: prior_total,
         },
         cancel,
         on_event.clone(),
@@ -314,42 +323,40 @@ pub async fn start_chat(
         }
     }
 
-    if result.cumulative_total_tokens > 0 {
-        if let Err(e) = state
-            .memory
-            .update_session_tokens(
-                &session_id,
-                result.cumulative_input_tokens,
-                result.cumulative_output_tokens,
-                result.cumulative_total_tokens,
-            )
-            .await
-        {
-            eprintln!("[chat] failed to persist session tokens: {e}");
-        }
+    if let Err(e) = state
+        .memory
+        .update_session_tokens(
+            &session_id,
+            result.cumulative_input_tokens,
+            result.cumulative_output_tokens,
+            result.cumulative_total_tokens,
+        )
+        .await
+    {
+        eprintln!("[chat] failed to persist session tokens: {e}");
+    }
 
-        if result.completed {
-            match maybe_compact(
-                &state.memory,
-                &client,
-                &model_info,
-                &session_id,
-                result.cumulative_total_tokens,
-            )
-            .await
-            {
-                Ok(Some(outcome)) => {
-                    let _ = on_event.send(ChatEvent::Compacted {
-                        original_message_count: outcome.original_message_count,
-                        ts: outcome.ts,
-                    });
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    let _ = on_event.send(ChatEvent::Error {
-                        message: format!("compaction failed: {e}"),
-                    });
-                }
+    if result.completed {
+        match maybe_compact(
+            &state.memory,
+            &client,
+            &model_info,
+            &session_id,
+            result.last_turn_input_tokens,
+        )
+        .await
+        {
+            Ok(Some(outcome)) => {
+                let _ = on_event.send(ChatEvent::Compacted {
+                    original_message_count: outcome.original_message_count,
+                    ts: outcome.ts,
+                });
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = on_event.send(ChatEvent::Error {
+                    message: format!("compaction failed: {e}"),
+                });
             }
         }
     }
@@ -549,7 +556,6 @@ pub fn terminal_close(state: State<'_, AppState>, id: String) {
 
 use crate::connectors::{self, ConnectorDef, CONNECTOR_DEFS};
 use crate::persistence::ConnectorRecord;
-use serde::Deserialize;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -566,7 +572,11 @@ pub struct ConnectorDto {
     pub error: Option<String>,
 }
 
-fn connector_dto(def: &ConnectorDef, rec: Option<&ConnectorRecord>) -> ConnectorDto {
+fn connector_dto(
+    def: &ConnectorDef,
+    rec: Option<&ConnectorRecord>,
+    has_token: bool,
+) -> ConnectorDto {
     ConnectorDto {
         id: def.id.to_string(),
         name: def.name.to_string(),
@@ -574,8 +584,8 @@ fn connector_dto(def: &ConnectorDef, rec: Option<&ConnectorRecord>) -> Connector
         category: def.category.to_string(),
         auth_kind: def.auth_kind.as_str().to_string(),
         is_configured: def.is_configured(),
-        enabled: rec.map(|r| r.enabled).unwrap_or(false),
-        has_token: rec.map(|r| r.has_token).unwrap_or(false),
+        enabled: has_token,
+        has_token,
         token_expires_at: rec.and_then(|r| r.token_expires_at),
         error: rec.and_then(|r| r.error.clone()),
     }
@@ -593,7 +603,13 @@ pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<Connector
 
     let dtos = CONNECTOR_DEFS
         .iter()
-        .map(|def| connector_dto(def, record_map.get(def.id).copied()))
+        .map(|def| {
+            connector_dto(
+                def,
+                record_map.get(def.id).copied(),
+                state.connector_manager.has_token(def.id),
+            )
+        })
         .collect();
 
     Ok(dtos)
@@ -601,19 +617,16 @@ pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<Connector
 
 #[tauri::command]
 pub async fn get_connector_auth_url(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
     connector_id: String,
 ) -> Result<String, String> {
     let def = connectors::find_def(&connector_id)
         .ok_or_else(|| format!("Connector not found: {connector_id}"))?;
-    let state_param = uuid::Uuid::new_v4().to_string();
+    let state_param = state
+        .connector_manager
+        .begin_oauth(&connector_id)
+        .map_err(|e| e.to_string())?;
     connectors::build_auth_url(def, &state_param).map_err(|e| e.to_string())
-}
-
-#[derive(Deserialize)]
-pub struct CompleteConnectorAuthArgs {
-    pub connector_id: String,
-    pub code: String,
 }
 
 #[tauri::command]
@@ -621,14 +634,24 @@ pub async fn complete_connector_auth(
     state: State<'_, AppState>,
     connector_id: String,
     code: String,
+    oauth_state: String,
 ) -> Result<ConnectorDto, String> {
     let def = connectors::find_def(&connector_id)
         .ok_or_else(|| format!("Connector not found: {connector_id}"))?;
-
-    let redirect_uri = connectors::connector_redirect_uri(&def.deep_link_id);
-    let tokens = connectors::exchange_code(def, &code, &redirect_uri, state.connector_manager.http())
-        .await
+    state
+        .connector_manager
+        .consume_oauth(&connector_id, &oauth_state)
         .map_err(|e| e.to_string())?;
+
+    let redirect_uri = connectors::connector_redirect_uri(def.deep_link_id);
+    let tokens = connectors::exchange_code(
+        def,
+        &code,
+        &redirect_uri,
+        state.connector_manager.http(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     state
         .connector_manager
@@ -638,7 +661,11 @@ pub async fn complete_connector_auth(
 
     let records = state.memory.list_connectors().await.map_err(|e| e.to_string())?;
     let rec = records.iter().find(|r| r.id == connector_id);
-    Ok(connector_dto(def, rec))
+    Ok(connector_dto(
+        def,
+        rec,
+        state.connector_manager.has_token(&connector_id),
+    ))
 }
 
 #[tauri::command]
@@ -674,8 +701,9 @@ pub async fn ipc_ingest_document(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<IngestResultDto, String> {
-    let p = std::path::Path::new(&path);
-    let result = ingest_document(p, &state.memory)
+    let root = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&root, &path).map_err(|e| e.to_string())?;
+    let result = ingest_document(&resolved, &state.memory)
         .await
         .map_err(|e| e.to_string())?;
 

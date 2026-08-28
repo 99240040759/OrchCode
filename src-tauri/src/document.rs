@@ -26,65 +26,60 @@ pub struct IngestResult {
 }
 
 pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<IngestResult> {
-    let path_str = path.to_string_lossy().into_owned();
     let canonical = dunce::canonicalize(path)
         .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
+    let metadata = std::fs::metadata(&canonical).map_err(AppError::Io)?;
+    if !metadata.is_file() {
+        return Err(AppError::DocumentParseError(format!(
+            "not a file: {}",
+            canonical.display()
+        )));
+    }
 
+    let canonical_path = canonical.to_string_lossy().into_owned();
     let file_type = detect_file_type(&canonical)?;
-    let metadata = std::fs::metadata(&canonical)
-        .map_err(|e| AppError::Io(e))?;
+    let existing_id = memory.document_exists_by_path(&canonical_path).await?;
+    let was_update = existing_id.is_some();
+    let doc_id = existing_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let size_bytes = metadata.len() as i64;
-
-    let was_update;
-    let doc_id = if let Some(existing_id) = memory.document_exists_by_path(&path_str).await? {
-        was_update = true;
-        memory.delete_document(&existing_id).await?;
-        existing_id
-    } else {
-        was_update = false;
-        Uuid::new_v4().to_string()
-    };
 
     let canonical_clone = canonical.clone();
     let file_type_clone = file_type.clone();
     let parsed = tokio::task::spawn_blocking(move || parse_document(&canonical_clone, &file_type_clone))
         .await
-        .map_err(|e| AppError::DocumentParseError(format!("Task panicked: {e}")))??;
+        .map_err(|e| AppError::DocumentParseError(format!("task failed: {e}")))??;
 
     let word_count = count_words(&parsed.full_text);
     let title = parsed
         .title
         .unwrap_or_else(|| file_stem_title(&canonical));
+    let full_text_clone = parsed.full_text.clone();
+    let page_boundaries = parsed.page_boundaries.clone();
+    let doc_id_clone = doc_id.clone();
+    let passages = tokio::task::spawn_blocking(move || {
+        chunk_text_into_passages(&full_text_clone, &doc_id_clone, page_boundaries)
+    })
+    .await
+    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
 
     let now = now_ms();
-
     let doc = DocumentRecord {
         id: doc_id.clone(),
         title: title.clone(),
-        file_path: Some(path_str.clone()),
+        file_path: Some(canonical_path.clone()),
         source: "local".to_string(),
         source_id: None,
         file_type: file_type.clone(),
         size_bytes,
         page_count: parsed.page_count.map(|p| p as i64),
         word_count: Some(word_count as i64),
-        metadata: serde_json::json!({ "path": path_str }),
+        metadata: serde_json::json!({ "path": canonical_path }),
         indexed_at: now,
         updated_at: now,
     };
-    memory.upsert_document(doc).await?;
-
-    let full_text_clone = parsed.full_text.clone();
-    let doc_id_clone = doc_id.clone();
-    let page_boundaries = parsed.page_boundaries.clone();
-    let passages = tokio::task::spawn_blocking(move || {
-        chunk_text_into_passages(&full_text_clone, &doc_id_clone, page_boundaries)
-    })
-    .await
-    .map_err(|e| AppError::DocumentParseError(format!("Task panicked: {e}")))?;
 
     let passage_count = passages.len();
-    memory.insert_passages(passages).await?;
+    memory.replace_document_with_passages(doc, passages).await?;
 
     Ok(IngestResult {
         document_id: doc_id,
@@ -107,6 +102,14 @@ pub async fn ingest_remote_document(
 ) -> AppResult<IngestResult> {
     let doc_id = Uuid::new_v4().to_string();
     let word_count = count_words(text);
+    let text_clone = text.to_string();
+    let doc_id_clone = doc_id.clone();
+    let passages = tokio::task::spawn_blocking(move || {
+        chunk_text_into_passages(&text_clone, &doc_id_clone, vec![])
+    })
+    .await
+    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
+    let passage_count = passages.len();
     let now = now_ms();
 
     let doc = DocumentRecord {
@@ -123,18 +126,7 @@ pub async fn ingest_remote_document(
         indexed_at: now,
         updated_at: now,
     };
-    memory.upsert_document(doc).await?;
-
-    let doc_id_clone = doc_id.clone();
-    let text_clone = text.to_string();
-    let passages = tokio::task::spawn_blocking(move || {
-        chunk_text_into_passages(&text_clone, &doc_id_clone, vec![])
-    })
-    .await
-    .map_err(|e| AppError::DocumentParseError(format!("Task panicked: {e}")))?;
-
-    let passage_count = passages.len();
-    memory.insert_passages(passages).await?;
+    memory.replace_document_with_passages(doc, passages).await?;
 
     Ok(IngestResult {
         document_id: doc_id,
@@ -570,7 +562,7 @@ fn chunk_text_into_passages(
     }
 
     let mut passages = Vec::new();
-    let mut start = 0;
+    let mut start = 0usize;
     let mut seq = 0i64;
 
     while start < text.len() {
@@ -584,10 +576,8 @@ fn chunk_text_into_passages(
                 .find(|(offset, _)| *offset <= start)
                 .map(|(_, page)| *page as i64);
 
-            let passage_id = stable_passage_id(document_id, seq);
-
             passages.push(PassageRecord {
-                id: passage_id,
+                id: stable_passage_id(document_id, seq),
                 document_id: document_id.to_string(),
                 seq,
                 text: chunk.to_string(),
@@ -595,19 +585,31 @@ fn chunk_text_into_passages(
                 char_start: Some(start as i64),
                 char_end: Some(end as i64),
             });
-
             seq += 1;
         }
 
         if end >= text.len() {
             break;
         }
-        start = end.saturating_sub(PASSAGE_OVERLAP);
-        while start < end && !text[start..].starts_with(char::is_whitespace) {
-            start += 1;
+
+        start = floor_char_boundary(text, end.saturating_sub(PASSAGE_OVERLAP));
+        while start < end {
+            let Some(ch) = text[start..].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() {
+                break;
+            }
+            start += ch.len_utf8();
         }
-        while start < text.len() && text[start..].starts_with(char::is_whitespace) {
-            start += 1;
+        while start < text.len() {
+            let Some(ch) = text[start..].chars().next() else {
+                break;
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            start += ch.len_utf8();
         }
         if start >= end {
             start = end;
@@ -617,8 +619,17 @@ fn chunk_text_into_passages(
     passages
 }
 
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    let mut boundary = index.min(text.len());
+    while boundary > 0 && !text.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    boundary
+}
+
 fn find_chunk_end(text: &str, start: usize, max_chars: usize) -> usize {
-    let end = (start + max_chars).min(text.len());
+    let target = (start + max_chars).min(text.len());
+    let end = floor_char_boundary(text, target);
     if end >= text.len() {
         return text.len();
     }
@@ -626,26 +637,22 @@ fn find_chunk_end(text: &str, start: usize, max_chars: usize) -> usize {
     if let Some(pos) = text[start..end].rfind("\n\n") {
         return start + pos + 2;
     }
-
     if let Some(pos) = text[start..end].rfind('\n') {
         return start + pos + 1;
     }
-
-    for delim in [". ", "! ", "? "] {
-        if let Some(pos) = text[start..end].rfind(delim) {
-            return start + pos + delim.len();
+    for delimiter in [". ", "! ", "? "] {
+        if let Some(pos) = text[start..end].rfind(delimiter) {
+            return start + pos + delimiter.len();
         }
     }
-
-    let mut idx = end;
-    while idx > start && !text[idx - 1..idx].contains(char::is_whitespace) {
-        idx -= 1;
+    if let Some((pos, ch)) = text[start..end]
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| ch.is_whitespace())
+    {
+        return start + pos + ch.len_utf8();
     }
-    if idx == start {
-        end
-    } else {
-        idx
-    }
+    end
 }
 
 fn count_words(text: &str) -> usize {
@@ -684,7 +691,7 @@ pub struct ParsedDocumentDto {
 
 pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
     let canonical = dunce::canonicalize(path)
-        .or_else(|_| Ok::<_, AppError>(path.to_path_buf()))?;
+        .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
     let file_type = detect_file_type(&canonical)?;
     let parsed = parse_document(&canonical, &file_type)?;
     Ok(ParsedDocumentDto {

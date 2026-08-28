@@ -21,13 +21,7 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
-export function BrowserView({
-  initialUrl,
-  active = true,
-}: {
-  initialUrl?: string;
-  active?: boolean;
-}) {
+export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const [label, setLabel] = useState("");
   const startUrl = normalizeUrl(initialUrl ?? DEFAULT_BROWSER_URL);
 
@@ -39,9 +33,6 @@ export function BrowserView({
   const hostRef = useRef<HTMLDivElement>(null);
   const initialUrlRef = useRef(startUrl);
   const lastPropUrl = useRef(startUrl);
-  const activeRef = useRef(active);
-  activeRef.current = active;
-  const syncRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const host = hostRef.current;
@@ -79,11 +70,6 @@ export function BrowserView({
 
     const syncPosition = () => {
       if (disposed) return;
-      if (!activeRef.current) {
-        void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
-        void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
-        return;
-      }
       const bounds = host.getBoundingClientRect();
       const isValid =
         visible &&
@@ -104,8 +90,6 @@ export function BrowserView({
         void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       }
     };
-
-    syncRef.current = syncPosition;
 
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
@@ -135,10 +119,6 @@ export function BrowserView({
       void api.webviewClose(currentLabel).catch(() => {});
     };
   }, []);
-
-  useEffect(() => {
-    syncRef.current?.();
-  }, [active]);
 
   const navigate = useCallback((next: string) => {
     setInput(next);

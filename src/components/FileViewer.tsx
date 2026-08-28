@@ -23,7 +23,7 @@ self.MonacoEnvironment = {
 loader.config({ monaco });
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
-import { getBasename, getDirname, splitPathParts } from "../lib/api";
+import { documentArtifactKindForPath, getBasename, getDirname, splitPathParts } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
 import { ExplorerIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
@@ -231,8 +231,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       setError(null);
       return;
     }
-    const ext = path.split(".").pop()?.toLowerCase();
-    if (ext === "pdf" || ext === "docx" || ext === "doc" || ext === "xlsx" || ext === "xls" || ext === "pptx" || ext === "ppt") {
+    if (documentArtifactKindForPath(path)) {
       setTabPath(tabId, path);
       return;
     }
@@ -317,7 +316,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
             key={`${path}:${version}`}
             height="100%"
             path={path}
-            defaultValue={content}
+            value={content}
             theme="app-dark"
             beforeMount={handleBeforeMount}
             loading={LOADING_SPINNER}

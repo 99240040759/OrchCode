@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { newId } from "./api";
+import {
+  documentArtifactKindForPath,
+  newId,
+  type DocumentArtifactKind,
+} from "./api";
 
-export type ArtifactKind = "file" | "browser" | "terminal" | "pdf" | "docx" | "xlsx" | "pptx";
-
-export const DOCUMENT_KINDS: ArtifactKind[] = ["pdf", "docx", "xlsx", "pptx"];
+export type ArtifactKind = "file" | "browser" | "terminal" | DocumentArtifactKind;
 
 export const DEFAULT_BROWSER_URL = "https://www.google.com";
 
@@ -29,7 +31,7 @@ interface ArtifactsActions {
   openFile: (path?: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
-  openDocument: (path: string, kind: ArtifactKind, label?: string, documentId?: string) => void;
+  openDocument: (path: string, kind: DocumentArtifactKind, label?: string, documentId?: string) => void;
   setTabPath: (id: string, path: string) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -60,14 +62,9 @@ export const useArtifactsStore = create(
 
     openFile: (path?: string) => {
       set((s) => {
-        let kind: ArtifactKind = "file";
-        if (path) {
-          const ext = path.split(".").pop()?.toLowerCase();
-          if (ext === "pdf") kind = "pdf";
-          else if (ext === "docx" || ext === "doc") kind = "docx";
-          else if (ext === "xlsx" || ext === "xls") kind = "xlsx";
-          else if (ext === "pptx" || ext === "ppt") kind = "pptx";
-        }
+        const kind: ArtifactKind = path
+          ? documentArtifactKindForPath(path) ?? "file"
+          : "file";
         const existing = path
           ? s.tabs.find((t) => t.kind === kind && t.path === path)
           : s.tabs.find((t) => t.kind === "file" && !t.path);
@@ -118,7 +115,7 @@ export const useArtifactsStore = create(
       });
     },
 
-    openDocument: (path: string, kind: ArtifactKind, label?: string, documentId?: string) => {
+    openDocument: (path: string, kind: DocumentArtifactKind, label?: string, documentId?: string) => {
       set((s) => {
         const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
         if (existing) {
@@ -137,12 +134,8 @@ export const useArtifactsStore = create(
       set((s) => {
         const tab = s.tabs.find((t) => t.id === id);
         if (tab) {
-          const ext = path.split(".").pop()?.toLowerCase();
-          if (ext === "pdf") tab.kind = "pdf";
-          else if (ext === "docx" || ext === "doc") tab.kind = "docx";
-          else if (ext === "xlsx" || ext === "xls") tab.kind = "xlsx";
-          else if (ext === "pptx" || ext === "ppt") tab.kind = "pptx";
-          else tab.kind = "file";
+          const kind = documentArtifactKindForPath(path) ?? "file";
+          tab.kind = kind;
           tab.path = path;
         }
       });

@@ -71,7 +71,7 @@ function ToolTarget({ tool }: { tool: ToolCallItem }) {
     : null;
 
   return (
-    <span className="ToolRow-targetText">
+    <span className="ToolRow-target">
       {Icon ? (
         <Icon className="ToolRow-icon" />
       ) : (
@@ -170,7 +170,6 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
         onClick={() => setUserToggled(!isOpen)}
       >
         <span className="Reasoning-label">{label}</span>
-        {item.active && <span className="Reasoning-spinner" aria-hidden="true" />}
         <VscChevronRight className="Reasoning-chevron" />
       </button>
       {isOpen && (

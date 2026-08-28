@@ -1,9 +1,12 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::Client;
 use serde::Deserialize;
+use url::Url;
+
+use crate::credentials;
 
 use crate::error::{AppError, AppResult};
 use crate::persistence::{ConnectorRecord, SqliteMemory};
@@ -173,7 +176,7 @@ pub fn find_def_by_deep_link(deep_link_id: &str) -> Option<&'static ConnectorDef
     CONNECTOR_DEFS.iter().find(|d| d.deep_link_id == deep_link_id)
 }
 
-const KEYRING_SERVICE: &str = "Orch";
+const CONNECTOR_OAUTH_STATE_TTL: Duration = Duration::from_secs(600);
 
 fn keyring_account_access(connector_id: &str) -> String {
     format!("connector_{connector_id}_access")
@@ -184,40 +187,26 @@ fn keyring_account_refresh(connector_id: &str) -> String {
 }
 
 pub fn save_connector_access_token(connector_id: &str, token: &str) -> AppResult<()> {
-    keyring::Entry::new(KEYRING_SERVICE, &keyring_account_access(connector_id))
-        .map_err(|e| AppError::ConnectorAuthError(e.to_string()))?
-        .set_password(token)
+    credentials::save(&keyring_account_access(connector_id), token)
         .map_err(|e| AppError::ConnectorAuthError(e.to_string()))
 }
 
 pub fn load_connector_access_token(connector_id: &str) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, &keyring_account_access(connector_id))
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .filter(|s| !s.is_empty())
+    credentials::load(&keyring_account_access(connector_id))
 }
 
 pub fn save_connector_refresh_token(connector_id: &str, token: &str) -> AppResult<()> {
-    keyring::Entry::new(KEYRING_SERVICE, &keyring_account_refresh(connector_id))
-        .map_err(|e| AppError::ConnectorAuthError(e.to_string()))?
-        .set_password(token)
+    credentials::save(&keyring_account_refresh(connector_id), token)
         .map_err(|e| AppError::ConnectorAuthError(e.to_string()))
 }
 
 pub fn load_connector_refresh_token(connector_id: &str) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, &keyring_account_refresh(connector_id))
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .filter(|s| !s.is_empty())
+    credentials::load(&keyring_account_refresh(connector_id))
 }
 
 pub fn clear_connector_tokens(connector_id: &str) {
-    if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, &keyring_account_access(connector_id)) {
-        let _ = e.delete_credential();
-    }
-    if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, &keyring_account_refresh(connector_id)) {
-        let _ = e.delete_credential();
-    }
+    credentials::delete(&keyring_account_access(connector_id));
+    credentials::delete(&keyring_account_refresh(connector_id));
 }
 
 pub fn clear_all_connector_tokens_keyring() {
@@ -284,31 +273,30 @@ pub fn build_auth_url(def: &ConnectorDef, state: &str) -> AppResult<String> {
     }
 
     let redirect_uri = connector_redirect_uri(def.deep_link_id);
-    let scope = def.scopes.join(" ");
-
-    let mut url = format!(
-        "{}?client_id={}&redirect_uri={}&response_type=code&state={}",
-        def.auth_url,
-        urlencoding::encode(&def.client_id()),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(state),
-    );
-
-    if !scope.is_empty() {
-        url.push_str(&format!("&scope={}", urlencoding::encode(&scope)));
-    }
-
-    match def.id {
-        "google_drive" | "gmail" => {
-            url.push_str("&access_type=offline&prompt=consent");
+    let mut url = Url::parse(def.auth_url)
+        .map_err(|e| AppError::ConnectorAuthError(format!("invalid OAuth URL: {e}")))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("client_id", &def.client_id());
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("response_type", "code");
+        query.append_pair("state", state);
+        if !def.scopes.is_empty() {
+            query.append_pair("scope", &def.scopes.join(" "));
         }
-        "jira" => {
-            url.push_str("&audience=api.atlassian.com&prompt=consent");
+        match def.id {
+            "google_drive" | "gmail" => {
+                query.append_pair("access_type", "offline");
+                query.append_pair("prompt", "consent");
+            }
+            "jira" => {
+                query.append_pair("audience", "api.atlassian.com");
+                query.append_pair("prompt", "consent");
+            }
+            _ => {}
         }
-        _ => {}
     }
-
-    Ok(url)
+    Ok(url.into())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -319,6 +307,7 @@ struct ConnectorRuntimeState {
 
 pub struct ConnectorManager {
     states: Arc<RwLock<HashMap<String, ConnectorRuntimeState>>>,
+    pending_oauth: Mutex<HashMap<String, (String, Instant)>>,
     http: Client,
     refresh_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
 }
@@ -331,6 +320,7 @@ impl ConnectorManager {
             .collect();
         Self {
             states: Arc::new(RwLock::new(HashMap::new())),
+            pending_oauth: Mutex::new(HashMap::new()),
             http: Client::builder()
                 .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
                 .build()
@@ -363,20 +353,52 @@ impl ConnectorManager {
         }
 
         let records = memory.list_connectors().await?;
-        let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
+        let mut loaded = Vec::new();
         for rec in records {
-            if rec.has_token {
-                let token = load_connector_access_token(&rec.id);
-                states.insert(
-                    rec.id.clone(),
+            let token = load_connector_access_token(&rec.id);
+            let has_token = token.is_some();
+            if rec.has_token != has_token || rec.enabled != has_token {
+                memory
+                    .set_connector_token_state(&rec.id, has_token, rec.token_expires_at, None)
+                    .await?;
+                memory.set_connector_enabled(&rec.id, has_token).await?;
+            }
+            if let Some(access_token) = token {
+                loaded.push((
+                    rec.id,
                     ConnectorRuntimeState {
-                        access_token: token,
+                        access_token: Some(access_token),
                         expires_at: rec.token_expires_at,
                     },
-                );
+                ));
             }
         }
 
+        let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
+        states.extend(loaded);
+
+        Ok(())
+    }
+
+    pub fn begin_oauth(&self, connector_id: &str) -> AppResult<String> {
+        if find_def(connector_id).is_none() {
+            return Err(AppError::ConnectorNotFound(connector_id.to_string()));
+        }
+        let state = uuid::Uuid::new_v4().to_string();
+        let mut pending = self.pending_oauth.lock().unwrap_or_else(|e| e.into_inner());
+        pending.retain(|_, (_, created)| created.elapsed() <= CONNECTOR_OAUTH_STATE_TTL);
+        pending.insert(state.clone(), (connector_id.to_string(), Instant::now()));
+        Ok(state)
+    }
+
+    pub fn consume_oauth(&self, connector_id: &str, state: &str) -> AppResult<()> {
+        let mut pending = self.pending_oauth.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((expected_connector, created)) = pending.remove(state) else {
+            return Err(AppError::ConnectorAuthError("invalid OAuth state".to_string()));
+        };
+        if created.elapsed() > CONNECTOR_OAUTH_STATE_TTL || expected_connector != connector_id {
+            return Err(AppError::ConnectorAuthError("invalid OAuth state".to_string()));
+        }
         Ok(())
     }
 

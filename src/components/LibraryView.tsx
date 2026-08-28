@@ -1,18 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import {
-  listDocuments,
-  searchDocuments,
-  deleteDocument,
-  ingestDocument,
   countDocuments,
+  deleteDocument,
+  documentArtifactKind,
   documentTypeLabel,
   formatRelativeTime,
+  ingestDocument,
+  listDocuments,
+  searchDocuments,
   type DocumentRecord,
-  type SearchHit,
   type IngestResultDto,
+  type SearchHit,
 } from "../lib/api";
-import { useArtifactsStore, type ArtifactKind } from "../lib/artifacts";
+import { useArtifactsStore } from "../lib/artifacts";
 import { Button } from "./ui/Button";
 import { ConnectorIcon } from "./icons/ConnectorIcon";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -21,13 +23,6 @@ function DocumentTypeIcon({ type, name }: { type: string; name?: string }) {
   const fileName = name ?? `document.${type}`;
   return <ExplorerIcon type="file" name={fileName} width={18} height={18} className="LibraryRow-icon" />;
 }
-
-const VIEWABLE_KINDS: Record<string, ArtifactKind> = {
-  pdf: "pdf",
-  docx: "docx",
-  xlsx: "xlsx",
-  pptx: "pptx",
-};
 
 type ViewMode = "browse" | "search";
 
@@ -43,7 +38,7 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
   const pages = doc.pageCount ? `${doc.pageCount} pages` : null;
   const words = doc.wordCount ? `~${doc.wordCount.toLocaleString()} words` : null;
   const meta = [documentTypeLabel(doc.fileType), pages, words].filter(Boolean).join(" · ");
-  const canOpen = doc.filePath && VIEWABLE_KINDS[doc.fileType];
+  const canOpen = Boolean(doc.filePath && documentArtifactKind(doc.fileType));
 
   return (
     <div
@@ -109,6 +104,18 @@ interface SearchResultRowProps {
   hit: SearchHit;
 }
 
+function SearchSnippet({ snippet }: { snippet: string }) {
+  const parts = snippet.split(/(<b>[\s\S]*?<\/b>)/gi);
+  return (
+    <>
+      {parts.map((part, index) => {
+        const match = /^<b>([\s\S]*)<\/b>$/i.exec(part);
+        return match ? <b key={index}>{match[1]}</b> : <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 function SearchResultRow({ hit }: SearchResultRowProps) {
   const page = hit.pageNumber ? ` — page ${hit.pageNumber}` : "";
   return (
@@ -122,10 +129,9 @@ function SearchResultRow({ hit }: SearchResultRowProps) {
           {hit.source}
         </span>
       </div>
-      <p
-        className="SearchResultRow-snippet"
-        dangerouslySetInnerHTML={{ __html: hit.snippet }}
-      />
+      <p className="SearchResultRow-snippet">
+        <SearchSnippet snippet={hit.snippet} />
+      </p>
     </div>
   );
 }
@@ -146,10 +152,11 @@ export function LibraryView() {
   const LIMIT = 50;
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
 
   const handleOpen = useCallback((doc: DocumentRecord) => {
     if (!doc.filePath) return;
-    const kind = VIEWABLE_KINDS[doc.fileType];
+    const kind = documentArtifactKind(doc.fileType);
     if (kind) openDocument(doc.filePath, kind, doc.title, doc.id);
   }, [openDocument]);
 
@@ -172,15 +179,39 @@ export function LibraryView() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
     void loadDocuments();
+    void listen("documents-updated", () => {
+      void loadDocuments();
+    }).then((stop) => {
+      if (disposed) {
+        stop();
+      } else {
+        unlisten = stop;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [loadDocuments]);
+
+  useEffect(() => {
+    return () => {
+      searchRequestRef.current += 1;
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, []);
 
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const requestId = ++searchRequestRef.current;
     if (!query.trim()) {
       setSearchHits([]);
       setView("browse");
+      setLoading(false);
       return;
     }
     setView("search");
@@ -188,11 +219,11 @@ export function LibraryView() {
       setLoading(true);
       try {
         const hits = await searchDocuments(query, 30);
-        setSearchHits(hits);
+        if (requestId === searchRequestRef.current) setSearchHits(hits);
       } catch (e) {
-        setError(String(e));
+        if (requestId === searchRequestRef.current) setError(String(e));
       } finally {
-        setLoading(false);
+        if (requestId === searchRequestRef.current) setLoading(false);
       }
     }, 350);
   }, []);

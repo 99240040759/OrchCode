@@ -3,6 +3,7 @@ pub mod browser;
 pub mod config;
 pub mod connector_tools;
 pub mod connectors;
+pub mod credentials;
 pub mod dictation;
 pub mod document;
 pub mod error;
@@ -26,12 +27,31 @@ const MAIN_WINDOW_LABEL: &str = "main";
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(rest) = raw_url.strip_prefix("orch://oauth/") {
         let state = app.state::<AppState>();
-        let (connector_id, code) = parse_connector_oauth_callback(rest);
-        if !connector_id.is_empty() && !code.is_empty() {
+        let (connector_id, code, oauth_state, callback_error) = parse_connector_oauth_callback(rest);
+        if let Some(error) = callback_error {
+            let _ = app.emit(
+                "connector-changed",
+                serde_json::json!({
+                    "connector": null,
+                    "error": error,
+                    "connectorId": connector_id
+                }),
+            );
+        } else if connector_id.is_empty() || code.is_empty() || oauth_state.is_empty() {
+            let _ = app.emit(
+                "connector-changed",
+                serde_json::json!({
+                    "connector": null,
+                    "error": "Invalid connector OAuth callback",
+                    "connectorId": connector_id
+                }),
+            );
+        } else {
             match ipc::complete_connector_auth(
                 state.clone(),
                 connector_id.clone(),
                 code,
+                oauth_state,
             )
             .await
             {
@@ -44,17 +64,21 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
                 Err(err) => {
                     let _ = app.emit(
                         "connector-changed",
-                        serde_json::json!({ "connector": null, "error": err, "connectorId": connector_id }),
+                        serde_json::json!({
+                            "connector": null,
+                            "error": err,
+                            "connectorId": connector_id
+                        }),
                     );
                 }
             }
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            return;
         }
+        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return;
     }
 
     let state = app.state::<AppState>();
@@ -93,20 +117,28 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     }
 }
 
-fn parse_connector_oauth_callback(rest: &str) -> (String, String) {
+fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option<String>) {
     let (connector_id, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let code = query
-        .split('&')
-        .find_map(|part| {
-            let (k, v) = part.split_once('=')?;
-            if k == "code" {
-                Some(urlencoding::decode(v).unwrap_or_default().into_owned())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
-    (connector_id.to_string(), code)
+    let mut code = String::new();
+    let mut state = String::new();
+    let mut error = None;
+
+    for part in query.split('&') {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        let value = urlencoding::decode(value)
+            .map(|decoded| decoded.into_owned())
+            .unwrap_or_else(|_| value.to_string());
+        match key {
+            "code" => code = value,
+            "state" => state = value,
+            "error" | "error_description" if error.is_none() => error = Some(value),
+            _ => {}
+        }
+    }
+
+    (connector_id.to_string(), code, state, error)
 }
 
 pub fn run() {

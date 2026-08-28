@@ -70,13 +70,13 @@ export interface ChatMessage {
   attachments: MessageAttachment[];
   streaming: boolean;
   error?: string;
-  usage?: TokenUsage;
 }
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
 let sessionsListenerBound = false;
 let modelsListenerBound = false;
+let workspaceListenerBound = false;
 
 function viewItemToLocal(item: MessageItemView): MessageItem {
   switch (item.type) {
@@ -113,9 +113,9 @@ function viewItemToLocal(item: MessageItemView): MessageItem {
 
 function usageFrom(session: SessionSummary): TokenUsage {
   return {
-    inputTokens: session.lastInputTokens,
-    outputTokens: session.lastOutputTokens,
-    totalTokens: session.lastTotalTokens,
+    inputTokens: session.totalInputTokens,
+    outputTokens: session.totalOutputTokens,
+    totalTokens: session.totalTokens,
   };
 }
 
@@ -207,11 +207,14 @@ export const useChatStore = create(
           void get().refreshModels();
         });
       }
-      await listen("workspace-changed", () => {
-        api.getWorkspaceInfo().then((ws) => {
-          if (ws) set((s) => { s.workspace = ws; });
-        }).catch(() => undefined);
-      });
+      if (!workspaceListenerBound) {
+        workspaceListenerBound = true;
+        await listen("workspace-changed", () => {
+          api.getWorkspaceInfo().then((ws) => {
+            if (ws) set((s) => { s.workspace = ws; });
+          }).catch(() => undefined);
+        });
+      }
     },
 
     reset: () => {
@@ -463,9 +466,6 @@ export const useChatStore = create(
               outputTokens: event.outputTokens,
               totalTokens: event.totalTokens,
             };
-            patch((m) => {
-              m.usage = usage;
-            });
             set((s) => {
               if (s.currentSessionId === sessionId) s.sessionTokens = usage;
             });

@@ -1,3 +1,5 @@
+use super::{request_json, request_text, truncate_text};
+
 use std::sync::Arc;
 
 use rig::tool::Tool;
@@ -67,24 +69,11 @@ impl Tool for GoogleDriveListFiles {
             urlencoding::encode(&q)
         );
 
-        let resp = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ToolError::msg(format!("Google Drive API error: {body}")));
-        }
-
-        let json: Value = resp
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let json = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Google Drive",
+        )
+        .await?;
 
         let files = json["files"].as_array().cloned().unwrap_or_default();
         if files.is_empty() {
@@ -139,17 +128,11 @@ impl Tool for GoogleDriveReadFile {
             "{GDRIVE_API}/files/{}?fields=name,mimeType,size",
             args.file_id
         );
-        let meta: Value = self
-            .manager
-            .http()
-            .get(&meta_url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let meta: Value = request_json(
+            self.manager.http().get(&meta_url).bearer_auth(&token),
+            "Google Drive",
+        )
+        .await?;
 
         let mime = meta["mimeType"].as_str().unwrap_or("").to_string();
         let name = meta["name"].as_str().unwrap_or("file").to_string();
@@ -175,38 +158,19 @@ impl Tool for GoogleDriveReadFile {
             )
         };
 
-        let resp = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
+        let content = request_text(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Google Drive",
+        )
+        .await?;
 
-        if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ToolError::msg(format!("Google Drive read error: {body}")));
-        }
+        let truncated = truncate_text(
+            &content,
+            50_000,
+            &format!("\n\n[Truncated: showing first 50,000 of {} chars]", content.chars().count()),
+        );
 
-        let content = resp
-            .text()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        const MAX_CHARS: usize = 50_000;
-        let (truncated, truncation_notice) = if content.len() > MAX_CHARS {
-            (
-                &content[..MAX_CHARS],
-                format!("\n\n[Truncated: showing first {MAX_CHARS} of {} chars]", content.len()),
-            )
-        } else {
-            (content.as_str(), String::new())
-        };
-
-        Ok(format!(
-            "File: {name}\nMIME: {mime}\n\n{truncated}{truncation_notice}"
-        ))
+        Ok(format!("File: {name}\nMIME: {mime}\n\n{truncated}"))
     }
 }
 
@@ -249,21 +213,11 @@ impl Tool for GoogleDriveSearchFiles {
             urlencoding::encode(&q)
         );
 
-        let resp = self
-            .manager
-            .http()
-            .get(&url)
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ToolError::msg(format!("Google Drive search error: {body}")));
-        }
-
-        let json: Value = resp.json().await.map_err(|e| ToolError::msg(e.to_string()))?;
+        let json: Value = request_json(
+            self.manager.http().get(&url).bearer_auth(&token),
+            "Google Drive",
+        )
+        .await?;
         let files = json["files"].as_array().cloned().unwrap_or_default();
 
         if files.is_empty() {
