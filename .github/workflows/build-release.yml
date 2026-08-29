@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 env:
+  NODE_OPTIONS: "--max-old-space-size=8192"
   GCP_FUNCTIONS_URL: ${{ secrets.GCP_FUNCTIONS_URL }}
   FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
   FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
