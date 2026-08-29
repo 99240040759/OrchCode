@@ -1,14 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import {
   VscAdd,
   VscClose,
-  VscFile,
   VscScreenFull,
   VscScreenNormal,
   VscTerminal,
 } from "react-icons/vsc";
-import { activeTabId, useArtifactsStore, type ArtifactKind, type ArtifactTab } from "../lib/artifacts";
-import { useChatStore } from "../lib/store";
+import { RiFolderOpenLine } from "react-icons/ri";
+import { listen } from "@tauri-apps/api/event";
+import { activeTabId, useArtifactsStore, type ArtifactTab } from "../lib/artifacts";
 import { documentArtifactKindForPath, getBasename } from "../lib/api";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
@@ -28,12 +28,8 @@ import {
 } from "./ui/DropdownMenu";
 
 function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
-  if (tab.kind === "browser") {
-    return <ChromeIcon className="ArtifactTab-icon" />;
-  }
-  if (tab.kind === "terminal") {
-    return <VscTerminal className="ArtifactTab-icon" />;
-  }
+  if (tab.kind === "browser") return <ChromeIcon className="ArtifactTab-icon" />;
+  if (tab.kind === "terminal") return <VscTerminal className="ArtifactTab-icon" />;
   const name = tab.path ? getBasename(tab.path) : `${tabName}.${tab.kind}`;
   return (
     <ExplorerIcon
@@ -46,67 +42,38 @@ function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }
   );
 }
 
-const EMPTY_CARDS: {
-  kind: ArtifactKind;
-  label: string;
-  Icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { kind: "file", label: "File", Icon: VscFile },
-  { kind: "browser", label: "Browser", Icon: ChromeIcon },
-  { kind: "terminal", label: "Terminal", Icon: VscTerminal },
+const EMPTY_CARDS = [
+  { kind: "file" as const, label: "Explorer", Icon: RiFolderOpenLine },
+  { kind: "browser" as const, label: "Browser", Icon: ChromeIcon },
+  { kind: "terminal" as const, label: "Terminal", Icon: VscTerminal },
 ];
 
-function useAutoOpenWrittenFiles() {
-  const openFile = useArtifactsStore((s) => s.openFile);
+function useFileWrittenListener() {
+  const openFile     = useArtifactsStore((s) => s.openFile);
   const openDocument = useArtifactsStore((s) => s.openDocument);
-  const bumpFile = useArtifactsStore((s) => s.bumpFile);
-  const messages = useChatStore((s) => s.messages);
-  const generation = useChatStore((s) => s.sessionGeneration);
-
-  const seenRunning = useRef<Set<string>>(new Set());
-  const opened = useRef<Set<string>>(new Set());
-  const lastGeneration = useRef(generation);
 
   useEffect(() => {
-    if (lastGeneration.current !== generation) {
-      lastGeneration.current = generation;
-      seenRunning.current = new Set();
-      opened.current = new Set();
-    }
-
-    for (const message of messages) {
-      for (const item of message.items) {
-        if (item.type !== "toolCall") continue;
-        if (item.status === "running") {
-          seenRunning.current.add(item.id);
-          continue;
-        }
-        if (!seenRunning.current.has(item.id)) continue;
-        if (!item.displayInfo.opensArtifact) continue;
-        const path = item.displayInfo.fullPath;
-        if (!path || opened.current.has(item.id)) continue;
-        opened.current.add(item.id);
-
-        const kind = documentArtifactKindForPath(path);
-        if (kind) openDocument(path, kind);
-        else {
-          openFile(path);
-          bumpFile(path);
-        }
-      }
-    }
-  }, [messages, generation, openFile, openDocument, bumpFile]);
+    let unlisten: (() => void) | undefined;
+    void listen<string>("file-written", (event) => {
+      const path = event.payload;
+      if (!path) return;
+      const kind = documentArtifactKindForPath(path);
+      if (kind) openDocument(path, kind);
+      else openFile(path);
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, [openFile, openDocument]);
 }
 
 function ArtifactPanelHeader() {
-  const tabs = useArtifactsStore((s) => s.tabs);
-  const active = useArtifactsStore(activeTabId);
-  const maximized = useArtifactsStore((s) => s.maximized);
-  const openFile = useArtifactsStore((s) => s.openFile);
-  const openBrowser = useArtifactsStore((s) => s.openBrowser);
-  const openTerminal = useArtifactsStore((s) => s.openTerminal);
-  const closeTab = useArtifactsStore((s) => s.closeTab);
-  const setActive = useArtifactsStore((s) => s.setActive);
+  const tabs          = useArtifactsStore((s) => s.tabs);
+  const active        = useArtifactsStore(activeTabId);
+  const maximized     = useArtifactsStore((s) => s.maximized);
+  const openFile      = useArtifactsStore((s) => s.openFile);
+  const openBrowser   = useArtifactsStore((s) => s.openBrowser);
+  const openTerminal  = useArtifactsStore((s) => s.openTerminal);
+  const closeTab      = useArtifactsStore((s) => s.closeTab);
+  const setActive     = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
 
   return (
@@ -115,9 +82,7 @@ function ArtifactPanelHeader() {
         {tabs.map((tab) => {
           const tabName =
             tab.kind === "file"
-              ? tab.path
-                ? getBasename(tab.path)
-                : "Untitled file"
+              ? tab.path ? getBasename(tab.path) : "Explorer"
               : tab.kind === "browser"
                 ? "Browser"
                 : tab.kind === "terminal"
@@ -165,7 +130,7 @@ function ArtifactPanelHeader() {
           </Tooltip>
           <DropdownMenuContent sideOffset={6} align="end">
             <DropdownMenuItem onSelect={() => openFile()}>
-              <VscFile /> File
+              <RiFolderOpenLine /> Explorer
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openBrowser()}>
               <ChromeIcon /> Browser
@@ -190,23 +155,34 @@ function ArtifactPanelHeader() {
   );
 }
 
+function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
+  return (
+    <div
+      className="ArtifactTabPanel"
+      style={{ display: active ? undefined : "none" }}
+      aria-hidden={!active}
+    >
+      {tab.kind === "terminal" && <TerminalView id={tab.id} />}
+      {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
+      {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
+      {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
+      {tab.kind === "docx" && tab.path && <DocxViewer path={tab.path} />}
+      {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
+      {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
+    </div>
+  );
+}
+
 export function ArtifactPanel() {
-  const tabs = useArtifactsStore((s) => s.tabs);
-  const active = useArtifactsStore(activeTabId);
-  const activeTab = tabs.find((tab) => tab.id === active);
+  const tabs      = useArtifactsStore((s) => s.tabs);
+  const active    = useArtifactsStore(activeTabId);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
-  const openFile = useArtifactsStore((s) => s.openFile);
-  const openBrowser = useArtifactsStore((s) => s.openBrowser);
+  const openFile     = useArtifactsStore((s) => s.openFile);
+  const openBrowser  = useArtifactsStore((s) => s.openBrowser);
   const openTerminal = useArtifactsStore((s) => s.openTerminal);
 
-  useAutoOpenWrittenFiles();
-
-  const openKind = (kind: ArtifactKind) => {
-    if (kind === "file") openFile();
-    else if (kind === "browser") openBrowser();
-    else openTerminal();
-  };
+  useFileWrittenListener();
 
   return (
     <aside className="ArtifactPanel" data-maximized={maximized}>
@@ -216,7 +192,15 @@ export function ArtifactPanel() {
           <div className="ArtifactEmpty">
             <div className="ArtifactCards">
               {EMPTY_CARDS.map(({ kind, label, Icon }) => (
-                <Button key={kind} className="ArtifactCard" onClick={() => openKind(kind)}>
+                <Button
+                  key={kind}
+                  className="ArtifactCard"
+                  onClick={() => {
+                    if (kind === "file") openFile();
+                    else if (kind === "browser") openBrowser();
+                    else openTerminal();
+                  }}
+                >
                   <Icon />
                   <span className="ArtifactCard-label">{label}</span>
                 </Button>
@@ -226,24 +210,16 @@ export function ArtifactPanel() {
               Open a file, browser, or terminal. Files the agent edits show up here too.
             </p>
           </div>
-        ) : activeTab && panelOpen ? (
-          <div key={activeTab.id} className="ArtifactTabPanel">
-            {activeTab.kind === "terminal" && <TerminalView id={activeTab.id} />}
-            {activeTab.kind === "file" && (
-              <FileViewer tabId={activeTab.id} path={activeTab.path} />
-            )}
-            {activeTab.kind === "browser" && <BrowserView initialUrl={activeTab.url} />}
-            {activeTab.kind === "pdf" && activeTab.path && <PdfViewer path={activeTab.path} />}
-            {activeTab.kind === "docx" && activeTab.path && (
-              <DocxViewer path={activeTab.path} documentId={activeTab.documentId} />
-            )}
-            {activeTab.kind === "xlsx" && activeTab.path && <XlsxViewer path={activeTab.path} />}
-            {activeTab.kind === "pptx" && activeTab.path && <PptxViewer path={activeTab.path} />}
-          </div>
-        ) : null}
+        ) : (
+          tabs.map((tab) => (
+            <TabContent
+              key={tab.id}
+              tab={tab}
+              active={panelOpen && tab.id === active}
+            />
+          ))
+        )}
       </div>
     </aside>
   );
 }
-
-export default ArtifactPanel;

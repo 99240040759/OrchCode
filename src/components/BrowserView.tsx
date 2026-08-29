@@ -57,8 +57,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       if (disposed) {
         void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
         void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
-        void webview.close().catch(() => {});
-        void api.webviewClose(currentLabel).catch(() => {});
+        void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));
         return;
       }
       setReady(true);
@@ -115,9 +114,9 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       window.removeEventListener("resize", syncPosition);
       void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
       void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
-      void webview.close().catch(() => {});
-      void api.webviewClose(currentLabel).catch(() => {});
+      void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));
     };
+
   }, []);
 
   const navigate = useCallback((next: string) => {

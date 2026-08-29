@@ -6,10 +6,10 @@ import * as api from "./api";
 import type { UserDisplay } from "./api";
 import { useArtifactsStore } from "./artifacts";
 import { useChatStore } from "./store";
+import { useWorkspaceStore } from "./workspace";
 
 export type AuthStatus = "loading" | "signedOut" | "signedIn";
 
-const REDIRECT_TO = "https://orch.live/auth-callback";
 const SIGN_IN_TIMEOUT_MS = 180_000;
 
 interface AuthState {
@@ -48,6 +48,18 @@ function clearSignInTimeout() {
 function clearWorkspaceState() {
   useChatStore.getState().reset();
   useArtifactsStore.getState().reset();
+  useWorkspaceStore.getState().reset();
+}
+
+function applySignedOut(
+  s: AuthState,
+  error: string | null
+) {
+  s.status = "signedOut";
+  s.user = null;
+  s.signingIn = false;
+  s.justSignedIn = false;
+  s.error = error;
 }
 
 export const useAuthStore = create(
@@ -79,13 +91,7 @@ export const useAuthStore = create(
           return;
         }
         clearWorkspaceState();
-        set((s) => {
-          s.status = "signedOut";
-          s.user = null;
-          s.signingIn = false;
-          s.justSignedIn = false;
-          s.error = error;
-        });
+        set((s) => applySignedOut(s, error));
       });
 
       try {
@@ -121,7 +127,7 @@ export const useAuthStore = create(
       }, SIGN_IN_TIMEOUT_MS);
 
       try {
-        const url = await api.getOAuthUrl(REDIRECT_TO);
+        const url = await api.getOAuthUrl("https://orch.live/auth-callback");
         await openUrl(url);
       } catch (e) {
         clearSignInTimeout();
@@ -143,13 +149,7 @@ export const useAuthStore = create(
         return;
       }
       clearWorkspaceState();
-      set((s) => {
-        s.status = "signedOut";
-        s.user = null;
-        s.error = null;
-        s.justSignedIn = false;
-        s.signingIn = false;
-      });
+      set((s) => applySignedOut(s, null));
     },
 
     dismissGreeting: () => {

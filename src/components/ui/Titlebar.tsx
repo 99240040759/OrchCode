@@ -6,17 +6,18 @@ import {
   VscChromeMinimize,
   VscChromeRestore,
   VscClose,
-  VscCopy,
   VscDash,
   VscLayoutSidebarLeft,
   VscLayoutSidebarLeftOff,
   VscLayoutSidebarRight,
   VscLayoutSidebarRightOff,
-  VscPrimitiveSquare,
   VscRefresh,
+  VscScreenFull,
+  VscScreenNormal,
 } from "react-icons/vsc";
 import { useArtifactsStore } from "../../lib/artifacts";
-import { useUpdaterStore, useChatStore } from "../../lib/store";
+import { useUpdaterStore } from "../../lib/updater";
+import { useChatStore } from "../../lib/store";
 import { cn } from "../../lib/api";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
@@ -25,10 +26,10 @@ export const IS_MAC =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 function UpdateBadge() {
-  const status = useUpdaterStore((s) => s.status);
+  const status  = useUpdaterStore((s) => s.status);
   const version = useUpdaterStore((s) => s.version);
   const percent = useUpdaterStore((s) => s.percent);
-  const apply = useUpdaterStore((s) => s.apply);
+  const apply   = useUpdaterStore((s) => s.apply);
 
   if (status === "downloading") {
     return (
@@ -75,21 +76,15 @@ function WindowControls() {
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let unlisten: (() => void) | undefined;
-
-    const sync = () => {
-      void appWindow.isMaximized().then(setIsMaximized);
-    };
+    const sync = () => { void appWindow.isMaximized().then(setIsMaximized); };
     sync();
-    void appWindow.onResized(sync).then((fn) => {
-      unlisten = fn;
-    });
-
+    void appWindow.onResized(sync).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, []);
 
-  const minimize = () => void getCurrentWindow().minimize();
+  const minimize       = () => void getCurrentWindow().minimize();
   const toggleMaximize = () => void getCurrentWindow().toggleMaximize();
-  const close = () => void getCurrentWindow().close();
+  const close          = () => void getCurrentWindow().close();
 
   if (IS_MAC) {
     return (
@@ -105,7 +100,7 @@ function WindowControls() {
           aria-label={isMaximized ? "Restore" : "Maximize"}
           onClick={toggleMaximize}
         >
-          {isMaximized ? <VscCopy /> : <VscPrimitiveSquare />}
+          {isMaximized ? <VscScreenNormal /> : <VscScreenFull />}
         </Button>
       </div>
     );
@@ -138,11 +133,12 @@ interface TitlebarProps {
 }
 
 export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: TitlebarProps) {
-  const sessions = useChatStore((s) => s.sessions);
-  const currentSessionId = useChatStore((s) => s.currentSessionId);
-  const sessionTitle = sessions.find((s) => s.id === currentSessionId)?.title;
+  const sessionTitle = useChatStore((s) => {
+    const id = s.currentSessionId;
+    return s.sessions.find((sess) => sess.id === id)?.title ?? null;
+  });
 
-  const panelOpen = useArtifactsStore((s) => s.panelOpen);
+  const panelOpen    = useArtifactsStore((s) => s.panelOpen);
   const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
 
   return (
@@ -193,5 +189,3 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
     </div>
   );
 }
-
-export default Titlebar;

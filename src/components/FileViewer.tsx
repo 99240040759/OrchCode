@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
+import { useDebouncedCallback } from "use-debounce";
+import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
 
 import editorWorker from "monaco-editor/editor/editor.worker?worker&inline";
 import jsonWorker from "monaco-editor/language/json/json.worker?worker&inline";
 import cssWorker from "monaco-editor/language/css/css.worker?worker&inline";
 import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
 import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
-import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
+
+import * as api from "../lib/api";
+import { getExt, getBasename, getDirname, splitPathParts } from "../lib/utils";
+import { useCopy } from "../lib/utils";
+import { documentArtifactKindForPath } from "../lib/api";
+import { useArtifactsStore } from "../lib/artifacts";
 import { Markdown } from "./Markdown";
+import { ExplorerIcon } from "./ChatPrimitives";
+import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
 
 self.MonacoEnvironment = {
   getWorker(_, label) {
@@ -21,32 +31,94 @@ self.MonacoEnvironment = {
 };
 
 loader.config({ monaco });
-import { useDebouncedCallback } from "use-debounce";
-import * as api from "../lib/api";
-import { documentArtifactKindForPath, getBasename, getDirname, splitPathParts } from "../lib/api";
-import { useArtifactsStore } from "../lib/artifacts";
-import { ExplorerIcon } from "./ChatPrimitives";
-import { Button } from "./ui/Button";
-import { Tooltip } from "./ui/Tooltip";
 
-function useCopy(text: string) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+let monacoThemeDefined = false;
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+const handleBeforeMount = (m: Parameters<NonNullable<React.ComponentProps<typeof Editor>["beforeMount"]>>[0]) => {
+  if (monacoThemeDefined) return;
+  monacoThemeDefined = true;
+  m.editor.defineTheme("app-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": "#181818",
+      "editor.foreground": "#F0F0F0",
+      "editor.lineHighlightBackground": "#262626",
+      "editorLineNumber.foreground": "#F0F0F05C",
+      "editorLineNumber.activeForeground": "#F0F0F0",
+      "editorGutter.background": "#181818",
+      "editorIndentGuide.background": "#F0F0F013",
+      "editorIndentGuide.activeBackground": "#F0F0F030",
+      "editor.selectionBackground": "#40404099",
+      "editor.inactiveSelectionBackground": "#40404077",
+      "scrollbarSlider.background": "#F0F0F011",
+      "scrollbarSlider.hoverBackground": "#F0F0F01E",
+      "scrollbarSlider.activeBackground": "#F0F0F01E",
+      "minimap.background": "#181818",
+    },
+  });
+};
 
-  const copy = useCallback(() => {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 2000);
-  }, [text]);
+const EDITOR_OPTIONS: React.ComponentProps<typeof Editor>["options"] = {
+  readOnly: true,
+  minimap: { enabled: true },
+  lineNumbers: "on",
+  lineNumbersMinChars: 4,
+  lineDecorationsWidth: 10,
+  padding: { top: 12, bottom: 12 },
+  scrollBeyondLastLine: false,
+  renderWhitespace: "none",
+  fontSize: 13,
+  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+  fontLigatures: true,
+  wordWrap: "on",
+  wrappingStrategy: "advanced",
+  scrollbar: { horizontal: "hidden", handleMouseWheel: true },
+  automaticLayout: true,
+  folding: true,
+  glyphMargin: false,
+  overviewRulerBorder: false,
+  renderLineHighlight: "gutter",
+  smoothScrolling: true,
+  cursorBlinking: "smooth",
+  contextmenu: false,
+};
 
-  return { copied, copy };
+const LOADING_SPINNER = (
+  <div className="FileViewerLoading">
+    <div className="Spinner" />
+  </div>
+);
+
+type FileKind = "image" | "video" | "audio" | "binary" | "text" | "unknown";
+
+const CODE_EXTENSIONS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs",
+  "py", "rs", "go", "java", "kt", "swift", "c", "cpp", "cc", "h", "hpp",
+  "cs", "rb", "php", "scala", "r", "dart", "lua", "ex", "exs", "erl", "hrl",
+  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "html", "htm", "css", "scss", "sass", "less",
+  "json", "yaml", "yml", "toml", "xml", "ini", "env", "conf", "config",
+  "md", "mdx", "txt", "csv", "log", "sql", "graphql", "gql",
+  "vue", "svelte", "astro",
+  "tf", "hcl", "dockerfile", "makefile",
+]);
+
+function mimeToKind(mime: string, ext: string): FileKind {
+  if (CODE_EXTENSIONS.has(ext)) return "text";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  const binaryMimes = new Set([
+    "application/zip", "application/x-tar", "application/gzip",
+    "application/x-bzip2", "application/x-7z-compressed", "application/x-rar-compressed",
+    "application/octet-stream", "application/wasm",
+    "font/ttf", "font/otf", "font/woff", "font/woff2",
+    "application/x-sqlite3", "application/vnd.sqlite3",
+  ]);
+  if (binaryMimes.has(mime)) return "binary";
+  return "text";
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
@@ -56,11 +128,7 @@ function FileBreadcrumb({ path }: { path: string }) {
       {parts.map((part, index) => (
         <span key={`${part}-${index}`} className="FileBreadcrumb-item">
           {index > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
-          <span
-            className={
-              index === parts.length - 1 ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"
-            }
-          >
+          <span className={index === parts.length - 1 ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"}>
             {part}
           </span>
         </span>
@@ -121,13 +189,7 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
                 className="FilePicker-item"
                 onClick={() => onPick(hit.path)}
               >
-                <ExplorerIcon
-                  type="file"
-                  name={filename}
-                  className="FilePicker-icon"
-                  width={14}
-                  height={14}
-                />
+                <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={14} height={14} />
                 <span className="FilePicker-name">{filename}</span>
                 {dir && <span className="FilePicker-path">{dir}</span>}
               </button>
@@ -139,67 +201,94 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
   );
 }
 
-const handleBeforeMount = (monaco: Parameters<NonNullable<React.ComponentProps<typeof Editor>["beforeMount"]>>[0]) => {
-  monaco.editor.defineTheme("app-dark", {
-    base: "vs-dark",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editor.background": "#181818",
-      "editor.foreground": "#F0F0F0",
-      "editor.lineHighlightBackground": "#262626",
-      "editorLineNumber.foreground": "#F0F0F05C",
-      "editorLineNumber.activeForeground": "#F0F0F0",
-      "editorGutter.background": "#181818",
-      "editorIndentGuide.background": "#F0F0F013",
-      "editorIndentGuide.activeBackground": "#F0F0F030",
-      "editor.selectionBackground": "#40404099",
-      "editor.inactiveSelectionBackground": "#40404077",
-      "scrollbarSlider.background": "#F0F0F011",
-      "scrollbarSlider.hoverBackground": "#F0F0F01E",
-      "scrollbarSlider.activeBackground": "#F0F0F01E",
-      "minimap.background": "#181818",
-    },
-  });
+function NativeImageViewer({ path }: { path: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.readImageDataUrl(path)
+      .then((url) => { if (!cancelled) { setSrc(url); setLoading(false); } })
+      .catch((e) => { if (!cancelled) { setError(api.errorMessage(e)); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [path]);
+
+  if (loading) return <div className="FileViewerLoading"><div className="Spinner" /></div>;
+  if (error) return <div className="FileContent-msg">{error}</div>;
+  return (
+    <div className="NativeMediaViewer">
+      <img src={src!} alt={getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+    </div>
+  );
+}
+
+type MediaKind = "video" | "audio";
+
+const VIDEO_MIMES: Record<string, string> = {
+  mp4: "video/mp4", webm: "video/webm", ogg: "video/ogg",
+  mov: "video/quicktime", avi: "video/x-msvideo", mkv: "video/x-matroska", m4v: "video/mp4",
+};
+const AUDIO_MIMES: Record<string, string> = {
+  mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac",
+  aac: "audio/aac", ogg: "audio/ogg", m4a: "audio/mp4", opus: "audio/opus",
 };
 
-const EDITOR_OPTIONS: React.ComponentProps<typeof Editor>["options"] = {
-  readOnly: true,
-  minimap: { enabled: true },
-  lineNumbers: "on",
-  lineNumbersMinChars: 4,
-  lineDecorationsWidth: 10,
-  padding: { top: 12, bottom: 12 },
-  scrollBeyondLastLine: false,
-  renderWhitespace: "none",
-  fontSize: 13,
-  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-  fontLigatures: true,
-  wordWrap: "on",
-  wrappingStrategy: "advanced",
-  scrollbar: {
-    horizontal: "hidden",
-    handleMouseWheel: true,
-  },
-  automaticLayout: true,
-  folding: true,
-  glyphMargin: false,
-  overviewRulerBorder: false,
-  renderLineHighlight: "gutter",
-  smoothScrolling: true,
-  cursorBlinking: "smooth",
-  contextmenu: false,
-};
+function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const ext = getExt(path);
 
-const LOADING_SPINNER = (
-  <div className="FileViewerLoading">
-    <div className="Spinner" />
-  </div>
-);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.readBinaryFileAsDataUrl(path)
+      .then((url) => { if (!cancelled) { setSrc(url); setLoading(false); } })
+      .catch((e) => { if (!cancelled) { setError(api.errorMessage(e)); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [path]);
+
+  if (loading) return <div className="FileViewerLoading"><div className="Spinner" /></div>;
+  if (error) return <div className="FileContent-msg">{error}</div>;
+
+  const mime = kind === "video"
+    ? (VIDEO_MIMES[ext] ?? "video/mp4")
+    : (AUDIO_MIMES[ext] ?? "audio/mpeg");
+
+  return (
+    <div className={`NativeMediaViewer${kind === "audio" ? " NativeMediaViewer--audio" : ""}`}>
+      {kind === "video" ? (
+        <video controls className="NativeMediaViewer-video">
+          <source src={src!} type={mime} />
+        </video>
+      ) : (
+        <audio controls className="NativeMediaViewer-audio">
+          <source src={src!} type={mime} />
+        </audio>
+      )}
+    </div>
+  );
+}
+
+function BinaryFileMessage({ path }: { path: string }) {
+  const ext = getExt(path);
+  return (
+    <div className="FileContent-msg">
+      <div className="BinaryFileMsg">
+        <ExplorerIcon type="file" name={getBasename(path)} width={40} height={40} className="BinaryFileMsg-icon" />
+        <span className="BinaryFileMsg-name">{getBasename(path)}</span>
+        <span className="BinaryFileMsg-hint">Binary file (.{ext}) — cannot be displayed as text</span>
+      </div>
+    </div>
+  );
+}
 
 export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const setTabPath = useArtifactsStore((s) => s.setTabPath);
-  const version = useArtifactsStore((s) => (path ? s.fileVersions[path] ?? 0 : 0));
 
   const isMd = Boolean(path && /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path));
   const [mode, setMode] = useState<"preview" | "code">("preview");
@@ -207,15 +296,22 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fileKind, setFileKind] = useState<FileKind | null>(null);
   const { copied, copy } = useCopy(content);
 
   const load = useCallback(async (target: string) => {
     setLoading(true);
     setError(null);
+    setFileKind(null);
     try {
-      const file = await api.readTextFile(target);
-      setContent(file.content);
-      setTruncated(file.truncated);
+      const meta = await api.readDocumentMetadata(target);
+      const kind = mimeToKind(meta.mime, meta.extension);
+      setFileKind(kind);
+      if (kind === "text") {
+        const file = await api.readTextFile(target);
+        setContent(file.content);
+        setTruncated(file.truncated);
+      }
     } catch (e) {
       setContent("");
       setTruncated(false);
@@ -229,20 +325,62 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
     if (!path) {
       setContent("");
       setError(null);
+      setFileKind(null);
       return;
     }
-    if (documentArtifactKindForPath(path)) {
-      setTabPath(tabId, path);
-      return;
-    }
+    if (documentArtifactKindForPath(path)) return;
     setMode("preview");
     void load(path);
-  }, [path, tabId, setTabPath, version, load]);
+  }, [path, load]);
 
   if (!path) {
     return (
       <div className="FileViewerFull">
         <FilePicker onPick={(picked) => setTabPath(tabId, picked)} />
+      </div>
+    );
+  }
+
+  if (fileKind === "image") {
+    return (
+      <div className="FileViewerFull">
+        <div className="FileViewerBar">
+          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
+        </div>
+        <div className="FileViewerBody"><NativeImageViewer path={path} /></div>
+      </div>
+    );
+  }
+
+  if (fileKind === "video") {
+    return (
+      <div className="FileViewerFull">
+        <div className="FileViewerBar">
+          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
+        </div>
+        <div className="FileViewerBody"><NativeMediaViewer path={path} kind="video" /></div>
+      </div>
+    );
+  }
+
+  if (fileKind === "audio") {
+    return (
+      <div className="FileViewerFull">
+        <div className="FileViewerBar">
+          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
+        </div>
+        <div className="FileViewerBody"><NativeMediaViewer path={path} kind="audio" /></div>
+      </div>
+    );
+  }
+
+  if (fileKind === "binary") {
+    return (
+      <div className="FileViewerFull">
+        <div className="FileViewerBar">
+          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
+        </div>
+        <div className="FileViewerBody"><BinaryFileMessage path={path} /></div>
       </div>
     );
   }
@@ -256,10 +394,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
         </div>
         <div className="FileViewerBar-right">
           {isMd && (
-            <Tooltip
-              content={mode === "preview" ? "View source code" : "Preview markdown"}
-              side="bottom"
-            >
+            <Tooltip content={mode === "preview" ? "View source code" : "Preview markdown"} side="bottom">
               <Button
                 className="IconBtn"
                 aria-label={mode === "preview" ? "View source code" : "Preview markdown"}
@@ -270,12 +405,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
             </Tooltip>
           )}
           <Tooltip content="Reload file" side="bottom">
-            <Button
-              className="IconBtn"
-              aria-label="Reload file"
-              onClick={() => void load(path)}
-              disabled={loading}
-            >
+            <Button className="IconBtn" aria-label="Reload file" onClick={() => void load(path)} disabled={loading}>
               <VscRefresh />
             </Button>
           </Tooltip>
@@ -288,13 +418,9 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
               disabled={!content}
             >
               {copied ? (
-                <>
-                  <VscCheck className="CodeBlock-copyIconDone" /> Copied
-                </>
+                <><VscCheck className="CodeBlock-copyIconDone" /> Copied</>
               ) : (
-                <>
-                  <VscCopy /> Copy
-                </>
+                <><VscCopy /> Copy</>
               )}
             </button>
           </Tooltip>
@@ -302,18 +428,14 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       </div>
       <div className="FileViewerBody">
         {loading && !content ? (
-          <div className="FileViewerLoading">
-            <div className="Spinner" />
-          </div>
+          <div className="FileViewerLoading"><div className="Spinner" /></div>
         ) : error ? (
           <div className="FileContent-msg">{error}</div>
         ) : isMd && mode === "preview" ? (
-          <div className="FileViewerMarkdown">
-            <Markdown>{content}</Markdown>
-          </div>
+          <div className="FileViewerMarkdown"><Markdown>{content}</Markdown></div>
         ) : (
           <Editor
-            key={`${path}:${version}`}
+            key={path}
             height="100%"
             path={path}
             value={content}
@@ -327,5 +449,3 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
     </div>
   );
 }
-
-export default FileViewer;

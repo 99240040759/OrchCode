@@ -1,9 +1,17 @@
 import React, { useEffect, useState, SVGProps } from "react";
 import { VscClose } from "react-icons/vsc";
+import {
+  BsFileEarmarkPdfFill,
+  BsFileEarmarkWordFill,
+  BsFileEarmarkExcelFill,
+  BsFileEarmarkPptFill,
+} from "react-icons/bs";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
 import * as api from "../lib/api";
 import { cn, getBasename } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
+
+const imageDataUrlCache = new Map<string, string>();
 
 export function Avatar({
   src,
@@ -38,9 +46,24 @@ export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
   name: string;
 }
 
-export function ExplorerIcon({ type, name, ...svgProps }: ExplorerIconProps) {
-  if (type === "folder") return <FolderIcon folderName={name} {...svgProps} />;
-  return <FileIcon fileName={name} autoAssign {...svgProps} />;
+export function ExplorerIcon({ type, name, className, style, ...svgProps }: ExplorerIconProps) {
+  if (type === "folder") return <FolderIcon folderName={name} className={className} style={style} {...svgProps} />;
+
+  const ext = name.split(".").pop()?.toLowerCase();
+  if (ext === "pdf") {
+    return <BsFileEarmarkPdfFill className={cn("shrink-0", className)} style={{ color: "#e2574c", ...style }} {...svgProps} />;
+  }
+  if (ext === "docx" || ext === "doc") {
+    return <BsFileEarmarkWordFill className={cn("shrink-0", className)} style={{ color: "#185abd", ...style }} {...svgProps} />;
+  }
+  if (ext === "xlsx" || ext === "xls") {
+    return <BsFileEarmarkExcelFill className={cn("shrink-0", className)} style={{ color: "#107c41", ...style }} {...svgProps} />;
+  }
+  if (ext === "pptx" || ext === "ppt") {
+    return <BsFileEarmarkPptFill className={cn("shrink-0", className)} style={{ color: "#c43e1c", ...style }} {...svgProps} />;
+  }
+
+  return <FileIcon fileName={name} autoAssign className={className} style={style} {...svgProps} />;
 }
 
 export function ChromeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -63,7 +86,9 @@ export interface AttachmentCardProps {
 }
 
 export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: AttachmentCardProps) {
-  const [fetchedSrc, setFetchedSrc] = useState<string | null>(null);
+  const [fetchedSrc, setFetchedSrc] = useState<string | null>(() =>
+    path && isImage ? (imageDataUrlCache.get(path) ?? null) : null
+  );
   const [failed, setFailed] = useState(false);
 
   const src = dataUrl ?? fetchedSrc;
@@ -74,12 +99,20 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
       setFailed(false);
       return;
     }
+    const cached = imageDataUrlCache.get(path);
+    if (cached) {
+      setFetchedSrc(cached);
+      return;
+    }
     let active = true;
     setFailed(false);
     api
       .readImageDataUrl(path)
       .then((url) => {
-        if (active) setFetchedSrc(url);
+        if (active) {
+          imageDataUrlCache.set(path, url);
+          setFetchedSrc(url);
+        }
       })
       .catch(() => {
         if (active) setFailed(true);
@@ -201,7 +234,7 @@ export function FileTag({
       )}
     </span>
   );
-};
+}
 
 export function ThinkingShimmer() {
   return (

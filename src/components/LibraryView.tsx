@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import { useDebouncedCallback } from "use-debounce";
 import {
   countDocuments,
   deleteDocument,
@@ -69,10 +70,7 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
           <>
             <Button
               className="LibraryRow-confirmYes"
-              onClick={() => {
-                setConfirming(false);
-                onDelete(doc.id);
-              }}
+              onClick={() => { setConfirming(false); onDelete(doc.id); }}
               disabled={deleting}
             >
               Remove
@@ -100,10 +98,6 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
   );
 }
 
-interface SearchResultRowProps {
-  hit: SearchHit;
-}
-
 function SearchSnippet({ snippet }: { snippet: string }) {
   const parts = snippet.split(/(<b>[\s\S]*?<\/b>)/gi);
   return (
@@ -116,7 +110,7 @@ function SearchSnippet({ snippet }: { snippet: string }) {
   );
 }
 
-function SearchResultRow({ hit }: SearchResultRowProps) {
+function SearchResultRow({ hit }: { hit: SearchHit }) {
   const page = hit.pageNumber ? ` — page ${hit.pageNumber}` : "";
   return (
     <div className="SearchResultRow">
@@ -151,9 +145,6 @@ export function LibraryView() {
   const [offset, setOffset] = useState(0);
   const LIMIT = 50;
 
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchRequestRef = useRef(0);
-
   const handleOpen = useCallback((doc: DocumentRecord) => {
     if (!doc.filePath) return;
     const kind = documentArtifactKind(doc.fileType);
@@ -185,11 +176,8 @@ export function LibraryView() {
     void listen("documents-updated", () => {
       void loadDocuments();
     }).then((stop) => {
-      if (disposed) {
-        stop();
-      } else {
-        unlisten = stop;
-      }
+      if (disposed) stop();
+      else unlisten = stop;
     });
     return () => {
       disposed = true;
@@ -197,36 +185,29 @@ export function LibraryView() {
     };
   }, [loadDocuments]);
 
-  useEffect(() => {
-    return () => {
-      searchRequestRef.current += 1;
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, []);
+  const runSearch = useDebouncedCallback(async (query: string) => {
+    setLoading(true);
+    try {
+      const hits = await searchDocuments(query, 30);
+      setSearchHits(hits);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, 350);
 
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    const requestId = ++searchRequestRef.current;
     if (!query.trim()) {
+      runSearch.cancel();
       setSearchHits([]);
       setView("browse");
-      setLoading(false);
       return;
     }
     setView("search");
-    searchTimerRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const hits = await searchDocuments(query, 30);
-        if (requestId === searchRequestRef.current) setSearchHits(hits);
-      } catch (e) {
-        if (requestId === searchRequestRef.current) setError(String(e));
-      } finally {
-        if (requestId === searchRequestRef.current) setLoading(false);
-      }
-    }, 350);
-  }, []);
+    void runSearch(query);
+  }, [runSearch]);
 
   const handleIngest = useCallback(async () => {
     setError(null);
@@ -242,7 +223,8 @@ export function LibraryView() {
         ],
       });
       if (!selected) return;
-      const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path) return;
       setIngesting(true);
       const result = await ingestDocument(path);
       setIngestResult(result);
@@ -386,5 +368,3 @@ export function LibraryView() {
     </div>
   );
 }
-
-export default LibraryView;

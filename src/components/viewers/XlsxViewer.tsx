@@ -1,38 +1,19 @@
 import { useState, useEffect } from "react";
-import { readParsedDocument } from "../../lib/api";
+import * as XLSX from "xlsx";
+import { dataUrlToArrayBuffer, readBinaryFileAsDataUrl } from "../../lib/api";
 
 interface XlsxViewerProps {
   path: string;
 }
 
-function parseSheetsFromText(fullText: string): Array<{ name: string; rows: string[][] }> {
-  const sheets: Map<string, string[][]> = new Map();
-  let currentSheet = "Sheet1";
-
-  const lines = fullText.split("\n");
-  for (const line of lines) {
-    const sheetMatch = line.match(/^=== Sheet: (.+) ===$/);
-    if (sheetMatch) {
-      currentSheet = sheetMatch[1];
-      if (!sheets.has(currentSheet)) sheets.set(currentSheet, []);
-      continue;
-    }
-    if (line.trim()) {
-      const cells = line.split("\t");
-      const existing = sheets.get(currentSheet);
-      if (existing) {
-        existing.push(cells);
-      } else {
-        sheets.set(currentSheet, [cells]);
-      }
-    }
-  }
-
-  return Array.from(sheets.entries()).map(([name, rows]) => ({ name, rows }));
+interface SheetData {
+  name: string;
+  rows: string[][];
 }
 
 export function XlsxViewer({ path }: XlsxViewerProps) {
-  const [sheets, setSheets] = useState<Array<{ name: string; rows: string[][] }>>([]);
+
+  const [sheets, setSheets] = useState<SheetData[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,14 +23,20 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
     setLoading(true);
     setError(null);
 
-    readParsedDocument(path)
-      .then((data) => {
-        if (!cancelled) {
-          const parsed = parseSheetsFromText(data.fullText);
-          setSheets(parsed);
-          setActiveSheet(0);
-          setLoading(false);
-        }
+    readBinaryFileAsDataUrl(path)
+      .then((dataUrl) => {
+        if (cancelled) return;
+        const buf = dataUrlToArrayBuffer(dataUrl);
+        const workbook = XLSX.read(buf, { type: "array" });
+        const parsed: SheetData[] = workbook.SheetNames.map((name) => {
+          const sheet = workbook.Sheets[name];
+          const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" });
+          const filtered = (rows as string[][]).filter((row) => row.some((c) => c !== ""));
+          return { name, rows: filtered };
+        });
+        setSheets(parsed);
+        setActiveSheet(0);
+        setLoading(false);
       })
       .catch((e) => {
         if (!cancelled) {
@@ -58,9 +45,7 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
         }
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [path]);
 
   if (loading) {

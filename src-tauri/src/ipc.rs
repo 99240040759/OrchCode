@@ -9,10 +9,10 @@ use crate::dictation;
 use crate::events::{ChatEvent, DictationEvent, TerminalEvent};
 use crate::gateway::{Budget, ModelInfo};
 use crate::llm::{build_agent, build_client, maybe_compact, run_chat, AttachmentRef, RunRequest};
-use crate::persistence::{MessageView, SessionSummary};
+use crate::persistence::MessageView;
 use crate::state::AppState;
 use crate::terminal;
-use crate::tools::{fs_util, ToolContext};
+use crate::tools::ToolContext;
 
 use rig::memory::ConversationMemory;
 
@@ -65,31 +65,6 @@ impl From<Budget> for BudgetDto {
             period: b.period,
             allowed: b.allowed,
         }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceInfo {
-    pub path: String,
-    pub name: String,
-    pub is_sandbox: bool,
-}
-
-fn workspace_info(state: &AppState) -> WorkspaceInfo {
-    let path = state.workspace().unwrap_or_else(|| state.sandbox.clone());
-    let is_sandbox = state.is_sandbox();
-    let name = if is_sandbox {
-        "Sandbox".to_string()
-    } else {
-        path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string())
-    };
-    WorkspaceInfo {
-        path: path.to_string_lossy().to_string(),
-        name,
-        is_sandbox,
     }
 }
 
@@ -154,25 +129,70 @@ pub async fn sign_out_auth(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_workspace(state: State<'_, AppState>, path: String) -> Result<WorkspaceInfo, String> {
+pub fn set_workspace(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let resolved = dunce::canonicalize(PathBuf::from(&path))
         .map_err(|e| format!("cannot resolve path: {e}"))?;
     if !resolved.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
     state.set_workspace(resolved);
-    Ok(workspace_info(&state))
+    Ok(())
 }
 
+/// Create a Quick Project directory at `<data_dir>/quick-projects/<id>-<name>/`
+/// and return its absolute path.
 #[tauri::command]
-pub fn get_workspace_info(state: State<'_, AppState>) -> WorkspaceInfo {
-    workspace_info(&state)
+pub fn create_quick_project_dir(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<String, String> {
+    let dir = state.quick_project_path(&id, &name);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("failed to create quick project dir: {e}"))?;
+    Ok(dir.to_string_lossy().to_string())
 }
 
+/// List sessions whose workspace_path matches the given path, ordered by updated_at DESC.
 #[tauri::command]
-pub fn use_sandbox(state: State<'_, AppState>) -> WorkspaceInfo {
-    state.use_sandbox();
-    workspace_info(&state)
+pub async fn list_sessions_for_workspace(
+    state: State<'_, AppState>,
+    workspace_path: String,
+) -> Result<Vec<crate::persistence::SessionSummary>, String> {
+    state
+        .memory
+        .list_sessions_for_workspace(&workspace_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Delete workspace data:
+/// 1. Purges all SQLite sessions, messages, and reasoning metrics for this workspace.
+/// 2. If `is_quick_project` is true, safely deletes the quick-project folder from disk.
+#[tauri::command]
+pub async fn delete_workspace_data(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    workspace_path: String,
+    is_quick_project: bool,
+) -> Result<(), String> {
+    state
+        .memory
+        .delete_sessions_for_workspace(&workspace_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if is_quick_project {
+        let quick_projects_root = state.data_dir.join("quick-projects");
+        let path = std::path::PathBuf::from(&workspace_path);
+        if path.starts_with(&quick_projects_root) && path.exists() {
+            std::fs::remove_dir_all(&path)
+                .map_err(|e| format!("failed to delete quick project directory: {e}"))?;
+        }
+    }
+
+    let _ = app.emit("sessions-updated", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -425,11 +445,6 @@ pub async fn clear_session(
 }
 
 #[tauri::command]
-pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionSummary>, String> {
-    state.memory.list_sessions().await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn get_session_view(
     state: State<'_, AppState>,
     session_id: String,
@@ -496,7 +511,7 @@ pub fn terminal_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> Result<(), String> {
-    let workspace = state.workspace().unwrap_or_else(|| state.sandbox.clone());
+    let workspace = state.workspace().unwrap_or_else(|| state.data_dir.clone());
     let terminals = state.terminals.clone();
     let id_cleanup = id.clone();
     let session = terminal::open(
@@ -566,7 +581,6 @@ pub struct ConnectorDto {
     pub category: String,
     pub auth_kind: String,
     pub is_configured: bool,
-    pub enabled: bool,
     pub has_token: bool,
     pub token_expires_at: Option<i64>,
     pub error: Option<String>,
@@ -584,7 +598,6 @@ fn connector_dto(
         category: def.category.to_string(),
         auth_kind: def.auth_kind.as_str().to_string(),
         is_configured: def.is_configured(),
-        enabled: has_token,
         has_token,
         token_expires_at: rec.and_then(|r| r.token_expires_at),
         error: rec.and_then(|r| r.error.clone()),
@@ -701,8 +714,11 @@ pub async fn ipc_ingest_document(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<IngestResultDto, String> {
-    let root = state.require_workspace().map_err(|e| e.to_string())?;
-    let resolved = fs_util::resolve_existing_file(&root, &path).map_err(|e| e.to_string())?;
+    let resolved = dunce::canonicalize(std::path::PathBuf::from(&path))
+        .map_err(|e| format!("cannot resolve path: {e}"))?;
+    if !resolved.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
     let result = ingest_document(&resolved, &state.memory)
         .await
         .map_err(|e| e.to_string())?;

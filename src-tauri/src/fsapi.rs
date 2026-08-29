@@ -25,6 +25,18 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
+fn resolve_path_flexible(
+    root: &std::path::Path,
+    path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let raw = std::path::Path::new(path);
+    if raw.is_absolute() && raw.exists() {
+        Ok(raw.to_path_buf())
+    } else {
+        fs_util::resolve_existing_file(root, path).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn list_workspace_files(
     state: State<'_, AppState>,
@@ -95,7 +107,9 @@ pub async fn read_text_file(
     path: String,
 ) -> Result<FileContent, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
-    let resolved = fs_util::resolve_existing_file(&root, &path).map_err(|e| e.to_string())?;
+
+    // Accept absolute paths that exist on disk (e.g. artifact dir files outside workspace)
+    let resolved = resolve_path_flexible(&root, &path)?;
 
     use tokio::io::AsyncReadExt;
     let meta = tokio::fs::metadata(&resolved)
@@ -205,7 +219,10 @@ pub async fn read_document_metadata(
     path: String,
 ) -> Result<DocumentFileMeta, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
-    let resolved = fs_util::resolve_existing_file(&root, &path).map_err(|e| e.to_string())?;
+
+    // Accept absolute paths that exist on disk (e.g. artifact dir files outside workspace)
+    let resolved = resolve_path_flexible(&root, &path)?;
+
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("metadata error: {e}"))?;

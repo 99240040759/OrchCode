@@ -145,7 +145,7 @@ impl Tool for GmailReadEmail {
 
         let body = extract_gmail_body(&json["payload"]);
 
-        let mut out = format!(
+        let out = format!(
             "Subject: {subject}\nFrom: {from}\nTo: {to}\nDate: {date}\n\n---\n\n{body}"
         );
 

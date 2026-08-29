@@ -23,7 +23,9 @@ import { Markdown, renderTextWithMentions } from "./Markdown";
 import { AttachmentCard, ExplorerIcon, FileTag, ThinkingShimmer } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
 
-const TOOL_ICONS: Record<Exclude<ToolIcon, "file" | "folder">, React.ComponentType<{ className?: string }>> = {
+type NonFileToolIcon = Exclude<ToolIcon, "file" | "folder">;
+
+const TOOL_ICONS: Record<NonFileToolIcon, React.ComponentType<{ className?: string }>> = {
   terminal: VscTerminal,
   search: VscSearch,
   globe: VscGlobe,
@@ -31,6 +33,10 @@ const TOOL_ICONS: Record<Exclude<ToolIcon, "file" | "folder">, React.ComponentTy
   cpu: VscMcp,
   zapOff: VscFlame,
 };
+
+function isNonFileToolIcon(icon: ToolIcon): icon is NonFileToolIcon {
+  return icon !== "file" && icon !== "folder";
+}
 
 function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
   const time = new Date(item.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -66,23 +72,26 @@ function ToolTarget({ tool }: { tool: ToolCallItem }) {
   }
 
   const isFolder = info.icon === "folder";
-  const Icon = (!isFolder && info.icon !== "file") 
-    ? TOOL_ICONS[info.icon as Exclude<ToolIcon, "file" | "folder">] 
-    : null;
+
+  if (isNonFileToolIcon(info.icon)) {
+    const Icon = TOOL_ICONS[info.icon];
+    return (
+      <span className="ToolRow-target">
+        <Icon className="ToolRow-icon" />
+        {info.targetText && <span className="ToolRow-text">{info.targetText}</span>}
+      </span>
+    );
+  }
 
   return (
     <span className="ToolRow-target">
-      {Icon ? (
-        <Icon className="ToolRow-icon" />
-      ) : (
-        <ExplorerIcon
-          type={isFolder ? "folder" : "file"}
-          name={info.targetText ?? ""}
-          className="ToolRow-icon"
-          width={13}
-          height={13}
-        />
-      )}
+      <ExplorerIcon
+        type={isFolder ? "folder" : "file"}
+        name={info.targetText ?? ""}
+        className="ToolRow-icon"
+        width={13}
+        height={13}
+      />
       {info.targetText && <span className="ToolRow-text">{info.targetText}</span>}
     </span>
   );
@@ -111,7 +120,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
               className="ToolRow-toggle"
               data-open={open}
               aria-expanded={open}
-              onClick={() => setOpen((value) => !value)}
+              onClick={() => setOpen((v) => !v)}
             >
               <VscChevronRight className="ToolRow-chevron" />
             </button>
@@ -269,5 +278,3 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
     </div>
   );
 });
-
-export default Message;

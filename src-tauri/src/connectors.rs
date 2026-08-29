@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
 
 use crate::credentials;
-
 use crate::error::{AppError, AppResult};
 use crate::persistence::{ConnectorRecord, SqliteMemory};
 
@@ -170,10 +169,6 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
 
 pub fn find_def(id: &str) -> Option<&'static ConnectorDef> {
     CONNECTOR_DEFS.iter().find(|d| d.id == id)
-}
-
-pub fn find_def_by_deep_link(deep_link_id: &str) -> Option<&'static ConnectorDef> {
-    CONNECTOR_DEFS.iter().find(|d| d.deep_link_id == deep_link_id)
 }
 
 const CONNECTOR_OAUTH_STATE_TTL: Duration = Duration::from_secs(600);
@@ -434,50 +429,11 @@ impl ConnectorManager {
         Ok(())
     }
 
-    pub async fn get_access_token(
+    async fn refresh_access_token(
         &self,
         connector_id: &str,
         memory: &SqliteMemory,
     ) -> AppResult<String> {
-        let (token, expires_at) = {
-            let states = self.states.read().unwrap_or_else(|e| e.into_inner());
-            let s = states.get(connector_id);
-            (
-                s.and_then(|s| s.access_token.clone()),
-                s.and_then(|s| s.expires_at),
-            )
-        };
-
-        if let Some(tok) = &token {
-            let threshold = now_ms() + 300_000;
-            if expires_at.map(|e| e > threshold).unwrap_or(true) {
-                return Ok(tok.clone());
-            }
-        }
-
-        let lock = self
-            .refresh_locks
-            .get(connector_id)
-            .ok_or_else(|| AppError::ConnectorNotFound(connector_id.to_string()))?
-            .clone();
-        let _refresh_guard = lock.lock().await;
-
-        let (token2, expires_at2) = {
-            let states = self.states.read().unwrap_or_else(|e| e.into_inner());
-            let s = states.get(connector_id);
-            (
-                s.and_then(|s| s.access_token.clone()),
-                s.and_then(|s| s.expires_at),
-            )
-        };
-
-        if let Some(tok) = token2 {
-            let threshold = now_ms() + 300_000;
-            if expires_at2.map(|e| e > threshold).unwrap_or(true) {
-                return Ok(tok);
-            }
-        }
-
         let def = find_def(connector_id)
             .ok_or_else(|| AppError::ConnectorNotFound(connector_id.to_string()))?;
 
@@ -506,9 +462,7 @@ impl ConnectorManager {
 
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::ConnectorAuthError(format!(
-                "token refresh failed: {body}"
-            )));
+            return Err(AppError::ConnectorAuthError(format!("token refresh failed: {body}")));
         }
 
         let new_tokens = resp
@@ -518,6 +472,47 @@ impl ConnectorManager {
 
         self.store_tokens(connector_id, &new_tokens, memory).await?;
         Ok(new_tokens.access_token)
+    }
+
+    pub async fn get_access_token(
+        &self,
+        connector_id: &str,
+        memory: &SqliteMemory,
+    ) -> AppResult<String> {
+        let threshold = now_ms() + 300_000;
+
+        let (token, expires_at) = {
+            let states = self.states.read().unwrap_or_else(|e| e.into_inner());
+            let s = states.get(connector_id);
+            (s.and_then(|s| s.access_token.clone()), s.and_then(|s| s.expires_at))
+        };
+
+        if let Some(tok) = token {
+            if expires_at.map(|e| e > threshold).unwrap_or(true) {
+                return Ok(tok);
+            }
+        }
+
+        let lock = self
+            .refresh_locks
+            .get(connector_id)
+            .ok_or_else(|| AppError::ConnectorNotFound(connector_id.to_string()))?
+            .clone();
+        let _refresh_guard = lock.lock().await;
+
+        let (token2, expires_at2) = {
+            let states = self.states.read().unwrap_or_else(|e| e.into_inner());
+            let s = states.get(connector_id);
+            (s.and_then(|s| s.access_token.clone()), s.and_then(|s| s.expires_at))
+        };
+
+        if let Some(tok) = token2 {
+            if expires_at2.map(|e| e > threshold).unwrap_or(true) {
+                return Ok(tok);
+            }
+        }
+
+        self.refresh_access_token(connector_id, memory).await
     }
 
     pub async fn disconnect(&self, connector_id: &str, memory: &SqliteMemory) -> AppResult<()> {
@@ -575,8 +570,5 @@ impl Default for ConnectorManager {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::document::now_ms()
 }

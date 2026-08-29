@@ -77,7 +77,7 @@ pub struct FirebaseAuthClient {
 impl FirebaseAuthClient {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_http_client(),
         }
     }
 
@@ -97,25 +97,17 @@ impl FirebaseAuthClient {
             .await
             .map_err(|e| AppError::other(format!("auth uri fetch network error: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Gateway { status, body });
-        }
-
-        #[derive(Deserialize)]
-        struct CreateAuthUriResponse {
-            #[serde(rename = "authUri")]
-            auth_uri: Option<String>,
-        }
-
-        let res: CreateAuthUriResponse = resp
-            .json()
-            .await
-            .map_err(|e| AppError::other(format!("auth uri parse error: {e}")))?;
-
-        res.auth_uri
-            .ok_or_else(|| AppError::other("no authUri returned from Firebase".to_string()))
+        check_status_text(resp, "auth uri").await.and_then(|body| {
+            #[derive(Deserialize)]
+            struct Resp {
+                #[serde(rename = "authUri")]
+                auth_uri: Option<String>,
+            }
+            let res: Resp = serde_json::from_str(&body)
+                .map_err(|e| AppError::other(format!("auth uri parse error: {e}")))?;
+            res.auth_uri
+                .ok_or_else(|| AppError::other("no authUri returned from Firebase".to_string()))
+        })
     }
 
     pub async fn get_user(&self, id_token: &str) -> AppResult<UserProfile> {
@@ -123,19 +115,16 @@ impl FirebaseAuthClient {
             "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={}",
             config::firebase_api_key()
         );
-        let resp = self
-            .client
-            .post(&url)
-            .json(&serde_json::json!({ "idToken": id_token }))
-            .send()
-            .await
-            .map_err(|e| AppError::other(format!("user fetch network error: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Gateway { status, body });
-        }
+        let body = check_status_text(
+            self.client
+                .post(&url)
+                .json(&serde_json::json!({ "idToken": id_token }))
+                .send()
+                .await
+                .map_err(|e| AppError::other(format!("user fetch network error: {e}")))?,
+            "user lookup",
+        )
+        .await?;
 
         #[derive(Deserialize)]
         struct FirebaseAccount {
@@ -147,17 +136,13 @@ impl FirebaseAuthClient {
             #[serde(rename = "photoUrl")]
             photo_url: Option<String>,
         }
-
         #[derive(Deserialize)]
         struct LookupResponse {
             users: Option<Vec<FirebaseAccount>>,
         }
 
-        let lookup: LookupResponse = resp
-            .json()
-            .await
+        let lookup: LookupResponse = serde_json::from_str(&body)
             .map_err(|e| AppError::other(format!("user JSON parse error: {e}")))?;
-
         let user = lookup
             .users
             .and_then(|u| u.into_iter().next())
@@ -187,24 +172,21 @@ impl FirebaseAuthClient {
         } else {
             format!("id_token={}&providerId=google.com", encoded_token)
         };
-        let resp = self
-            .client
-            .post(&url)
-            .json(&serde_json::json!({
-                "postBody": post_body,
-                "requestUri": request_uri,
-                "returnIdpCredential": true,
-                "returnSecureToken": true
-            }))
-            .send()
-            .await
-            .map_err(|e| AppError::other(format!("signInWithIdp network error: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Gateway { status, body });
-        }
+        let body = check_status_text(
+            self.client
+                .post(&url)
+                .json(&serde_json::json!({
+                    "postBody": post_body,
+                    "requestUri": request_uri,
+                    "returnIdpCredential": true,
+                    "returnSecureToken": true
+                }))
+                .send()
+                .await
+                .map_err(|e| AppError::other(format!("signInWithIdp network error: {e}")))?,
+            "signInWithIdp",
+        )
+        .await?;
 
         #[derive(Deserialize)]
         struct FirebaseIdpResponse {
@@ -221,24 +203,19 @@ impl FirebaseAuthClient {
             photo_url: Option<String>,
         }
 
-        let res: FirebaseIdpResponse = resp
-            .json()
-            .await
+        let res: FirebaseIdpResponse = serde_json::from_str(&body)
             .map_err(|e| AppError::other(format!("signInWithIdp parse error: {e}")))?;
-
         let profile = UserProfile {
             id: res.local_id,
             email: res.email,
             display_name: res.display_name,
             photo_url: res.photo_url,
         };
-
         let session = AuthSession {
             access_token: res.id_token,
             refresh_token: Some(res.refresh_token),
             user: Some(profile.clone()),
         };
-
         Ok((session, profile))
     }
 
@@ -251,20 +228,17 @@ impl FirebaseAuthClient {
             "grant_type=refresh_token&refresh_token={}",
             urlencoding::encode(refresh_token)
         );
-        let resp = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body_str)
-            .send()
-            .await
-            .map_err(|e| AppError::other(format!("session refresh network error: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Gateway { status, body });
-        }
+        let body = check_status_text(
+            self.client
+                .post(&url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body_str)
+                .send()
+                .await
+                .map_err(|e| AppError::other(format!("session refresh network error: {e}")))?,
+            "token refresh",
+        )
+        .await?;
 
         #[derive(Deserialize)]
         struct FirebaseTokenResponse {
@@ -272,11 +246,8 @@ impl FirebaseAuthClient {
             refresh_token: Option<String>,
         }
 
-        let token_resp: FirebaseTokenResponse = resp
-            .json()
-            .await
+        let token_resp: FirebaseTokenResponse = serde_json::from_str(&body)
             .map_err(|e| AppError::other(format!("refresh parse error: {e}")))?;
-
         let new_refresh = token_resp
             .refresh_token
             .or_else(|| Some(refresh_token.to_string()));
@@ -287,6 +258,26 @@ impl FirebaseAuthClient {
             user: None,
         })
     }
+}
+
+async fn check_status_text(
+    resp: reqwest::Response,
+    context: &str,
+) -> AppResult<String> {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if status.is_success() {
+        Ok(body)
+    } else {
+        Err(AppError::Gateway { status: status.as_u16(), body: format!("{context}: {body}") })
+    }
+}
+
+fn shared_http_client() -> Client {
+    static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| Client::new())
+        .clone()
 }
 
 pub fn save_refresh_token(token: &str) -> AppResult<()> {
@@ -331,10 +322,10 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
             params.is_code = key == "code";
         }
         "refresh_token" if params.refresh_token.is_none() => {
-            params.refresh_token = Some(value.to_string())
+            params.refresh_token = Some(value.to_string());
         }
         "error_description" | "error" if params.error.is_none() => {
-            params.error = Some(value.to_string())
+            params.error = Some(value.to_string());
         }
         _ => {}
     }
@@ -384,22 +375,24 @@ pub async fn handle_auth_callback(
 
     let client = FirebaseAuthClient::new();
 
-    let (firebase_id_token, firebase_refresh_token, user_display) = if let Some(rt) = params.refresh_token {
-        let profile = client.get_user(&id_or_access_token).await.map_err(|e| e.to_string())?;
-        (id_or_access_token, Some(rt), UserDisplay::from_profile(&profile))
-    } else if !params.is_code {
-        let (session, profile) = client
-            .sign_in_with_idp(&id_or_access_token, false, "https://orch.live/auth-callback")
-            .await
-            .map_err(|e| e.to_string())?;
-        (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
-    } else {
-        let (session, profile) = client
-            .sign_in_with_idp(&id_or_access_token, true, "https://orch.live/auth-callback")
-            .await
-            .map_err(|e| e.to_string())?;
-        (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
-    };
+    let (firebase_id_token, firebase_refresh_token, user_display) =
+        if let Some(rt) = params.refresh_token {
+            let profile = client
+                .get_user(&id_or_access_token)
+                .await
+                .map_err(|e| e.to_string())?;
+            (id_or_access_token, Some(rt), UserDisplay::from_profile(&profile))
+        } else {
+            let (session, profile) = client
+                .sign_in_with_idp(
+                    &id_or_access_token,
+                    params.is_code,
+                    config::AUTH_REDIRECT_URL,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
+        };
 
     if let Some(rt) = firebase_refresh_token {
         save_refresh_token(&rt).map_err(|e| e.to_string())?;

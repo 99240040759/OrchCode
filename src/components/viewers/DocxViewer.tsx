@@ -1,78 +1,76 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { renderAsync } from "docx-preview";
-import { readBinaryFileAsDataUrl, readParsedDocument, type ParsedDocumentDto } from "../../lib/api";
+import { dataUrlToArrayBuffer, readBinaryFileAsDataUrl } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
 
 interface DocxViewerProps {
   path: string;
-  documentId?: string;
 }
+
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 2.0;
 
 export function DocxViewer({ path }: DocxViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [fallbackDoc, setFallbackDoc] = useState<ParsedDocumentDto | null>(null);
+  const [zoom, setZoom] = useState(1.0);
+  const [rendered, setRendered] = useState(false);
 
   const fileName = path.split(/[\\/]/).pop() ?? path;
+
+  const zoomIn    = useCallback(() => setZoom((z) => Math.min(ZOOM_MAX, parseFloat((z + ZOOM_STEP).toFixed(2)))), []);
+  const zoomOut   = useCallback(() => setZoom((z) => Math.max(ZOOM_MIN, parseFloat((z - ZOOM_STEP).toFixed(2)))), []);
+  const zoomReset = useCallback(() => setZoom(1.0), []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setFallbackDoc(null);
+    setRendered(false);
+    setZoom(1.0);
 
     async function loadDoc() {
       try {
         const dataUrl = await readBinaryFileAsDataUrl(path);
-        const base64 = dataUrl.split(",")[1];
-        if (!base64) throw new Error("Invalid file data");
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
+        const buffer = dataUrlToArrayBuffer(dataUrl);
         if (cancelled || !containerRef.current) return;
         containerRef.current.innerHTML = "";
-        await renderAsync(bytes.buffer, containerRef.current, undefined, {
+        await renderAsync(buffer, containerRef.current, undefined, {
           inWrapper: false,
           ignoreWidth: false,
           ignoreHeight: false,
           useBase64URL: true,
         });
-        if (!cancelled) setLoading(false);
-      } catch {
-        try {
-          const parsed = await readParsedDocument(path);
-          if (!cancelled) {
-            setFallbackDoc(parsed);
-            setLoading(false);
-          }
-        } catch (e2) {
-          if (!cancelled) {
-            setError(String(e2));
-            setLoading(false);
-          }
+        if (!cancelled) {
+          setRendered(true);
+          setLoading(false);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e));
+          setLoading(false);
         }
       }
     }
 
     void loadDoc();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [path]);
-
-  const paragraphs = fallbackDoc?.fullText
-    ? fallbackDoc.fullText.split("\n").filter((p) => p.trim().length > 0)
-    : [];
 
   return (
     <div className="DocxViewer">
       <div className="DocxViewer-header">
         <ExplorerIcon type="file" name={fileName} width={18} height={18} />
-        <span className="DocxViewer-title">{fallbackDoc?.title ?? fileName}</span>
+        <span className="DocxViewer-title">{fileName}</span>
+        {rendered && !error && !loading && (
+          <div className="DocxViewer-zoom">
+            <button className="DocxViewer-zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} aria-label="Zoom out">−</button>
+            <button className="DocxViewer-zoom-pct" onClick={zoomReset} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
+            <button className="DocxViewer-zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} aria-label="Zoom in">+</button>
+          </div>
+        )}
       </div>
       {loading && (
         <div className="DocViewer-loading">
@@ -87,25 +85,16 @@ export function DocxViewer({ path }: DocxViewerProps) {
         </div>
       )}
       <div
-        ref={containerRef}
-        className="DocxViewer-render"
+        className="DocxViewer-scroll"
         style={{ display: loading || error ? "none" : "block" }}
-      />
-      {fallbackDoc && !loading && !error && (
-        <div className="DocxViewer-body">
-          {paragraphs.length === 0 ? (
-            <div className="DocViewer-empty">
-              <p>No text content found in this document.</p>
-            </div>
-          ) : (
-            paragraphs.map((p, i) => (
-              <p key={i} className="DocxViewer-text">{p}</p>
-            ))
-          )}
+      >
+        <div
+          className="DocxViewer-scaleWrap"
+          style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
+        >
+          <div ref={containerRef} className="DocxViewer-render" />
         </div>
-      )}
+      </div>
     </div>
   );
 }
-
-export default DocxViewer;

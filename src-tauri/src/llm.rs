@@ -21,7 +21,9 @@ use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
 use crate::gateway::ModelInfo;
 use crate::persistence::SqliteMemory;
-use crate::tools::{parse_display_info, strip_tool_error_sentinel, tool_output_is_error, ToolContext};
+use crate::tools::{
+    parse_display_info, slice_lines, strip_tool_error_sentinel, tool_output_is_error, ToolContext,
+};
 
 pub type ChatClient = rig::providers::openai::CompletionsClient;
 pub type ChatModel = rig::providers::openai::completion::CompletionModel<reqwest::Client>;
@@ -68,6 +70,14 @@ pub fn payload_part_label(text: &str) -> Option<String> {
     }
 }
 
+fn parse_line_range(lr: &str) -> (Option<usize>, Option<usize>) {
+    let s = lr.trim_start_matches("#L");
+    match s.split_once('-') {
+        Some((a, b)) => (a.parse::<usize>().ok(), b.parse::<usize>().ok()),
+        None => (s.parse::<usize>().ok(), None),
+    }
+}
+
 pub fn build_agent(
     client: &ChatClient,
     model: &ModelInfo,
@@ -92,50 +102,13 @@ pub fn build_agent(
         .tool(ctx.run_command())
         .tool(ctx.get_command_status())
         .tool(ctx.stop_command())
-        .tool(ctx.search_documents())
-        .tool(ctx.list_documents())
-        .tool(ctx.ingest_document_tool());
+        .tool(ctx.search_documents());
 
-    for conn_id in enabled_connectors {
-        match conn_id.as_str() {
-            "google_drive" => {
-                builder = builder
-                    .tool(ctx.google_drive_list())
-                    .tool(ctx.google_drive_read())
-                    .tool(ctx.google_drive_search());
-            }
-            "gmail" => {
-                builder = builder
-                    .tool(ctx.gmail_list())
-                    .tool(ctx.gmail_read())
-                    .tool(ctx.gmail_search());
-            }
-            "github" => {
-                builder = builder
-                    .tool(ctx.github_list())
-                    .tool(ctx.github_read())
-                    .tool(ctx.github_search());
-            }
-            "notion" => {
-                builder = builder
-                    .tool(ctx.notion_list())
-                    .tool(ctx.notion_read())
-                    .tool(ctx.notion_search());
-            }
-            "slack" => {
-                builder = builder
-                    .tool(ctx.slack_list())
-                    .tool(ctx.slack_read())
-                    .tool(ctx.slack_search());
-            }
-            "jira" => {
-                builder = builder
-                    .tool(ctx.jira_list())
-                    .tool(ctx.jira_get())
-                    .tool(ctx.jira_search());
-            }
-            _ => {}
-        }
+    if !enabled_connectors.is_empty() {
+        builder = builder
+            .tool(ctx.connector_search())
+            .tool(ctx.connector_read())
+            .tool(ctx.connector_list());
     }
 
     builder = builder.memory(memory);
@@ -150,23 +123,26 @@ pub fn build_agent(
 fn build_preamble(data_dir: &Path, workspace: Option<&Path>, enabled_connectors: &[String]) -> String {
     let workspace_line = match workspace {
         Some(p) => format!("Active Workspace: {}", p.display()),
-        None => "No workspace is open. Ask the user to open a folder before making file changes."
+        None => "No workspace folder is currently open. You can answer questions, explain concepts, or create quick scratch files. If the user wants to work on an existing project, suggest opening a workspace folder."
             .to_string(),
     };
 
     let mut connector_section = String::new();
     if !enabled_connectors.is_empty() {
-        connector_section.push_str("\n## CONNECTED KNOWLEDGE SOURCES\n");
-        connector_section.push_str("The following external knowledge sources are connected and their tools are available:\n");
+        connector_section.push_str("\n## CONNECTED EXTERNAL SERVICES\n");
+        connector_section.push_str("The following external knowledge sources are connected:\n");
         for id in enabled_connectors {
             if let Some(def) = crate::connectors::find_def(id) {
-                connector_section.push_str(&format!("- **{}**: {}\n", def.name, def.description));
+                connector_section.push_str(&format!("- **{}** (`{}`): {}\n", def.name, def.id, def.description));
             }
         }
-        connector_section.push_str("\nUse the appropriate connector tools to search and read content from these sources when the user asks about documents, files, messages, or issues from these systems.\n");
+        connector_section.push_str("\nAccess them using the unified connector tools:\n");
+        connector_section.push_str("- `connector_search(provider, query)`: Search files, emails, issues, or messages\n");
+        connector_section.push_str("- `connector_read(provider, target)`: Read specific file, email, issue, page, or channel content\n");
+        connector_section.push_str("- `connector_list(provider, container?)`: List files, repos, channels, pages, or projects\n");
     }
     connector_section.push_str("\n## KNOWLEDGE LIBRARY\n");
-    connector_section.push_str("You have access to a local knowledge library via `search_documents`, `list_documents`, and `ingest_document` tools. When the user asks to find documents, search reports, or query company knowledge, use `search_documents` first before asking the user to provide files.\n");
+    connector_section.push_str("You have access to a local knowledge library via the `search_documents` tool. When the user asks to find documents, search reports, or query company knowledge, use `search_documents` first before asking the user to provide files.\n");
 
     let all_skills = crate::skills::load_all_skills(data_dir);
     let mut skills_section = String::new();
@@ -181,6 +157,8 @@ The skill content gives you a proven sequence of steps, tool calls, and checks �
             skills_section.push_str(&format!("- **{}** — {}\n", sk.name, sk.description));
         }
     }
+
+    // Guardrails are embedded directly in the preamble — no external injection needed.
 
     format!(
         "You are Orch, an autonomous AI software engineer embedded inside a desktop IDE. \
@@ -201,26 +179,28 @@ You are not a chatbot. You are an agent. Each time you respond, you either:
 Do not narrate what you are about to do and then stop. Do not ask for permission to proceed. \
 If you have enough information to act, act. If you need information, get it with a tool call.
 
-Your loop continues across as many turns as needed — there is no artificial limit. \
-Each tool result feeds directly into your next decision. Use that feedback.
+Work purposefully and efficiently toward resolution. Each tool result feeds directly into your next decision. \
+Use that feedback to make steady, deterministic progress.
 
 ## HOW TO INTERPRET TOOL RESULTS
 
 Every tool returns a result you must read and reason about before continuing:
 
+- **list_dir** lists folder entries to explore file structure and navigate directory trees.
 - **read_file** returns the raw file content. Inspect it before writing any edits.
+- **read_skill** returns detailed procedural instructions and checklists for specific engineering workflows.
 - **write_file / multi_replace_file_content** return a confirmation or an error. \
-  If multi_replace fails with \"not found\", the file changed — read it again and retry.
-- **run_command** returns either the full output (short commands) or a task_id (long commands). \
-  For a task_id, poll get_command_status until the command finishes, then check the exit code AND the output.
-- **get_command_status** returns status, exit code, and output. \
-  \"running\" means keep polling. \"completed\" with exit code 0 means success — read the output to confirm. \
-  \"failed\" with a non-zero exit code means failure — read the output to diagnose the error.
-- **search_workspace** returns file:line: content matches. Use these to locate exactly where to read or edit.
-- **web_search** returns titles, URLs, and snippets. Read them before deciding your next action.
+  If multi_replace fails with \"not found\", the file content differs — read it again and retry with exact context.
+- **run_command** returns output for foreground commands, or a task_id for background processes.
+- **get_command_status** returns status (\"running\", \"completed\", \"failed\"), exit code, and accumulated output.
+- **stop_command** cancels a running background command task if it has hung or is no longer needed.
+- **search_workspace** returns file:line: content matches. Use these to locate symbols and code locations.
+- **web_search** returns titles, URLs, and snippets from current online sources.
+- **search_documents** searches indexed files (PDFs, Word docs, spreadsheets, presentations) in the knowledge library.
+- **connector_search / connector_read / connector_list** search, read, and browse connected services (Google Drive, Gmail, GitHub, Notion, Slack, Jira).
 
 Tool failures are prefixed with [[tool-error]]. Diagnose the message before retrying. \
-Do not retry the same call unchanged if it failed — something must be different.
+Do not retry the same call unchanged if it failed — modify your parameters or approach.
 
 ## WORKING WITH FILES
 
@@ -234,34 +214,34 @@ Do not retry the same call unchanged if it failed — something must be differen
 
 ## WORKING WITH COMMANDS
 
-1. Run short verification commands (build, lint, test) directly with run_command. Read the full output.
-2. For commands that take more than ~30 seconds (install, long build, dev server): \
-   use background=true with run_command to get a task_id immediately, then poll get_command_status.
-3. When polling: wait a few seconds between calls. Read the output each time — errors appear in the stream.
-4. Commands run with no interactive stdin. Never pass interactive flags.
-5. A build that outputs warnings but exits 0 still succeeded. A build that exits non-zero failed — \
-   read the output to find the error, fix the file, and run the build again.
-6. Never declare success on a command without checking its exit code and output.
+1. Run short verification commands (build, lint, test) directly with run_command in foreground (background=false). \
+   Inspect the full exit code and output.
+2. For long-running processes (dev servers, file watchers, persistent tasks): \
+   use background=true with run_command to obtain a task_id, then check get_command_status as needed.
+3. Use stop_command to terminate a background task when finished or if it becomes unresponsive.
+4. Commands run without interactive stdin. Never pass interactive flags (e.g. prompt confirmations).
+5. A build that outputs warnings but exits 0 succeeded. A build that exits non-zero failed — \
+   diagnose the output, fix the root cause, and re-run.
+6. Never declare success on a command without verifying its exit code and output.
 
 ## INVESTIGATION STRATEGY
 
 When asked to fix a bug or understand unfamiliar code, follow this order:
-1. Use search_workspace to locate relevant files, symbols, or error strings.
+1. Use list_dir or search_workspace to locate relevant files, symbols, or error strings.
 2. Use read_file to read the specific files and functions identified.
 3. Form a hypothesis about the root cause before making any change.
 4. Make the minimal change that addresses the root cause.
 5. Verify with a build or test run.
 
-Do not edit blindly. Do not make multiple changes at once and hope one works. \
-One focused change, then verify.
+Do not edit blindly. One focused, verified change is better than multiple speculative edits.
 
 ## VERIFICATION
 
 A task is complete only when you have empirical evidence it works:
-- For code changes: the build/compile command succeeds with no errors.
-- For UI changes: inspect the implementation and use the available verification method appropriate to it.
+- For code changes: the build/compile/typecheck command succeeds with no errors.
+- For UI changes: verify component state, markup, and visual hierarchy.
 - For command tasks: exit code 0 and output confirms the expected outcome.
-- For file edits: reading the file back confirms the content is exactly right.
+- For file edits: reading the file back confirms the content is exact.
 
 Never tell the user a task is done based on reasoning alone. Show the evidence."
     )
@@ -505,7 +485,7 @@ fn display_label(path: &Path, workspace: Option<&Path>) -> String {
         })
 }
 
-fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<PathBuf> {
+fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathBuf, Option<String>)> {
     let Some(ws) = workspace else {
         return Vec::new();
     };
@@ -515,18 +495,27 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<PathBu
 
     let mut out = Vec::new();
     for cap in re.captures_iter(prompt) {
-        let Some(candidate) = cap
+        let Some(raw) = cap
             .name("bracket")
             .or_else(|| cap.name("plain"))
             .map(|value| value.as_str().trim())
         else {
             continue;
         };
+        if raw.is_empty() {
+            continue;
+        }
+        let (candidate, line_range) = if let Some(hash_pos) = raw.find("#L") {
+            let (p, r) = raw.split_at(hash_pos);
+            (p, Some(r.to_string()))
+        } else {
+            (raw, None)
+        };
         if candidate.is_empty() {
             continue;
         }
         if let Ok(resolved) = crate::tools::fs_util::resolve_existing_file(ws, candidate) {
-            out.push(resolved);
+            out.push((resolved, line_range));
         }
     }
     out
@@ -559,18 +548,23 @@ async fn build_user_message(
             Err(_) => notes.push(format!("attachment not found in workspace: {}", attachment.name)),
         }
     }
-    let mentioned: Vec<(PathBuf, String)> = collect_mentioned_paths(workspace, prompt)
+    let mentioned: Vec<(PathBuf, String, Option<String>)> = collect_mentioned_paths(workspace, prompt)
         .into_iter()
-        .map(|p| {
+        .map(|(p, line_range)| {
             let name = p
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            (p, name)
+            (p, name, line_range)
         })
         .collect();
 
-    for (path, display_name) in declared.into_iter().chain(mentioned) {
+    let declared_extended: Vec<(PathBuf, String, Option<String>)> = declared
+        .into_iter()
+        .map(|(p, n)| (p, n, None))
+        .collect();
+
+    for (path, display_name, line_range) in declared_extended.into_iter().chain(mentioned) {
         let canonical = dunce::canonicalize(&path)
             .map_err(|e| format!("cannot resolve attachment {display_name}: {e}"));
         let canonical = match canonical {
@@ -638,9 +632,22 @@ async fn build_user_message(
         }
 
         match tokio::fs::read_to_string(&canonical).await {
-            Ok(content) => parts.push(UserContent::text(format!(
-                "{FILE_PART_PREFIX}{label}>\n{content}"
-            ))),
+            Ok(raw_content) => {
+                let content = if let Some(ref lr) = line_range {
+                    let (start, end) = parse_line_range(lr);
+                    slice_lines(&raw_content, start, end)
+                } else {
+                    raw_content
+                };
+                let label_with_range = if let Some(ref lr) = line_range {
+                    format!("{label}{lr}")
+                } else {
+                    label.clone()
+                };
+                parts.push(UserContent::text(format!(
+                    "{FILE_PART_PREFIX}{label_with_range}>\n{content}"
+                )));
+            }
             Err(e) => notes.push(format!("cannot read attachment {label} as text: {e}")),
         }
     }

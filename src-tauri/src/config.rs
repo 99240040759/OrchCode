@@ -11,16 +11,18 @@ pub fn firebase_auth_domain() -> &'static str {
 }
 
 pub fn sentry_dsn() -> &'static str {
-    env!("SENTRY_DSN")
+    option_env!("SENTRY_DSN").unwrap_or("")
 }
 
+pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
+
 pub fn inference_base_url(provider: &str) -> String {
-    let clean_provider = if provider.trim().is_empty() {
-        "nvidia"
+    let clean = if provider.trim().is_empty() {
+        DEFAULT_INFERENCE_PROVIDER
     } else {
         provider.trim()
     };
-    format!("{}/{}/v1", gcp_functions_url(), clean_provider)
+    format!("{}/{}/v1", gcp_functions_url(), clean)
 }
 
 pub fn models_url() -> String {
@@ -43,6 +45,7 @@ pub fn tavily_url() -> String {
     format!("{}/tavily", gcp_functions_url())
 }
 
+const DEFAULT_INFERENCE_PROVIDER: &str = "nvidia";
 
 pub const DEFAULT_MAX_TURNS: usize = 1000;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;

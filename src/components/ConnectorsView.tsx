@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
 import {
   listConnectors,
   getConnectorAuthUrl,
   disconnectConnector,
   type ConnectorDto,
 } from "../lib/api";
-import { listen } from "@tauri-apps/api/event";
 import { Button } from "./ui/Button";
 import { ConnectorIcon } from "./icons/ConnectorIcon";
 
@@ -107,15 +108,20 @@ export function ConnectorsView() {
         if (event.payload.error) {
           setError(event.payload.error);
         }
-        void refresh();
+        if (event.payload.connector) {
+          setConnectors((prev) =>
+            prev.map((c) =>
+              c.id === event.payload.connector!.id ? event.payload.connector! : c
+            )
+          );
+        } else {
+          void refresh();
+        }
         setActionId(null);
       }
     ).then((stop) => {
-      if (disposed) {
-        stop();
-      } else {
-        unlisten = stop;
-      }
+      if (disposed) stop();
+      else unlisten = stop;
     });
     return () => {
       disposed = true;
@@ -128,7 +134,6 @@ export function ConnectorsView() {
     setError(null);
     try {
       const url = await getConnectorAuthUrl(id);
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
     } catch (e) {
       setError(String(e));
@@ -161,14 +166,14 @@ export function ConnectorsView() {
   }, [connectors, activeFilter]);
 
   const filterTabs = useMemo(() => {
-    const categories = Array.from(new Set(connectors.map((connector) => connector.category))).sort();
+    const categories = Array.from(new Set(connectors.map((c) => c.category))).sort();
     return [
       { id: "all", label: "All", count: connectors.length },
       { id: "connected", label: "Connected", count: connectedCount },
-      ...categories.map((category) => ({
-        id: category,
-        label: category,
-        count: connectors.filter((connector) => connector.category === category).length,
+      ...categories.map((cat) => ({
+        id: cat,
+        label: cat,
+        count: connectors.filter((c) => c.category === cat).length,
       })),
     ];
   }, [connectors, connectedCount]);
@@ -194,7 +199,6 @@ export function ConnectorsView() {
           <p className="ConnectorsView-subtitle">
             Connect external accounts to make documents, repos, and communications searchable across conversations.
           </p>
-
           <nav className="ConnectorsView-filterBar" aria-label="Connector category filters">
             {filterTabs.map((tab) => (
               <button
@@ -233,5 +237,3 @@ export function ConnectorsView() {
     </div>
   );
 }
-
-export default ConnectorsView;

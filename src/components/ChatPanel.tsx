@@ -13,8 +13,8 @@ import { MessageList } from "./MessageList";
 
 export function ChatPanel() {
   const hasMessages = useChatStore((s) => s.messages.length > 0);
-  const panelOpen = useArtifactsStore((s) => s.panelOpen);
-  const maximized = useArtifactsStore((s) => s.maximized);
+  const panelOpen   = useArtifactsStore((s) => s.panelOpen);
+  const maximized   = useArtifactsStore((s) => s.maximized);
 
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
 
@@ -43,37 +43,21 @@ export function ChatPanel() {
         data-panel-open={panelOpen}
         data-maximized={maximized}
       >
-        <Panel
-          id="chat"
-          order={1}
-          collapsible
-          collapsedSize={0}
-          defaultSize={60}
-          minSize={0}
-        >
+        <Panel id="chat" order={1} collapsible collapsedSize={0} defaultSize={60} minSize={0}>
           <div className="ChatPane">
             {hasMessages && <MessageList />}
             <div className={hasMessages ? "Composer-dock" : "EmptyState"}>
               <div className="Composer-wrapper">
-                <InputBar />
+                <InputBar promptMode={hasMessages} />
               </div>
             </div>
           </div>
         </Panel>
         <PanelResizeHandle className="PanelResizeHandle" />
-        <Panel
-          id="artifacts"
-          order={2}
-          collapsible
-          collapsedSize={0}
-          defaultSize={40}
-          minSize={0}
-        >
+        <Panel id="artifacts" order={2} collapsible collapsedSize={0} defaultSize={40} minSize={0}>
           <ArtifactPanel />
         </Panel>
       </PanelGroup>
     </div>
   );
 }
-
-export default ChatPanel;

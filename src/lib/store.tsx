@@ -1,10 +1,9 @@
 import { create } from "zustand";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { immer } from "zustand/middleware/immer";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { newId } from "./api";
+import { useWorkspaceStore, registerWorkspaceActivatedCallback } from "./workspace";
 import type {
   AttachmentRef,
   Budget,
@@ -13,8 +12,10 @@ import type {
   ModelDto,
   SessionSummary,
   ToolDisplayInfo,
-  WorkspaceInfo,
 } from "./api";
+
+export type { UpdateStatus, UpdaterStore } from "./updater";
+export { useUpdaterStore } from "./updater";
 
 export interface MessageAttachment {
   name: string;
@@ -74,10 +75,6 @@ export interface ChatMessage {
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
-let sessionsListenerBound = false;
-let modelsListenerBound = false;
-let workspaceListenerBound = false;
-
 function viewItemToLocal(item: MessageItemView): MessageItem {
   switch (item.type) {
     case "text":
@@ -129,13 +126,13 @@ interface ChatState {
   models: ModelDto[];
   selectedModel: ModelDto | null;
   budget: Budget | null;
-  workspace: WorkspaceInfo | null;
   error: string | null;
   initialized: boolean;
 }
 
 interface ChatActions {
   initialize: () => Promise<void>;
+  reloadForWorkspace: () => Promise<void>;
   reset: () => void;
   newChat: () => void;
   selectSession: (id: string) => Promise<void>;
@@ -143,8 +140,6 @@ interface ChatActions {
   send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
   cancel: () => void;
   setSelectedModel: (key: string) => void;
-  pickWorkspace: () => Promise<void>;
-  resetToSandbox: () => Promise<void>;
   refreshSessions: () => Promise<void>;
   refreshModels: () => Promise<void>;
   refreshBudget: () => Promise<void>;
@@ -163,10 +158,27 @@ const INITIAL_STATE: ChatState = {
   models: [],
   selectedModel: null,
   budget: null,
-  workspace: null,
   error: null,
   initialized: false,
 };
+
+type UnlistenFn = () => void;
+let boundUnlisteners: UnlistenFn[] = [];
+
+async function bindListeners() {
+  const unlistenSessions = await listen("sessions-updated", () => {
+    void useChatStore.getState().refreshSessions();
+  });
+  const unlistenModels = await listen("models-updated", () => {
+    void useChatStore.getState().refreshModels();
+  });
+  boundUnlisteners = [unlistenSessions, unlistenModels];
+}
+
+function unbindListeners() {
+  for (const fn of boundUnlisteners) fn();
+  boundUnlisteners = [];
+}
 
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
@@ -174,62 +186,65 @@ export const useChatStore = create(
 
     initialize: async () => {
       if (get().initialized) return;
-      set((s) => {
-        s.initialized = true;
-      });
+      set((s) => { s.initialized = true; });
 
-      const [sessions, workspace, models, savedModel] = await Promise.all([
-        api.listSessions().catch(() => [] as SessionSummary[]),
-        api.getWorkspaceInfo().catch(() => null),
+      const wsPath = useWorkspaceStore.getState().current?.path ?? null;
+
+      const [sessions, models, savedModel] = await Promise.all([
+        wsPath
+          ? api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
+          : Promise.resolve([] as SessionSummary[]),
         api.listModels().catch(() => [] as ModelDto[]),
         api.getUserPref("selectedModel").catch(() => null),
       ]);
 
       set((s) => {
         s.sessions = sessions;
-        if (workspace) s.workspace = workspace;
         s.models = models;
         const preferred = savedModel ? models.find((m) => m.key === savedModel) : undefined;
         s.selectedModel = preferred ?? models[0] ?? null;
       });
 
       void get().refreshBudget();
+      registerWorkspaceActivatedCallback(() => void useChatStore.getState().reloadForWorkspace());
+      await bindListeners();
+    },
 
-      if (!sessionsListenerBound) {
-        sessionsListenerBound = true;
-        await listen("sessions-updated", () => {
-          void get().refreshSessions();
-        });
-      }
-      if (!modelsListenerBound) {
-        modelsListenerBound = true;
-        await listen("models-updated", () => {
-          void get().refreshModels();
-        });
-      }
-      if (!workspaceListenerBound) {
-        workspaceListenerBound = true;
-        await listen("workspace-changed", () => {
-          api.getWorkspaceInfo().then((ws) => {
-            if (ws) set((s) => { s.workspace = ws; });
-          }).catch(() => undefined);
-        });
-      }
+    reloadForWorkspace: async () => {
+      const wsPath = useWorkspaceStore.getState().current?.path ?? null;
+      const freshId = newId();
+
+      const sessions = wsPath
+        ? await api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
+        : [];
+
+      set((s) => {
+        s.sessions = sessions;
+        s.currentSessionId = freshId;
+        s.sessionGeneration += 1;
+        s.messages = [];
+        s.sessionTokens = ZERO_USAGE;
+        s.streaming = false;
+        s.error = null;
+      });
     },
 
     reset: () => {
+      unbindListeners();
       set((s) => {
         Object.assign(s, INITIAL_STATE, {
           currentSessionId: newId(),
           sessionGeneration: s.sessionGeneration + 1,
+          initialized: false,
         });
       });
     },
 
     newChat: () => {
       if (get().streaming) return;
+      const freshId = newId();
       set((s) => {
-        s.currentSessionId = newId();
+        s.currentSessionId = freshId;
         s.sessionGeneration += 1;
         s.messages = [];
         s.sessionTokens = ZERO_USAGE;
@@ -250,16 +265,7 @@ export const useChatStore = create(
       });
 
       if (target?.workspacePath) {
-        try {
-          const info = await api.setWorkspace(target.workspacePath);
-          set((s) => {
-            if (s.currentSessionId === id) s.workspace = info;
-          });
-        } catch (e) {
-          set((s) => {
-            if (s.currentSessionId === id) s.error = api.errorMessage(e);
-          });
-        }
+        api.setWorkspace(target.workspacePath).catch(() => undefined);
       }
 
       try {
@@ -292,9 +298,7 @@ export const useChatStore = create(
       try {
         await api.clearSession(id);
       } catch (e) {
-        set((s) => {
-          s.error = api.errorMessage(e);
-        });
+        set((s) => { s.error = api.errorMessage(e); });
         return;
       }
       set((s) => {
@@ -316,9 +320,7 @@ export const useChatStore = create(
       if (streaming) return false;
       if (!text && attachments.length === 0) return false;
       if (!selectedModel) {
-        set((s) => {
-          s.error = "Select a model before sending a message";
-        });
+        set((s) => { s.error = "Select a model before sending a message"; });
         return false;
       }
 
@@ -361,9 +363,7 @@ export const useChatStore = create(
       const settle = () => {
         if (settled) return;
         settled = true;
-        patch((m) => {
-          m.streaming = false;
-        });
+        patch((m) => { m.streaming = false; });
         set((s) => {
           if (s.currentSessionId === sessionId) s.streaming = false;
         });
@@ -383,14 +383,7 @@ export const useChatStore = create(
           if (pendingReasoning) {
             const last = m.items[m.items.length - 1];
             if (last?.type === "reasoning" && last.active) last.text += pendingReasoning;
-            else
-              m.items.push({
-                type: "reasoning",
-                id: newId(),
-                text: pendingReasoning,
-                active: true,
-                startTime: Date.now(),
-              });
+            else m.items.push({ type: "reasoning", id: newId(), text: pendingReasoning, active: true, startTime: Date.now() });
           }
           if (pendingText) {
             const last = m.items[m.items.length - 1];
@@ -403,12 +396,8 @@ export const useChatStore = create(
       const startFlushTimer = () => {
         if (flushTimer === null) flushTimer = setInterval(flush, 40);
       };
-
       const stopFlushTimer = () => {
-        if (flushTimer !== null) {
-          clearInterval(flushTimer);
-          flushTimer = null;
-        }
+        if (flushTimer !== null) { clearInterval(flushTimer); flushTimer = null; }
       };
 
       const handleEvent = (event: ChatStreamEvent) => {
@@ -422,8 +411,7 @@ export const useChatStore = create(
             startFlushTimer();
             break;
           case "reasoningDone":
-            stopFlushTimer();
-            flush();
+            stopFlushTimer(); flush();
             patch((m) => {
               for (let i = m.items.length - 1; i >= 0; i--) {
                 const item = m.items[i];
@@ -436,108 +424,56 @@ export const useChatStore = create(
             });
             break;
           case "toolCall":
-            stopFlushTimer();
-            flush();
+            stopFlushTimer(); flush();
             patch((m) => {
-              m.items.push({
-                type: "toolCall",
-                id: event.id,
-                name: event.name,
-                args: event.args,
-                displayInfo: event.displayInfo,
-                status: "running",
-              });
+              m.items.push({ type: "toolCall", id: event.id, name: event.name, args: event.args, displayInfo: event.displayInfo, status: "running" });
             });
             break;
           case "toolResult":
             patch((m) => {
-              const item = m.items.find(
-                (i): i is ToolCallItem => i.type === "toolCall" && i.id === event.id
-              );
-              if (item) {
-                item.output = event.output;
-                item.status = event.isError ? "error" : "done";
-              }
+              const item = m.items.find((i): i is ToolCallItem => i.type === "toolCall" && i.id === event.id);
+              if (item) { item.output = event.output; item.status = event.isError ? "error" : "done"; }
             });
             break;
-          case "usage": {
-            const usage: TokenUsage = {
-              inputTokens: event.inputTokens,
-              outputTokens: event.outputTokens,
-              totalTokens: event.totalTokens,
-            };
+          case "usage":
             set((s) => {
-              if (s.currentSessionId === sessionId) s.sessionTokens = usage;
+              if (s.currentSessionId === sessionId)
+                s.sessionTokens = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
             });
             break;
-          }
           case "compacted":
             set((s) => {
               if (s.currentSessionId !== sessionId) return;
-              s.messages.push({
-                id: newId(),
-                role: "system",
-                items: [
-                  {
-                    type: "compactionNotice",
-                    id: newId(),
-                    originalMessageCount: event.originalMessageCount,
-                    ts: event.ts,
-                  },
-                ],
-                attachments: [],
-                streaming: false,
-              });
+              s.messages.push({ id: newId(), role: "system", items: [{ type: "compactionNotice", id: newId(), originalMessageCount: event.originalMessageCount, ts: event.ts }], attachments: [], streaming: false });
             });
             break;
           case "done":
-            stopFlushTimer();
-            flush();
-            settle();
-            void get().refreshBudget();
+            stopFlushTimer(); flush(); settle();
+            void useChatStore.getState().refreshBudget();
             break;
           case "cancelled":
-            stopFlushTimer();
-            flush();
-            settle();
+            stopFlushTimer(); flush(); settle();
             break;
           case "error":
-            stopFlushTimer();
-            flush();
-            patch((m) => {
-              m.error = event.message;
-            });
+            stopFlushTimer(); flush();
+            patch((m) => { m.error = event.message; });
             settle();
-            set((s) => {
-              if (s.currentSessionId === sessionId) s.error = event.message;
-            });
+            set((s) => { if (s.currentSessionId === sessionId) s.error = event.message; });
             break;
         }
       };
 
       try {
-        await api.startChat(
-          sessionId,
-          selectedModel.key,
-          text,
-          attachments,
-          handleEvent
-        );
-        stopFlushTimer();
-        flush();
-        settle();
+        await api.startChat(sessionId, selectedModel.key, text, attachments, handleEvent);
+        stopFlushTimer(); flush(); settle();
         return true;
       } catch (e) {
         const message = api.errorMessage(e);
-        stopFlushTimer();
-        flush();
-        settle();
+        stopFlushTimer(); flush(); settle();
         set((s) => {
           if (s.currentSessionId !== sessionId) return;
           s.error = message;
-          s.messages = s.messages.filter(
-            (m) => m.id !== userMsgId && m.id !== assistantMsgId
-          );
+          s.messages = s.messages.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId);
         });
         return false;
       }
@@ -550,51 +486,20 @@ export const useChatStore = create(
     setSelectedModel: (key: string) => {
       const model = get().models.find((m) => m.key === key);
       if (!model) return;
-      set((s) => {
-        s.selectedModel = model;
-      });
+      set((s) => { s.selectedModel = model; });
       void api.setUserPref("selectedModel", key).catch(() => undefined);
-    },
-
-    pickWorkspace: async () => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected !== "string") return;
-      try {
-        const info = await api.setWorkspace(selected);
-        set((s) => {
-          s.workspace = info;
-        });
-      } catch (e) {
-        set((s) => {
-          s.error = api.errorMessage(e);
-        });
-      }
-    },
-
-    resetToSandbox: async () => {
-      try {
-        const info = await api.useSandbox();
-        set((s) => {
-          s.workspace = info;
-        });
-      } catch (e) {
-        set((s) => {
-          s.error = api.errorMessage(e);
-        });
-      }
     },
 
     refreshSessions: async () => {
       try {
-        const sessions = await api.listSessions();
+        const wsPath = useWorkspaceStore.getState().current?.path ?? null;
+        if (!wsPath) return;
+        const sessions = await api.listSessionsForWorkspace(wsPath);
         set((s) => {
           s.sessions = sessions;
           if (!s.streaming) {
             const current = sessions.find((sess) => sess.id === s.currentSessionId);
-            if (current) {
-              s.sessionTokens = usageFrom(current);
-            }
+            if (current) s.sessionTokens = usageFrom(current);
           }
         });
       } catch {
@@ -622,108 +527,14 @@ export const useChatStore = create(
     refreshBudget: async () => {
       try {
         const budget = await api.getBudget();
-        set((s) => {
-          s.budget = budget;
-        });
+        set((s) => { s.budget = budget; });
       } catch {
         return;
       }
     },
 
     dismissError: () => {
-      set((s) => {
-        s.error = null;
-      });
+      set((s) => { s.error = null; });
     },
   }))
 );
-
-export type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "none"
-  | "downloading"
-  | "readyToRestart"
-  | "installing"
-  | "failed";
-
-interface UpdaterState {
-  status: UpdateStatus;
-  version: string;
-  percent: number;
-  error: string | null;
-}
-
-interface UpdaterActions {
-  start: () => Promise<void>;
-  apply: () => Promise<void>;
-}
-
-export type UpdaterStore = UpdaterState & UpdaterActions;
-
-let pendingUpdate: Update | null = null;
-let updateStarted = false;
-
-export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
-  status: "idle",
-  version: "",
-  percent: 0,
-  error: null,
-
-  start: async () => {
-    if (updateStarted) return;
-    updateStarted = true;
-    set({ status: "checking", error: null });
-
-    let update: Update | null = null;
-    try {
-      update = await check();
-    } catch (e) {
-      set({ status: "failed", error: api.errorMessage(e) });
-      return;
-    }
-
-    if (!update?.available) {
-      set({ status: "none" });
-      return;
-    }
-
-    pendingUpdate = update;
-    set({ status: "downloading", version: update.version, percent: 0 });
-
-    let contentLength = 0;
-    let received = 0;
-
-    try {
-      await update.download((event) => {
-        if (event.event === "Started") {
-          contentLength = event.data.contentLength ?? 0;
-          received = 0;
-          set({ percent: 0 });
-        } else if (event.event === "Progress") {
-          received += event.data.chunkLength;
-          if (contentLength > 0) {
-            set({ percent: Math.min(99, Math.round((received / contentLength) * 100)) });
-          }
-        } else if (event.event === "Finished") {
-          set({ percent: 100 });
-        }
-      });
-      set({ status: "readyToRestart" });
-    } catch (e) {
-      pendingUpdate = null;
-      set({ status: "failed", error: api.errorMessage(e) });
-    }
-  },
-
-  apply: async () => {
-    if (get().status !== "readyToRestart" || !pendingUpdate) return;
-    set({ status: "installing", error: null });
-    try {
-      await pendingUpdate.install();
-      await relaunch();
-    } catch (e) {
-      set({ status: "readyToRestart", error: api.errorMessage(e) });
-    }
-  },
-}));

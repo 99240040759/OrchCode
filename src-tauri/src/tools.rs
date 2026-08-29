@@ -195,7 +195,7 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
                 full_path: path,
                 line_range,
                 icon: ToolIcon::File,
-                opens_artifact: false,
+                opens_artifact: true,
                 ..Default::default()
             }
         }
@@ -300,6 +300,38 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             label: "Listed".to_string(),
             target_text: str_arg(&args, "path"),
             full_path: str_arg(&args, "path"),
+            icon: ToolIcon::Folder,
+            opens_artifact: false,
+            ..Default::default()
+        },
+
+        "search_documents" => ToolDisplayInfo {
+            label: "Searched Docs".to_string(),
+            target_text: str_arg(&args, "query"),
+            icon: ToolIcon::Search,
+            opens_artifact: false,
+            ..Default::default()
+        },
+
+        "connector_search" => ToolDisplayInfo {
+            label: format!("{}: Search", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
+            target_text: str_arg(&args, "query"),
+            icon: ToolIcon::Search,
+            opens_artifact: false,
+            ..Default::default()
+        },
+
+        "connector_read" => ToolDisplayInfo {
+            label: format!("{}: Read", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
+            target_text: str_arg(&args, "target"),
+            icon: ToolIcon::File,
+            opens_artifact: false,
+            ..Default::default()
+        },
+
+        "connector_list" => ToolDisplayInfo {
+            label: format!("{}: List", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
+            target_text: str_arg(&args, "container"),
             icon: ToolIcon::Folder,
             opens_artifact: false,
             ..Default::default()
@@ -571,7 +603,7 @@ fn mime_for_image(ext: &str) -> &'static str {
     }
 }
 
-fn slice_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
+pub(crate) fn slice_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
     if start.is_none() && end.is_none() {
         return content.to_string();
     }
@@ -710,11 +742,12 @@ pub struct WriteFileArgs {
 
 pub struct WriteFile {
     workspace: WorkspaceHandle,
+    app: tauri::AppHandle,
 }
 
 impl WriteFile {
-    pub fn new(workspace: WorkspaceHandle) -> Self {
-        Self { workspace }
+    pub fn new(workspace: WorkspaceHandle, app: tauri::AppHandle) -> Self {
+        Self { workspace, app }
     }
 }
 
@@ -760,6 +793,9 @@ impl Tool for WriteFile {
         let bytes = args.content.len();
         fs_util::atomic_write(&path, args.content.as_bytes()).await?;
 
+        let full_path = path.to_string_lossy().replace('\\', "/");
+        let _ = tauri::Emitter::emit(&self.app, "file-written", &full_path);
+
         let rel = fs_util::display_relative(&root, &path);
         let verb = if existed { "Overwrote" } else { "Created" };
         Ok(format!("{verb} {rel} ({bytes} bytes)"))
@@ -780,11 +816,12 @@ pub struct MultiReplaceArgs {
 
 pub struct MultiReplaceFileContent {
     workspace: WorkspaceHandle,
+    app: tauri::AppHandle,
 }
 
 impl MultiReplaceFileContent {
-    pub fn new(workspace: WorkspaceHandle) -> Self {
-        Self { workspace }
+    pub fn new(workspace: WorkspaceHandle, app: tauri::AppHandle) -> Self {
+        Self { workspace, app }
     }
 }
 
@@ -857,6 +894,9 @@ impl Tool for MultiReplaceFileContent {
         }
 
         fs_util::atomic_write(&path, content.as_bytes()).await?;
+
+        let full_path = path.to_string_lossy().replace('\\', "/");
+        let _ = tauri::Emitter::emit(&self.app, "file-written", &full_path);
 
         let rel = fs_util::display_relative(&root, &path);
         Ok(format!(
@@ -1412,10 +1452,10 @@ impl ToolContext {
         ReadSkill::new(self.data_dir.clone())
     }
     pub fn write_file(&self) -> WriteFile {
-        WriteFile::new(self.workspace.clone())
+        WriteFile::new(self.workspace.clone(), self.app_handle.clone())
     }
     pub fn multi_replace(&self) -> MultiReplaceFileContent {
-        MultiReplaceFileContent::new(self.workspace.clone())
+        MultiReplaceFileContent::new(self.workspace.clone(), self.app_handle.clone())
     }
     pub fn search_workspace(&self) -> SearchWorkspace {
         SearchWorkspace::new(self.workspace.clone())
@@ -1435,120 +1475,23 @@ impl ToolContext {
     pub fn search_documents(&self) -> SearchDocuments {
         SearchDocuments { memory: self.memory.clone() }
     }
-    pub fn list_documents(&self) -> ListDocuments {
-        ListDocuments { memory: self.memory.clone() }
-    }
-    pub fn ingest_document_tool(&self) -> IngestDocumentTool {
-        IngestDocumentTool {
+
+    pub fn connector_search(&self) -> crate::connector_tools::ConnectorSearch {
+        crate::connector_tools::ConnectorSearch {
+            manager: self.connector_manager.clone(),
             memory: self.memory.clone(),
-            workspace: self.workspace.clone(),
         }
     }
 
-    pub fn google_drive_list(&self) -> crate::connector_tools::google_drive::GoogleDriveListFiles {
-        crate::connector_tools::google_drive::GoogleDriveListFiles {
+    pub fn connector_read(&self) -> crate::connector_tools::ConnectorRead {
+        crate::connector_tools::ConnectorRead {
             manager: self.connector_manager.clone(),
             memory: self.memory.clone(),
         }
     }
-    pub fn google_drive_read(&self) -> crate::connector_tools::google_drive::GoogleDriveReadFile {
-        crate::connector_tools::google_drive::GoogleDriveReadFile {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn google_drive_search(&self) -> crate::connector_tools::google_drive::GoogleDriveSearchFiles {
-        crate::connector_tools::google_drive::GoogleDriveSearchFiles {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn notion_list(&self) -> crate::connector_tools::notion::NotionListPages {
-        crate::connector_tools::notion::NotionListPages {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn notion_read(&self) -> crate::connector_tools::notion::NotionReadPage {
-        crate::connector_tools::notion::NotionReadPage {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn notion_search(&self) -> crate::connector_tools::notion::NotionSearchPages {
-        crate::connector_tools::notion::NotionSearchPages {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn github_list(&self) -> crate::connector_tools::github::GitHubListRepos {
-        crate::connector_tools::github::GitHubListRepos {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn github_read(&self) -> crate::connector_tools::github::GitHubReadFile {
-        crate::connector_tools::github::GitHubReadFile {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn github_search(&self) -> crate::connector_tools::github::GitHubSearchCode {
-        crate::connector_tools::github::GitHubSearchCode {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn slack_list(&self) -> crate::connector_tools::slack::SlackListChannels {
-        crate::connector_tools::slack::SlackListChannels {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn slack_read(&self) -> crate::connector_tools::slack::SlackReadMessages {
-        crate::connector_tools::slack::SlackReadMessages {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn slack_search(&self) -> crate::connector_tools::slack::SlackSearchMessages {
-        crate::connector_tools::slack::SlackSearchMessages {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn jira_list(&self) -> crate::connector_tools::jira::JiraListIssues {
-        crate::connector_tools::jira::JiraListIssues {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn jira_get(&self) -> crate::connector_tools::jira::JiraGetIssue {
-        crate::connector_tools::jira::JiraGetIssue {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn jira_search(&self) -> crate::connector_tools::jira::JiraSearchIssues {
-        crate::connector_tools::jira::JiraSearchIssues {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn gmail_list(&self) -> crate::connector_tools::gmail::GmailListEmails {
-        crate::connector_tools::gmail::GmailListEmails {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn gmail_read(&self) -> crate::connector_tools::gmail::GmailReadEmail {
-        crate::connector_tools::gmail::GmailReadEmail {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-    pub fn gmail_search(&self) -> crate::connector_tools::gmail::GmailSearchEmails {
-        crate::connector_tools::gmail::GmailSearchEmails {
+
+    pub fn connector_list(&self) -> crate::connector_tools::ConnectorList {
+        crate::connector_tools::ConnectorList {
             manager: self.connector_manager.clone(),
             memory: self.memory.clone(),
         }
@@ -1612,132 +1555,4 @@ impl Tool for SearchDocuments {
     }
 }
 
-pub fn parse_display_info_search_documents() -> crate::events::ToolDisplayInfo {
-    crate::events::ToolDisplayInfo {
-        label: "Searching documents".to_string(),
-        icon: crate::events::ToolIcon::Search,
-        ..Default::default()
-    }
-}
-
-pub struct ListDocuments {
-    pub memory: crate::persistence::SqliteMemory,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ListDocumentsArgs {
-    pub source: Option<String>,
-    pub file_type: Option<String>,
-    pub page: Option<usize>,
-}
-
-impl Tool for ListDocuments {
-    const NAME: &'static str = "list_documents";
-
-    type Args = ListDocumentsArgs;
-    type Output = String;
-    type Error = ToolError;
-
-    fn description(&self) -> String {
-        "List documents in the knowledge library. Filter by source or file type.".to_string()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
-    }
-
-    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let page = args.page.unwrap_or(0);
-        let limit = 20usize;
-        let offset = page * limit;
-
-        let docs = self
-            .memory
-            .list_documents(args.source, args.file_type, limit, offset)
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        if docs.is_empty() {
-            return Ok("No documents in the library (matching filters).".to_string());
-        }
-
-        let mut out = format!("Documents (page {page}, showing {}):\n\n", docs.len());
-        for doc in &docs {
-            let pages = doc.page_count.map(|p| format!(", {p} pages")).unwrap_or_default();
-            let words = doc.word_count.map(|w| format!(", ~{w} words")).unwrap_or_default();
-            let path = doc.file_path.as_deref().unwrap_or("(remote)");
-            out.push_str(&format!(
-                "• **{}** [{}]{}{}\n  Source: {} | Path: {}\n\n",
-                doc.title, doc.file_type, pages, words, doc.source, path
-            ));
-        }
-
-        Ok(out)
-    }
-}
-
-pub struct IngestDocumentTool {
-    pub memory: crate::persistence::SqliteMemory,
-    pub workspace: std::sync::Arc<std::sync::RwLock<Option<std::path::PathBuf>>>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct IngestDocumentToolArgs {
-    pub path: String,
-}
-
-impl Tool for IngestDocumentTool {
-    const NAME: &'static str = "ingest_document";
-
-    type Args = IngestDocumentToolArgs;
-    type Output = String;
-    type Error = ToolError;
-
-    fn description(&self) -> String {
-        "Add a document file (PDF, DOCX, XLSX, PPTX, TXT, MD) to the knowledge library so it can be searched and queried.".to_string()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
-    }
-
-    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let p = std::path::PathBuf::from(&args.path);
-        let resolved = if p.exists() {
-            p
-        } else if let Ok(guard) = self.workspace.read() {
-            if let Some(ws) = guard.as_ref() {
-                if let Ok(r) = fs_util::resolve_in_workspace(ws, &args.path) {
-                    if r.exists() {
-                        r
-                    } else {
-                        p
-                    }
-                } else {
-                    p
-                }
-            } else {
-                p
-            }
-        } else {
-            p
-        };
-
-        if !resolved.exists() {
-            return Err(ToolError::msg(format!("File not found: {}", args.path)));
-        }
-
-        let result = crate::document::ingest_document(&resolved, &self.memory)
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        let action = if result.was_update { "Re-indexed" } else { "Indexed" };
-        let pages = result.page_count.map(|p| format!(", {p} pages")).unwrap_or_default();
-
-        Ok(format!(
-            "{action} **{}** ({}{pages})\n• {} passages created\n• ~{} words\n• Document ID: {}",
-            result.title, result.file_type, result.passage_count, result.word_count, result.document_id
-        ))
-    }
-}
 

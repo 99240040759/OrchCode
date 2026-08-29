@@ -6,10 +6,10 @@ import { Message } from "./Message";
 const NEAR_BOTTOM_PX = 120;
 
 export function MessageList() {
-  const messages = useChatStore((s) => s.messages);
+  const messages  = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
   const containerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef    = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback(() => {
@@ -25,33 +25,29 @@ export function MessageList() {
   }, []);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom();
-    }
+    if (messages.length > 0) scrollToBottom();
   }, []);
 
   useLayoutEffect(() => {
-    if (streaming && messages.length > 0) {
-      scrollToBottom();
-    }
-  }, [messages, messages.length, scrollToBottom, streaming]);
+    if (streaming && messages.length > 0) scrollToBottom();
+  }, [messages, scrollToBottom, streaming]);
 
   return (
     <div className="MessageListWrap">
-      <div 
-        className="MessageList" 
-        ref={containerRef} 
+      <div
+        className="MessageList"
+        ref={containerRef}
         onScroll={handleScroll}
-        style={{ overflowAnchor: 'none' }}
+        style={{ overflowAnchor: "none" }}
       >
         <div className="MessageList-inner">
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          <div 
-            ref={bottomRef} 
-            className="MessageList-bottomSpacer" 
-            style={{ overflowAnchor: 'auto' }}
+          <div
+            ref={bottomRef}
+            className="MessageList-bottomSpacer"
+            style={{ overflowAnchor: "auto" }}
           />
         </div>
       </div>
@@ -68,5 +64,3 @@ export function MessageList() {
     </div>
   );
 }
-
-export default MessageList;

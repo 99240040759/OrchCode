@@ -2,19 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   VscAdd,
   VscArrowUp,
-  VscChevronDown,
   VscDebugStop,
   VscFile,
   VscFileMedia,
+  VscFolderOpened,
   VscMic,
-  VscWindow,
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { renderToStaticMarkup } from "react-dom/server";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
+import { getBasename, getDirname, IMAGE_EXTENSIONS, isImagePath } from "../lib/utils";
 import { useChatStore } from "../lib/store";
+import { useWorkspaceStore } from "../lib/workspace";
 import { useArtifactsStore } from "../lib/artifacts";
-import { getBasename, getDirname, IMAGE_EXTENSIONS, isImagePath } from "../lib/api";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { AttachmentCard, ExplorerIcon } from "./ChatPrimitives";
@@ -55,12 +56,23 @@ function createMentionNode(path: string): { node: HTMLSpanElement; space: Text }
   container.contentEditable = "false";
   container.setAttribute("data-path", path);
   container.title = path;
-
+  container.insertAdjacentHTML(
+    "beforeend",
+    renderToStaticMarkup(
+      <ExplorerIcon
+        type="file"
+        name={filename}
+        className="FileTag-icon"
+        width={14}
+        height={14}
+        aria-hidden="true"
+      />
+    )
+  );
   const name = document.createElement("span");
   name.className = "FileTag-name";
   name.textContent = filename;
   container.append(name);
-
   const space = document.createTextNode("\u00A0");
   return { node: container, space };
 }
@@ -86,6 +98,19 @@ function getTextFromEditor(el: HTMLElement): string {
     }
   }
   return text;
+}
+
+function insertTextAtCaret(text: string) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const textNode = document.createTextNode(text);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
 
 function insertMentionAtCaret(path: string) {
@@ -119,9 +144,7 @@ function insertMentionAtCaret(path: string) {
         const next = textNode.nextSibling;
         parent.insertBefore(mentionNode, next);
         parent.insertBefore(spaceNode, next);
-        if (after) {
-          parent.insertBefore(document.createTextNode(after), next);
-        }
+        if (after) parent.insertBefore(document.createTextNode(after), next);
         const newRange = document.createRange();
         newRange.setStart(spaceNode, 1);
         newRange.collapse(true);
@@ -141,19 +164,65 @@ function insertMentionAtCaret(path: string) {
   sel.addRange(range);
 }
 
-export function InputBar() {
-  const send = useChatStore((s) => s.send);
-  const cancel = useChatStore((s) => s.cancel);
-  const streaming = useChatStore((s) => s.streaming);
-  const models = useChatStore((s) => s.models);
-  const selectedModel = useChatStore((s) => s.selectedModel);
+interface ModelSelectorProps {
+  models: api.ModelDto[];
+  selectedModel: api.ModelDto | null;
+  setSelectedModel: (key: string) => void;
+  align?: "start" | "end";
+}
+
+function ModelSelector({ models, selectedModel, setSelectedModel, align = "start" }: ModelSelectorProps) {
+  return (
+    <DropdownMenu>
+      <Tooltip content="Select AI model" side="top">
+        <DropdownMenuTrigger asChild>
+          <Button className="Composer-model">
+            <span>{selectedModel?.name ?? "Model"}</span>
+            {selectedModel?.badge && <span className="Composer-badge">{selectedModel.badge}</span>}
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent sideOffset={6} align={align}>
+        {models.length === 0 && <DropdownMenuItem disabled>No models available</DropdownMenuItem>}
+        {models.map((model) => (
+          <DropdownMenuItem key={model.key} onSelect={() => setSelectedModel(model.key)}>
+            <span className="ModelItem-name">{model.name}</span>
+            {model.badge && <span className="Composer-badge">{model.badge}</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+interface WorkspaceDisplayProps {
+  currentName: string | undefined;
+  currentPath?: string;
+}
+
+function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayProps) {
+  return (
+    <Tooltip content={currentPath ? `Workspace: ${currentPath}` : "Current workspace"} side="top">
+      <div className="Composer-repo">
+        <VscFolderOpened />
+        <span>{currentName ?? "Workspace"}</span>
+      </div>
+    </Tooltip>
+  );
+}
+
+export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
+  const send             = useChatStore((s) => s.send);
+  const cancel           = useChatStore((s) => s.cancel);
+  const streaming        = useChatStore((s) => s.streaming);
+  const models           = useChatStore((s) => s.models);
+  const selectedModel    = useChatStore((s) => s.selectedModel);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
-  const workspace = useChatStore((s) => s.workspace);
-  const pickWorkspace = useChatStore((s) => s.pickWorkspace);
-  const resetToSandbox = useChatStore((s) => s.resetToSandbox);
-  const newChat = useChatStore((s) => s.newChat);
-  const sessionTokens = useChatStore((s) => s.sessionTokens);
-  const openFile = useArtifactsStore((s) => s.openFile);
+  const newChat          = useChatStore((s) => s.newChat);
+  const sessionTokens    = useChatStore((s) => s.sessionTokens);
+  const openFile         = useArtifactsStore((s) => s.openFile);
+
+  const currentWs = useWorkspaceStore((s) => s.current);
 
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<api.AttachmentRef[]>([]);
@@ -209,9 +278,7 @@ export function InputBar() {
         if (event.payload.type !== "drop") return;
         addAttachments(event.payload.paths ?? []);
       })
-      .then((fn) => {
-        unlisten = fn;
-      });
+      .then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, [addAttachments]);
 
@@ -230,6 +297,7 @@ export function InputBar() {
 
   useEffect(() => {
     if (trigger !== "@") {
+      searchFiles.cancel();
       setFileHits([]);
       setLoadingFiles(false);
       return;
@@ -300,9 +368,7 @@ export function InputBar() {
     (command: CommandItem) => {
       if (command.key === "clear") {
         newChat();
-        if (editorRef.current) {
-          editorRef.current.innerHTML = "";
-        }
+        if (editorRef.current) editorRef.current.innerHTML = "";
         setValue("");
         setAttachments([]);
         setNotice(null);
@@ -317,20 +383,14 @@ export function InputBar() {
     const text = value.trim();
     if (!text && attachments.length === 0) return;
     const pending = attachments;
-
-    if (editor) {
-      editor.innerHTML = "";
-    }
+    if (editor) editor.innerHTML = "";
     setValue("");
     setAttachments([]);
     setNotice(null);
     closePopover();
-
     const ok = await send(text, pending);
     if (!ok) {
-      if (editor) {
-        editor.innerText = text;
-      }
+      if (editor) editor.innerText = text;
       setValue(text);
       setAttachments(pending);
     }
@@ -361,11 +421,8 @@ export function InputBar() {
         if (event.key === "Enter" || event.key === "Tab") {
           event.preventDefault();
           const hit = hits[activeIndex];
-          if (trigger === "@") {
-            insertMention((hit as api.FileEntry).path);
-          } else {
-            runCommand(hit as CommandItem);
-          }
+          if (trigger === "@") insertMention((hit as api.FileEntry).path);
+          else runCommand(hit as CommandItem);
           return;
         }
       }
@@ -381,10 +438,7 @@ export function InputBar() {
     const mentionEl = target.closest<HTMLElement>("[data-path]");
     if (mentionEl) {
       const path = mentionEl.getAttribute("data-path");
-      if (path) {
-        openFile(path);
-        return;
-      }
+      if (path) { openFile(path); return; }
     }
     syncEditor();
   };
@@ -393,7 +447,7 @@ export function InputBar() {
     event.preventDefault();
     const text = event.clipboardData.getData("text/plain");
     if (!text) return;
-    document.execCommand("insertText", false, text);
+    insertTextAtCaret(text);
     syncEditor();
   };
 
@@ -414,7 +468,7 @@ export function InputBar() {
         setRecording(false);
         if (event.type === "final") {
           if (event.text && editorRef.current) {
-            document.execCommand("insertText", false, event.text);
+            insertTextAtCaret(event.text);
             syncEditor();
           }
         } else {
@@ -477,13 +531,7 @@ export function InputBar() {
                     onMouseEnter={() => setHighlighted(index)}
                     onClick={() => insertMention(file.path)}
                   >
-                    <ExplorerIcon
-                      type="file"
-                      name={filename}
-                      className="MentionItem-icon"
-                      width={14}
-                      height={14}
-                    />
+                    <ExplorerIcon type="file" name={filename} className="MentionItem-icon" width={14} height={14} />
                     <span className="MentionItem-name">{filename}</span>
                     {dir && <span className="MentionItem-path">{dir}</span>}
                   </button>
@@ -534,171 +582,148 @@ export function InputBar() {
           </div>
         )}
 
-        <div
-          ref={editorRef}
-          className="Composer-input"
-          contentEditable
-          role="textbox"
-          aria-multiline="true"
-          data-placeholder="Ask anything, @ to mention a file, / for actions"
-          data-empty={value.length === 0 ? "true" : undefined}
-          onInput={syncEditor}
-          onKeyDown={onKeyDown}
-          onClick={onEditorClick}
-          onPaste={onPaste}
-        />
+        <div className={promptMode ? "Composer-inputArea Composer-inputArea-prompt" : "Composer-inputArea"}>
+          <div
+            ref={editorRef}
+            className={promptMode ? "Composer-input Composer-input-prompt" : "Composer-input"}
+            contentEditable
+            role="textbox"
+            aria-multiline="true"
+            data-placeholder={promptMode ? "Write a message..." : "Ask anything, @ to mention a file, / for actions"}
+            data-empty={value.length === 0 ? "true" : undefined}
+            onInput={syncEditor}
+            onKeyDown={onKeyDown}
+            onClick={onEditorClick}
+            onPaste={onPaste}
+          />
 
-        <div className="Composer-row">
-          <DropdownMenu>
-            <Tooltip content="Add files or images" side="top">
-              <DropdownMenuTrigger asChild>
-                <Button className="Composer-plus" aria-label="Add attachment">
-                  <VscAdd />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent sideOffset={6} align="start">
-              <DropdownMenuItem
-                disabled={!modelSupportsImages}
-                onSelect={() => {
-                  if (modelSupportsImages) void pickFiles(true);
-                }}
-              >
-                <VscFileMedia />
-                <span>Image</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void pickFiles(false)}>
-                <VscFile />
-                <span>File</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
-            <Tooltip content="Select AI model" side="top">
-              <DropdownMenuTrigger asChild>
-                <Button className="Composer-model">
-                  <span>{selectedModel?.name ?? "Model"}</span>
-                  {selectedModel?.badge && (
-                    <span className="Composer-badge">{selectedModel.badge}</span>
-                  )}
-                  <VscChevronDown />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent sideOffset={6} align="start">
-              {models.length === 0 && <DropdownMenuItem disabled>No models available</DropdownMenuItem>}
-              {models.map((model) => (
+          <div className={promptMode ? "Composer-row Composer-row-prompt" : "Composer-row"}>
+            <DropdownMenu>
+              <Tooltip content="Add files or images" side="top">
+                <DropdownMenuTrigger asChild>
+                  <Button className="Composer-plus" aria-label="Add attachment">
+                    <VscAdd />
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent sideOffset={6} align="start">
                 <DropdownMenuItem
-                  key={model.key}
-                  onSelect={() => setSelectedModel(model.key)}
+                  disabled={!modelSupportsImages}
+                  onSelect={() => { if (modelSupportsImages) void pickFiles(true); }}
                 >
-                  <span className="ModelItem-name">{model.name}</span>
-                  {model.badge && <span className="Composer-badge">{model.badge}</span>}
+                  <VscFileMedia />
+                  <span>Image</span>
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuItem onSelect={() => void pickFiles(false)}>
+                  <VscFile />
+                  <span>File</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          <span className="Composer-rowspacer" />
+            {!promptMode && (
+              <ModelSelector
+                models={models}
+                selectedModel={selectedModel}
+                setSelectedModel={setSelectedModel}
+              />
+            )}
 
-          <Tooltip content={recording ? "Stop dictation" : "Voice dictation"} side="top">
-            <Button
-              className="Composer-mic"
-              aria-label={recording ? "Stop dictation" : "Start dictation"}
-              data-active={recording}
-              onClick={() => void toggleDictation()}
-            >
-              {recording ? (
-                <span className="Composer-micWaves" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              ) : (
-                <VscMic />
-              )}
-            </Button>
-          </Tooltip>
+            <span className="Composer-rowspacer" />
 
-          {maxContext > 0 && (
+            {maxContext > 0 && (
+              <Tooltip
+                content={`Context: ${sessionTokens.totalTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+                side="top"
+              >
+                <div className="TokenRing">
+                  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8.5" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
+                    <circle
+                      cx="11" cy="11" r="8.5" fill="none"
+                      stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
+                      strokeWidth="2.5"
+                      strokeDasharray={RING_CIRCUMFERENCE}
+                      strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
+                      strokeLinecap="round"
+                      transform="rotate(-90 11 11)"
+                    />
+                  </svg>
+                  <span className="TokenRing-label">{fillPct}%</span>
+                </div>
+              </Tooltip>
+            )}
+
             <Tooltip
-              content={`Context: ${sessionTokens.totalTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+              content={
+                recording
+                  ? "Stop dictation"
+                  : canSend
+                  ? streaming
+                    ? "Stop generating"
+                    : "Send message (Enter)"
+                  : "Voice dictation"
+              }
               side="top"
             >
-              <div className="TokenRing">
-                <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                  <circle
-                    cx="11"
-                    cy="11"
-                    r="8.5"
-                    fill="none"
-                    stroke="rgba(255,255,255,0.08)"
-                    strokeWidth="2.5"
-                  />
-                  <circle
-                    cx="11"
-                    cy="11"
-                    r="8.5"
-                    fill="none"
-                    stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
-                    strokeWidth="2.5"
-                    strokeDasharray={RING_CIRCUMFERENCE}
-                    strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
-                    strokeLinecap="round"
-                    transform="rotate(-90 11 11)"
-                  />
-                </svg>
-                <span className="TokenRing-label">{fillPct}%</span>
-              </div>
-            </Tooltip>
-          )}
-
-          {streaming ? (
-            <Tooltip content="Stop generating" side="top">
-              <Button className="Composer-send Composer-stop" aria-label="Stop generating" onClick={cancel}>
-                <VscDebugStop />
-              </Button>
-            </Tooltip>
-          ) : (
-            <Tooltip content="Send message (Enter)" side="top">
               <Button
-                className="Composer-send"
-                aria-label="Send message"
-                disabled={!canSend}
-                onClick={() => void doSend()}
+                className={`Composer-send${streaming ? " Composer-stop" : recording ? " Composer-mic-send" : !canSend ? " Composer-mic-idle" : ""}`}
+                aria-label={
+                  recording
+                    ? "Stop dictation"
+                    : canSend
+                    ? streaming
+                      ? "Stop generating"
+                      : "Send message"
+                    : "Start voice dictation"
+                }
+                onClick={() => {
+                  if (streaming) { cancel(); return; }
+                  if (recording) { void toggleDictation(); return; }
+                  if (canSend) { void doSend(); return; }
+                  void toggleDictation();
+                }}
               >
-                <VscArrowUp />
+                {streaming ? (
+                  <VscDebugStop />
+                ) : recording ? (
+                  <span className="Composer-micWaves" aria-hidden="true">
+                    <span /><span /><span /><span />
+                  </span>
+                ) : canSend ? (
+                  <VscArrowUp />
+                ) : (
+                  <VscMic />
+                )}
               </Button>
             </Tooltip>
-          )}
+          </div>
         </div>
 
-        <div className="Composer-subrow">
-          <DropdownMenu>
-            <Tooltip content="Workspace directory" side="top">
-              <DropdownMenuTrigger asChild>
-                <Button className="Composer-repo">
-                  <VscWindow />
-                  <span>{workspace?.name ?? "Workspace"}</span>
-                  <VscChevronDown />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent sideOffset={6} align="start">
-              <DropdownMenuItem onSelect={() => void pickWorkspace()}>
-                Open folder…
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void resetToSandbox()}>
-                Use sandbox
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        {!promptMode && (
+          <div className="Composer-subrow">
+            <WorkspaceDisplay
+              currentName={currentWs?.name}
+              currentPath={currentWs?.path}
+            />
+          </div>
+        )}
       </div>
+
+      {promptMode && (
+        <div className="Composer-footer">
+          <WorkspaceDisplay
+            currentName={currentWs?.name}
+            currentPath={currentWs?.path}
+          />
+          <ModelSelector
+            models={models}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            align="end"
+          />
+        </div>
+      )}
     </div>
   );
 }
-
-export default InputBar;

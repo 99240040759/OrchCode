@@ -3,9 +3,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ErrorBoundary } from "react-error-boundary";
 import { useAuthStore } from "./lib/auth";
 import { useChatStore } from "./lib/store";
-import { useUpdaterStore } from "./lib/store";
+import { useUpdaterStore } from "./lib/updater";
+import { useWorkspaceStore } from "./lib/workspace";
 import { ChatPanel } from "./components/ChatPanel";
 import { Greeting, Onboarding } from "./components/screens";
+import { WorkspacePicker } from "./components/WorkspacePicker";
 import { Sidebar } from "./components/Sidebar";
 import { LibraryView } from "./components/LibraryView";
 import { ConnectorsView } from "./components/ConnectorsView";
@@ -59,30 +61,41 @@ function AppError({
 }
 
 function Root() {
-  const status = useAuthStore((s) => s.status);
-  const user = useAuthStore((s) => s.user);
-  const justSignedIn = useAuthStore((s) => s.justSignedIn);
+  const authStatus      = useAuthStore((s) => s.status);
+  const user            = useAuthStore((s) => s.user);
+  const justSignedIn    = useAuthStore((s) => s.justSignedIn);
   const dismissGreeting = useAuthStore((s) => s.dismissGreeting);
-  const initializeAuth = useAuthStore((s) => s.initialize);
-  const initializeChat = useChatStore((s) => s.initialize);
-  const startUpdater = useUpdaterStore((s) => s.start);
+  const initializeAuth  = useAuthStore((s) => s.initialize);
+  const initializeChat  = useChatStore((s) => s.initialize);
+  const startUpdater    = useUpdaterStore((s) => s.start);
+
+  const workspaceStatus = useWorkspaceStore((s) => s.status);
+  const initWorkspace   = useWorkspaceStore((s) => s.initialize);
 
   useEffect(() => {
     void initializeAuth();
   }, [initializeAuth]);
 
   useEffect(() => {
-    if (status === "loading") return;
+    if (authStatus === "loading") return;
     void getCurrentWindow().show();
     void startUpdater();
-  }, [status, startUpdater]);
+  }, [authStatus, startUpdater]);
 
   useEffect(() => {
-    if (status !== "signedIn") return;
-    void initializeChat();
-  }, [status, initializeChat]);
+    if (authStatus !== "signedIn") return;
+    void initWorkspace();
+  }, [authStatus, initWorkspace]);
 
-  if (status === "loading") {
+  useEffect(() => {
+    if (workspaceStatus !== "ready") return;
+    void initializeChat();
+  }, [workspaceStatus, initializeChat]);
+
+  if (
+    authStatus === "loading" ||
+    (authStatus === "signedIn" && workspaceStatus === "loading")
+  ) {
     return (
       <div className="AuthLoading">
         <div className="Spinner" role="status" aria-label="Loading" />
@@ -90,8 +103,13 @@ function Root() {
     );
   }
 
-  if (status === "signedOut") return <Onboarding />;
+  if (authStatus === "signedOut") return <Onboarding />;
   if (justSignedIn) return <Greeting user={user} onDone={dismissGreeting} />;
+
+  if (workspaceStatus === "needs_pick" || workspaceStatus === "error") {
+    return <WorkspacePicker />;
+  }
+
   return <AppShell />;
 }
 

@@ -1,11 +1,19 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { formatDistanceToNowStrict } from "date-fns";
 
-export interface WorkspaceInfo {
-  path: string;
-  name: string;
-  isSandbox: boolean;
-}
+export {
+  cn,
+  splitPathParts,
+  getBasename,
+  getDirname,
+  getExt,
+  IMAGE_EXTENSIONS,
+  isImagePath,
+  looksLikePath,
+  createMentionRegex,
+  formatUsd,
+  useCopy,
+} from "./utils";
 
 export interface ModelDto {
   key: string;
@@ -142,16 +150,12 @@ export function signOutAuth(): Promise<void> {
   return invoke("sign_out_auth");
 }
 
-export function setWorkspace(path: string): Promise<WorkspaceInfo> {
+export function setWorkspace(path: string): Promise<void> {
   return invoke("set_workspace", { path });
 }
 
-export function getWorkspaceInfo(): Promise<WorkspaceInfo> {
-  return invoke("get_workspace_info");
-}
-
-export function useSandbox(): Promise<WorkspaceInfo> {
-  return invoke("use_sandbox");
+export function listSessionsForWorkspace(workspacePath: string): Promise<SessionSummary[]> {
+  return invoke("list_sessions_for_workspace", { workspacePath });
 }
 
 export function listModels(forceRefresh = false): Promise<ModelDto[]> {
@@ -160,10 +164,6 @@ export function listModels(forceRefresh = false): Promise<ModelDto[]> {
 
 export function getBudget(): Promise<Budget> {
   return invoke("get_budget");
-}
-
-export function listSessions(): Promise<SessionSummary[]> {
-  return invoke("list_sessions");
 }
 
 export function getSessionView(sessionId: string): Promise<MessageView[]> {
@@ -191,13 +191,7 @@ export function startChat(
 ): Promise<void> {
   const channel = new Channel<ChatStreamEvent>();
   channel.onmessage = onEvent;
-  return invoke("start_chat", {
-    sessionId,
-    model,
-    prompt,
-    attachments,
-    onEvent: channel,
-  });
+  return invoke("start_chat", { sessionId, model, prompt, attachments, onEvent: channel });
 }
 
 export function cancelChat(sessionId: string): Promise<void> {
@@ -283,58 +277,24 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
-export { clsx as cn } from "clsx";
-
 export function newId(): string {
   return crypto.randomUUID();
 }
 
-export function splitPathParts(pathStr: string): string[] {
-  return pathStr.replace(/\\/g, "/").split("/").filter(Boolean);
-}
-
-export function getBasename(pathStr: string): string {
-  if (!pathStr) return "";
-  const parts = pathStr.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || pathStr;
-}
-
-export function getDirname(pathStr: string): string {
-  if (!pathStr) return "";
-  const parts = pathStr.replace(/\\/g, "/").split("/");
-  parts.pop();
-  return parts.join("/");
-}
-
 export const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
-
-export function looksLikePath(value: string): boolean {
-  return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
-}
-
-export function createMentionRegex(): RegExp {
-  return new RegExp(MENTION_PATTERN, "g");
-}
-
-const USD_FORMAT = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-});
-
-export function formatUsd(amount: number): string {
-  return USD_FORMAT.format(amount);
-}
 
 export function formatRelativeTime(ts?: number): string {
   if (!ts) return "now";
   return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });
 }
 
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
-
-export function isImagePath(pathStr: string): boolean {
-  const extension = pathStr.replace(/\\/g, "/").split("/").pop()?.split(".").pop()?.toLowerCase();
-  return extension ? IMAGE_EXTENSIONS.includes(extension) : false;
+export function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
+  const base64 = dataUrl.split(",")[1];
+  if (!base64) throw new Error("Invalid data URL");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
 
 export interface ConnectorDto {
@@ -344,7 +304,6 @@ export interface ConnectorDto {
   category: string;
   authKind: string;
   isConfigured: boolean;
-  enabled: boolean;
   hasToken: boolean;
   tokenExpiresAt?: number | null;
   error?: string | null;
@@ -433,10 +392,7 @@ export function deleteDocument(documentId: string): Promise<void> {
   return invoke("ipc_delete_document", { documentId });
 }
 
-export function searchDocuments(
-  query: string,
-  limit?: number
-): Promise<SearchHit[]> {
+export function searchDocuments(query: string, limit?: number): Promise<SearchHit[]> {
   return invoke("ipc_search_documents", { query, limit: limit ?? 20 });
 }
 
@@ -477,17 +433,21 @@ export function documentArtifactKindForPath(path: string): DocumentArtifactKind 
   return documentArtifactKind(extension);
 }
 
-export const DOCUMENT_FILE_TYPES: Record<string, { label: string; icon: string }> = {
-  pdf: { label: "PDF", icon: "📄" },
-  docx: { label: "Word", icon: "📝" },
-  xlsx: { label: "Excel", icon: "📊" },
-  pptx: { label: "PowerPoint", icon: "📑" },
-  txt: { label: "Text", icon: "📃" },
-  md: { label: "Markdown", icon: "📋" },
-  csv: { label: "CSV", icon: "📊" },
-  json: { label: "JSON", icon: "🔧" },
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  pdf: "PDF",
+  docx: "Word",
+  doc: "Word",
+  xlsx: "Excel",
+  xls: "Excel",
+  pptx: "PowerPoint",
+  ppt: "PowerPoint",
+  txt: "Text",
+  md: "Markdown",
+  csv: "CSV",
+  json: "JSON",
 };
 
 export function documentTypeLabel(fileType: string): string {
-  return DOCUMENT_FILE_TYPES[fileType]?.label ?? fileType.toUpperCase();
+  const key = fileType.toLowerCase();
+  return DOCUMENT_TYPE_LABELS[key] ?? fileType.toUpperCase();
 }

@@ -234,18 +234,25 @@ impl SqliteMemory {
         })
     }
 
-    pub async fn list_sessions(&self) -> AppResult<Vec<SessionSummary>> {
+    /// List sessions scoped to a specific workspace path, newest first.
+    pub async fn list_sessions_for_workspace(
+        &self,
+        workspace_path: &str,
+    ) -> AppResult<Vec<SessionSummary>> {
         let conn = self.conn.clone();
+        let ws = workspace_path.to_string();
         run_db_task(move || {
             let c = conn.lock().map_err(lock_err)?;
             let mut stmt = c
                 .prepare(
                     "SELECT id, title, workspace_path, updated_at, total_input_tokens, total_output_tokens, total_tokens
-                     FROM sessions ORDER BY updated_at DESC",
+                     FROM sessions
+                     WHERE workspace_path = ?1
+                     ORDER BY updated_at DESC",
                 )
                 .map_err(sql_err)?;
             let rows = stmt
-                .query_map([], |row| {
+                .query_map(params![ws], |row| {
                     Ok(SessionSummary {
                         id: row.get(0)?,
                         title: row.get(1)?,
@@ -262,6 +269,38 @@ impl SqliteMemory {
                 out.push(r.map_err(sql_err)?);
             }
             Ok(out)
+        })
+        .await
+    }
+
+    /// Delete all sessions and associated messages/reasoning for a specific workspace path.
+    pub async fn delete_sessions_for_workspace(&self, workspace_path: &str) -> AppResult<()> {
+        let conn = self.conn.clone();
+        let ws = workspace_path.to_string();
+        run_db_task(move || {
+            let mut c = conn.lock().map_err(lock_err)?;
+            let tx = c.transaction().map_err(sql_err)?;
+
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)",
+                params![ws],
+            )
+            .map_err(sql_err)?;
+
+            tx.execute(
+                "DELETE FROM reasoning_durations WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)",
+                params![ws],
+            )
+            .map_err(sql_err)?;
+
+            tx.execute(
+                "DELETE FROM sessions WHERE workspace_path = ?1",
+                params![ws],
+            )
+            .map_err(sql_err)?;
+
+            tx.commit().map_err(sql_err)?;
+            Ok(())
         })
         .await
     }

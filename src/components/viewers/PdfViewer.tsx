@@ -18,16 +18,10 @@ export function PdfViewer({ path }: PdfViewerProps) {
 
     readBinaryFileAsDataUrl(path)
       .then((url) => {
-        if (!cancelled) {
-          setDataUrl(url);
-          setLoading(false);
-        }
+        if (!cancelled) { setDataUrl(url); setLoading(false); }
       })
       .catch((e) => {
-        if (!cancelled) {
-          setError(String(e));
-          setLoading(false);
-        }
+        if (!cancelled) { setError(String(e)); setLoading(false); }
       });
 
     return () => { cancelled = true; };

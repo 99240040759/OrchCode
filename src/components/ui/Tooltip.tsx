@@ -3,10 +3,8 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "../../lib/api";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
-export const TooltipRoot = TooltipPrimitive.Root;
-export const TooltipTrigger = TooltipPrimitive.Trigger;
 
-export const TooltipContent = forwardRef<
+const TooltipContent = forwardRef<
   React.ComponentRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
 >(({ className, sideOffset = 6, ...props }, ref) => (
@@ -45,13 +43,11 @@ export function Tooltip({
   if (disabled || !content) return children;
 
   return (
-    <TooltipRoot delayDuration={delayDuration} disableHoverableContent>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
+    <TooltipPrimitive.Root delayDuration={delayDuration} disableHoverableContent>
+      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipContent side={side} align={align} sideOffset={sideOffset} className={className}>
         {content}
       </TooltipContent>
-    </TooltipRoot>
+    </TooltipPrimitive.Root>
   );
 }
-
-export default Tooltip;

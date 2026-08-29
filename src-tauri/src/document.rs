@@ -25,6 +25,31 @@ pub struct IngestResult {
     pub was_update: bool,
 }
 
+pub fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+async fn persist_document(
+    doc: DocumentRecord,
+    text: &str,
+    page_boundaries: Vec<(usize, usize)>,
+    memory: &SqliteMemory,
+) -> AppResult<usize> {
+    let doc_id = doc.id.clone();
+    let text_clone = text.to_string();
+    let passages = tokio::task::spawn_blocking(move || {
+        chunk_text_into_passages(&text_clone, &doc_id, page_boundaries)
+    })
+    .await
+    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
+    let count = passages.len();
+    memory.replace_document_with_passages(doc, passages).await?;
+    Ok(count)
+}
+
 pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<IngestResult> {
     let canonical = dunce::canonicalize(path)
         .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
@@ -50,19 +75,9 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
         .map_err(|e| AppError::DocumentParseError(format!("task failed: {e}")))??;
 
     let word_count = count_words(&parsed.full_text);
-    let title = parsed
-        .title
-        .unwrap_or_else(|| file_stem_title(&canonical));
-    let full_text_clone = parsed.full_text.clone();
-    let page_boundaries = parsed.page_boundaries.clone();
-    let doc_id_clone = doc_id.clone();
-    let passages = tokio::task::spawn_blocking(move || {
-        chunk_text_into_passages(&full_text_clone, &doc_id_clone, page_boundaries)
-    })
-    .await
-    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
-
+    let title = parsed.title.unwrap_or_else(|| file_stem_title(&canonical));
     let now = now_ms();
+
     let doc = DocumentRecord {
         id: doc_id.clone(),
         title: title.clone(),
@@ -78,8 +93,7 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
         updated_at: now,
     };
 
-    let passage_count = passages.len();
-    memory.replace_document_with_passages(doc, passages).await?;
+    let passage_count = persist_document(doc, &parsed.full_text, parsed.page_boundaries, memory).await?;
 
     Ok(IngestResult {
         document_id: doc_id,
@@ -102,14 +116,6 @@ pub async fn ingest_remote_document(
 ) -> AppResult<IngestResult> {
     let doc_id = Uuid::new_v4().to_string();
     let word_count = count_words(text);
-    let text_clone = text.to_string();
-    let doc_id_clone = doc_id.clone();
-    let passages = tokio::task::spawn_blocking(move || {
-        chunk_text_into_passages(&text_clone, &doc_id_clone, vec![])
-    })
-    .await
-    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
-    let passage_count = passages.len();
     let now = now_ms();
 
     let doc = DocumentRecord {
@@ -126,7 +132,8 @@ pub async fn ingest_remote_document(
         indexed_at: now,
         updated_at: now,
     };
-    memory.replace_document_with_passages(doc, passages).await?;
+
+    let passage_count = persist_document(doc, text, vec![], memory).await?;
 
     Ok(IngestResult {
         document_id: doc_id,
@@ -151,13 +158,9 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
         "docx" | "doc" => Ok("docx".to_string()),
         "xlsx" | "xls" | "ods" => Ok("xlsx".to_string()),
         "pptx" | "ppt" => Ok("pptx".to_string()),
-        "txt" | "text" => Ok("txt".to_string()),
-        "md" | "markdown" => Ok("md".to_string()),
-        "csv" => Ok("csv".to_string()),
-        "json" => Ok("json".to_string()),
-        "html" | "htm" => Ok("html".to_string()),
-        "xml" => Ok("xml".to_string()),
-        "rtf" => Ok("rtf".to_string()),
+        "txt" | "text" | "md" | "markdown" | "csv" | "json" | "html" | "htm" | "xml" | "rtf" => {
+            Ok(ext)
+        }
         _ => Err(AppError::UnsupportedFileType(format!(
             "'.{ext}' files are not supported. Supported: pdf, docx, xlsx, pptx, txt, md, csv, json, html"
         ))),
@@ -174,12 +177,10 @@ struct ParsedDocument {
 fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
     match file_type {
         "pdf" => parse_pdf(path),
-        "docx" => parse_docx(path),
+        "docx" => parse_office_zip(path, "word/document.xml", OfficeXmlKind::Word),
         "xlsx" => parse_xlsx(path),
-        "pptx" => parse_pptx(path),
-        "csv" => parse_csv(path),
-        "txt" | "md" | "json" | "xml" | "html" | "rtf" | "htm" => parse_plain_text(path),
-        _ => Err(AppError::UnsupportedFileType(file_type.to_string())),
+        "pptx" => parse_office_zip(path, "", OfficeXmlKind::Pptx),
+        _ => parse_plain_text(path),
     }
 }
 
@@ -195,7 +196,6 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     for (page_num, _page_id) in &pages {
         let page_offset = full_text.len();
         page_boundaries.push((page_offset, *page_num as usize));
-
         match doc.extract_text(&[*page_num]) {
             Ok(text) => {
                 let cleaned = clean_pdf_text(&text);
@@ -210,12 +210,7 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
         }
     }
 
-    Ok(ParsedDocument {
-        full_text,
-        title: None,
-        page_count: Some(page_count),
-        page_boundaries,
-    })
+    Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count), page_boundaries })
 }
 
 fn clean_pdf_text(text: &str) -> String {
@@ -227,26 +222,73 @@ fn clean_pdf_text(text: &str) -> String {
         .join(" ")
 }
 
-fn parse_docx(path: &Path) -> AppResult<ParsedDocument> {
+enum OfficeXmlKind {
+    Word,
+    Pptx,
+}
+
+fn parse_office_zip(path: &Path, _entry_hint: &str, kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
     let data = std::fs::read(path).map_err(AppError::Io)?;
     let cursor = Cursor::new(data);
     let mut zip = ZipArchive::new(cursor)
-        .map_err(|e| AppError::DocumentParseError(format!("DOCX zip error: {e}")))?;
-
-    let xml_text = read_zip_entry(&mut zip, "word/document.xml")?;
-    let text = extract_text_from_word_xml(&xml_text)?;
+        .map_err(|e| AppError::DocumentParseError(format!("ZIP open error: {e}")))?;
 
     let title = read_zip_entry(&mut zip, "docProps/core.xml")
         .ok()
         .and_then(|xml| extract_xml_element(&xml, "dc:title").ok())
         .filter(|t| !t.is_empty());
 
-    Ok(ParsedDocument {
-        full_text: text,
-        title,
-        page_count: None,
-        page_boundaries: vec![],
-    })
+    match kind {
+        OfficeXmlKind::Word => {
+            let xml_text = read_zip_entry(&mut zip, "word/document.xml")?;
+            let text = extract_office_text(&xml_text, false)?;
+            Ok(ParsedDocument { full_text: text, title, page_count: None, page_boundaries: vec![] })
+        }
+        OfficeXmlKind::Pptx => {
+            let slide_names: Vec<String> = (0..zip.len())
+                .filter_map(|i| {
+                    let entry = zip.by_index(i).ok()?;
+                    let raw_name = entry.name().replace('\\', "/");
+                    if raw_name.starts_with("ppt/slides/slide") && raw_name.ends_with(".xml") {
+                        Some(entry.name().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let mut sorted_slides = slide_names;
+            sorted_slides.sort_by_key(|s| {
+                s.replace('\\', "/")
+                    .trim_start_matches("ppt/slides/slide")
+                    .trim_end_matches(".xml")
+                    .parse::<usize>()
+                    .unwrap_or(0)
+            });
+
+            let slide_count = sorted_slides.len();
+            let mut full_text = String::new();
+            let mut page_boundaries = Vec::new();
+
+            for (idx, slide_name) in sorted_slides.iter().enumerate() {
+                let slide_num = idx + 1;
+                let offset = full_text.len();
+                page_boundaries.push((offset, slide_num));
+                let xml = read_zip_entry(&mut zip, slide_name)?;
+                let slide_text = extract_office_text(&xml, false)?;
+                if !slide_text.trim().is_empty() {
+                    full_text.push_str(&format!("=== Slide {slide_num} ===\n{slide_text}\n\n"));
+                }
+            }
+
+            Ok(ParsedDocument {
+                full_text,
+                title,
+                page_count: Some(slide_count),
+                page_boundaries,
+            })
+        }
+    }
 }
 
 fn read_zip_entry(zip: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> AppResult<String> {
@@ -260,7 +302,7 @@ fn read_zip_entry(zip: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> AppResul
     Ok(content)
 }
 
-fn extract_text_from_word_xml(xml: &str) -> AppResult<String> {
+fn extract_office_text(xml: &str, _is_pptx: bool) -> AppResult<String> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -275,28 +317,30 @@ fn extract_text_from_word_xml(xml: &str) -> AppResult<String> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"t" || local_bytes == b"delText" || local_bytes == b"instrText" {
-                    in_text = true;
-                } else if local_bytes == b"p" {
-                    if !text.is_empty() && !text.ends_with('\n') {
-                        text.push('\n');
+                let lb = local.as_ref();
+                match lb {
+                    b"t" | b"delText" | b"instrText" => in_text = true,
+                    b"p" => {
+                        if !text.is_empty() && !text.ends_with('\n') {
+                            text.push('\n');
+                        }
                     }
+                    _ => {}
                 }
             }
             Ok(Event::Empty(ref e)) => {
                 let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"br" || local_bytes == b"cr" {
-                    text.push('\n');
-                } else if local_bytes == b"tab" {
-                    text.push('\t');
+                let lb = local.as_ref();
+                match lb {
+                    b"br" | b"cr" => text.push('\n'),
+                    b"tab" => text.push('\t'),
+                    _ => {}
                 }
             }
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"t" || local_bytes == b"delText" || local_bytes == b"instrText" {
+                let lb = local.as_ref();
+                if matches!(lb, b"t" | b"delText" | b"instrText") {
                     in_text = false;
                 }
             }
@@ -314,8 +358,7 @@ fn extract_text_from_word_xml(xml: &str) -> AppResult<String> {
                     }
                 }
             }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
+            Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
         buf.clear();
@@ -337,8 +380,7 @@ fn extract_xml_element(xml: &str, tag: &str) -> AppResult<String> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                let local = e.local_name();
-                if local.as_ref() == tag_local {
+                if e.local_name().as_ref() == tag_local {
                     in_target = true;
                 }
             }
@@ -348,8 +390,7 @@ fn extract_xml_element(xml: &str, tag: &str) -> AppResult<String> {
                 }
                 in_target = false;
             }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
+            Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
         buf.clear();
@@ -408,144 +449,11 @@ fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
     })
 }
 
-fn parse_pptx(path: &Path) -> AppResult<ParsedDocument> {
-    let data = std::fs::read(path).map_err(AppError::Io)?;
-    let cursor = Cursor::new(data);
-    let mut zip = ZipArchive::new(cursor)
-        .map_err(|e| AppError::DocumentParseError(format!("PPTX zip error: {e}")))?;
-
-    let slide_names: Vec<String> = (0..zip.len())
-        .filter_map(|i| {
-            let entry = zip.by_index(i).ok()?;
-            let raw_name = entry.name().replace('\\', "/");
-            if raw_name.starts_with("ppt/slides/slide") && raw_name.ends_with(".xml") {
-                Some(entry.name().to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let mut sorted_slides = slide_names;
-    sorted_slides.sort_by_key(|s| {
-        let clean = s.replace('\\', "/");
-        clean.trim_start_matches("ppt/slides/slide")
-            .trim_end_matches(".xml")
-            .parse::<usize>()
-            .unwrap_or(0)
-    });
-
-    let slide_count = sorted_slides.len();
-    let mut full_text = String::new();
-    let mut page_boundaries = Vec::new();
-
-    for (idx, slide_name) in sorted_slides.iter().enumerate() {
-        let slide_num = idx + 1;
-        let offset = full_text.len();
-        page_boundaries.push((offset, slide_num));
-
-        let xml = read_zip_entry(&mut zip, slide_name)?;
-        let slide_text = extract_text_from_pptx_slide(&xml)?;
-        if !slide_text.trim().is_empty() {
-            full_text.push_str(&format!("=== Slide {slide_num} ===\n{slide_text}\n\n"));
-        }
-    }
-
-    let title = read_zip_entry(&mut zip, "docProps/core.xml")
-        .ok()
-        .and_then(|xml| extract_xml_element(&xml, "dc:title").ok())
-        .filter(|t| !t.is_empty());
-
-    Ok(ParsedDocument {
-        full_text,
-        title,
-        page_count: Some(slide_count),
-        page_boundaries,
-    })
-}
-
-fn extract_text_from_pptx_slide(xml: &str) -> AppResult<String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(false);
-
-    let mut text = String::new();
-    let mut in_text = false;
-    let mut buf = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"t" {
-                    in_text = true;
-                } else if local_bytes == b"p" {
-                    if !text.is_empty() && !text.ends_with('\n') {
-                        text.push('\n');
-                    }
-                }
-            }
-            Ok(Event::Empty(ref e)) => {
-                let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"br" {
-                    text.push('\n');
-                }
-            }
-            Ok(Event::End(ref e)) => {
-                let local = e.local_name();
-                let local_bytes = local.as_ref();
-                if local_bytes == b"t" {
-                    in_text = false;
-                }
-            }
-            Ok(Event::Text(e)) => {
-                if in_text {
-                    if let Ok(t) = e.unescape() {
-                        text.push_str(&t);
-                    }
-                }
-            }
-            Ok(Event::CData(e)) => {
-                if in_text {
-                    if let Ok(t) = std::str::from_utf8(e.as_ref()) {
-                        text.push_str(t);
-                    }
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(text)
-}
-
 fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
     let raw = std::fs::read(path).map_err(AppError::Io)?;
     let (cow, _, _) = encoding_rs::UTF_8.decode(&raw);
-    let text = cow.into_owned();
-
     Ok(ParsedDocument {
-        full_text: text,
-        title: None,
-        page_count: None,
-        page_boundaries: vec![],
-    })
-}
-
-fn parse_csv(path: &Path) -> AppResult<ParsedDocument> {
-    let raw = std::fs::read(path).map_err(AppError::Io)?;
-    let (cow, _, _) = encoding_rs::UTF_8.decode(&raw);
-    let text = cow.into_owned();
-
-    Ok(ParsedDocument {
-        full_text: text,
+        full_text: cow.into_owned(),
         title: None,
         page_count: None,
         page_boundaries: vec![],
@@ -594,21 +502,13 @@ fn chunk_text_into_passages(
 
         start = floor_char_boundary(text, end.saturating_sub(PASSAGE_OVERLAP));
         while start < end {
-            let Some(ch) = text[start..].chars().next() else {
-                break;
-            };
-            if ch.is_whitespace() {
-                break;
-            }
+            let Some(ch) = text[start..].chars().next() else { break };
+            if ch.is_whitespace() { break }
             start += ch.len_utf8();
         }
         while start < text.len() {
-            let Some(ch) = text[start..].chars().next() else {
-                break;
-            };
-            if !ch.is_whitespace() {
-                break;
-            }
+            let Some(ch) = text[start..].chars().next() else { break };
+            if !ch.is_whitespace() { break }
             start += ch.len_utf8();
         }
         if start >= end {
@@ -633,7 +533,6 @@ fn find_chunk_end(text: &str, start: usize, max_chars: usize) -> usize {
     if end >= text.len() {
         return text.len();
     }
-
     if let Some(pos) = text[start..end].rfind("\n\n") {
         return start + pos + 2;
     }
@@ -672,13 +571,6 @@ fn stable_passage_id(document_id: &str, seq: i64) -> String {
         "{:016x}",
         u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
     )
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

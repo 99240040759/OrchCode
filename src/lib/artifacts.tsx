@@ -24,7 +24,6 @@ interface ArtifactsState {
   activeId: string | null;
   panelOpen: boolean;
   maximized: boolean;
-  fileVersions: Record<string, number>;
 }
 
 interface ArtifactsActions {
@@ -37,7 +36,6 @@ interface ArtifactsActions {
   setActive: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
   toggleMaximized: () => void;
-  bumpFile: (path: string) => void;
   reset: () => void;
 }
 
@@ -48,7 +46,6 @@ const INITIAL_STATE: ArtifactsState = {
   activeId: null,
   panelOpen: false,
   maximized: false,
-  fileVersions: {},
 };
 
 export function activeTabId(state: ArtifactsState): string | null {
@@ -176,17 +173,9 @@ export const useArtifactsStore = create(
       });
     },
 
-    bumpFile: (path: string) => {
-      set((s) => {
-        s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1;
-      });
-    },
-
     reset: () => {
       set((s) => {
         Object.assign(s, INITIAL_STATE);
-        s.tabs = [];
-        s.fileVersions = {};
       });
     },
   }))

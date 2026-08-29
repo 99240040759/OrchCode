@@ -26,7 +26,6 @@ pub struct AppState {
     pub token: TokenHandle,
     pub workspace: WorkspaceHandle,
     pub data_dir: PathBuf,
-    pub sandbox: PathBuf,
     pub gateway: Arc<Gateway>,
     pub catalog: RwLock<Option<ModelCatalog>>,
     pub memory: SqliteMemory,
@@ -47,14 +46,15 @@ impl AppState {
         let token: TokenHandle = Arc::new(RwLock::new(None));
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
-        let sandbox = data_dir.join("sandbox");
-        std::fs::create_dir_all(&sandbox)?;
+
+        // Ensure top-level quick-projects directory exists under app data
+        let quick_projects_dir = data_dir.join("quick-projects");
+        std::fs::create_dir_all(&quick_projects_dir)?;
 
         Ok(Self {
             token,
-            workspace: Arc::new(RwLock::new(Some(sandbox.clone()))),
+            workspace: Arc::new(RwLock::new(None)),
             data_dir: data_dir.to_path_buf(),
-            sandbox,
             gateway,
             catalog: RwLock::new(None),
             memory,
@@ -140,14 +140,6 @@ impl AppState {
         }
     }
 
-    pub fn use_sandbox(&self) {
-        self.set_workspace(self.sandbox.clone());
-    }
-
-    pub fn is_sandbox(&self) -> bool {
-        self.workspace().map(|w| w == self.sandbox).unwrap_or(true)
-    }
-
     pub fn set_workspace(&self, path: PathBuf) {
         if let Ok(mut guard) = self.workspace.write() {
             *guard = Some(path);
@@ -160,6 +152,14 @@ impl AppState {
 
     pub fn require_workspace(&self) -> AppResult<PathBuf> {
         self.workspace().ok_or(AppError::NoWorkspace)
+    }
+
+    // ── AppData quick-projects helper ───────────────────────────────────────
+    /// `<data_dir>/quick-projects/<id>-<name>/`
+    pub fn quick_project_path(&self, id: &str, name: &str) -> PathBuf {
+        self.data_dir
+            .join("quick-projects")
+            .join(format!("{id}-{name}"))
     }
 
     pub async fn catalog(&self) -> AppResult<ModelCatalog> {
@@ -325,6 +325,8 @@ impl AppState {
             session.kill();
         }
         guard.clear();
+        // Terminals map is cleared before on_exit callbacks can fire,
+        // so any pending on_exit removal calls are no-ops — this is correct.
         if let Ok(mut dictation) = self.dictation.lock() {
             if let Some(handle) = dictation.take() {
                 handle.stop();
