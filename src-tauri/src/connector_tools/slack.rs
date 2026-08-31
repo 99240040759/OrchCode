@@ -40,7 +40,7 @@ impl Tool for SlackListChannels {
 
         let limit = args.max_results.unwrap_or(50).min(200);
         let url = format!(
-            "{SLACK_API}/conversations.list?limit={limit}&exclude_archived=true&types=public_channel,private_channel"
+            "{SLACK_API}/conversations.list?limit={limit}&exclude_archived=true&types=public_channel"
         );
 
         let json = request_json(

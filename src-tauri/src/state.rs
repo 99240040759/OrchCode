@@ -273,11 +273,15 @@ impl AppState {
                     continue;
                 }
                 if let Err(e) = state.ensure_fresh_token().await {
-                    state.clear_credentials();
-                    let _ = app.emit(
-                        "auth-changed",
-                        serde_json::json!({ "user": null, "error": e.to_string() }),
-                    );
+                    if e.is_fatal_auth() {
+                        state.clear_credentials();
+                        let _ = app.emit(
+                            "auth-changed",
+                            serde_json::json!({ "user": null, "error": e.to_string() }),
+                        );
+                    } else {
+                        eprintln!("[auth] token refresh failed (retryable): {e}");
+                    }
                 }
             }
         });

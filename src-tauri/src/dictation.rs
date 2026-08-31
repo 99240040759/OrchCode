@@ -24,10 +24,6 @@ impl DictationHandle {
     pub fn stop(&self) {
         self.recording.store(false, Ordering::SeqCst);
     }
-
-    pub fn is_finished(&self) -> bool {
-        self.finished.load(Ordering::SeqCst)
-    }
 }
 
 pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResult<DictationHandle> {

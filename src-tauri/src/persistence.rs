@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,6 +17,7 @@ use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
 use crate::llm::{is_payload_part, payload_part_label};
 use crate::tools::{parse_display_info, strip_tool_error_sentinel, tool_output_is_error};
+use crate::util::now_ms;
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -196,16 +197,24 @@ pub struct CompactionInput {
     pub first_seq: i64,
 }
 
+const POOL_SIZE: u32 = 4;
+
+type SqlitePool = Pool<SqliteConnectionManager>;
+
 #[derive(Clone)]
 pub struct SqliteMemory {
-    conn: Arc<Mutex<Connection>>,
+    pool: SqlitePool,
 }
 
 impl SqliteMemory {
     pub fn open(path: &Path) -> AppResult<Self> {
-        let mut conn = Connection::open(path)
-            .map_err(|e| AppError::other(format!("sqlite open failed: {e}")))?;
-        configure_connection(&conn)?;
+        let manager = SqliteConnectionManager::file(path).with_init(configure_connection);
+        let pool = Pool::builder()
+            .max_size(POOL_SIZE)
+            .build(manager)
+            .map_err(|e| AppError::other(format!("sqlite pool build failed: {e}")))?;
+
+        let mut conn = pool.get().map_err(pool_err)?;
 
         let migration_list = vec![
             rusqlite_migration::M::up(BASELINE_SCHEMA),
@@ -229,9 +238,9 @@ impl SqliteMemory {
             .to_latest(&mut conn)
             .map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
 
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        drop(conn);
+
+        Ok(Self { pool })
     }
 
     /// List sessions scoped to a specific workspace path, newest first.
@@ -239,10 +248,10 @@ impl SqliteMemory {
         &self,
         workspace_path: &str,
     ) -> AppResult<Vec<SessionSummary>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let ws = workspace_path.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut stmt = c
                 .prepare(
                     "SELECT id, title, workspace_path, updated_at, total_input_tokens, total_output_tokens, total_tokens
@@ -275,10 +284,10 @@ impl SqliteMemory {
 
     /// Delete all sessions and associated messages/reasoning for a specific workspace path.
     pub async fn delete_sessions_for_workspace(&self, workspace_path: &str) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let ws = workspace_path.to_string();
         run_db_task(move || {
-            let mut c = conn.lock().map_err(lock_err)?;
+            let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
 
             tx.execute(
@@ -310,12 +319,12 @@ impl SqliteMemory {
         conversation_id: &str,
         workspace_path: Option<&str>,
     ) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         let ws = workspace_path.map(|s| s.to_string());
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            let now = now_millis();
+            let c = pool.get().map_err(pool_err)?;
+            let now = now_ms();
             c.execute(
                 "INSERT INTO sessions (id, workspace_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
                  ON CONFLICT(id) DO UPDATE SET workspace_path = ?2, updated_at = ?3",
@@ -328,12 +337,12 @@ impl SqliteMemory {
     }
 
     pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         let t = title.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            let now = now_millis();
+            let c = pool.get().map_err(pool_err)?;
+            let now = now_ms();
             c.execute(
                 "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
                  ON CONFLICT(id) DO UPDATE SET title = ?2, updated_at = ?3",
@@ -346,10 +355,10 @@ impl SqliteMemory {
     }
 
     pub async fn session_has_title(&self, conversation_id: &str) -> AppResult<bool> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.query_row(
                 "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND title IS NOT NULL AND title != ''",
                 params![cid],
@@ -368,11 +377,11 @@ impl SqliteMemory {
         output_tokens: u64,
         total_tokens: u64,
     ) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
-            let now = now_millis();
+            let c = pool.get().map_err(pool_err)?;
+            let now = now_ms();
             c.execute(
                 "UPDATE sessions SET total_input_tokens = ?1, total_output_tokens = ?2, total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
                 params![input_tokens as i64, output_tokens as i64, total_tokens as i64, now, cid],
@@ -387,10 +396,10 @@ impl SqliteMemory {
         &self,
         conversation_id: &str,
     ) -> AppResult<(u64, u64, u64)> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.query_row(
                 "SELECT total_input_tokens, total_output_tokens, total_tokens FROM sessions WHERE id = ?1",
                 params![cid],
@@ -401,17 +410,21 @@ impl SqliteMemory {
                     Ok((i.max(0) as u64, o.max(0) as u64, t.max(0) as u64))
                 },
             )
-            .map_err(sql_err)
-            .or(Ok((0, 0, 0)))
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(sql_err(other)),
+            })
+            .map(|opt| opt.unwrap_or((0, 0, 0)))
         })
         .await
     }
 
     pub async fn max_seq(&self, conversation_id: &str) -> AppResult<i64> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.query_row(
                 "SELECT COALESCE(MAX(seq), -1) FROM messages WHERE conversation_id = ?1",
                 params![cid],
@@ -431,10 +444,10 @@ impl SqliteMemory {
         if durations.is_empty() {
             return Ok(());
         }
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let mut c = conn.lock().map_err(lock_err)?;
+            let mut c = pool.get().map_err(pool_err)?;
             let rows = load_after(&c, &cid, after_seq).map_err(sql_err)?;
             let mut pending = durations.into_iter();
             let mut assignments: Vec<(String, u64)> = Vec::new();
@@ -499,10 +512,10 @@ impl SqliteMemory {
         conversation_id: &str,
         keep_recent_user_turns: usize,
     ) -> AppResult<Option<CompactionInput>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let rows = load_all(&c, &cid).map_err(sql_err)?;
             let boundary = rows.iter().rposition(|r| r.kind == "compaction");
 
@@ -573,11 +586,11 @@ impl SqliteMemory {
         first_seq: i64,
         upto_seq: i64,
     ) -> AppResult<i64> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         let summary = summary.to_string();
         run_db_task(move || {
-            let now = now_millis();
+            let now = now_ms();
             let marker = CompactionMarker {
                 summary,
                 original_message_count,
@@ -585,7 +598,7 @@ impl SqliteMemory {
             let data = serde_json::to_string(&marker)
                 .map_err(|e| AppError::other(format!("serialize compaction marker: {e}")))?;
 
-            let mut c = conn.lock().map_err(lock_err)?;
+            let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
             tx.execute(
                 "DELETE FROM messages WHERE conversation_id = ?1 AND seq <= ?2",
@@ -609,10 +622,10 @@ impl SqliteMemory {
     }
 
     pub async fn get_session_view(&self, conversation_id: &str) -> AppResult<Vec<MessageView>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let rows = load_all(&c, &cid).map_err(sql_err)?;
 
             let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
@@ -829,11 +842,11 @@ impl ConversationMemory for SqliteMemory {
         &'a self,
         conversation_id: &'a str,
     ) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
             run_mem_task(move || {
-                let c = conn.lock().map_err(mem_lock)?;
+                let c = pool.get().map_err(mem_pool)?;
                 let rows = load_all(&c, &cid).map_err(mem_sql)?;
                 let boundary = rows.iter().rposition(|r| r.kind == "compaction");
 
@@ -869,12 +882,12 @@ impl ConversationMemory for SqliteMemory {
         conversation_id: &'a str,
         messages: Vec<Message>,
     ) -> MemoryFuture<'a, Result<(), MemoryError>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
             run_mem_task(move || {
-                let now = now_millis();
-                let mut c = conn.lock().map_err(mem_lock)?;
+                let now = now_ms();
+                let mut c = pool.get().map_err(mem_pool)?;
                 let tx = c.transaction().map_err(mem_sql)?;
 
                 let start_seq: i64 = tx
@@ -909,11 +922,11 @@ impl ConversationMemory for SqliteMemory {
     }
 
     fn clear<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<(), MemoryError>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
             run_mem_task(move || {
-                let mut c = conn.lock().map_err(mem_lock)?;
+                let mut c = pool.get().map_err(mem_pool)?;
                 let tx = c.transaction().map_err(mem_sql)?;
                 tx.execute(
                     "DELETE FROM messages WHERE conversation_id = ?1",
@@ -935,15 +948,11 @@ impl ConversationMemory for SqliteMemory {
     }
 }
 
-pub fn configure_connection(conn: &Connection) -> AppResult<()> {
-    conn.pragma_update(None, "foreign_keys", true)
-        .map_err(|e| AppError::other(format!("sqlite foreign_keys failed: {e}")))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| AppError::other(format!("sqlite journal_mode failed: {e}")))?;
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(|e| AppError::other(format!("sqlite synchronous failed: {e}")))?;
-    conn.busy_timeout(std::time::Duration::from_secs(10))
-        .map_err(|e| AppError::other(format!("sqlite busy_timeout failed: {e}")))?;
+pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
+    conn.pragma_update(None, "foreign_keys", true)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.busy_timeout(std::time::Duration::from_secs(10))?;
     Ok(())
 }
 
@@ -999,6 +1008,14 @@ fn basename(label: &str) -> String {
         .to_string()
 }
 
+fn fts5_query(raw: &str) -> String {
+    raw.split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
     let input = format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or(""));
     let hash = Sha256::digest(input.as_bytes());
@@ -1006,13 +1023,6 @@ fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String
         "{:016x}",
         u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
     )
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 async fn run_db_task<T, F>(f: F) -> AppResult<T>
@@ -1039,17 +1049,18 @@ fn sql_err(e: rusqlite::Error) -> AppError {
     AppError::other(format!("sqlite error: {e}"))
 }
 
-fn lock_err<T>(_: std::sync::PoisonError<T>) -> AppError {
-    AppError::other("sqlite connection lock poisoned")
+fn pool_err(e: r2d2::Error) -> AppError {
+    AppError::other(format!("db pool error: {e}"))
+}
+
+fn mem_pool(e: r2d2::Error) -> MemoryError {
+    MemoryError::Internal(format!("db pool error: {e}"))
 }
 
 fn mem_sql(e: rusqlite::Error) -> MemoryError {
     MemoryError::backend(e)
 }
 
-fn mem_lock<T>(_: std::sync::PoisonError<T>) -> MemoryError {
-    MemoryError::Internal("sqlite connection lock poisoned".to_string())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1113,9 +1124,9 @@ impl SqliteMemory {
         doc: DocumentRecord,
         passages: Vec<PassageRecord>,
     ) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         run_db_task(move || {
-            let mut c = conn.lock().map_err(lock_err)?;
+            let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
             let document_id = doc.id.clone();
             tx.execute(
@@ -1177,10 +1188,10 @@ impl SqliteMemory {
     }
 
     pub async fn delete_document(&self, document_id: &str) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let did = document_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.execute("DELETE FROM documents WHERE id=?1", rusqlite::params![did])
                 .map_err(sql_err)?;
             Ok(())
@@ -1194,9 +1205,9 @@ impl SqliteMemory {
         limit: usize,
         offset: usize,
     ) -> AppResult<Vec<DocumentRecord>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut sql = String::from(
                 "SELECT id, title, file_path, source, source_id, file_type,
                         size_bytes, page_count, word_count, metadata, indexed_at, updated_at
@@ -1227,10 +1238,10 @@ impl SqliteMemory {
     }
 
     pub async fn get_document(&self, document_id: &str) -> AppResult<Option<DocumentRecord>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let did = document_id.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut stmt = c.prepare(
                 "SELECT id, title, file_path, source, source_id, file_type,
                         size_bytes, page_count, word_count, metadata, indexed_at, updated_at
@@ -1246,10 +1257,10 @@ impl SqliteMemory {
     }
 
     pub async fn document_exists_by_path(&self, path: &str) -> AppResult<Option<String>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let p = path.to_string();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut stmt = c.prepare("SELECT id FROM documents WHERE file_path=?1 LIMIT 1")
                 .map_err(sql_err)?;
             let mut rows = stmt.query_map(rusqlite::params![p], |row| row.get::<_, String>(0))
@@ -1263,11 +1274,14 @@ impl SqliteMemory {
     }
 
     pub async fn search_documents(&self, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
-        let conn = self.conn.clone();
-        let q = query.to_string();
+        let q = fts5_query(query);
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pool = self.pool.clone();
         let lim = limit;
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut stmt = c.prepare(
                 "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
                         snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
@@ -1305,18 +1319,18 @@ impl SqliteMemory {
     }
 
     pub async fn count_documents(&self) -> AppResult<i64> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
                 .map_err(sql_err)
         }).await
     }
 
     pub async fn upsert_connector(&self, rec: ConnectorRecord) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "INSERT INTO connectors (id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
@@ -1335,9 +1349,9 @@ impl SqliteMemory {
     }
 
     pub async fn list_connectors(&self) -> AppResult<Vec<ConnectorRecord>> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             let mut stmt = c.prepare(
                 "SELECT id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at
                  FROM connectors ORDER BY id"
@@ -1363,11 +1377,11 @@ impl SqliteMemory {
     }
 
     pub async fn set_connector_enabled(&self, id: &str, enabled: bool) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = id.to_string();
-        let ts = now_millis();
+        let ts = now_ms();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET enabled=?1, updated_at=?2 WHERE id=?3",
                 rusqlite::params![enabled as i64, ts, cid],
@@ -1383,12 +1397,12 @@ impl SqliteMemory {
         expires_at: Option<i64>,
         error: Option<&str>,
     ) -> AppResult<()> {
-        let conn = self.conn.clone();
+        let pool = self.pool.clone();
         let cid = id.to_string();
-        let ts = now_millis();
+        let ts = now_ms();
         let err = error.map(|s| s.to_string());
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET has_token=?1, token_expires_at=?2, error=?3, updated_at=?4 WHERE id=?5",
                 rusqlite::params![has_token as i64, expires_at, err, ts, cid],
@@ -1398,10 +1412,10 @@ impl SqliteMemory {
     }
 
     pub async fn clear_all_connector_tokens(&self) -> AppResult<()> {
-        let conn = self.conn.clone();
-        let ts = now_millis();
+        let pool = self.pool.clone();
+        let ts = now_ms();
         run_db_task(move || {
-            let c = conn.lock().map_err(lock_err)?;
+            let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET enabled=0, has_token=0, token_expires_at=NULL, error=NULL, updated_at=?1",
                 rusqlite::params![ts],

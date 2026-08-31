@@ -55,17 +55,29 @@ pub fn open(
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 8192];
+            let mut decoder = encoding_rs::UTF_8.new_decoder();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        if channel.send(TerminalEvent::Data { data: text }).is_err() {
+                        let mut text = String::new();
+                        if let Some(cap) = decoder.max_utf8_buffer_length(n) {
+                            text.reserve(cap);
+                        }
+                        let _ = decoder.decode_to_string(&buf[..n], &mut text, false);
+                        if !text.is_empty()
+                            && channel.send(TerminalEvent::Data { data: text }).is_err()
+                        {
                             break;
                         }
                     }
                     Err(_) => break,
                 }
+            }
+            let mut tail = String::new();
+            let _ = decoder.decode_to_string(&[], &mut tail, true);
+            if !tail.is_empty() {
+                let _ = channel.send(TerminalEvent::Data { data: tail });
             }
             let _ = channel.send(TerminalEvent::Exit);
             on_exit();

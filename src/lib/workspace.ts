@@ -60,13 +60,9 @@ const INITIAL_STATE: WorkspaceState = {
 };
 
 async function loadAll(): Promise<WorkspaceMeta[]> {
-  try {
-    const raw = await getUserPref(PREF_ALL_WORKSPACES);
-    if (!raw) return [];
-    return JSON.parse(raw) as WorkspaceMeta[];
-  } catch {
-    return [];
-  }
+  const raw = await getUserPref(PREF_ALL_WORKSPACES);
+  if (!raw) return [];
+  return JSON.parse(raw) as WorkspaceMeta[];
 }
 
 async function saveAll(list: WorkspaceMeta[]): Promise<void> {
@@ -118,7 +114,17 @@ export const useWorkspaceStore = create(
         s.error = null;
       });
 
-      const [all, lastId] = await Promise.all([loadAll(), loadLastId()]);
+      let all: WorkspaceMeta[] = [];
+      let lastId: string | null = null;
+      try {
+        [all, lastId] = await Promise.all([loadAll(), loadLastId()]);
+      } catch (e) {
+        set((s) => {
+          s.status = "needs_pick";
+          s.error = `Could not load saved workspaces: ${errorMessage(e)}`;
+        });
+        return;
+      }
 
       set((s) => {
         s.all = all;

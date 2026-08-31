@@ -1,5 +1,6 @@
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use gray_matter::engine::YAML;
 use gray_matter::Matter;
@@ -48,13 +49,31 @@ pub fn seed_bundled_skills(data_dir: &Path) {
     let _ = std::fs::write(&version_file, BUNDLED_VERSION);
 }
 
+fn skills_cache() -> &'static Mutex<HashMap<PathBuf, Vec<Skill>>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<Skill>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn load_all_skills(data_dir: &Path) -> Vec<Skill> {
+    let skills_dir = data_dir.join("skills");
+
+    {
+        let cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.get(&skills_dir) {
+            return cached.clone();
+        }
+    }
+
     let mut skills = Vec::new();
     let mut seen = HashSet::new();
 
-    scan_skills_directory(&data_dir.join("skills"), &mut skills, &mut seen);
+    scan_skills_directory(&skills_dir, &mut skills, &mut seen);
 
     skills.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(skills_dir, skills.clone());
+
     skills
 }
 

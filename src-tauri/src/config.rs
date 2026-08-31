@@ -47,8 +47,9 @@ pub fn tavily_url() -> String {
 
 const DEFAULT_INFERENCE_PROVIDER: &str = "nvidia";
 
-pub const DEFAULT_MAX_TURNS: usize = 1000;
+pub const DEFAULT_MAX_TURNS: usize = 100;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;
+pub const BUDGET_RECHECK_EVERY_TURNS: u32 = 10;
 pub const COMMAND_FOREGROUND_HANDOFF_SECS: u64 = 30;
 pub const MAX_ATTACHMENT_BYTES: usize = 1024 * 1024;
 

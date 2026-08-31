@@ -38,6 +38,14 @@ impl AppError {
     pub fn other(msg: impl Into<String>) -> Self {
         AppError::Other(msg.into())
     }
+
+    pub fn is_fatal_auth(&self) -> bool {
+        match self {
+            AppError::NoToken => true,
+            AppError::Gateway { status, .. } => matches!(status, 400 | 401 | 403),
+            _ => false,
+        }
+    }
 }
 
 pub type AppResult<T> = Result<T, AppError>;

@@ -18,6 +18,7 @@ pub mod skills;
 pub mod state;
 pub mod terminal;
 pub mod tools;
+pub mod util;
 
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -143,9 +144,6 @@ fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option
 
 pub fn run() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -156,6 +154,9 @@ pub fn run() {
                 }
             });
         }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -205,54 +206,48 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler({
-            let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
-                Box::new(tauri::generate_handler![
-                browser::webview_navigate,
-                browser::webview_history,
-                browser::webview_close,
-                fsapi::list_workspace_files,
-                fsapi::read_text_file,
-                fsapi::read_image_data_url,
-                fsapi::read_binary_file_as_data_url,
-                fsapi::read_document_metadata,
-                fsapi::read_parsed_document,
-                ipc::get_auth_user,
-                ipc::get_oauth_url,
-                ipc::sign_out_auth,
-                ipc::set_workspace,
-                ipc::create_quick_project_dir,
-                ipc::list_sessions_for_workspace,
-                ipc::delete_workspace_data,
-                ipc::list_models,
-                ipc::get_budget,
-                ipc::get_session_view,
-                ipc::clear_session,
-                ipc::get_user_pref,
-                ipc::set_user_pref,
-                ipc::start_chat,
-                ipc::cancel_chat,
-                ipc::start_dictation,
-                ipc::stop_dictation,
-                ipc::terminal_open,
-                ipc::terminal_write,
-                ipc::terminal_resize,
-                ipc::terminal_close,
-                ipc::list_connectors,
-                ipc::get_connector_auth_url,
-                ipc::complete_connector_auth,
-                ipc::disconnect_connector,
-                ipc::ipc_ingest_document,
-                ipc::ipc_list_documents,
-                ipc::ipc_get_document,
-                ipc::ipc_delete_document,
-                ipc::ipc_search_documents,
-                ipc::ipc_count_documents,
-                ]);
-            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
-                handler(invoke)
-            }
-        })
+        .invoke_handler(tauri::generate_handler![
+            browser::webview_navigate,
+            browser::webview_history,
+            browser::webview_close,
+            fsapi::list_workspace_files,
+            fsapi::read_text_file,
+            fsapi::read_image_data_url,
+            fsapi::read_binary_file_as_data_url,
+            fsapi::read_document_metadata,
+            fsapi::read_parsed_document,
+            ipc::get_auth_user,
+            ipc::get_oauth_url,
+            ipc::sign_out_auth,
+            ipc::set_workspace,
+            ipc::create_quick_project_dir,
+            ipc::list_sessions_for_workspace,
+            ipc::delete_workspace_data,
+            ipc::list_models,
+            ipc::get_budget,
+            ipc::get_session_view,
+            ipc::clear_session,
+            ipc::get_user_pref,
+            ipc::set_user_pref,
+            ipc::start_chat,
+            ipc::cancel_chat,
+            ipc::start_dictation,
+            ipc::stop_dictation,
+            ipc::terminal_open,
+            ipc::terminal_write,
+            ipc::terminal_resize,
+            ipc::terminal_close,
+            ipc::list_connectors,
+            ipc::get_connector_auth_url,
+            ipc::complete_connector_auth,
+            ipc::disconnect_connector,
+            ipc::ipc_ingest_document,
+            ipc::ipc_list_documents,
+            ipc::ipc_get_document,
+            ipc::ipc_delete_document,
+            ipc::ipc_search_documents,
+            ipc::ipc_count_documents,
+        ])
         .build(tauri::generate_context!())
         .expect("failed to build the application");
 

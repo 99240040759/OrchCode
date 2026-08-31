@@ -152,11 +152,19 @@ pub mod fs_util {
     pub async fn atomic_write(path: &Path, content: &[u8]) -> AppResult<()> {
         let target_path = path.to_path_buf();
         let bytes = content.to_vec();
-        tokio::task::spawn_blocking(move || std::fs::write(&target_path, &bytes))
-            .await
-            .map_err(|e| AppError::other(format!("atomic write join failed: {e}")))?
-            .map_err(AppError::Io)?;
-        Ok(())
+        tokio::task::spawn_blocking(move || -> AppResult<()> {
+            use std::io::Write;
+            let parent = target_path
+                .parent()
+                .ok_or_else(|| AppError::other("target path has no parent directory"))?;
+            let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(AppError::Io)?;
+            tmp.write_all(&bytes).map_err(AppError::Io)?;
+            tmp.as_file().sync_all().map_err(AppError::Io)?;
+            tmp.persist(&target_path).map_err(|e| AppError::Io(e.error))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| AppError::other(format!("atomic write join failed: {e}")))?
     }
 }
 
@@ -381,8 +389,8 @@ impl RingBuffer {
         }
     }
 
-    fn push(&mut self, s: &str) {
-        self.data.extend(s.as_bytes().iter().copied());
+    fn push(&mut self, bytes: &[u8]) {
+        self.data.extend(bytes.iter().copied());
     }
 
     fn as_string(&mut self) -> String {
@@ -488,7 +496,7 @@ impl CommandManager {
                             }
                             Some(Err(e)) => {
                                 g.status = "failed".to_string();
-                                g.output.push(&format!("\nprocess wait error: {e}\n"));
+                                g.output.push(format!("\nprocess wait error: {e}\n").as_bytes());
                             }
                             None => g.status = "cancelled".to_string(),
                         }
@@ -498,7 +506,7 @@ impl CommandManager {
                     if let Ok(mut g) = inner.lock() {
                         g.kill_tx = None;
                         g.status = "failed".to_string();
-                        g.output.push(&format!("spawn error: {e}"));
+                        g.output.push(format!("spawn error: {e}").as_bytes());
                     }
                 }
             }
@@ -564,9 +572,8 @@ where
         match reader.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
-                let text = String::from_utf8_lossy(&buf[..n]);
                 if let Ok(mut g) = inner.lock() {
-                    g.output.push(&text);
+                    g.output.push(&buf[..n]);
                 }
             }
             Err(_) => break,
@@ -654,20 +661,12 @@ ALWAYS call this before editing any file."
             .unwrap_or_default();
 
         if ext == "pdf" {
-            let glob_path = path.to_string_lossy().replace('\\', "/");
-            let loader = rig::loaders::PdfFileLoader::with_glob(&glob_path)
-                .map_err(|e| ToolError::msg(format!("cannot load PDF {}: {e}", args.path)))?;
-            let mut text = String::new();
-            for (_, content) in loader.read_with_path().ignore_errors() {
-                text.push_str(&content);
-                text.push_str("\n\n");
-            }
-            if text.trim().is_empty() {
-                return Err(ToolError::msg(format!(
-                    "PDF contains no extractable text: {}",
-                    args.path
-                )));
-            }
+            let pdf_path = path.clone();
+            let text = tokio::task::spawn_blocking(move || {
+                crate::document::extract_pdf_text(&pdf_path, None)
+            })
+            .await
+            .map_err(|e| ToolError::msg(format!("pdf extraction task failed: {e}")))??;
             return Ok(slice_lines(&text, args.start_line, args.end_line));
         }
 
@@ -1383,51 +1382,56 @@ Useful to explore the codebase structure."
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let root = workspace_root(&self.workspace)?;
         let resolved = fs_util::resolve_in_workspace(&root, &args.path)?;
+        let display_path = args.path.clone();
 
-        if !resolved.exists() {
-            return Err(ToolError::msg(format!("Directory not found: {}", args.path)));
-        }
-        if !resolved.is_dir() {
-            return Err(ToolError::msg(format!("Path is not a directory: {}", args.path)));
-        }
+        tokio::task::spawn_blocking(move || {
+            if !resolved.exists() {
+                return Err(ToolError::msg(format!("Directory not found: {display_path}")));
+            }
+            if !resolved.is_dir() {
+                return Err(ToolError::msg(format!("Path is not a directory: {display_path}")));
+            }
 
-        let mut out = format!("Contents of {}:\n\n", args.path);
-        let mut count = 0;
+            let entries = std::fs::read_dir(&resolved)
+                .map_err(|e| ToolError::msg(format!("Failed to read directory: {e}")))?;
+            let mut paths: Vec<_> = entries.filter_map(Result::ok).collect();
+            paths.sort_by_key(|e| e.file_name());
 
-        match std::fs::read_dir(&resolved) {
-            Ok(entries) => {
-                let mut paths: Vec<_> = entries.filter_map(Result::ok).collect();
-                paths.sort_by_key(|e| e.file_name());
+            let mut out = format!("Contents of {display_path}:\n\n");
+            let mut count = 0;
 
-                for entry in paths {
-                    if count >= 200 {
-                        out.push_str("... (truncated. too many files)\n");
-                        break;
-                    }
-                    count += 1;
+            for entry in paths {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let metadata = entry.metadata().ok();
+                let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
 
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    let metadata = entry.metadata().ok();
-                    let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                    
-                    if is_dir {
-                        out.push_str(&format!("[DIR]  {}\n", name));
+                if is_dir && SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                if count >= 200 {
+                    out.push_str("... (truncated. too many files)\n");
+                    break;
+                }
+                count += 1;
+
+                if is_dir {
+                    out.push_str(&format!("[DIR]  {name}\n"));
+                } else {
+                    let size = metadata.map(|m| m.len()).unwrap_or(0);
+                    let size_str = if size < 1024 {
+                        format!("{size} B")
+                    } else if size < 1024 * 1024 {
+                        format!("{} KB", size / 1024)
                     } else {
-                        let size = metadata.map(|m| m.len()).unwrap_or(0);
-                        let size_str = if size < 1024 {
-                            format!("{} B", size)
-                        } else if size < 1024 * 1024 {
-                            format!("{} KB", size / 1024)
-                        } else {
-                            format!("{} MB", size / (1024 * 1024))
-                        };
-                        out.push_str(&format!("[FILE] {} ({})\n", name, size_str));
-                    }
+                        format!("{} MB", size / (1024 * 1024))
+                    };
+                    out.push_str(&format!("[FILE] {name} ({size_str})\n"));
                 }
             }
-            Err(e) => return Err(ToolError::msg(format!("Failed to read directory: {}", e))),
-        }
-        Ok(out)
+            Ok(out)
+        })
+        .await
+        .map_err(|e| ToolError::msg(format!("list_dir task failed: {e}")))?
     }
 }
 

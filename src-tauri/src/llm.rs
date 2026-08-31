@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use std::time::{Duration, Instant};
 
@@ -19,7 +20,7 @@ use tauri::ipc::Channel;
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
-use crate::gateway::ModelInfo;
+use crate::gateway::{Gateway, ModelInfo};
 use crate::persistence::SqliteMemory;
 use crate::tools::{
     parse_display_info, slice_lines, strip_tool_error_sentinel, tool_output_is_error, ToolContext,
@@ -272,6 +273,7 @@ pub async fn run_chat(
     request: RunRequest,
     cancel: CancellationToken,
     channel: Channel<ChatEvent>,
+    gateway: Arc<Gateway>,
 ) -> RunResult {
     let ws_ref: Option<&Path> = request.workspace.as_deref();
     let user_message = build_user_message(
@@ -295,6 +297,7 @@ pub async fn run_chat(
     let mut cumulative_output: u64 = request.prior_output_tokens;
     let mut cumulative_total: u64 = request.prior_total_tokens;
     let mut last_turn_input: u64 = 0;
+    let mut turns_since_budget_check: u32 = 0;
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let mut deadline = tokio::time::Instant::now() + chunk_timeout;
 
@@ -316,7 +319,10 @@ pub async fn run_chat(
             _ = tokio::time::sleep_until(deadline) => {
                 close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
                 let _ = channel.send(ChatEvent::Error {
-                    message: "stream timed out: no data received from the model for 120 s".to_string(),
+                    message: format!(
+                        "stream timed out: no data received from the model for {}s",
+                        config::STREAM_CHUNK_TIMEOUT_SECS
+                    ),
                 });
                 return RunResult {
                     reasoning_durations,
@@ -405,6 +411,29 @@ pub async fn run_chat(
                     output_tokens: cumulative_output,
                     total_tokens: cumulative_total,
                 });
+
+                turns_since_budget_check += 1;
+                if turns_since_budget_check >= config::BUDGET_RECHECK_EVERY_TURNS {
+                    turns_since_budget_check = 0;
+                    if let Ok(budget) = gateway.budget().await {
+                        if !budget.allowed {
+                            let _ = channel.send(ChatEvent::Error {
+                                message: format!(
+                                    "usage limit reached for this {}: {:.2} of {:.2} USD used",
+                                    budget.period, budget.cost_usd, budget.limit_usd
+                                ),
+                            });
+                            return RunResult {
+                                reasoning_durations,
+                                completed: false,
+                                cumulative_input_tokens: cumulative_input,
+                                cumulative_output_tokens: cumulative_output,
+                                cumulative_total_tokens: cumulative_total,
+                                last_turn_input_tokens: last_turn_input,
+                            };
+                        }
+                    }
+                }
             }
             Ok(_) => {}
             Err(e) => {
@@ -456,24 +485,6 @@ fn image_media_type(ext: &str) -> Option<ImageMediaType> {
     }
 }
 
-fn extract_pdf_text(path: &Path) -> Option<String> {
-    let glob_path = path.to_string_lossy().replace('\\', "/");
-    let loader = rig::loaders::PdfFileLoader::with_glob(&glob_path).ok()?;
-    let mut text = String::new();
-    for (_, content) in loader.read_with_path().ignore_errors() {
-        if text.len() >= config::MAX_ATTACHMENT_BYTES {
-            break;
-        }
-        text.push_str(&content);
-        text.push_str("\n\n");
-    }
-    if text.trim().is_empty() {
-        None
-    } else {
-        Some(text)
-    }
-}
-
 fn display_label(path: &Path, workspace: Option<&Path>) -> String {
     workspace
         .and_then(|ws| path.strip_prefix(ws).ok())
@@ -485,13 +496,19 @@ fn display_label(path: &Path, workspace: Option<&Path>) -> String {
         })
 }
 
+fn mention_regex() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\]|@(?P<plain>[^\s@]+)")
+            .expect("mention regex is a valid pattern")
+    })
+}
+
 fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathBuf, Option<String>)> {
     let Some(ws) = workspace else {
         return Vec::new();
     };
-    let Ok(re) = regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\]|@(?P<plain>[^\s@]+)") else {
-        return Vec::new();
-    };
+    let re = mention_regex();
 
     let mut out = Vec::new();
     for cap in re.captures_iter(prompt) {
@@ -595,11 +612,16 @@ async fn build_user_message(
         };
 
         if ext == "pdf" {
-            match extract_pdf_text(&canonical) {
-                Some(text) => {
+            let pdf_path = canonical.clone();
+            let extracted = tokio::task::spawn_blocking(move || {
+                crate::document::extract_pdf_text(&pdf_path, Some(cap))
+            })
+            .await;
+            match extracted {
+                Ok(Ok(text)) => {
                     parts.push(UserContent::text(format!("{PDF_PART_PREFIX}{label}>\n{text}")))
                 }
-                None => notes.push(format!("PDF has no extractable text: {label}")),
+                _ => notes.push(format!("PDF has no extractable text: {label}")),
             }
             continue;
         }

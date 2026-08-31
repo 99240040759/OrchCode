@@ -16,7 +16,12 @@ use crate::tools::ToolContext;
 
 use rig::memory::ConversationMemory;
 
-const DEFAULT_REDIRECT_TO: &str = "https://orch.live/auth-callback";
+fn is_safe_path_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,8 +106,10 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
             state.set_authenticated_user(&profile.id);
             Ok(Some(UserDisplay::from_profile(&profile)))
         }
-        Err(_) => {
-            state.clear_credentials();
+        Err(e) => {
+            if e.is_fatal_auth() {
+                state.clear_credentials();
+            }
             Ok(None)
         }
     }
@@ -115,7 +122,7 @@ pub async fn get_oauth_url(
 ) -> Result<String, String> {
     state.mark_sign_in_started();
     let client = auth::FirebaseAuthClient::new();
-    let target = redirect_to.unwrap_or_else(|| DEFAULT_REDIRECT_TO.to_string());
+    let target = redirect_to.unwrap_or_else(|| crate::config::AUTH_REDIRECT_URL.to_string());
     client
         .get_google_oauth_url(&target)
         .await
@@ -147,6 +154,9 @@ pub fn create_quick_project_dir(
     id: String,
     name: String,
 ) -> Result<String, String> {
+    if !is_safe_path_segment(&id) || !is_safe_path_segment(&name) {
+        return Err("invalid quick project id or name".to_string());
+    }
     let dir = state.quick_project_path(&id, &name);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("failed to create quick project dir: {e}"))?;
@@ -330,6 +340,7 @@ pub async fn start_chat(
         },
         cancel,
         on_event.clone(),
+        state.gateway.clone(),
     )
     .await;
 

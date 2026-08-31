@@ -25,7 +25,10 @@ export function getDirname(pathStr: string): string {
 }
 
 export function getExt(pathStr: string): string {
-  return normalizePath(pathStr).split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
+  const base = normalizePath(pathStr).split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return base.slice(dot + 1).toLowerCase();
 }
 
 export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);

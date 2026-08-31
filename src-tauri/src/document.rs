@@ -1,6 +1,5 @@
 use std::io::{Cursor, Read};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -8,6 +7,7 @@ use zip::ZipArchive;
 
 use crate::error::{AppError, AppResult};
 use crate::persistence::{DocumentRecord, PassageRecord, SqliteMemory};
+use crate::util::now_ms;
 
 const CHARS_PER_TOKEN: usize = 4;
 const PASSAGE_TOKENS: usize = 512;
@@ -23,13 +23,6 @@ pub struct IngestResult {
     pub word_count: usize,
     pub page_count: Option<usize>,
     pub was_update: bool,
-}
-
-pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 async fn persist_document(
@@ -106,46 +99,6 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
     })
 }
 
-pub async fn ingest_remote_document(
-    title: &str,
-    source: &str,
-    source_id: &str,
-    file_type: &str,
-    text: &str,
-    memory: &SqliteMemory,
-) -> AppResult<IngestResult> {
-    let doc_id = Uuid::new_v4().to_string();
-    let word_count = count_words(text);
-    let now = now_ms();
-
-    let doc = DocumentRecord {
-        id: doc_id.clone(),
-        title: title.to_string(),
-        file_path: None,
-        source: source.to_string(),
-        source_id: Some(source_id.to_string()),
-        file_type: file_type.to_string(),
-        size_bytes: text.len() as i64,
-        page_count: None,
-        word_count: Some(word_count as i64),
-        metadata: serde_json::json!({ "source_id": source_id }),
-        indexed_at: now,
-        updated_at: now,
-    };
-
-    let passage_count = persist_document(doc, text, vec![], memory).await?;
-
-    Ok(IngestResult {
-        document_id: doc_id,
-        title: title.to_string(),
-        file_type: file_type.to_string(),
-        passage_count,
-        word_count,
-        page_count: None,
-        was_update: false,
-    })
-}
-
 fn detect_file_type(path: &Path) -> AppResult<String> {
     let ext = path
         .extension()
@@ -155,9 +108,9 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
 
     match ext.as_str() {
         "pdf" => Ok("pdf".to_string()),
-        "docx" | "doc" => Ok("docx".to_string()),
+        "docx" => Ok("docx".to_string()),
         "xlsx" | "xls" | "ods" => Ok("xlsx".to_string()),
-        "pptx" | "ppt" => Ok("pptx".to_string()),
+        "pptx" => Ok("pptx".to_string()),
         "txt" | "text" | "md" | "markdown" | "csv" | "json" | "html" | "htm" | "xml" | "rtf" => {
             Ok(ext)
         }
@@ -177,9 +130,9 @@ struct ParsedDocument {
 fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
     match file_type {
         "pdf" => parse_pdf(path),
-        "docx" => parse_office_zip(path, "word/document.xml", OfficeXmlKind::Word),
+        "docx" => parse_office_zip(path, OfficeXmlKind::Word),
         "xlsx" => parse_xlsx(path),
-        "pptx" => parse_office_zip(path, "", OfficeXmlKind::Pptx),
+        "pptx" => parse_office_zip(path, OfficeXmlKind::Pptx),
         _ => parse_plain_text(path),
     }
 }
@@ -213,6 +166,23 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count), page_boundaries })
 }
 
+pub fn extract_pdf_text(path: &Path, max_bytes: Option<usize>) -> AppResult<String> {
+    let mut text = parse_pdf(path)?.full_text;
+    if let Some(cap) = max_bytes {
+        if text.len() > cap {
+            let boundary = floor_char_boundary(&text, cap);
+            text.truncate(boundary);
+        }
+    }
+    if text.trim().is_empty() {
+        return Err(AppError::DocumentParseError(format!(
+            "PDF contains no extractable text: {}",
+            path.display()
+        )));
+    }
+    Ok(text)
+}
+
 fn clean_pdf_text(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
@@ -227,7 +197,7 @@ enum OfficeXmlKind {
     Pptx,
 }
 
-fn parse_office_zip(path: &Path, _entry_hint: &str, kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
+fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
     let data = std::fs::read(path).map_err(AppError::Io)?;
     let cursor = Cursor::new(data);
     let mut zip = ZipArchive::new(cursor)
@@ -241,7 +211,7 @@ fn parse_office_zip(path: &Path, _entry_hint: &str, kind: OfficeXmlKind) -> AppR
     match kind {
         OfficeXmlKind::Word => {
             let xml_text = read_zip_entry(&mut zip, "word/document.xml")?;
-            let text = extract_office_text(&xml_text, false)?;
+            let text = extract_office_text(&xml_text)?;
             Ok(ParsedDocument { full_text: text, title, page_count: None, page_boundaries: vec![] })
         }
         OfficeXmlKind::Pptx => {
@@ -275,7 +245,7 @@ fn parse_office_zip(path: &Path, _entry_hint: &str, kind: OfficeXmlKind) -> AppR
                 let offset = full_text.len();
                 page_boundaries.push((offset, slide_num));
                 let xml = read_zip_entry(&mut zip, slide_name)?;
-                let slide_text = extract_office_text(&xml, false)?;
+                let slide_text = extract_office_text(&xml)?;
                 if !slide_text.trim().is_empty() {
                     full_text.push_str(&format!("=== Slide {slide_num} ===\n{slide_text}\n\n"));
                 }
@@ -302,7 +272,7 @@ fn read_zip_entry(zip: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> AppResul
     Ok(content)
 }
 
-fn extract_office_text(xml: &str, _is_pptx: bool) -> AppResult<String> {
+fn extract_office_text(xml: &str) -> AppResult<String> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 

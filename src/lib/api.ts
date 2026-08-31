@@ -281,8 +281,6 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
-export const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
-
 export function formatRelativeTime(ts?: number): string {
   if (!ts) return "now";
   return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });

@@ -58,7 +58,7 @@ impl Tool for GmailListEmails {
         }
 
         let mut out = format!("Found {} email(s):\n\n", messages.len());
-        for msg in messages.iter().take(20) {
+        for msg in &messages {
             let id = msg["id"].as_str().unwrap_or("");
             let meta_url = format!(
                 "{GMAIL_API}/messages/{id}?format=metadata&metadataHeaders=Subject,From,Date"
@@ -155,18 +155,17 @@ impl Tool for GmailReadEmail {
     }
 }
 
+fn decode_gmail_b64(data: &str) -> Option<Vec<u8>> {
+    let trimmed = data.trim_end_matches('=');
+    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, trimmed).ok()
+}
+
 fn extract_gmail_body(payload: &Value) -> String {
     let mime = payload["mimeType"].as_str().unwrap_or("");
 
     if mime == "text/plain" {
         if let Some(data) = payload["body"]["data"].as_str() {
-            let cleaned: String = data
-                .chars()
-                .map(|c| if c == '-' { '+' } else if c == '_' { '/' } else { c })
-                .collect();
-            if let Ok(bytes) =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, cleaned.as_bytes())
-            {
+            if let Some(bytes) = decode_gmail_b64(data) {
                 return String::from_utf8_lossy(&bytes).into_owned();
             }
         }

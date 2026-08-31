@@ -14,6 +14,9 @@ use crate::tools::ToolError;
 const JIRA_CLOUD_API: &str = "https://api.atlassian.com/ex/jira";
 
 async fn get_jira_cloud_id(manager: &ConnectorManager, token: &str) -> Result<String, ToolError> {
+    if let Some(id) = manager.cached_jira_cloud_id() {
+        return Ok(id);
+    }
     let json = request_json(
         manager
             .http()
@@ -25,11 +28,13 @@ async fn get_jira_cloud_id(manager: &ConnectorManager, token: &str) -> Result<St
     .await?;
     let resources = json.as_array().cloned().unwrap_or_default();
 
-    resources
+    let id = resources
         .first()
         .and_then(|r| r["id"].as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| ToolError::msg("No Jira Cloud instances found"))
+        .ok_or_else(|| ToolError::msg("No Jira Cloud instances found"))?;
+    manager.set_jira_cloud_id(&id);
+    Ok(id)
 }
 
 #[derive(Clone)]
@@ -78,7 +83,7 @@ impl Tool for JiraListIssues {
 
         let jql = jql_parts.join(" AND ");
         let url = format!(
-            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search?jql={}&maxResults={limit}&fields=summary,status,assignee,priority,updated",
+            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search/jql?jql={}&maxResults={limit}&fields=summary,status,assignee,priority,updated",
             urlencoding::encode(&jql)
         );
 
@@ -99,13 +104,12 @@ impl Tool for JiraListIssues {
         }
 
         let issues = json["issues"].as_array().cloned().unwrap_or_default();
-        let total = json["total"].as_u64().unwrap_or(0);
 
         if issues.is_empty() {
             return Ok("No issues found.".to_string());
         }
 
-        let mut out = format!("Found {total} issue(s) (showing {}):\n\n", issues.len());
+        let mut out = format!("Found {} issue(s):\n\n", issues.len());
         for issue in &issues {
             let key = issue["key"].as_str().unwrap_or("—");
             let summary = issue["fields"]["summary"].as_str().unwrap_or("(no title)");
@@ -264,7 +268,7 @@ impl Tool for JiraSearchIssues {
         let limit = args.max_results.unwrap_or(20).min(50);
 
         let url = format!(
-            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search?jql={}&maxResults={limit}&fields=summary,status,assignee,priority",
+            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search/jql?jql={}&maxResults={limit}&fields=summary,status,assignee,priority",
             urlencoding::encode(&args.jql)
         );
 
@@ -290,13 +294,12 @@ impl Tool for JiraSearchIssues {
         }
 
         let issues = json["issues"].as_array().cloned().unwrap_or_default();
-        let total = json["total"].as_u64().unwrap_or(0);
 
         if issues.is_empty() {
             return Ok("No issues match the JQL query.".to_string());
         }
 
-        let mut out = format!("Found {total} issue(s) (showing {}):\n\n", issues.len());
+        let mut out = format!("Found {} issue(s):\n\n", issues.len());
         for issue in &issues {
             let key = issue["key"].as_str().unwrap_or("—");
             let summary = issue["fields"]["summary"].as_str().unwrap_or("(no title)");

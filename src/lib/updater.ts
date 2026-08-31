@@ -44,11 +44,13 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
     try {
       update = await check();
     } catch (e) {
+      updateStarted = false;
       set({ status: "failed", error: api.errorMessage(e) });
       return;
     }
 
     if (!update?.available) {
+      updateStarted = false;
       set({ status: "none" });
       return;
     }
@@ -76,6 +78,7 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
       set({ status: "readyToRestart" });
     } catch (e) {
       pendingUpdate = null;
+      updateStarted = false;
       set({ status: "failed", error: api.errorMessage(e) });
     }
   },

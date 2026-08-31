@@ -27,14 +27,23 @@ pub struct FileContent {
 
 fn resolve_path_flexible(
     root: &std::path::Path,
+    data_dir: &std::path::Path,
     path: &str,
 ) -> Result<std::path::PathBuf, String> {
     let raw = std::path::Path::new(path);
-    if raw.is_absolute() && raw.exists() {
-        Ok(raw.to_path_buf())
-    } else {
-        fs_util::resolve_existing_file(root, path).map_err(|e| e.to_string())
+    if raw.is_absolute() {
+        let canonical =
+            dunce::canonicalize(raw).map_err(|e| format!("cannot resolve {path}: {e}"))?;
+        let permitted = [dunce::canonicalize(root).ok(), dunce::canonicalize(data_dir).ok()]
+            .into_iter()
+            .flatten()
+            .any(|allowed| canonical.starts_with(&allowed));
+        if permitted && canonical.is_file() {
+            return Ok(canonical);
+        }
+        return Err(format!("path is outside the permitted directories: {path}"));
     }
+    fs_util::resolve_existing_file(root, path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -108,8 +117,7 @@ pub async fn read_text_file(
 ) -> Result<FileContent, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
 
-    // Accept absolute paths that exist on disk (e.g. artifact dir files outside workspace)
-    let resolved = resolve_path_flexible(&root, &path)?;
+    let resolved = resolve_path_flexible(&root, &state.data_dir, &path)?;
 
     use tokio::io::AsyncReadExt;
     let meta = tokio::fs::metadata(&resolved)
@@ -154,9 +162,6 @@ pub async fn read_image_data_url(
     }
 
     let mime = file_mime(&resolved);
-    if mime == "image/svg+xml" {
-        return Err(format!("SVG images are not supported: {path}"));
-    }
     if !mime.starts_with("image/") {
         return Err(format!("not a supported image: {path}"));
     }
@@ -164,6 +169,13 @@ pub async fn read_image_data_url(
     let bytes = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
+
+    // SVGs are vector text — no decode/resize needed; pass through as a data URL directly.
+    if mime == "image/svg+xml" {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        return Ok(format!("data:image/svg+xml;base64,{b64}"));
+    }
+
     let image = image::load_from_memory(&bytes)
         .map_err(|e| format!("cannot decode image {path}: {e}"))?;
     let (output_mime, output_bytes) = if image.width() > 1200 || image.height() > 1200 {
@@ -220,8 +232,7 @@ pub async fn read_document_metadata(
 ) -> Result<DocumentFileMeta, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
 
-    // Accept absolute paths that exist on disk (e.g. artifact dir files outside workspace)
-    let resolved = resolve_path_flexible(&root, &path)?;
+    let resolved = resolve_path_flexible(&root, &state.data_dir, &path)?;
 
     let meta = tokio::fs::metadata(&resolved)
         .await
@@ -258,5 +269,8 @@ pub async fn read_parsed_document(
 ) -> Result<crate::document::ParsedDocumentDto, String> {
     let root = state.require_workspace().map_err(|e| e.to_string())?;
     let resolved = fs_util::resolve_existing_file(&root, &path).map_err(|e| e.to_string())?;
-    crate::document::parse_document_file(&resolved).map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || crate::document::parse_document_file(&resolved))
+        .await
+        .map_err(|e| format!("document parse task failed: {e}"))?
+        .map_err(|e| e.to_string())
 }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -89,11 +90,10 @@ pub struct Gateway {
 
 impl Gateway {
     pub fn new(token: TokenHandle) -> AppResult<Self> {
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(AppError::Http)?;
-        Ok(Self { http, token })
+        Ok(Self {
+            http: crate::util::http_client(),
+            token,
+        })
     }
 
     fn require_token(&self) -> AppResult<String> {
@@ -136,6 +136,7 @@ impl Gateway {
             .http
             .post(config::transcribe_url())
             .bearer_auth(token)
+            .timeout(Duration::from_secs(300))
             .json(&json!({ "audio": audio_base64 }))
             .send()
             .await?;

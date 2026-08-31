@@ -77,7 +77,7 @@ pub struct FirebaseAuthClient {
 impl FirebaseAuthClient {
     pub fn new() -> Self {
         Self {
-            client: shared_http_client(),
+            client: crate::util::http_client(),
         }
     }
 
@@ -271,13 +271,6 @@ async fn check_status_text(
     } else {
         Err(AppError::Gateway { status: status.as_u16(), body: format!("{context}: {body}") })
     }
-}
-
-fn shared_http_client() -> Client {
-    static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| Client::new())
-        .clone()
 }
 
 pub fn save_refresh_token(token: &str) -> AppResult<()> {

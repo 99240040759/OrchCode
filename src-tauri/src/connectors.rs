@@ -9,6 +9,7 @@ use url::Url;
 use crate::credentials;
 use crate::error::{AppError, AppResult};
 use crate::persistence::{ConnectorRecord, SqliteMemory};
+use crate::util::now_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthKind {
@@ -212,10 +213,53 @@ pub fn clear_all_connector_tokens_keyring() {
 
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
+    #[serde(default)]
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_in: Option<i64>,
     pub token_type: Option<String>,
+    #[serde(default)]
+    pub authed_user: Option<AuthedUser>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthedUser {
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub expires_in: Option<i64>,
+}
+
+impl TokenResponse {
+    pub fn effective_access_token(&self) -> Option<String> {
+        self.authed_user
+            .as_ref()
+            .and_then(|u| u.access_token.clone())
+            .filter(|t| !t.is_empty())
+            .or_else(|| {
+                if self.access_token.is_empty() {
+                    None
+                } else {
+                    Some(self.access_token.clone())
+                }
+            })
+    }
+
+    pub fn effective_refresh_token(&self) -> Option<String> {
+        self.authed_user
+            .as_ref()
+            .and_then(|u| u.refresh_token.clone())
+            .or_else(|| self.refresh_token.clone())
+    }
+
+    pub fn effective_expires_in(&self) -> Option<i64> {
+        self.authed_user
+            .as_ref()
+            .and_then(|u| u.expires_in)
+            .or(self.expires_in)
+    }
 }
 
 pub async fn exchange_code(
@@ -277,7 +321,8 @@ pub fn build_auth_url(def: &ConnectorDef, state: &str) -> AppResult<String> {
         query.append_pair("response_type", "code");
         query.append_pair("state", state);
         if !def.scopes.is_empty() {
-            query.append_pair("scope", &def.scopes.join(" "));
+            let scope_param = if def.id == "slack" { "user_scope" } else { "scope" };
+            query.append_pair(scope_param, &def.scopes.join(" "));
         }
         match def.id {
             "google_drive" | "gmail" => {
@@ -305,6 +350,7 @@ pub struct ConnectorManager {
     pending_oauth: Mutex<HashMap<String, (String, Instant)>>,
     http: Client,
     refresh_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    jira_cloud_id: RwLock<Option<String>>,
 }
 
 impl ConnectorManager {
@@ -316,11 +362,9 @@ impl ConnectorManager {
         Self {
             states: Arc::new(RwLock::new(HashMap::new())),
             pending_oauth: Mutex::new(HashMap::new()),
-            http: Client::builder()
-                .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("failed to build connector http client"),
+            http: crate::util::http_client(),
             refresh_locks,
+            jira_cloud_id: RwLock::new(None),
         }
     }
 
@@ -403,19 +447,22 @@ impl ConnectorManager {
         token_resp: &TokenResponse,
         memory: &SqliteMemory,
     ) -> AppResult<()> {
-        save_connector_access_token(connector_id, &token_resp.access_token)?;
-        if let Some(rt) = &token_resp.refresh_token {
-            save_connector_refresh_token(connector_id, rt)?;
+        let access_token = token_resp.effective_access_token().ok_or_else(|| {
+            AppError::ConnectorAuthError("token response contained no access token".to_string())
+        })?;
+        save_connector_access_token(connector_id, &access_token)?;
+        if let Some(rt) = token_resp.effective_refresh_token() {
+            save_connector_refresh_token(connector_id, &rt)?;
         }
 
-        let expires_at = token_resp.expires_in.map(|secs| now_ms() + secs * 1000);
+        let expires_at = token_resp.effective_expires_in().map(|secs| now_ms() + secs * 1000);
 
         {
             let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
             states.insert(
                 connector_id.to_string(),
                 ConnectorRuntimeState {
-                    access_token: Some(token_resp.access_token.clone()),
+                    access_token: Some(access_token),
                     expires_at,
                 },
             );
@@ -470,8 +517,11 @@ impl ConnectorManager {
             .await
             .map_err(|e| AppError::ConnectorAuthError(format!("token parse error: {e}")))?;
 
+        let access_token = new_tokens.effective_access_token().ok_or_else(|| {
+            AppError::ConnectorAuthError("refresh response contained no access token".to_string())
+        })?;
         self.store_tokens(connector_id, &new_tokens, memory).await?;
-        Ok(new_tokens.access_token)
+        Ok(access_token)
     }
 
     pub async fn get_access_token(
@@ -522,6 +572,9 @@ impl ConnectorManager {
             let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
             states.remove(connector_id);
         }
+        if connector_id == "jira" {
+            *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = None;
+        }
 
         memory
             .set_connector_token_state(connector_id, false, None, None)
@@ -546,8 +599,20 @@ impl ConnectorManager {
             let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
             states.clear();
         }
+        *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = None;
         memory.clear_all_connector_tokens().await?;
         Ok(())
+    }
+
+    pub fn cached_jira_cloud_id(&self) -> Option<String> {
+        self.jira_cloud_id
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn set_jira_cloud_id(&self, id: &str) {
+        *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = Some(id.to_string());
     }
 
     pub fn has_token(&self, connector_id: &str) -> bool {
@@ -567,8 +632,4 @@ impl Default for ConnectorManager {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn now_ms() -> i64 {
-    crate::document::now_ms()
 }
