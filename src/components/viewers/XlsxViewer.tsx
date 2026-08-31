@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
-import { dataUrlToArrayBuffer, readBinaryFileAsDataUrl } from "../../lib/api";
+import { dataUrlToArrayBuffer, errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
 
 interface XlsxViewerProps {
   path: string;
@@ -40,7 +40,7 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(String(e));
+          setError(errorMessage(e));
           setLoading(false);
         }
       });
@@ -108,5 +108,3 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
     </div>
   );
 }
-
-export default XlsxViewer;

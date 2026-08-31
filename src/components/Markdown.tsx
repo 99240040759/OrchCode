@@ -23,8 +23,10 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-diff";
 import "prismjs/components/prism-graphql";
 import "prismjs/components/prism-docker";
+import "prismjs/components/prism-ruby";
 
-import { looksLikePath, createMentionRegex } from "../lib/utils";
+import { looksLikePath, createMentionRegex } from "../lib/api";
+import { useArtifactsStore } from "../lib/artifacts";
 import { FileTag } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
 
@@ -59,6 +61,16 @@ function isWorkspaceLink(href: string): boolean {
     return false;
   }
   return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
+}
+
+function workspacePathFromHref(href: string): string {
+  const withoutScheme = href.startsWith("file:") ? href.replace(/^file:\/*/, "") : href;
+  const withoutFragment = withoutScheme.replace(/#L\d+(?:-\d+)?$/, "");
+  try {
+    return decodeURIComponent(withoutFragment);
+  } catch {
+    return withoutFragment;
+  }
 }
 
 function getPrismGrammar(lang: string): { grammar: Prism.Grammar; name: string } | null {
@@ -169,6 +181,7 @@ const CodeBlockComponent = React.memo(function CodeBlockComponent({
 });
 
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
+  const openFile = useArtifactsStore((s) => s.openFile);
   if (!children) return null;
 
   return (
@@ -188,7 +201,22 @@ export const Markdown = React.memo(function Markdown({ children }: { children: s
           },
           a({ href, children: aChildren, ...props }) {
             const link = href || "";
-            if (link && !isWorkspaceLink(link)) {
+            if (link && isWorkspaceLink(link)) {
+              const path = workspacePathFromHref(link);
+              return (
+                <a
+                  href={link}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openFile(path);
+                  }}
+                  {...props}
+                >
+                  {aChildren}
+                </a>
+              );
+            }
+            if (link) {
               return (
                 <a
                   href={link}

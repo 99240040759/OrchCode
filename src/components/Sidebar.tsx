@@ -53,7 +53,6 @@ const SessionItem = React.memo(function SessionItem({
     <div
       className="ThreadItem"
       data-active={isActive}
-      data-confirming={confirming}
     >
       <button
         type="button"

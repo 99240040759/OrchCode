@@ -14,9 +14,6 @@ import type {
   ToolDisplayInfo,
 } from "./api";
 
-export type { UpdateStatus, UpdaterStore } from "./updater";
-export { useUpdaterStore } from "./updater";
-
 export interface MessageAttachment {
   name: string;
   isImage: boolean;
@@ -458,7 +455,6 @@ export const useChatStore = create(
             stopFlushTimer(); flush();
             patch((m) => { m.error = event.message; });
             settle();
-            set((s) => { if (s.currentSessionId === sessionId) s.error = event.message; });
             break;
         }
       };

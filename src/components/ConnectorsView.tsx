@@ -5,6 +5,7 @@ import {
   listConnectors,
   getConnectorAuthUrl,
   disconnectConnector,
+  errorMessage,
   type ConnectorDto,
 } from "../lib/api";
 import { Button } from "./ui/Button";
@@ -92,7 +93,7 @@ export function ConnectorsView() {
       const list = await listConnectors();
       setConnectors(list);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -136,7 +137,7 @@ export function ConnectorsView() {
       const url = await getConnectorAuthUrl(id);
       await openUrl(url);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
       setActionId(null);
     }
   }, []);
@@ -148,7 +149,7 @@ export function ConnectorsView() {
       await disconnectConnector(id);
       await refresh();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setActionId(null);
     }

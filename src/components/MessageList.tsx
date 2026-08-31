@@ -38,7 +38,6 @@ export function MessageList() {
         className="MessageList"
         ref={containerRef}
         onScroll={handleScroll}
-        style={{ overflowAnchor: "none" }}
       >
         <div className="MessageList-inner">
           {messages.map((message) => (

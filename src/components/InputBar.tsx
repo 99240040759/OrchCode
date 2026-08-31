@@ -12,7 +12,6 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
-import { getBasename, getDirname, IMAGE_EXTENSIONS, isImagePath } from "../lib/utils";
 import { useChatStore } from "../lib/store";
 import { useWorkspaceStore } from "../lib/workspace";
 import { useArtifactsStore } from "../lib/artifacts";
@@ -50,7 +49,7 @@ function activeToken(text: string, caret: number) {
 }
 
 function createMentionNode(path: string): { node: HTMLSpanElement; space: Text } {
-  const filename = getBasename(path) || path;
+  const filename = api.getBasename(path) || path;
   const container = document.createElement("span");
   container.className = "FileTag FileTag-clickable";
   container.contentEditable = "false";
@@ -252,13 +251,13 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
         const next = [...previous];
         for (const path of paths) {
           if (known.has(path)) continue;
-          const image = isImagePath(path);
+          const image = api.isImagePath(path);
           if (image && !modelSupportsImages) {
-            rejected.push(getBasename(path));
+            rejected.push(api.getBasename(path));
             continue;
           }
           known.add(path);
-          next.push({ path, name: getBasename(path), isImage: image });
+          next.push({ path, name: api.getBasename(path), isImage: image });
         }
         return next;
       });
@@ -487,7 +486,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       const selected = await open({
         multiple: true,
         filters: imagesOnly
-          ? [{ name: "Images", extensions: [...IMAGE_EXTENSIONS] }]
+          ? [{ name: "Images", extensions: [...api.IMAGE_EXTENSIONS] }]
           : undefined,
       });
       if (!selected) return;
@@ -504,7 +503,6 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   return (
     <div
       className="Composer"
-      data-streaming={streaming || undefined}
       data-recording={recording || undefined}
     >
       {popoverOpen && (
@@ -518,8 +516,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               </div>
             ) : (
               fileHits.map((file, index) => {
-                const filename = getBasename(file.path) || file.name;
-                const dir = getDirname(file.path);
+                const filename = api.getBasename(file.path) || file.name;
+                const dir = api.getDirname(file.path);
                 return (
                   <button
                     type="button"

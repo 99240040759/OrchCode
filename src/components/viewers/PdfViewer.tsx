@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { readBinaryFileAsDataUrl } from "../../lib/api";
+import { errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
 
 interface PdfViewerProps {
   path: string;
@@ -21,7 +21,7 @@ export function PdfViewer({ path }: PdfViewerProps) {
         if (!cancelled) { setDataUrl(url); setLoading(false); }
       })
       .catch((e) => {
-        if (!cancelled) { setError(String(e)); setLoading(false); }
+        if (!cancelled) { setError(errorMessage(e)); setLoading(false); }
       });
 
     return () => { cancelled = true; };

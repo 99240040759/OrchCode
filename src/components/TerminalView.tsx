@@ -92,5 +92,3 @@ export function TerminalView({ id }: { id: string }) {
 
   return <div className="TerminalView" ref={containerRef} />;
 }
-
-export default TerminalView;

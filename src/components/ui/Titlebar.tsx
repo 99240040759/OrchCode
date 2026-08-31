@@ -159,12 +159,12 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
           </Tooltip>
         )}
         {sessionTitle && (
-          <span className="Titlebar-session-title" data-tauri-drag-region>
+          <span className="Titlebar-title" data-tauri-drag-region>
             {sessionTitle}
           </span>
         )}
         {title && !sessionTitle && (
-          <span className={cn("Titlebar-title", IS_MAC && "Titlebar-title-mac")} data-tauri-drag-region>
+          <span className="Titlebar-title" data-tauri-drag-region>
             {title}
           </span>
         )}

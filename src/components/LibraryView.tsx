@@ -7,6 +7,7 @@ import {
   deleteDocument,
   documentArtifactKind,
   documentTypeLabel,
+  errorMessage,
   formatRelativeTime,
   ingestDocument,
   listDocuments,
@@ -61,7 +62,7 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
         )}
       </div>
       <span className="LibraryRow-source" data-source={doc.source}>
-        {doc.source !== "local" && <ConnectorIcon id={doc.source} size={12} className="LibraryRow-sourceIcon" />}
+        {doc.source !== "local" && <ConnectorIcon id={doc.source} size={12} />}
         {doc.source}
       </span>
       <span className="LibraryRow-time">{formatRelativeTime(doc.updatedAt)}</span>
@@ -119,7 +120,7 @@ function SearchResultRow({ hit }: { hit: SearchHit }) {
         <span className="SearchResultRow-title">{hit.documentTitle}</span>
         <span className="SearchResultRow-type">[{documentTypeLabel(hit.fileType)}{page}]</span>
         <span className="SearchResultRow-source">
-          {hit.source !== "local" && <ConnectorIcon id={hit.source} size={12} className="LibraryRow-sourceIcon" />}
+          {hit.source !== "local" && <ConnectorIcon id={hit.source} size={12} />}
           {hit.source}
         </span>
       </div>
@@ -163,7 +164,7 @@ export function LibraryView() {
       setTotalCount(count);
       setOffset(off);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -191,7 +192,7 @@ export function LibraryView() {
       const hits = await searchDocuments(query, 30);
       setSearchHits(hits);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -230,7 +231,7 @@ export function LibraryView() {
       setIngestResult(result);
       await loadDocuments(0);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setIngesting(false);
     }
@@ -244,7 +245,7 @@ export function LibraryView() {
       setDocuments((prev) => prev.filter((d) => d.id !== id));
       setTotalCount((c) => Math.max(0, c - 1));
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setDeletingId(null);
     }

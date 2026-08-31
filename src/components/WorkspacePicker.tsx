@@ -74,5 +74,3 @@ export function WorkspacePicker() {
     </div>
   );
 }
-
-export default WorkspacePicker;

@@ -177,7 +177,6 @@ export function ArtifactPanel() {
   const tabs      = useArtifactsStore((s) => s.tabs);
   const active    = useArtifactsStore(activeTabId);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
-  const maximized = useArtifactsStore((s) => s.maximized);
   const openFile     = useArtifactsStore((s) => s.openFile);
   const openBrowser  = useArtifactsStore((s) => s.openBrowser);
   const openTerminal = useArtifactsStore((s) => s.openTerminal);
@@ -185,7 +184,7 @@ export function ArtifactPanel() {
   useFileWrittenListener();
 
   return (
-    <aside className="ArtifactPanel" data-maximized={maximized}>
+    <aside className="ArtifactPanel">
       <ArtifactPanelHeader />
       <div className="ArtifactPanel-body">
         {tabs.length === 0 ? (

@@ -199,5 +199,3 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
     </div>
   );
 }
-
-export default BrowserView;

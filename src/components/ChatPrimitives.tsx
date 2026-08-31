@@ -11,7 +11,16 @@ import * as api from "../lib/api";
 import { cn, getBasename } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
 
+const IMAGE_CACHE_LIMIT = 200;
 const imageDataUrlCache = new Map<string, string>();
+
+function cacheImageDataUrl(path: string, url: string): void {
+  if (imageDataUrlCache.size >= IMAGE_CACHE_LIMIT) {
+    const oldest = imageDataUrlCache.keys().next().value;
+    if (oldest !== undefined) imageDataUrlCache.delete(oldest);
+  }
+  imageDataUrlCache.set(path, url);
+}
 
 export function Avatar({
   src,
@@ -51,16 +60,16 @@ export function ExplorerIcon({ type, name, className, style, ...svgProps }: Expl
 
   const ext = name.split(".").pop()?.toLowerCase();
   if (ext === "pdf") {
-    return <BsFileEarmarkPdfFill className={cn("shrink-0", className)} style={{ color: "#e2574c", ...style }} {...svgProps} />;
+    return <BsFileEarmarkPdfFill className={className} style={{ color: "#e2574c", ...style }} {...svgProps} />;
   }
   if (ext === "docx" || ext === "doc") {
-    return <BsFileEarmarkWordFill className={cn("shrink-0", className)} style={{ color: "#185abd", ...style }} {...svgProps} />;
+    return <BsFileEarmarkWordFill className={className} style={{ color: "#185abd", ...style }} {...svgProps} />;
   }
   if (ext === "xlsx" || ext === "xls") {
-    return <BsFileEarmarkExcelFill className={cn("shrink-0", className)} style={{ color: "#107c41", ...style }} {...svgProps} />;
+    return <BsFileEarmarkExcelFill className={className} style={{ color: "#107c41", ...style }} {...svgProps} />;
   }
   if (ext === "pptx" || ext === "ppt") {
-    return <BsFileEarmarkPptFill className={cn("shrink-0", className)} style={{ color: "#c43e1c", ...style }} {...svgProps} />;
+    return <BsFileEarmarkPptFill className={className} style={{ color: "#c43e1c", ...style }} {...svgProps} />;
   }
 
   return <FileIcon fileName={name} autoAssign className={className} style={style} {...svgProps} />;
@@ -110,7 +119,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
       .readImageDataUrl(path)
       .then((url) => {
         if (active) {
-          imageDataUrlCache.set(path, url);
+          cacheImageDataUrl(path, url);
           setFetchedSrc(url);
         }
       })
@@ -126,10 +135,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
   const showThumb = isImage && src !== null && !failed;
 
   return (
-    <div
-      className={`AttachmentCard ${isImage ? "AttachmentCard-image" : "AttachmentCard-doc"}`}
-      title={title}
-    >
+    <div className="AttachmentCard" title={title}>
       {showThumb ? (
         <span className="AttachmentCard-thumbWrap">
           <img src={src} alt={name} className="AttachmentCard-thumb" />

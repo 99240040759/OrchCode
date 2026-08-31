@@ -11,9 +11,6 @@ import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
 import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
 
 import * as api from "../lib/api";
-import { getExt, getBasename, getDirname, splitPathParts } from "../lib/utils";
-import { useCopy } from "../lib/utils";
-import { documentArtifactKindForPath } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
 import { Markdown } from "./Markdown";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -122,7 +119,7 @@ function mimeToKind(mime: string, ext: string): FileKind {
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
-  const parts = splitPathParts(path);
+  const parts = api.splitPathParts(path);
   return (
     <div className="FileBreadcrumb">
       {parts.map((part, index) => (
@@ -180,8 +177,8 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
           <p className="FilePicker-empty">No files found</p>
         ) : (
           hits.map((hit) => {
-            const filename = getBasename(hit.path) || hit.name;
-            const dir = getDirname(hit.path);
+            const filename = api.getBasename(hit.path) || hit.name;
+            const dir = api.getDirname(hit.path);
             return (
               <button
                 type="button"
@@ -220,7 +217,7 @@ function NativeImageViewer({ path }: { path: string }) {
   if (error) return <div className="FileContent-msg">{error}</div>;
   return (
     <div className="NativeMediaViewer">
-      <img src={src!} alt={getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+      <img src={src!} alt={api.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
     </div>
   );
 }
@@ -240,7 +237,7 @@ function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const ext = getExt(path);
+  const ext = api.getExt(path);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,12 +272,12 @@ function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
 }
 
 function BinaryFileMessage({ path }: { path: string }) {
-  const ext = getExt(path);
+  const ext = api.getExt(path);
   return (
     <div className="FileContent-msg">
       <div className="BinaryFileMsg">
-        <ExplorerIcon type="file" name={getBasename(path)} width={40} height={40} className="BinaryFileMsg-icon" />
-        <span className="BinaryFileMsg-name">{getBasename(path)}</span>
+        <ExplorerIcon type="file" name={api.getBasename(path)} width={40} height={40} className="BinaryFileMsg-icon" />
+        <span className="BinaryFileMsg-name">{api.getBasename(path)}</span>
         <span className="BinaryFileMsg-hint">Binary file (.{ext}) — cannot be displayed as text</span>
       </div>
     </div>
@@ -297,7 +294,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fileKind, setFileKind] = useState<FileKind | null>(null);
-  const { copied, copy } = useCopy(content);
+  const { copied, copy } = api.useCopy(content);
 
   const load = useCallback(async (target: string) => {
     setLoading(true);
@@ -328,7 +325,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       setFileKind(null);
       return;
     }
-    if (documentArtifactKindForPath(path)) return;
+    if (api.documentArtifactKindForPath(path)) return;
     setMode("preview");
     void load(path);
   }, [path, load]);

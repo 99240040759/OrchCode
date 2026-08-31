@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PPTXViewer } from "pptxviewjs";
-import { dataUrlToArrayBuffer, readBinaryFileAsDataUrl } from "../../lib/api";
+import { dataUrlToArrayBuffer, errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
 
 interface PptxViewerProps {
@@ -59,7 +59,7 @@ export function PptxViewer({ path }: PptxViewerProps) {
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(String(e));
+          setError(errorMessage(e));
           setLoading(false);
         }
       });
@@ -91,7 +91,7 @@ export function PptxViewer({ path }: PptxViewerProps) {
         setSlideIndex(viewer.getCurrentSlideIndex());
         await viewer.render(canvas!);
       } catch (e) {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(errorMessage(e));
       }
     }
 
@@ -169,17 +169,17 @@ export function PptxViewer({ path }: PptxViewerProps) {
 
   return (
     <div className="PptxViewer">
-      <div className="DocxViewer-header">
+      <div className="DocViewer-header">
         <ExplorerIcon type="file" name={fileName} width={18} height={18} />
-        <span className="DocxViewer-title">{fileName}</span>
+        <span className="DocViewer-title">{fileName}</span>
         {slideCount > 0 && (
-          <span className="DocxViewer-meta">{slideCount} slide{slideCount !== 1 ? "s" : ""}</span>
+          <span className="DocViewer-meta">{slideCount} slide{slideCount !== 1 ? "s" : ""}</span>
         )}
         {!loading && !error && (
-          <div className="DocxViewer-zoom">
-            <button className="DocxViewer-zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} aria-label="Zoom out">−</button>
-            <button className="DocxViewer-zoom-pct" onClick={zoomReset} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
-            <button className="DocxViewer-zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} aria-label="Zoom in">+</button>
+          <div className="DocViewer-zoom">
+            <button className="DocViewer-zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} aria-label="Zoom out">−</button>
+            <button className="DocViewer-zoom-pct" onClick={zoomReset} aria-label="Reset zoom">{Math.round(zoom * 100)}%</button>
+            <button className="DocViewer-zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} aria-label="Zoom in">+</button>
           </div>
         )}
       </div>
