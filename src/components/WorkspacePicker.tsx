@@ -1,12 +1,3 @@
-/**
- * WorkspacePicker — full-screen gate shown when no workspace is active.
- *
- * Shown when workspaceStore.status === "needs_pick" | "error".
- *
- * Two actions:
- *   • Open Folder    — system folder picker, activates that dir as workspace
- *   • Quick Project  — auto-named workspace stored in AppData
- */
 import { VscFolderOpened, VscRocket } from "react-icons/vsc";
 import { Titlebar } from "./ui/Titlebar";
 import { useWorkspaceStore } from "../lib/workspace";

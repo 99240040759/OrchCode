@@ -47,7 +47,6 @@ impl AppState {
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
 
-        // Ensure top-level quick-projects directory exists under app data
         let quick_projects_dir = data_dir.join("quick-projects");
         std::fs::create_dir_all(&quick_projects_dir)?;
 
@@ -154,8 +153,6 @@ impl AppState {
         self.workspace().ok_or(AppError::NoWorkspace)
     }
 
-    // ── AppData quick-projects helper ───────────────────────────────────────
-    /// `<data_dir>/quick-projects/<id>-<name>/`
     pub fn quick_project_path(&self, id: &str, name: &str) -> PathBuf {
         self.data_dir
             .join("quick-projects")
@@ -323,14 +320,18 @@ impl AppState {
     }
 
     pub fn shutdown(&self) {
+        {
+            let runs = self.runs.lock().unwrap_or_else(|error| error.into_inner());
+            for run in runs.values() {
+                run.cancel.cancel();
+            }
+        }
         self.command_manager.kill_all();
         let mut guard = self.terminals.lock().unwrap_or_else(|e| e.into_inner());
         for (_, session) in guard.iter_mut() {
             session.kill();
         }
         guard.clear();
-        // Terminals map is cleared before on_exit callbacks can fire,
-        // so any pending on_exit removal calls are no-ops — this is correct.
         if let Ok(mut dictation) = self.dictation.lock() {
             if let Some(handle) = dictation.take() {
                 handle.stop();

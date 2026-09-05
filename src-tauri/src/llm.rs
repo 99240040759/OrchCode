@@ -159,8 +159,6 @@ The skill content gives you a proven sequence of steps, tool calls, and checks â
         }
     }
 
-    // Guardrails are embedded directly in the preamble â€” no external injection needed.
-
     format!(
         "You are Orch, an autonomous AI software engineer embedded inside a desktop IDE. \
 You have full access to the user's codebase and can read files, edit files, run commands, \
@@ -248,21 +246,46 @@ Never tell the user a task is done based on reasoning alone. Show the evidence."
     )
 }
 
+#[derive(Debug, Clone)]
+pub enum RunOutcome {
+    Completed,
+    Cancelled,
+    Failed(String),
+}
+
 pub struct RunResult {
     pub reasoning_durations: Vec<u64>,
-    pub completed: bool,
+    pub outcome: RunOutcome,
     pub cumulative_input_tokens: u64,
     pub cumulative_output_tokens: u64,
     pub cumulative_total_tokens: u64,
     pub last_turn_input_tokens: u64,
 }
 
+impl RunResult {
+    fn new(
+        reasoning_durations: Vec<u64>,
+        outcome: RunOutcome,
+        cumulative_input_tokens: u64,
+        cumulative_output_tokens: u64,
+        cumulative_total_tokens: u64,
+        last_turn_input_tokens: u64,
+    ) -> Self {
+        Self {
+            reasoning_durations,
+            outcome,
+            cumulative_input_tokens,
+            cumulative_output_tokens,
+            cumulative_total_tokens,
+            last_turn_input_tokens,
+        }
+    }
+}
+
 pub struct RunRequest {
+    pub run_id: String,
     pub session_id: String,
-    pub prompt: String,
-    pub attachments: Vec<AttachmentRef>,
-    pub supports_images: bool,
-    pub workspace: Option<PathBuf>,
+    pub user_message: Message,
     pub prior_input_tokens: u64,
     pub prior_output_tokens: u64,
     pub prior_total_tokens: u64,
@@ -274,18 +297,10 @@ pub async fn run_chat(
     cancel: CancellationToken,
     channel: Channel<ChatEvent>,
     gateway: Arc<Gateway>,
+    memory: SqliteMemory,
 ) -> RunResult {
-    let ws_ref: Option<&Path> = request.workspace.as_deref();
-    let user_message = build_user_message(
-        ws_ref,
-        &request.prompt,
-        &request.attachments,
-        request.supports_images,
-    )
-    .await;
-
     let mut stream = agent
-        .stream_prompt(user_message)
+        .stream_prompt(request.user_message)
         .conversation(request.session_id.clone())
         .max_turns(config::DEFAULT_MAX_TURNS)
         .tool_concurrency(config::DEFAULT_TOOL_CONCURRENCY)
@@ -297,41 +312,63 @@ pub async fn run_chat(
     let mut cumulative_output: u64 = request.prior_output_tokens;
     let mut cumulative_total: u64 = request.prior_total_tokens;
     let mut last_turn_input: u64 = 0;
-    let mut turns_since_budget_check: u32 = 0;
+    let mut completion_calls_since_budget_check: u32 = 0;
+    let mut event_seq: u64 = 0;
+    let mut saw_final_response = false;
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let mut deadline = tokio::time::Instant::now() + chunk_timeout;
+
+    macro_rules! fail_run {
+        ($message:expr) => {
+            return RunResult::new(
+                reasoning_durations,
+                RunOutcome::Failed($message),
+                cumulative_input,
+                cumulative_output,
+                cumulative_total,
+                last_turn_input,
+            )
+        };
+    }
 
     loop {
         let item = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-                let _ = channel.send(ChatEvent::Cancelled);
-                return RunResult {
+                if let Err(message) = close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_durations,
+                    &channel,
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                ).await {
+                    fail_run!(message);
+                }
+                return RunResult::new(
                     reasoning_durations,
-                    completed: false,
-                    cumulative_input_tokens: cumulative_input,
-                    cumulative_output_tokens: cumulative_output,
-                    cumulative_total_tokens: cumulative_total,
-                    last_turn_input_tokens: last_turn_input,
-                };
+                    RunOutcome::Cancelled,
+                    cumulative_input,
+                    cumulative_output,
+                    cumulative_total,
+                    last_turn_input,
+                );
             }
             _ = tokio::time::sleep_until(deadline) => {
-                close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-                let _ = channel.send(ChatEvent::Error {
-                    message: format!(
-                        "stream timed out: no data received from the model for {}s",
-                        config::STREAM_CHUNK_TIMEOUT_SECS
-                    ),
-                });
-                return RunResult {
-                    reasoning_durations,
-                    completed: false,
-                    cumulative_input_tokens: cumulative_input,
-                    cumulative_output_tokens: cumulative_output,
-                    cumulative_total_tokens: cumulative_total,
-                    last_turn_input_tokens: last_turn_input,
-                };
+                if let Err(message) = close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_durations,
+                    &channel,
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                ).await {
+                    fail_run!(message);
+                }
+                fail_run!(format!(
+                    "stream timed out: no data received from the model for {}s",
+                    config::STREAM_CHUNK_TIMEOUT_SECS
+                ));
             }
             next = stream.next() => match next {
                 Some(item) => {
@@ -344,22 +381,64 @@ pub async fn run_chat(
 
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
-                StreamedAssistantContent::Text(t) => {
-                    close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-                    let _ = channel.send(ChatEvent::Text { delta: t.text });
+                StreamedAssistantContent::Text(text) => {
+                    if let Err(message) = close_reasoning(
+                        &mut reasoning_started,
+                        &mut reasoning_durations,
+                        &channel,
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
+                    }
+                    if let Err(message) = checkpoint_event(
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                        "text",
+                        &text.text,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
+                    }
+                    let _ = channel.send(ChatEvent::Text { delta: text.text });
                 }
-
-                StreamedAssistantContent::Reasoning(r) => {
+                StreamedAssistantContent::Reasoning(reasoning) => {
                     if reasoning_started.is_none() {
                         reasoning_started = Some(Instant::now());
                     }
-                    let _ = channel.send(ChatEvent::Reasoning {
-                        delta: r.display_text(),
-                    });
+                    let delta = reasoning.display_text();
+                    if let Err(message) = checkpoint_event(
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                        "reasoning",
+                        &delta,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
+                    }
+                    let _ = channel.send(ChatEvent::Reasoning { delta });
                 }
                 StreamedAssistantContent::ReasoningDelta { reasoning, .. } => {
                     if reasoning_started.is_none() {
                         reasoning_started = Some(Instant::now());
+                    }
+                    if let Err(message) = checkpoint_event(
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                        "reasoning",
+                        &reasoning,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
                     }
                     let _ = channel.send(ChatEvent::Reasoning { delta: reasoning });
                 }
@@ -367,112 +446,286 @@ pub async fn run_chat(
                     tool_call,
                     internal_call_id,
                 } => {
-                    close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
+                    if let Err(message) = close_reasoning(
+                        &mut reasoning_started,
+                        &mut reasoning_durations,
+                        &channel,
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
+                    }
                     let args_value = match &tool_call.function.arguments {
-                        serde_json::Value::String(s) => {
-                            serde_json::from_str::<serde_json::Value>(s.as_str())
+                        serde_json::Value::String(value) => {
+                            serde_json::from_str::<serde_json::Value>(value.as_str())
                                 .unwrap_or_else(|_| tool_call.function.arguments.clone())
                         }
                         other => other.clone(),
                     };
                     let args = args_value.to_string();
+                    let payload = serde_json::json!({
+                        "id": internal_call_id,
+                        "name": tool_call.function.name,
+                        "args": args,
+                    })
+                    .to_string();
+                    if let Err(message) = checkpoint_event(
+                        &memory,
+                        &request.run_id,
+                        &mut event_seq,
+                        "tool_call",
+                        &payload,
+                    )
+                    .await
+                    {
+                        fail_run!(message);
+                    }
                     let display_info = parse_display_info(&tool_call.function.name, &args);
                     let _ = channel.send(ChatEvent::ToolCall {
                         id: internal_call_id,
-                        name: tool_call.function.name.clone(),
+                        name: tool_call.function.name,
                         args,
                         display_info,
                     });
                 }
                 _ => {}
             },
-            Ok(MultiTurnStreamItem::ToolExecutionCommitted { .. }) => {}
+            Ok(MultiTurnStreamItem::ToolExecutionCommitted {
+                tool_call,
+                internal_call_id,
+            }) => {
+                let payload = serde_json::json!({
+                    "id": internal_call_id,
+                    "name": tool_call.function.name,
+                    "args": tool_call.function.arguments,
+                })
+                .to_string();
+                if let Err(message) = checkpoint_event(
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                    "tool_execution",
+                    &payload,
+                )
+                .await
+                {
+                    fail_run!(message);
+                }
+            }
             Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
                 tool_result,
                 internal_call_id,
             })) => {
                 let raw = stringify_tool_result(&tool_result);
                 let is_error = tool_output_is_error(&raw);
+                let output = strip_tool_error_sentinel(&raw).to_string();
+                let payload = serde_json::json!({
+                    "id": internal_call_id,
+                    "output": output,
+                    "isError": is_error,
+                })
+                .to_string();
+                if let Err(message) = checkpoint_event(
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                    "tool_result",
+                    &payload,
+                )
+                .await
+                {
+                    fail_run!(message);
+                }
                 let _ = channel.send(ChatEvent::ToolResult {
                     id: internal_call_id,
-                    output: strip_tool_error_sentinel(&raw).to_string(),
+                    output,
                     is_error,
                 });
             }
-            Ok(MultiTurnStreamItem::FinalResponse(res)) => {
-                close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-                let turn = res.usage();
-                last_turn_input = turn.input_tokens;
-                cumulative_input += turn.input_tokens;
-                cumulative_output += turn.output_tokens;
-                cumulative_total += turn.total_tokens;
+            Ok(MultiTurnStreamItem::CompletionCall(call)) => {
+                let turn = call.usage;
+                let usage = match memory
+                    .record_chat_run_completion_usage(
+                        &request.run_id,
+                        call.call_index,
+                        turn.input_tokens,
+                        turn.output_tokens,
+                        turn.total_tokens,
+                    )
+                    .await
+                {
+                    Ok(usage) => usage,
+                    Err(error) => fail_run!(format!(
+                        "failed to persist token usage checkpoint: {error}"
+                    )),
+                };
+                cumulative_input = usage.cumulative_input_tokens;
+                cumulative_output = usage.cumulative_output_tokens;
+                cumulative_total = usage.cumulative_total_tokens;
+                last_turn_input = usage.last_turn_input_tokens;
                 let _ = channel.send(ChatEvent::Usage {
                     input_tokens: cumulative_input,
                     output_tokens: cumulative_output,
                     total_tokens: cumulative_total,
                 });
 
-                turns_since_budget_check += 1;
-                if turns_since_budget_check >= config::BUDGET_RECHECK_EVERY_TURNS {
-                    turns_since_budget_check = 0;
+                completion_calls_since_budget_check += 1;
+                if completion_calls_since_budget_check >= config::BUDGET_RECHECK_EVERY_TURNS {
+                    completion_calls_since_budget_check = 0;
                     if let Ok(budget) = gateway.budget().await {
                         if !budget.allowed {
-                            let _ = channel.send(ChatEvent::Error {
-                                message: format!(
-                                    "usage limit reached for this {}: {:.2} of {:.2} USD used",
-                                    budget.period, budget.cost_usd, budget.limit_usd
-                                ),
-                            });
-                            return RunResult {
-                                reasoning_durations,
-                                completed: false,
-                                cumulative_input_tokens: cumulative_input,
-                                cumulative_output_tokens: cumulative_output,
-                                cumulative_total_tokens: cumulative_total,
-                                last_turn_input_tokens: last_turn_input,
-                            };
+                            fail_run!(format!(
+                                "usage limit reached for this {}: {:.2} of {:.2} USD used",
+                                budget.period, budget.cost_usd, budget.limit_usd
+                            ));
                         }
                     }
                 }
             }
-            Ok(_) => {}
-            Err(e) => {
-                close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-                let message = humanize_llm_error(&e.to_string());
-                let _ = channel.send(ChatEvent::Error { message });
-                return RunResult {
-                    reasoning_durations,
-                    completed: false,
-                    cumulative_input_tokens: cumulative_input,
-                    cumulative_output_tokens: cumulative_output,
-                    cumulative_total_tokens: cumulative_total,
-                    last_turn_input_tokens: last_turn_input,
+            Ok(MultiTurnStreamItem::ModelTurnRetried { turn }) => {
+                if let Err(message) = checkpoint_event(
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                    "model_turn_retried",
+                    &format!("turn {turn}"),
+                )
+                .await
+                {
+                    fail_run!(message);
+                }
+            }
+            Ok(MultiTurnStreamItem::FinalResponse(response)) => {
+                if let Err(message) = close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_durations,
+                    &channel,
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                )
+                .await
+                {
+                    fail_run!(message);
+                }
+                let aggregate = response.usage();
+                let terminal_last_input = response
+                    .completion_calls()
+                    .last()
+                    .map(|call| call.usage.input_tokens)
+                    .unwrap_or(last_turn_input);
+                let usage = match memory
+                    .reconcile_chat_run_usage(
+                        &request.run_id,
+                        aggregate.input_tokens,
+                        aggregate.output_tokens,
+                        aggregate.total_tokens,
+                        terminal_last_input,
+                    )
+                    .await
+                {
+                    Ok(usage) => usage,
+                    Err(error) => fail_run!(format!(
+                        "failed to reconcile terminal token usage: {error}"
+                    )),
                 };
+                cumulative_input = usage.cumulative_input_tokens;
+                cumulative_output = usage.cumulative_output_tokens;
+                cumulative_total = usage.cumulative_total_tokens;
+                last_turn_input = usage.last_turn_input_tokens;
+                let _ = channel.send(ChatEvent::Usage {
+                    input_tokens: cumulative_input,
+                    output_tokens: cumulative_output,
+                    total_tokens: cumulative_total,
+                });
+                saw_final_response = true;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                if let Err(message) = close_reasoning(
+                    &mut reasoning_started,
+                    &mut reasoning_durations,
+                    &channel,
+                    &memory,
+                    &request.run_id,
+                    &mut event_seq,
+                )
+                .await
+                {
+                    fail_run!(message);
+                }
+                fail_run!(humanize_llm_error(&error.to_string()));
             }
         }
     }
 
-    close_reasoning(&mut reasoning_started, &mut reasoning_durations, &channel);
-
-    RunResult {
-        reasoning_durations,
-        completed: true,
-        cumulative_input_tokens: cumulative_input,
-        cumulative_output_tokens: cumulative_output,
-        cumulative_total_tokens: cumulative_total,
-        last_turn_input_tokens: last_turn_input,
+    if let Err(message) = close_reasoning(
+        &mut reasoning_started,
+        &mut reasoning_durations,
+        &channel,
+        &memory,
+        &request.run_id,
+        &mut event_seq,
+    )
+    .await
+    {
+        fail_run!(message);
     }
+    if !saw_final_response {
+        fail_run!("model stream ended before a final response".to_string());
+    }
+
+    RunResult::new(
+        reasoning_durations,
+        RunOutcome::Completed,
+        cumulative_input,
+        cumulative_output,
+        cumulative_total,
+        last_turn_input,
+    )
 }
 
-fn close_reasoning(
+async fn checkpoint_event(
+    memory: &SqliteMemory,
+    run_id: &str,
+    event_seq: &mut u64,
+    kind: &str,
+    payload: &str,
+) -> Result<(), String> {
+    memory
+        .append_chat_run_event(run_id, *event_seq, kind, payload)
+        .await
+        .map_err(|error| format!("failed to checkpoint agent stream: {error}"))?;
+    *event_seq = event_seq.saturating_add(1);
+    Ok(())
+}
+
+async fn close_reasoning(
     started: &mut Option<Instant>,
     durations: &mut Vec<u64>,
     channel: &Channel<ChatEvent>,
-) {
-    let Some(start) = started.take() else { return };
+    memory: &SqliteMemory,
+    run_id: &str,
+    event_seq: &mut u64,
+) -> Result<(), String> {
+    let Some(start) = started.take() else {
+        return Ok(());
+    };
     let duration_seconds = start.elapsed().as_secs().max(1);
+    checkpoint_event(
+        memory,
+        run_id,
+        event_seq,
+        "reasoning_done",
+        &duration_seconds.to_string(),
+    )
+    .await?;
     durations.push(duration_seconds);
     let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
+    Ok(())
 }
 
 fn image_media_type(ext: &str) -> Option<ImageMediaType> {
@@ -538,7 +791,7 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathB
     out
 }
 
-async fn build_user_message(
+pub async fn build_user_message(
     workspace: Option<&Path>,
     prompt: &str,
     attachments: &[AttachmentRef],

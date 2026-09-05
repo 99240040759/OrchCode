@@ -170,7 +170,6 @@ pub async fn read_image_data_url(
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
 
-    // SVGs are vector text — no decode/resize needed; pass through as a data URL directly.
     if mime == "image/svg+xml" {
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         return Ok(format!("data:image/svg+xml;base64,{b64}"));

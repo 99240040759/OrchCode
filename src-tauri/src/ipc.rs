@@ -8,12 +8,17 @@ use crate::auth::{self, UserDisplay};
 use crate::dictation;
 use crate::events::{ChatEvent, DictationEvent, TerminalEvent};
 use crate::gateway::{Budget, ModelInfo};
-use crate::llm::{build_agent, build_client, maybe_compact, run_chat, AttachmentRef, RunRequest};
+use crate::llm::{
+    build_agent, build_client, build_user_message, maybe_compact, run_chat, AttachmentRef,
+    RunOutcome, RunRequest,
+};
 use crate::persistence::MessageView;
+use crate::run_persistence::RunCommitKind;
 use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
 
+use rig::completion::Message;
 use rig::memory::ConversationMemory;
 
 fn is_safe_path_segment(s: &str) -> bool {
@@ -146,8 +151,6 @@ pub fn set_workspace(state: State<'_, AppState>, path: String) -> Result<(), Str
     Ok(())
 }
 
-/// Create a Quick Project directory at `<data_dir>/quick-projects/<id>-<name>/`
-/// and return its absolute path.
 #[tauri::command]
 pub fn create_quick_project_dir(
     state: State<'_, AppState>,
@@ -163,7 +166,6 @@ pub fn create_quick_project_dir(
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// List sessions whose workspace_path matches the given path, ordered by updated_at DESC.
 #[tauri::command]
 pub async fn list_sessions_for_workspace(
     state: State<'_, AppState>,
@@ -176,9 +178,6 @@ pub async fn list_sessions_for_workspace(
         .map_err(|e| e.to_string())
 }
 
-/// Delete workspace data:
-/// 1. Purges all SQLite sessions, messages, and reasoning metrics for this workspace.
-/// 2. If `is_quick_project` is true, safely deletes the quick-project folder from disk.
 #[tauri::command]
 pub async fn delete_workspace_data(
     app: tauri::AppHandle,
@@ -252,62 +251,31 @@ pub async fn start_chat(
         return Err("a prompt or at least one attachment is required".to_string());
     }
 
-    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
-    let jwt = state
-        .access_token()
-        .ok_or_else(|| "not authenticated".to_string())?;
-
-    let budget = state.gateway.budget().await.map_err(|e| e.to_string())?;
-    if !budget.allowed {
-        return Err(format!(
-            "usage limit reached for this {}: {:.2} of {:.2} USD used",
-            budget.period, budget.cost_usd, budget.limit_usd
-        ));
-    }
-
-    let catalog = state.catalog().await.map_err(|e| e.to_string())?;
-    let model_info = catalog
-        .resolve(&model)
-        .cloned()
-        .ok_or_else(|| format!("model not found: {model}"))?;
-    let supports_images = model_info.supports_images();
-
     let workspace = state.workspace();
-    let client = build_client(&jwt, &model_info.provider).map_err(|e| e.to_string())?;
-
-    let ctx = ToolContext {
-        workspace: state.workspace.clone(),
-        gateway: state.gateway.clone(),
-        app_handle: app.clone(),
-        command_manager: (*state.command_manager).clone(),
-        data_dir: state.data_dir.clone(),
-        memory: state.memory.clone(),
-        connector_manager: state.connector_manager.clone(),
-    };
-
-    let enabled_connectors = state.connector_manager.enabled_ids();
-
-    let agent = build_agent(
-        &client,
-        &model_info,
-        &ctx,
-        state.memory.clone(),
-        &state.data_dir,
-        workspace.as_deref(),
-        &enabled_connectors,
-    );
-
-    let (run_id, cancel) = state.start_run(&session_id).map_err(|e| e.to_string())?;
-
-    let workspace_str = workspace.as_ref().map(|p| p.to_string_lossy().to_string());
-    if let Err(e) = state
+    let workspace_string = workspace
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
+    let (run_id, cancel) = state.start_run(&session_id).map_err(|error| error.to_string())?;
+    let raw_prompt = durable_prompt_text(&prompt, &attachments);
+    let initial_user_message = Message::user(raw_prompt.clone());
+    let baseline = match state
         .memory
-        .set_session_workspace(&session_id, workspace_str.as_deref())
+        .begin_chat_run(
+            &run_id,
+            &session_id,
+            &model,
+            &raw_prompt,
+            &initial_user_message,
+            workspace_string.as_deref(),
+        )
         .await
     {
-        state.finish_run(&session_id, &run_id);
-        return Err(e.to_string());
-    }
+        Ok(baseline) => baseline,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            return Err(format!("failed to durably accept chat request: {error}"));
+        }
+    };
 
     let needs_title = !state
         .memory
@@ -318,56 +286,144 @@ pub async fn start_chat(
         spawn_title_generation(&app, &state, &session_id, &prompt);
     }
 
-    let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
+    macro_rules! accepted_or_finish {
+        ($result:expr) => {
+            match $result {
+                Ok(value) => value,
+                Err(error) => {
+                    return finish_accepted_chat_error(
+                        &app,
+                        &state,
+                        &session_id,
+                        &run_id,
+                        &on_event,
+                        error.to_string(),
+                    )
+                    .await
+                }
+            }
+        };
+    }
 
-    let (prior_input, prior_output, prior_total) = state
-        .memory
-        .get_session_tokens(&session_id)
-        .await
-        .unwrap_or((0, 0, 0));
+    accepted_or_finish!(state.ensure_fresh_token().await.map_err(|error| error.to_string()));
+    let jwt = accepted_or_finish!(
+        state
+            .access_token()
+            .ok_or_else(|| "not authenticated".to_string())
+    );
+
+    let budget = accepted_or_finish!(state.gateway.budget().await.map_err(|error| error.to_string()));
+    if !budget.allowed {
+        return finish_accepted_chat_error(
+            &app,
+            &state,
+            &session_id,
+            &run_id,
+            &on_event,
+            format!(
+                "usage limit reached for this {}: {:.2} of {:.2} USD used",
+                budget.period, budget.cost_usd, budget.limit_usd
+            ),
+        )
+        .await;
+    }
+
+    let catalog = accepted_or_finish!(state.catalog().await.map_err(|error| error.to_string()));
+    let model_info = accepted_or_finish!(
+        catalog
+            .resolve(&model)
+            .cloned()
+            .ok_or_else(|| format!("model not found: {model}"))
+    );
+    let client = accepted_or_finish!(build_client(&jwt, &model_info.provider).map_err(|error| error.to_string()));
+
+    let user_message = build_user_message(
+        workspace.as_deref(),
+        &prompt,
+        &attachments,
+        model_info.supports_images(),
+    )
+    .await;
+    accepted_or_finish!(
+        state
+            .memory
+            .update_chat_run_user_message(&run_id, &user_message)
+            .await
+            .map_err(|error| error.to_string())
+    );
+
+    let tool_context = ToolContext {
+        workspace: state.workspace.clone(),
+        gateway: state.gateway.clone(),
+        app_handle: app.clone(),
+        command_manager: (*state.command_manager).clone(),
+        data_dir: state.data_dir.clone(),
+        memory: state.memory.clone(),
+        connector_manager: state.connector_manager.clone(),
+    };
+    let enabled_connectors = state.connector_manager.enabled_ids();
+    let agent = build_agent(
+        &client,
+        &model_info,
+        &tool_context,
+        state.memory.scoped_to_run(&run_id),
+        &state.data_dir,
+        workspace.as_deref(),
+        &enabled_connectors,
+    );
+    let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
 
     let result = run_chat(
         agent,
         RunRequest {
+            run_id: run_id.clone(),
             session_id: session_id.clone(),
-            prompt,
-            attachments,
-            supports_images,
-            workspace,
-            prior_input_tokens: prior_input,
-            prior_output_tokens: prior_output,
-            prior_total_tokens: prior_total,
+            user_message,
+            prior_input_tokens: baseline.input_tokens,
+            prior_output_tokens: baseline.output_tokens,
+            prior_total_tokens: baseline.total_tokens,
         },
         cancel,
         on_event.clone(),
         state.gateway.clone(),
+        state.memory.clone(),
     )
     .await;
 
+    let outcome = result.outcome.clone();
+    let (status, terminal_error) = match &outcome {
+        RunOutcome::Completed => ("completed", None),
+        RunOutcome::Cancelled => ("cancelled", Some("cancelled by the user")),
+        RunOutcome::Failed(message) => ("error", Some(message.as_str())),
+    };
+    let commit_kind = match state
+        .memory
+        .finalize_chat_run(&run_id, status, terminal_error)
+        .await
+    {
+        Ok(kind) => kind,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            let message = format!("failed to finalize durable chat history: {error}");
+            let _ = app.emit("sessions-updated", ());
+            let _ = on_event.send(ChatEvent::Error { message });
+            return Ok(());
+        }
+    };
+
     if !result.reasoning_durations.is_empty() {
-        if let Err(e) = state
+        if let Err(error) = state
             .memory
             .assign_reasoning_durations(&session_id, base_seq, result.reasoning_durations)
             .await
         {
-            eprintln!("[chat] failed to persist reasoning durations: {e}");
+            eprintln!("[chat] failed to persist reasoning durations: {error}");
         }
     }
 
-    if let Err(e) = state
-        .memory
-        .update_session_tokens(
-            &session_id,
-            result.cumulative_input_tokens,
-            result.cumulative_output_tokens,
-            result.cumulative_total_tokens,
-        )
-        .await
-    {
-        eprintln!("[chat] failed to persist session tokens: {e}");
-    }
-
-    if result.completed {
+    let completed = matches!(outcome, RunOutcome::Completed)
+        || commit_kind == RunCommitKind::Canonical;
+    if completed && commit_kind == RunCommitKind::Canonical {
         match maybe_compact(
             &state.memory,
             &client,
@@ -384,20 +440,76 @@ pub async fn start_chat(
                 });
             }
             Ok(None) => {}
-            Err(e) => {
-                let _ = on_event.send(ChatEvent::Error {
-                    message: format!("compaction failed: {e}"),
-                });
+            Err(error) => {
+                eprintln!("[chat] compaction failed after durable commit: {error}");
             }
         }
     }
 
-    if result.completed {
-        let _ = on_event.send(ChatEvent::Done);
-    }
-
     state.finish_run(&session_id, &run_id);
     let _ = app.emit("sessions-updated", ());
+    if completed {
+        let _ = on_event.send(ChatEvent::Done);
+    } else {
+        match outcome {
+            RunOutcome::Cancelled => {
+                let _ = on_event.send(ChatEvent::Cancelled);
+            }
+            RunOutcome::Failed(message) => {
+                let _ = on_event.send(ChatEvent::Error { message });
+            }
+            RunOutcome::Completed => {
+                let _ = on_event.send(ChatEvent::Done);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn durable_prompt_text(prompt: &str, attachments: &[AttachmentRef]) -> String {
+    let mut text = prompt.trim().to_string();
+    if !attachments.is_empty() {
+        if !text.is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str("[Attachments submitted: ");
+        text.push_str(
+            &attachments
+                .iter()
+                .map(|attachment| attachment.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        text.push(']');
+    }
+    if text.is_empty() {
+        "[Attachment-only user request]".to_string()
+    } else {
+        text
+    }
+}
+
+async fn finish_accepted_chat_error(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    session_id: &str,
+    run_id: &str,
+    on_event: &Channel<ChatEvent>,
+    message: String,
+) -> Result<(), String> {
+    let displayed_message = match state
+        .memory
+        .finalize_chat_run(run_id, "error", Some(&message))
+        .await
+    {
+        Ok(_) => message,
+        Err(error) => format!("{message} (durable finalization also failed: {error})"),
+    };
+    state.finish_run(session_id, run_id);
+    let _ = app.emit("sessions-updated", ());
+    let _ = on_event.send(ChatEvent::Error {
+        message: displayed_message,
+    });
     Ok(())
 }
 

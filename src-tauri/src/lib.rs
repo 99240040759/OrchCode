@@ -13,6 +13,7 @@ pub mod gateway;
 pub mod ipc;
 pub mod llm;
 pub mod persistence;
+pub mod run_persistence;
 pub mod platform;
 pub mod skills;
 pub mod state;

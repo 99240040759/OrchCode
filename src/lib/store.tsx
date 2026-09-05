@@ -466,12 +466,11 @@ export const useChatStore = create(
       } catch (e) {
         const message = api.errorMessage(e);
         stopFlushTimer(); flush(); settle();
+        patch((m) => { m.error = message; });
         set((s) => {
-          if (s.currentSessionId !== sessionId) return;
-          s.error = message;
-          s.messages = s.messages.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId);
+          if (s.currentSessionId === sessionId) s.error = message;
         });
-        return false;
+        return true;
       }
     },
 

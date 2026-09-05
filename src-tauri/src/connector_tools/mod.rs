@@ -65,10 +65,6 @@ pub fn truncate_text(text: &str, limit: usize, suffix: &str) -> String {
     format!("{}{}", &text[..end], suffix)
 }
 
-// ==========================================
-// UNIFIED CONNECTOR TOOLS
-// ==========================================
-
 #[derive(Clone)]
 pub struct ConnectorSearch {
     pub manager: Arc<ConnectorManager>,
@@ -77,11 +73,8 @@ pub struct ConnectorSearch {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConnectorSearchArgs {
-    /// The provider service: "google_drive", "gmail", "github", "notion", "slack", or "jira"
     pub provider: String,
-    /// Search query string
     pub query: String,
-    /// Optional maximum results to return
     pub max_results: Option<u32>,
 }
 
@@ -143,11 +136,8 @@ pub struct ConnectorRead {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConnectorReadArgs {
-    /// The provider service: "google_drive", "gmail", "github", "notion", "slack", or "jira"
     pub provider: String,
-    /// Target identifier: File ID (Google Drive), Message ID (Gmail), "owner/repo/path" (GitHub), Page ID (Notion), Channel ID (Slack), or Issue Key (Jira)
     pub target: String,
-    /// Optional extra parameter (e.g. export MIME type for Google Drive, ref/branch for GitHub, oldest timestamp for Slack)
     pub extra: Option<String>,
 }
 
@@ -220,11 +210,8 @@ pub struct ConnectorList {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConnectorListArgs {
-    /// The provider service: "google_drive", "gmail", "github", "notion", "slack", or "jira"
     pub provider: String,
-    /// Optional container/filter (Folder ID for Google Drive, database ID for Notion, filter for Gmail, visibility for GitHub, project for Jira)
     pub container: Option<String>,
-    /// Optional maximum results to return
     pub max_results: Option<u32>,
 }
 

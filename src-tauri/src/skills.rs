@@ -16,9 +16,6 @@ pub struct Skill {
 
 static EMBEDDED_SKILLS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../.agents/skills");
 
-/// Increment this string whenever the bundled skills content changes.
-/// On app launch, if the stored version matches this value the seed step is skipped.
-/// Forgetting to bump this means users keep stale skills until they clear app data.
 const BUNDLED_VERSION: &str = "v5";
 
 pub fn seed_bundled_skills(data_dir: &Path) {

@@ -199,11 +199,11 @@ pub struct CompactionInput {
 
 const POOL_SIZE: u32 = 4;
 
-type SqlitePool = Pool<SqliteConnectionManager>;
+pub(crate) type SqlitePool = Pool<SqliteConnectionManager>;
 
 #[derive(Clone)]
 pub struct SqliteMemory {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl SqliteMemory {
@@ -220,6 +220,7 @@ impl SqliteMemory {
             rusqlite_migration::M::up(BASELINE_SCHEMA),
             rusqlite_migration::M::up(KNOWLEDGE_SCHEMA),
             rusqlite_migration::M::up(RENAME_TOKEN_COLUMNS),
+            rusqlite_migration::M::up(crate::run_persistence::DURABLE_RUN_SCHEMA),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -238,12 +239,12 @@ impl SqliteMemory {
             .to_latest(&mut conn)
             .map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
 
+        crate::run_persistence::recover_interrupted_runs(&mut conn)?;
         drop(conn);
 
         Ok(Self { pool })
     }
 
-    /// List sessions scoped to a specific workspace path, newest first.
     pub async fn list_sessions_for_workspace(
         &self,
         workspace_path: &str,
@@ -282,7 +283,6 @@ impl SqliteMemory {
         .await
     }
 
-    /// Delete all sessions and associated messages/reasoning for a specific workspace path.
     pub async fn delete_sessions_for_workspace(&self, workspace_path: &str) -> AppResult<()> {
         let pool = self.pool.clone();
         let ws = workspace_path.to_string();
