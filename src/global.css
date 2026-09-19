@@ -286,15 +286,22 @@ svg {
   position: relative;
 }
 
-.Titlebar-mac { padding: 0; }
+.Titlebar-mac {
+  padding: 0;
+}
 
 .Titlebar-left {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   padding: 0 4px 0 8px;
   flex: 0 0 auto;
   height: 100%;
+}
+
+.Titlebar-mac .Titlebar-left {
+  padding: 0 4px 0 0;
+  gap: 2px;
 }
 
 .Titlebar-drag {
@@ -311,7 +318,7 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 320px;
-  padding: 0 4px;
+  padding: 0 2px;
   pointer-events: none;
 }
 
@@ -321,7 +328,6 @@ svg {
   height: 24px;
 }
 
-
 .Titlebar-right {
   display: flex;
   align-items: center;
@@ -330,7 +336,16 @@ svg {
   height: 100%;
 }
 
-.MacControls,
+.Titlebar-mac .Titlebar-right {
+  padding-right: 12px;
+}
+
+.MacTrafficLightSpacer {
+  width: 74px;
+  height: 100%;
+  flex: 0 0 auto;
+}
+
 .WinControls {
   display: flex;
   align-items: center;
@@ -338,7 +353,6 @@ svg {
   flex: 0 0 auto;
 }
 
-.MacBtn,
 .WinBtn {
   display: inline-flex;
   align-items: center;
@@ -348,26 +362,6 @@ svg {
   background: transparent;
   color: var(--text-med);
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
-.MacBtn {
-  width: 32px;
-  height: 100%;
-}
-
-.MacBtn svg { width: 15px; height: 15px; }
-
-.MacBtn:hover {
-  background: var(--bg-hover-sm);
-  color: var(--text-hi);
-}
-
-.MacBtn-close:hover {
-  background: rgba(252,107,131,.2);
-  color: var(--c-removed);
-}
-
-.WinBtn {
   width: 40px;
   height: 100%;
 }

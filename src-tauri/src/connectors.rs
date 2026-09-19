@@ -67,6 +67,11 @@ impl ConnectorDef {
 }
 
 fn option_env_static(key: &str) -> String {
+    if let Ok(val) = std::env::var(key) {
+        if !val.is_empty() {
+            return val;
+        }
+    }
     match key {
         "GOOGLE_CLIENT_ID" => option_env!("GOOGLE_CLIENT_ID").unwrap_or("").to_string(),
         "GOOGLE_CLIENT_SECRET" => option_env!("GOOGLE_CLIENT_SECRET").unwrap_or("").to_string(),
@@ -150,7 +155,14 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         client_secret_env: "SLACK_CLIENT_SECRET",
         auth_url: "https://slack.com/oauth/v2/authorize",
         token_url: "https://slack.com/api/oauth.v2.access",
-        scopes: &["channels:history", "channels:read", "files:read", "search:read", "users:read"],
+        scopes: &[
+            "channels:history",
+            "channels:read",
+            "files:read",
+            "search:read",
+            "users:read",
+            "users.profile:read",
+        ],
         deep_link_id: "slack",
     },
     ConnectorDef {

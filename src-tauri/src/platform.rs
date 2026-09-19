@@ -1,5 +1,6 @@
 #[cfg(target_os = "windows")]
 pub fn setup_native_window(window: &tauri::WebviewWindow) {
+    let _ = window.set_decorations(false);
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{
         DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,

@@ -5,15 +5,11 @@ import {
   VscChromeMaximize,
   VscChromeMinimize,
   VscChromeRestore,
-  VscClose,
-  VscDash,
   VscLayoutSidebarLeft,
   VscLayoutSidebarLeftOff,
   VscLayoutSidebarRight,
   VscLayoutSidebarRightOff,
   VscRefresh,
-  VscScreenFull,
-  VscScreenNormal,
 } from "react-icons/vsc";
 import { useArtifactsStore } from "../../lib/artifacts";
 import { useUpdaterStore } from "../../lib/updater";
@@ -87,23 +83,7 @@ function WindowControls() {
   const close          = () => void getCurrentWindow().close();
 
   if (IS_MAC) {
-    return (
-      <div className="MacControls">
-        <Button className="MacBtn MacBtn-close" aria-label="Close" onClick={close}>
-          <VscClose />
-        </Button>
-        <Button className="MacBtn" aria-label="Minimize" onClick={minimize}>
-          <VscDash />
-        </Button>
-        <Button
-          className="MacBtn"
-          aria-label={isMaximized ? "Restore" : "Maximize"}
-          onClick={toggleMaximize}
-        >
-          {isMaximized ? <VscScreenNormal /> : <VscScreenFull />}
-        </Button>
-      </div>
-    );
+    return <div className="MacTrafficLightSpacer" data-tauri-drag-region />;
   }
 
   return (

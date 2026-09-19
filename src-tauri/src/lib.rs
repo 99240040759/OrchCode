@@ -27,7 +27,9 @@ use tauri::{Emitter, Manager};
 const MAIN_WINDOW_LABEL: &str = "main";
 
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
-    if let Some(rest) = raw_url.strip_prefix("orch://oauth/") {
+    let url_lower = raw_url.to_lowercase();
+    if let Some(rest_lower) = url_lower.strip_prefix("orch://oauth/") {
+        let rest = &raw_url[raw_url.len() - rest_lower.len()..];
         let state = app.state::<AppState>();
         let (connector_id, code, oauth_state, callback_error) = parse_connector_oauth_callback(rest);
         if let Some(error) = callback_error {

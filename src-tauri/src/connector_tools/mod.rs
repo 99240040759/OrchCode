@@ -35,7 +35,7 @@ pub async fn request_json(request: RequestBuilder, provider: &str) -> Result<Val
         )));
     }
     serde_json::from_str(&body)
-        .map_err(|e| ToolError::msg(format!("{provider} response parse failed: {e}")))
+        .map_err(|e| ToolError::msg(format!("{provider} response parse failed: {e} — body: {}", &body[..body.len().min(200)])))
 }
 
 pub async fn request_text(request: RequestBuilder, provider: &str) -> Result<String, ToolError> {
@@ -76,6 +76,7 @@ pub struct ConnectorSearchArgs {
     pub provider: String,
     pub query: String,
     pub max_results: Option<u32>,
+    pub page_token: Option<String>,
 }
 
 impl Tool for ConnectorSearch {
@@ -85,7 +86,7 @@ impl Tool for ConnectorSearch {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Search connected external services (Google Drive, Gmail, GitHub, Notion, Slack, Jira) by provider name and query.".to_string()
+        "Search connected external services by provider name and query. Supported providers: google_drive, gmail, github, notion, slack, jira. Use page_token/cursor for pagination.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -99,27 +100,51 @@ impl Tool for ConnectorSearch {
         match p.as_str() {
             "google_drive" | "gdrive" | "drive" => {
                 google_drive::GoogleDriveSearchFiles { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, google_drive::GoogleDriveSearchFilesArgs { query: args.query, max_results: args.max_results }).await
+                    .call(_ctx, google_drive::GoogleDriveSearchFilesArgs {
+                        query: args.query,
+                        max_results: args.max_results,
+                        page_token: args.page_token,
+                    }).await
             }
             "gmail" | "email" => {
                 gmail::GmailSearchEmails { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, gmail::GmailSearchEmailsArgs { query: args.query, max_results: args.max_results }).await
+                    .call(_ctx, gmail::GmailSearchEmailsArgs {
+                        query: args.query,
+                        max_results: args.max_results,
+                        page_token: args.page_token,
+                    }).await
             }
             "github" => {
                 github::GitHubSearchCode { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, github::GitHubSearchCodeArgs { query: args.query, max_results: args.max_results }).await
+                    .call(_ctx, github::GitHubSearchCodeArgs {
+                        query: args.query,
+                        max_results: args.max_results,
+                        page: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                    }).await
             }
             "notion" => {
                 notion::NotionSearchPages { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, notion::NotionSearchPagesArgs { query: args.query, max_results: args.max_results }).await
+                    .call(_ctx, notion::NotionSearchPagesArgs {
+                        query: args.query,
+                        max_results: args.max_results,
+                        cursor: args.page_token,
+                    }).await
             }
             "slack" => {
                 slack::SlackSearchMessages { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, slack::SlackSearchMessagesArgs { query: args.query, max_results: args.max_results }).await
+                    .call(_ctx, slack::SlackSearchMessagesArgs {
+                        query: args.query,
+                        max_results: args.max_results,
+                        page: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                    }).await
             }
             "jira" => {
                 jira::JiraSearchIssues { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, jira::JiraSearchIssuesArgs { jql: args.query, max_results: args.max_results }).await
+                    .call(_ctx, jira::JiraSearchIssuesArgs {
+                        jql: args.query,
+                        max_results: args.max_results,
+                        start_at: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                    }).await
             }
             unknown => Err(ToolError::msg(format!(
                 "Unknown connector provider '{unknown}'. Supported: google_drive, gmail, github, notion, slack, jira."
@@ -148,7 +173,7 @@ impl Tool for ConnectorRead {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Read specific content from a connected service: a file in Google Drive/GitHub, an email in Gmail, a Notion page, Slack messages in a channel, or a Jira issue.".to_string()
+        "Read specific content from a connected service. target is: file ID for Google Drive, message ID for Gmail, 'owner/repo/path' for GitHub, page ID for Notion, channel ID for Slack, issue key (e.g. PROJ-123) for Jira.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -162,7 +187,10 @@ impl Tool for ConnectorRead {
         match p.as_str() {
             "google_drive" | "gdrive" | "drive" => {
                 google_drive::GoogleDriveReadFile { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, google_drive::GoogleDriveReadFileArgs { file_id: args.target, export_mime_type: args.extra }).await
+                    .call(_ctx, google_drive::GoogleDriveReadFileArgs {
+                        file_id: args.target,
+                        export_mime_type: args.extra,
+                    }).await
             }
             "gmail" | "email" => {
                 gmail::GmailReadEmail { manager: manager.clone(), memory: memory.clone() }
@@ -176,7 +204,9 @@ impl Tool for ConnectorRead {
                     if parts.len() >= 3 {
                         (format!("{}/{}", parts[0], parts[1]), parts[2].to_string())
                     } else {
-                        return Err(ToolError::msg("GitHub read target must be 'owner/repo/path/to/file' or set extra='path'"));
+                        return Err(ToolError::msg(
+                            "GitHub read target must be 'owner/repo/path/to/file' or set extra='path/to/file'"
+                        ));
                     }
                 };
                 github::GitHubReadFile { manager: manager.clone(), memory: memory.clone() }
@@ -189,7 +219,12 @@ impl Tool for ConnectorRead {
             "slack" => {
                 let oldest = args.extra.as_deref().and_then(|s| s.parse::<f64>().ok());
                 slack::SlackReadMessages { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, slack::SlackReadMessagesArgs { channel_id: args.target, limit: Some(50), oldest }).await
+                    .call(_ctx, slack::SlackReadMessagesArgs {
+                        channel_id: args.target,
+                        limit: Some(50),
+                        oldest,
+                        cursor: None,
+                    }).await
             }
             "jira" => {
                 jira::JiraGetIssue { manager: manager.clone(), memory: memory.clone() }
@@ -213,6 +248,7 @@ pub struct ConnectorListArgs {
     pub provider: String,
     pub container: Option<String>,
     pub max_results: Option<u32>,
+    pub page_token: Option<String>,
 }
 
 impl Tool for ConnectorList {
@@ -222,7 +258,7 @@ impl Tool for ConnectorList {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "List items in a connected service: files in Google Drive, recent emails in Gmail, repositories in GitHub, pages in Notion, channels in Slack, or issues in Jira.".to_string()
+        "List items in a connected service. container is: folder ID for Drive, label/filter for Gmail, 'all'/'owner'/'private' for GitHub repos, database ID for Notion, nothing needed for Slack channels, project key for Jira. Use page_token for pagination.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -236,27 +272,54 @@ impl Tool for ConnectorList {
         match p.as_str() {
             "google_drive" | "gdrive" | "drive" => {
                 google_drive::GoogleDriveListFiles { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, google_drive::GoogleDriveListFilesArgs { folder_id: args.container, mime_type: None, max_results: args.max_results }).await
+                    .call(_ctx, google_drive::GoogleDriveListFilesArgs {
+                        folder_id: args.container,
+                        mime_type: None,
+                        max_results: args.max_results,
+                        page_token: args.page_token,
+                    }).await
             }
             "gmail" | "email" => {
                 gmail::GmailListEmails { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, gmail::GmailListEmailsArgs { filter: args.container, max_results: args.max_results }).await
+                    .call(_ctx, gmail::GmailListEmailsArgs {
+                        filter: args.container,
+                        max_results: args.max_results,
+                        page_token: args.page_token,
+                    }).await
             }
             "github" => {
                 github::GitHubListRepos { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, github::GitHubListReposArgs { visibility: args.container, max_results: args.max_results }).await
+                    .call(_ctx, github::GitHubListReposArgs {
+                        visibility: args.container,
+                        max_results: args.max_results,
+                        page: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                    }).await
             }
             "notion" => {
                 notion::NotionListPages { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, notion::NotionListPagesArgs { database_id: args.container, max_results: args.max_results }).await
+                    .call(_ctx, notion::NotionListPagesArgs {
+                        database_id: args.container,
+                        max_results: args.max_results,
+                        cursor: args.page_token,
+                    }).await
             }
             "slack" => {
                 slack::SlackListChannels { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, slack::SlackListChannelsArgs { max_results: args.max_results }).await
+                    .call(_ctx, slack::SlackListChannelsArgs {
+                        max_results: args.max_results,
+                        cursor: args.page_token,
+                        include_private: None,
+                    }).await
             }
             "jira" => {
                 jira::JiraListIssues { manager: manager.clone(), memory: memory.clone() }
-                    .call(_ctx, jira::JiraListIssuesArgs { project: args.container, status: None, assignee: None, max_results: args.max_results }).await
+                    .call(_ctx, jira::JiraListIssuesArgs {
+                        project: args.container,
+                        status: None,
+                        assignee: None,
+                        max_results: args.max_results,
+                        start_at: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                    }).await
             }
             unknown => Err(ToolError::msg(format!(
                 "Unknown connector provider '{unknown}'. Supported: google_drive, gmail, github, notion, slack, jira."
@@ -264,4 +327,3 @@ impl Tool for ConnectorList {
         }
     }
 }
-
