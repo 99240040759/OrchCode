@@ -189,7 +189,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                #[cfg(target_os = "windows")]
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
                 app.deep_link().register_all()?;
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
