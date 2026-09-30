@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useDebouncedCallback } from "use-debounce";
@@ -28,6 +28,8 @@ function DocumentTypeIcon({ type, name }: { type: string; name?: string }) {
 
 type ViewMode = "browse" | "search";
 
+const PAGE_SIZE = 50;
+
 interface DocumentRowProps {
   doc: DocumentRecord;
   onDelete: (id: string) => void;
@@ -49,7 +51,9 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
       role={canOpen ? "button" : undefined}
       tabIndex={canOpen ? 0 : undefined}
       onClick={() => canOpen && onOpen(doc)}
-      onKeyDown={(e) => e.key === "Enter" && canOpen && onOpen(doc)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && e.key === "Enter" && canOpen) onOpen(doc);
+      }}
     >
       <DocumentTypeIcon type={doc.fileType} name={doc.filePath ?? `${doc.title}.${doc.fileType}`} />
       <div className="LibraryRow-info">
@@ -66,7 +70,11 @@ function DocumentRow({ doc, onDelete, onOpen, deleting }: DocumentRowProps) {
         {doc.source}
       </span>
       <span className="LibraryRow-time">{formatRelativeTime(doc.updatedAt)}</span>
-      <div className="LibraryRow-actions">
+      <div
+        className="LibraryRow-actions"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         {confirming ? (
           <>
             <Button
@@ -139,27 +147,30 @@ export function LibraryView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<IngestResultDto | null>(null);
   const [offset, setOffset] = useState(0);
-  const LIMIT = 50;
+  const offsetRef = useRef(0);
+  const searchSeqRef = useRef(0);
 
   const handleOpen = useCallback((doc: DocumentRecord) => {
     if (!doc.filePath) return;
     const kind = documentArtifactKind(doc.fileType);
-    if (kind) openDocument(doc.filePath, kind, doc.title, doc.id);
+    if (kind) openDocument(doc.filePath, kind, doc.title);
   }, [openDocument]);
 
-  const loadDocuments = useCallback(async (off = 0) => {
+  const loadDocuments = useCallback(async (requested: number) => {
     setLoading(true);
     setError(null);
     try {
-      const [docs, count] = await Promise.all([
-        listDocuments({ limit: LIMIT, offset: off }),
-        countDocuments(),
-      ]);
+      const count = await countDocuments();
+      const lastPage = Math.max(0, Math.floor((count - 1) / PAGE_SIZE) * PAGE_SIZE);
+      const off = Math.min(Math.max(0, requested), lastPage);
+      const docs = await listDocuments({ limit: PAGE_SIZE, offset: off });
+      offsetRef.current = off;
       setDocuments(docs);
       setTotalCount(count);
       setOffset(off);
@@ -173,9 +184,9 @@ export function LibraryView() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void loadDocuments();
+    void loadDocuments(0);
     void listen("documents-updated", () => {
-      void loadDocuments();
+      void loadDocuments(offsetRef.current);
     }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
@@ -187,14 +198,15 @@ export function LibraryView() {
   }, [loadDocuments]);
 
   const runSearch = useDebouncedCallback(async (query: string) => {
-    setLoading(true);
+    const seq = ++searchSeqRef.current;
+    setSearching(true);
     try {
       const hits = await searchDocuments(query, 30);
-      setSearchHits(hits);
+      if (seq === searchSeqRef.current) setSearchHits(hits);
     } catch (e) {
-      setError(errorMessage(e));
+      if (seq === searchSeqRef.current) setError(errorMessage(e));
     } finally {
-      setLoading(false);
+      if (seq === searchSeqRef.current) setSearching(false);
     }
   }, 350);
 
@@ -202,11 +214,14 @@ export function LibraryView() {
     setSearchQuery(query);
     if (!query.trim()) {
       runSearch.cancel();
+      searchSeqRef.current += 1;
+      setSearching(false);
       setSearchHits([]);
       setView("browse");
       return;
     }
     setView("search");
+    setSearching(true);
     void runSearch(query);
   }, [runSearch]);
 
@@ -229,21 +244,19 @@ export function LibraryView() {
       setIngesting(true);
       const result = await ingestDocument(path);
       setIngestResult(result);
-      await loadDocuments(0);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setIngesting(false);
     }
-  }, [loadDocuments]);
+  }, []);
 
   const handleDelete = useCallback(async (id: string) => {
     setDeletingId(id);
     setError(null);
     try {
       await deleteDocument(id);
-      setDocuments((prev) => prev.filter((d) => d.id !== id));
-      setTotalCount((c) => Math.max(0, c - 1));
+      setSearchHits((prev) => prev.filter((hit) => hit.documentId !== id));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -301,7 +314,8 @@ export function LibraryView() {
       )}
 
       <div className="LibraryView-content">
-        {loading && <p className="LibraryView-loading">Loading…</p>}
+        {view === "browse" && loading && <p className="LibraryView-loading">Loading…</p>}
+        {view === "search" && searching && <p className="LibraryView-loading">Searching…</p>}
 
         {!loading && view === "browse" && (
           <>
@@ -324,20 +338,20 @@ export function LibraryView() {
               </div>
             )}
 
-            {totalCount > LIMIT && (
+            {totalCount > PAGE_SIZE && (
               <div className="LibraryView-pagination">
                 <Button
-                  onClick={() => void loadDocuments(Math.max(0, offset - LIMIT))}
+                  onClick={() => void loadDocuments(offset - PAGE_SIZE)}
                   disabled={offset === 0}
                 >
                   Previous
                 </Button>
                 <span>
-                  {offset + 1}–{Math.min(offset + LIMIT, totalCount)} of {totalCount}
+                  {offset + 1}–{Math.min(offset + PAGE_SIZE, totalCount)} of {totalCount}
                 </span>
                 <Button
-                  onClick={() => void loadDocuments(offset + LIMIT)}
-                  disabled={offset + LIMIT >= totalCount}
+                  onClick={() => void loadDocuments(offset + PAGE_SIZE)}
+                  disabled={offset + PAGE_SIZE >= totalCount}
                 >
                   Next
                 </Button>
@@ -346,7 +360,7 @@ export function LibraryView() {
           </>
         )}
 
-        {!loading && view === "search" && (
+        {!searching && view === "search" && (
           <>
             {searchHits.length === 0 ? (
               <p className="LibraryView-noResults">

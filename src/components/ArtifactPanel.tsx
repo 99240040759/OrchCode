@@ -13,6 +13,14 @@ import { getBasename } from "../lib/api";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { TerminalView } from "./TerminalView";
+import { Button } from "./ui/Button";
+import { Tooltip } from "./ui/Tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/DropdownMenu";
 
 const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.FileViewer })));
 const PdfViewer = lazy(() => import("./viewers/PdfViewer").then((m) => ({ default: m.PdfViewer })));
@@ -25,15 +33,6 @@ const VIEWER_FALLBACK = (
     <div className="Spinner" />
   </div>
 );
-import { Button } from "./ui/Button";
-import { Tooltip } from "./ui/Tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/DropdownMenu";
-
 function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
   if (tab.kind === "browser") return <ChromeIcon className="ArtifactTab-icon" />;
   if (tab.kind === "terminal") return <VscTerminal className="ArtifactTab-icon" />;
@@ -164,6 +163,16 @@ function ArtifactPanelHeader() {
   );
 }
 
+function DocumentViewer({ kind, path }: { kind: ArtifactTab["kind"]; path: string }) {
+  const version = useArtifactsStore((s) => s.fileVersions[path] ?? 0);
+  const key = `${path}:${version}`;
+  if (kind === "pdf") return <PdfViewer key={key} path={path} />;
+  if (kind === "docx") return <DocxViewer key={key} path={path} />;
+  if (kind === "xlsx") return <XlsxViewer key={key} path={path} />;
+  if (kind === "pptx") return <PptxViewer key={key} path={path} />;
+  return null;
+}
+
 function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
   const stateful = tab.kind === "terminal" || tab.kind === "browser";
   if (!active && !stateful) return null;
@@ -175,13 +184,15 @@ function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
     >
       {tab.kind === "terminal" && <TerminalView id={tab.id} />}
       {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
-      <Suspense fallback={VIEWER_FALLBACK}>
-        {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
-        {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
-        {tab.kind === "docx" && tab.path && <DocxViewer path={tab.path} />}
-        {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
-        {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
-      </Suspense>
+      {!stateful && (
+        <Suspense fallback={VIEWER_FALLBACK}>
+          {tab.kind === "file" ? (
+            <FileViewer tabId={tab.id} path={tab.path} />
+          ) : (
+            tab.path && <DocumentViewer kind={tab.kind} path={tab.path} />
+          )}
+        </Suspense>
+      )}
     </div>
   );
 }

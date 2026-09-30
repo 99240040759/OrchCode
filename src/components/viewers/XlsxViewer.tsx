@@ -1,69 +1,52 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { errorMessage, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
+import { ViewerError, ViewerLoading } from "./ViewerChrome";
 
-interface XlsxViewerProps {
-  path: string;
-}
-
-export function XlsxViewer({ path }: XlsxViewerProps) {
-  const [sheets, setSheets] = useState<SpreadsheetSheet[]>([]);
+export function XlsxViewer({ path }: { path: string }) {
+  const [sheets, setSheets] = useState<SpreadsheetSheet[] | null>(null);
   const [activeSheet, setActiveSheet] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    setSheets(null);
     setError(null);
 
-    readSpreadsheet(path)
-      .then((parsed) => {
+    readSpreadsheet(path).then(
+      (parsed) => {
         if (cancelled) return;
         setSheets(parsed);
         setActiveSheet(0);
-        setLoading(false);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(errorMessage(e));
-          setLoading(false);
-        }
-      });
+      },
+      (e) => {
+        if (!cancelled) setError(errorMessage(e));
+      }
+    );
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [path]);
 
-  if (loading) {
-    return (
-      <div className="DocViewer-loading">
-        <div className="DocViewer-spinner" />
-        <span>Loading spreadsheet…</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="DocViewer-error">
-        <span className="DocViewer-error-icon">⚠</span>
-        <p>{error}</p>
-      </div>
-    );
-  }
+  if (error) return <ViewerError message={error} />;
+  if (!sheets) return <ViewerLoading label="Loading spreadsheet…" />;
 
   const current = sheets[activeSheet];
 
   return (
     <div className="XlsxViewer">
       {sheets.length > 1 && (
-        <div className="XlsxViewer-tabs">
-          {sheets.map((s, i) => (
+        <div className="XlsxViewer-tabs" role="tablist">
+          {sheets.map((sheet, index) => (
             <button
-              key={s.name}
-              className={`XlsxViewer-tab${i === activeSheet ? " active" : ""}`}
-              onClick={() => setActiveSheet(i)}
+              type="button"
+              role="tab"
+              aria-selected={index === activeSheet}
+              key={`${sheet.name}-${index}`}
+              className={`XlsxViewer-tab${index === activeSheet ? " active" : ""}`}
+              onClick={() => setActiveSheet(index)}
             >
-              {s.name}
+              {sheet.name}
             </button>
           ))}
         </div>

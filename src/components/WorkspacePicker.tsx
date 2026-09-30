@@ -1,15 +1,13 @@
-import { VscFolderOpened, VscRocket } from "react-icons/vsc";
+import { VscClose, VscFolderOpened, VscRocket } from "react-icons/vsc";
 import { Titlebar } from "./ui/Titlebar";
 import { useWorkspaceStore } from "../lib/workspace";
 
 export function WorkspacePicker() {
-  const status        = useWorkspaceStore((s) => s.status);
-  const error         = useWorkspaceStore((s) => s.error);
-  const pickAndOpen   = useWorkspaceStore((s) => s.pickAndOpen);
-  const createQuick   = useWorkspaceStore((s) => s.createQuickProject);
-  const dismissError  = useWorkspaceStore((s) => s.dismissError);
-
-  const busy = status === "loading";
+  const busy         = useWorkspaceStore((s) => s.busy);
+  const error        = useWorkspaceStore((s) => s.error);
+  const pickAndOpen  = useWorkspaceStore((s) => s.pickAndOpen);
+  const createQuick  = useWorkspaceStore((s) => s.createQuickProject);
+  const dismissError = useWorkspaceStore((s) => s.dismissError);
 
   return (
     <div className="WorkspacePicker">
@@ -23,7 +21,7 @@ export function WorkspacePicker() {
           project or start a fresh quick project.
         </p>
 
-        <div className="WorkspacePicker-actions">
+        <div className="WorkspacePicker-actions" aria-busy={busy}>
           <button
             type="button"
             className="WorkspacePicker-card"
@@ -52,13 +50,16 @@ export function WorkspacePicker() {
         </div>
 
         {error && (
-          <div
-            className="WorkspacePicker-error"
-            role="alert"
-            onClick={dismissError}
-          >
+          <div className="WorkspacePicker-error" role="alert">
             {error}
-            <span className="WorkspacePicker-error-dismiss" aria-label="Dismiss">×</span>
+            <button
+              type="button"
+              className="WorkspacePicker-error-dismiss"
+              aria-label="Dismiss error"
+              onClick={dismissError}
+            >
+              <VscClose />
+            </button>
           </div>
         )}
       </div>

@@ -7,7 +7,7 @@ import {
 } from "./api";
 import { useWorkspaceStore } from "./workspace";
 
-export function normalizeWorkspacePath(path: string): string {
+function normalizeWorkspacePath(path: string): string {
   const clean = path.replace(/\\/g, "/");
   const root = useWorkspaceStore.getState().current?.path?.replace(/\\/g, "/").replace(/\/+$/, "");
   if (root && clean.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
@@ -25,7 +25,6 @@ export interface ArtifactTab {
   kind: ArtifactKind;
   path?: string;
   url?: string;
-  documentId?: string;
   label?: string;
   preview?: boolean;
 }
@@ -42,7 +41,7 @@ interface ArtifactsActions {
   openFile: (path?: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
-  openDocument: (path: string, kind: DocumentArtifactKind, label?: string, documentId?: string) => void;
+  openDocument: (path: string, kind: DocumentArtifactKind, label?: string) => void;
   setTabPath: (id: string, path: string) => void;
   fileWritten: (path: string) => void;
   dropWorkspaceTabs: () => void;
@@ -129,16 +128,18 @@ export const useArtifactsStore = create(
       });
     },
 
-    openDocument: (rawPath: string, kind: DocumentArtifactKind, label?: string, documentId?: string) => {
+    openDocument: (rawPath: string, kind: DocumentArtifactKind, label?: string) => {
       const path = normalizeWorkspacePath(rawPath);
       set((s) => {
         const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
         if (existing) {
+          existing.preview = false;
+          if (label) existing.label = label;
           s.activeId = existing.id;
           s.panelOpen = true;
           return;
         }
-        const tab: ArtifactTab = { id: newId(), kind, path, label, documentId };
+        const tab: ArtifactTab = { id: newId(), kind, path, label };
         s.tabs.push(tab);
         s.activeId = tab.id;
         s.panelOpen = true;

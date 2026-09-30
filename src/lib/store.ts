@@ -113,14 +113,13 @@ function usageFrom(session: SessionSummary): TokenUsage {
     inputTokens: session.totalInputTokens,
     outputTokens: session.totalOutputTokens,
     totalTokens: session.totalTokens,
-    contextTokens: session.contextTokens ?? 0,
+    contextTokens: session.contextTokens,
   };
 }
 
 interface ChatState {
   sessions: SessionSummary[];
   currentSessionId: string;
-  sessionGeneration: number;
   messages: ChatMessage[];
   streaming: boolean;
   streamingSessionId: string | null;
@@ -153,7 +152,6 @@ export type ChatStore = ChatState & ChatActions;
 const INITIAL_STATE: ChatState = {
   sessions: [],
   currentSessionId: newId(),
-  sessionGeneration: 0,
   messages: [],
   streaming: false,
   streamingSessionId: null,
@@ -167,21 +165,37 @@ const INITIAL_STATE: ChatState = {
 
 type UnlistenFn = () => void;
 let boundUnlisteners: UnlistenFn[] = [];
-
-async function bindListeners() {
-  const unlistenSessions = await listen("sessions-updated", () => {
-    void useChatStore.getState().refreshSessions();
-  });
-  const unlistenModels = await listen("models-updated", () => {
-    void useChatStore.getState().refreshModels();
-  });
-  boundUnlisteners = [unlistenSessions, unlistenModels];
-}
+let listenerEpoch = 0;
+let initEpoch = 0;
 
 function unbindListeners() {
+  listenerEpoch += 1;
   for (const fn of boundUnlisteners) fn();
   boundUnlisteners = [];
 }
+
+async function bindListeners() {
+  unbindListeners();
+  const epoch = listenerEpoch;
+  const fns = await Promise.all([
+    listen("sessions-updated", () => {
+      void useChatStore.getState().refreshSessions();
+    }),
+    listen("models-updated", () => {
+      void useChatStore.getState().refreshModels();
+    }),
+  ]);
+  if (epoch !== listenerEpoch) {
+    for (const fn of fns) fn();
+    return;
+  }
+  boundUnlisteners = fns;
+}
+
+function pickModel(models: ModelDto[], key: string | null | undefined): ModelDto | null {
+  return (key ? models.find((m) => m.key === key) : undefined) ?? models[0] ?? null;
+}
+
 
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
@@ -190,6 +204,7 @@ export const useChatStore = create(
     initialize: async () => {
       if (get().initialized) return;
       set((s) => { s.initialized = true; });
+      const epoch = initEpoch;
 
       const wsPath = useWorkspaceStore.getState().current?.path ?? null;
 
@@ -200,16 +215,15 @@ export const useChatStore = create(
         api.listModels().catch(() => [] as ModelDto[]),
         api.getUserPref("selectedModel").catch(() => null),
       ]);
+      if (epoch !== initEpoch) return;
 
       set((s) => {
         s.sessions = sessions;
         s.models = models;
-        const preferred = savedModel ? models.find((m) => m.key === savedModel) : undefined;
-        s.selectedModel = preferred ?? models[0] ?? null;
+        s.selectedModel = pickModel(models, savedModel);
       });
 
       void get().refreshBudget();
-      registerWorkspaceActivatedCallback(() => void useChatStore.getState().reloadForWorkspace());
       await bindListeners();
     },
 
@@ -227,7 +241,6 @@ export const useChatStore = create(
       set((s) => {
         s.sessions = sessions;
         s.currentSessionId = freshId;
-        s.sessionGeneration += 1;
         s.messages = [];
         s.sessionTokens = ZERO_USAGE;
         s.streaming = false;
@@ -239,13 +252,10 @@ export const useChatStore = create(
     reset: () => {
       const running = get().streamingSessionId;
       if (running) void api.cancelChat(running).catch(() => undefined);
+      initEpoch += 1;
       unbindListeners();
       set((s) => {
-        Object.assign(s, INITIAL_STATE, {
-          currentSessionId: newId(),
-          sessionGeneration: s.sessionGeneration + 1,
-          initialized: false,
-        });
+        Object.assign(s, INITIAL_STATE, { currentSessionId: newId() });
       });
     },
 
@@ -254,7 +264,6 @@ export const useChatStore = create(
       const freshId = newId();
       set((s) => {
         s.currentSessionId = freshId;
-        s.sessionGeneration += 1;
         s.messages = [];
         s.sessionTokens = ZERO_USAGE;
         s.error = null;
@@ -267,15 +276,10 @@ export const useChatStore = create(
 
       set((s) => {
         s.currentSessionId = id;
-        s.sessionGeneration += 1;
         s.messages = [];
         s.sessionTokens = target ? usageFrom(target) : ZERO_USAGE;
         s.error = null;
       });
-
-      if (target?.workspacePath) {
-        api.setWorkspace(target.workspacePath).catch(() => undefined);
-      }
 
       try {
         const views = await api.getSessionView(id);
@@ -314,7 +318,6 @@ export const useChatStore = create(
         s.sessions = s.sessions.filter((sess) => sess.id !== id);
         if (s.currentSessionId === id) {
           s.currentSessionId = newId();
-          s.sessionGeneration += 1;
           s.messages = [];
           s.sessionTokens = ZERO_USAGE;
           s.streaming = false;
@@ -519,6 +522,7 @@ export const useChatStore = create(
         const wsPath = useWorkspaceStore.getState().current?.path ?? null;
         if (!wsPath) return;
         const sessions = await api.listSessionsForWorkspace(wsPath);
+        if (useWorkspaceStore.getState().current?.path !== wsPath) return;
         set((s) => {
           s.sessions = sessions;
           if (!s.streaming) {
@@ -536,12 +540,7 @@ export const useChatStore = create(
         const models = await api.listModels();
         set((s) => {
           s.models = models;
-          if (s.selectedModel) {
-            const current = models.find((m) => m.key === s.selectedModel?.key);
-            s.selectedModel = current ?? models[0] ?? null;
-          } else {
-            s.selectedModel = models[0] ?? null;
-          }
+          s.selectedModel = pickModel(models, s.selectedModel?.key);
         });
       } catch {
         return;
@@ -562,3 +561,7 @@ export const useChatStore = create(
     },
   }))
 );
+
+registerWorkspaceActivatedCallback(() => {
+  if (useChatStore.getState().initialized) void useChatStore.getState().reloadForWorkspace();
+});

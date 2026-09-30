@@ -7,20 +7,9 @@ import {
   BsFileEarmarkPptFill,
 } from "react-icons/bs";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
-import * as api from "../lib/api";
 import { cn, getBasename } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
-
-const IMAGE_CACHE_LIMIT = 200;
-const imageDataUrlCache = new Map<string, string>();
-
-function cacheImageDataUrl(path: string, url: string): void {
-  if (imageDataUrlCache.size >= IMAGE_CACHE_LIMIT) {
-    const oldest = imageDataUrlCache.keys().next().value;
-    if (oldest !== undefined) imageDataUrlCache.delete(oldest);
-  }
-  imageDataUrlCache.set(path, url);
-}
+import { useImageDataUrl } from "../lib/images";
 
 export function Avatar({
   src,
@@ -95,50 +84,16 @@ export interface AttachmentCardProps {
 }
 
 export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: AttachmentCardProps) {
-  const [fetchedSrc, setFetchedSrc] = useState<string | null>(() =>
-    path && isImage ? (imageDataUrlCache.get(path) ?? null) : null
-  );
-  const [failed, setFailed] = useState(false);
-
-  const src = dataUrl ?? fetchedSrc;
-
-  useEffect(() => {
-    if (dataUrl || !isImage || !path) {
-      setFetchedSrc(null);
-      setFailed(false);
-      return;
-    }
-    const cached = imageDataUrlCache.get(path);
-    if (cached) {
-      setFetchedSrc(cached);
-      return;
-    }
-    let active = true;
-    setFailed(false);
-    api
-      .readImageDataUrl(path)
-      .then((url) => {
-        if (active) {
-          cacheImageDataUrl(path, url);
-          setFetchedSrc(url);
-        }
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [dataUrl, isImage, path]);
-
+  const fetched = useImageDataUrl(isImage && !dataUrl ? path : null);
+  const src = dataUrl ?? fetched.src;
   const title = path ?? name;
-  const showThumb = isImage && src !== null && !failed;
+  const showThumb = isImage && Boolean(src);
 
   return (
     <div className="AttachmentCard" title={title}>
       {showThumb ? (
         <span className="AttachmentCard-thumbWrap">
-          <img src={src} alt={name} className="AttachmentCard-thumb" />
+          <img src={src ?? undefined} alt={name} className="AttachmentCard-thumb" />
         </span>
       ) : (
         <ExplorerIcon
@@ -171,8 +126,6 @@ export interface FileTagProps {
   added?: number;
   removed?: number;
   interactive?: boolean;
-  className?: string;
-  onRemove?: () => void;
 }
 
 export function FileTag({
@@ -182,8 +135,6 @@ export function FileTag({
   added,
   removed,
   interactive = true,
-  className = "",
-  onRemove,
 }: FileTagProps) {
   const openFile = useArtifactsStore((s) => s.openFile);
   const filename = name || getBasename(path);
@@ -196,7 +147,7 @@ export function FileTag({
 
   return (
     <span
-      className={`FileTag ${clickable ? "FileTag-clickable" : ""} ${className}`}
+      className={cn("FileTag", clickable && "FileTag-clickable")}
       title={path || filename}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
@@ -224,19 +175,6 @@ export function FileTag({
       {typeof added === "number" && added > 0 && <span className="FileTag-added">+{added}</span>}
       {typeof removed === "number" && removed > 0 && (
         <span className="FileTag-removed">-{removed}</span>
-      )}
-      {onRemove && (
-        <button
-          type="button"
-          className="FileTag-remove"
-          aria-label={`Remove ${filename}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemove();
-          }}
-        >
-          <VscClose />
-        </button>
       )}
     </span>
   );

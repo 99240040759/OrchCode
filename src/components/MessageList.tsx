@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { VscArrowDown } from "react-icons/vsc";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
@@ -27,10 +27,6 @@ export function MessageList() {
     pinnedRef.current = pinned;
     setShowJump(!pinned);
   }, []);
-
-  useEffect(() => {
-    if (messages.length > 0) scrollToBottom();
-  }, [scrollToBottom]);
 
   useLayoutEffect(() => {
     const grew = messages.length > lastCountRef.current;

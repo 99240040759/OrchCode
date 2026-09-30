@@ -12,14 +12,14 @@ import {
 } from "./api";
 
 type WorkspaceActivatedFn = () => void;
-let _onWorkspaceActivated: WorkspaceActivatedFn | null = null;
+let onWorkspaceActivated: WorkspaceActivatedFn | null = null;
 
 export function registerWorkspaceActivatedCallback(fn: WorkspaceActivatedFn) {
-  _onWorkspaceActivated = fn;
+  onWorkspaceActivated = fn;
 }
 
-function notifyChatStore() {
-  _onWorkspaceActivated?.();
+function notifyWorkspaceActivated() {
+  onWorkspaceActivated?.();
 }
 
 export interface WorkspaceMeta {
@@ -41,6 +41,7 @@ interface WorkspaceState {
   current: WorkspaceMeta | null;
   all: WorkspaceMeta[];
   status: WorkspacePickStatus;
+  busy: boolean;
   error: string | null;
 }
 
@@ -63,6 +64,7 @@ const INITIAL_STATE: WorkspaceState = {
   current: null,
   all: [],
   status: "idle",
+  busy: false,
   error: null,
 };
 
@@ -142,202 +144,159 @@ function randomProjectName(existingNames: Set<string>): string {
 }
 
 export const useWorkspaceStore = create(
-  immer<WorkspaceStore>((set, get) => ({
-    ...INITIAL_STATE,
-
-    initialize: async () => {
+  immer<WorkspaceStore>((set, get) => {
+    const exclusive = async (task: () => Promise<void>) => {
+      if (get().busy) return;
       set((s) => {
-        s.status = "loading";
-        s.error = null;
+        s.busy = true;
       });
-
-      let all: WorkspaceMeta[] = [];
-      let lastId: string | null = null;
       try {
-        [all, lastId] = await Promise.all([loadAll(), loadLastId()]);
-      } catch (e) {
-        set((s) => {
-          s.status = "needs_pick";
-          s.error = `Could not load saved workspaces: ${errorMessage(e)}`;
-        });
-        return;
-      }
-
-      set((s) => {
-        s.all = all;
-      });
-
-      if (all.length === 0) {
-        set((s) => {
-          s.status = "needs_pick";
-        });
-        return;
-      }
-
-      const last = all.find((w) => w.id === lastId) ?? all[0];
-
-      try {
-        const active = await activateWorkspace(last);
-        const next = upsert(all, active);
-        if (active !== last) await saveAll(next);
-        set((s) => {
-          s.all = next;
-          s.current = active;
-          s.status = "ready";
-        });
-      } catch (e) {
-        set((s) => {
-          s.status = "needs_pick";
-          s.error = `Last workspace "${last.name}" could not be opened: ${errorMessage(e)}`;
-        });
-      }
-    },
-
-    pickAndOpen: async () => {
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected !== "string") return;
-
-      const path = selected;
-      const name = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
-
-      let meta: WorkspaceMeta = {
-        id: newId(),
-        name,
-        path,
-        isQuickProject: false,
-        createdAt: Date.now(),
-      };
-
-      try {
-        meta = await activateWorkspace(meta);
+        await task();
       } catch (e) {
         set((s) => {
           s.error = errorMessage(e);
           s.status = failureStatus(s.current);
         });
-        return;
+      } finally {
+        set((s) => {
+          s.busy = false;
+        });
       }
+    };
 
-      const existing = get().all.find((w) => w.path === meta.path);
-      if (existing) meta = existing;
-      const next = upsert(get().all, meta);
-      await saveAll(next);
+    const commit = async (meta: WorkspaceMeta, list: WorkspaceMeta[]) => {
+      await saveAll(list);
       await saveLastId(meta.id);
-
       set((s) => {
-        s.all = next;
+        s.all = list;
         s.current = meta;
         s.status = "ready";
         s.error = null;
       });
+      notifyWorkspaceActivated();
+    };
 
-      void notifyChatStore();
-    },
+    return {
+      ...INITIAL_STATE,
 
-    createQuickProject: async () => {
-      const id = newId();
-      const existingNames = new Set(get().all.map((w) => w.name));
-      const name = randomProjectName(existingNames);
-
-      let path: string;
-      try {
-        path = await createQuickProjectDir(id, name);
-      } catch (e) {
+      initialize: async () => {
         set((s) => {
-          s.error = errorMessage(e);
-          s.status = failureStatus(s.current);
-        });
-        return;
-      }
-
-      let meta: WorkspaceMeta = {
-        id,
-        name,
-        path,
-        isQuickProject: true,
-        createdAt: Date.now(),
-      };
-
-      try {
-        meta = await activateWorkspace(meta);
-      } catch (e) {
-        set((s) => {
-          s.error = errorMessage(e);
-          s.status = failureStatus(s.current);
-        });
-        return;
-      }
-
-      const next = upsert(get().all, meta);
-      await saveAll(next);
-      await saveLastId(meta.id);
-
-      set((s) => {
-        s.all = next;
-        s.current = meta;
-        s.status = "ready";
-        s.error = null;
-      });
-
-      void notifyChatStore();
-    },
-
-    switchTo: async (id: string) => {
-      const meta = get().all.find((w) => w.id === id);
-      if (!meta) return;
-      try {
-        const active = await activateWorkspace(meta);
-        await saveLastId(id);
-        const next = upsert(get().all, active);
-        if (active !== meta) await saveAll(next);
-        set((s) => {
-          s.all = next;
-          s.current = active;
-          s.status = "ready";
+          s.status = "loading";
           s.error = null;
         });
-        void notifyChatStore();
-      } catch (e) {
-        set((s) => {
-          s.error = errorMessage(e);
-        });
-      }
-    },
 
-    remove: async (id: string) => {
-      const target = get().all.find((w) => w.id === id);
-      if (!target) return;
-      const next = get().all.filter((w) => w.id !== id);
-      try {
-        await forgetWorkspace(target.path, target.isQuickProject);
-      } catch (e) {
-        set((s) => {
-          s.error = errorMessage(e);
-        });
-        return;
-      }
-      await saveAll(next);
-      const wasCurrent = get().current?.id === id;
-      set((s) => {
-        s.all = next;
-        if (wasCurrent) {
-          s.current = null;
-          s.status = "needs_pick";
+        let all: WorkspaceMeta[] = [];
+        let lastId: string | null = null;
+        try {
+          [all, lastId] = await Promise.all([loadAll(), loadLastId()]);
+        } catch (e) {
+          set((s) => {
+            s.status = "needs_pick";
+            s.error = `Could not load saved workspaces: ${errorMessage(e)}`;
+          });
+          return;
         }
-      });
-      if (wasCurrent) notifyChatStore();
-    },
 
-    dismissError: () => {
-      set((s) => {
-        s.error = null;
-      });
-    },
+        set((s) => {
+          s.all = all;
+        });
 
-    reset: () => {
-      set((s) => {
-        Object.assign(s, INITIAL_STATE);
-      });
-    },
-  }))
+        if (all.length === 0) {
+          set((s) => {
+            s.status = "needs_pick";
+          });
+          return;
+        }
+
+        const last = all.find((w) => w.id === lastId) ?? all[0];
+
+        try {
+          const active = await activateWorkspace(last);
+          const next = upsert(all, active);
+          if (active !== last) await saveAll(next);
+          set((s) => {
+            s.all = next;
+            s.current = active;
+            s.status = "ready";
+          });
+        } catch (e) {
+          set((s) => {
+            s.status = "needs_pick";
+            s.error = `Last workspace "${last.name}" could not be opened: ${errorMessage(e)}`;
+          });
+        }
+      },
+
+      pickAndOpen: () =>
+        exclusive(async () => {
+          const selected = await open({ directory: true, multiple: false });
+          if (typeof selected !== "string") return;
+
+          const name = selected.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? selected;
+          const activated = await activateWorkspace({
+            id: newId(),
+            name,
+            path: selected,
+            isQuickProject: false,
+            createdAt: Date.now(),
+          });
+          const meta = get().all.find((w) => w.path === activated.path) ?? activated;
+          await commit(meta, upsert(get().all, meta));
+        }),
+
+      createQuickProject: () =>
+        exclusive(async () => {
+          const id = newId();
+          const name = randomProjectName(new Set(get().all.map((w) => w.name)));
+          const path = await createQuickProjectDir(id, name);
+          const meta = await activateWorkspace({
+            id,
+            name,
+            path,
+            isQuickProject: true,
+            createdAt: Date.now(),
+          });
+          await commit(meta, upsert(get().all, meta));
+        }),
+
+      switchTo: (id: string) =>
+        exclusive(async () => {
+          const meta = get().all.find((w) => w.id === id);
+          if (!meta) return;
+          const active = await activateWorkspace(meta);
+          await commit(active, upsert(get().all, active));
+        }),
+
+      remove: (id: string) =>
+        exclusive(async () => {
+          const target = get().all.find((w) => w.id === id);
+          if (!target) return;
+          await forgetWorkspace(target.path, target.isQuickProject);
+          const next = get().all.filter((w) => w.id !== id);
+          await saveAll(next);
+          const wasCurrent = get().current?.id === id;
+          set((s) => {
+            s.all = next;
+            s.error = null;
+            if (wasCurrent) {
+              s.current = null;
+              s.status = "needs_pick";
+            }
+          });
+          if (wasCurrent) notifyWorkspaceActivated();
+        }),
+
+      dismissError: () => {
+        set((s) => {
+          s.error = null;
+        });
+      },
+
+      reset: () => {
+        set((s) => {
+          Object.assign(s, INITIAL_STATE);
+        });
+      },
+    };
+  })
 );

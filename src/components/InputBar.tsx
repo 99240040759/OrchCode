@@ -10,7 +10,8 @@ import {
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { renderToStaticMarkup } from "react-dom/server";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
 import { useChatStore } from "../lib/store";
@@ -43,10 +44,37 @@ type Trigger = "@" | "/" | null;
 function activeToken(text: string, caret: number) {
   const upto = text.slice(0, caret);
   const at = /(^|\s)@([^\s]*)$/.exec(upto);
-  if (at) return { trigger: "@" as Trigger, query: at[2], start: caret - at[2].length - 1 };
-  const slash = /(^|\s)\/([^\s]*)$/.exec(upto);
-  if (slash) return { trigger: "/" as Trigger, query: slash[2], start: caret - slash[2].length - 1 };
-  return { trigger: null as Trigger, query: "", start: caret };
+  if (at) return { trigger: "@" as Trigger, query: at[2] };
+  const slash = /^\s*\/([^\s]*)$/.exec(upto);
+  if (slash) return { trigger: "/" as Trigger, query: slash[1] };
+  return { trigger: null as Trigger, query: "" };
+}
+
+const iconMarkupCache = new Map<string, string>();
+
+function mentionIconMarkup(filename: string): string {
+  const key = filename.toLowerCase();
+  const cached = iconMarkupCache.get(key);
+  if (cached !== undefined) return cached;
+  const host = document.createElement("span");
+  const root = createRoot(host);
+  flushSync(() => {
+    root.render(
+      <ExplorerIcon
+        type="file"
+        name={filename}
+        className="FileTag-icon"
+        width={14}
+        height={14}
+        aria-hidden="true"
+      />
+    );
+  });
+  const markup = host.innerHTML;
+  root.unmount();
+  if (iconMarkupCache.size >= 200) iconMarkupCache.clear();
+  iconMarkupCache.set(key, markup);
+  return markup;
 }
 
 function createMentionNode(path: string): { node: HTMLSpanElement; space: Text } {
@@ -56,19 +84,7 @@ function createMentionNode(path: string): { node: HTMLSpanElement; space: Text }
   container.contentEditable = "false";
   container.setAttribute("data-path", path);
   container.title = path;
-  container.insertAdjacentHTML(
-    "beforeend",
-    renderToStaticMarkup(
-      <ExplorerIcon
-        type="file"
-        name={filename}
-        className="FileTag-icon"
-        width={14}
-        height={14}
-        aria-hidden="true"
-      />
-    )
-  );
+  container.insertAdjacentHTML("beforeend", mentionIconMarkup(filename));
   const name = document.createElement("span");
   name.className = "FileTag-name";
   name.textContent = filename;
@@ -411,6 +427,10 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       if (event.key === "Escape") {
         event.preventDefault();
         closePopover();
+        return;
+      }
+      if (trigger === "@" && loadingFiles && (event.key === "Enter" || event.key === "Tab")) {
+        event.preventDefault();
         return;
       }
       if (hits.length > 0) {

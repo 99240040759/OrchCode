@@ -1,5 +1,6 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { formatDistanceToNowStrict } from "date-fns";
+import { getExt } from "./utils";
 
 export {
   cn,
@@ -168,8 +169,8 @@ export function listSessionsForWorkspace(workspacePath: string): Promise<Session
   return invoke("list_sessions_for_workspace", { workspacePath });
 }
 
-export function listModels(forceRefresh = false): Promise<ModelDto[]> {
-  return invoke("list_models", { forceRefresh });
+export function listModels(): Promise<ModelDto[]> {
+  return invoke("list_models");
 }
 
 export function getBudget(): Promise<Budget> {
@@ -386,10 +387,6 @@ export function listDocuments(opts?: {
   });
 }
 
-export function getDocument(documentId: string): Promise<DocumentRecord | null> {
-  return invoke("ipc_get_document", { documentId });
-}
-
 export function deleteDocument(documentId: string): Promise<void> {
   return invoke("ipc_delete_document", { documentId });
 }
@@ -400,17 +397,6 @@ export function searchDocuments(query: string, limit?: number): Promise<SearchHi
 
 export function countDocuments(): Promise<number> {
   return invoke("ipc_count_documents");
-}
-
-export interface ParsedDocumentDto {
-  title?: string | null;
-  fileType: string;
-  pageCount?: number | null;
-  fullText: string;
-}
-
-export function readParsedDocument(path: string): Promise<ParsedDocumentDto> {
-  return invoke("read_parsed_document", { path });
 }
 
 export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
@@ -429,9 +415,7 @@ export function documentArtifactKind(fileType: string): DocumentArtifactKind | u
 }
 
 export function documentArtifactKindForPath(path: string): DocumentArtifactKind | undefined {
-  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
-  const extension = name.split(".").pop() ?? "";
-  return documentArtifactKind(extension);
+  return documentArtifactKind(getExt(path));
 }
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {

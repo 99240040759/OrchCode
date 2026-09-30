@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import { useDebouncedCallback } from "use-debounce";
@@ -12,6 +12,7 @@ import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 
 import * as api from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
+import { useImageDataUrl } from "../lib/images";
 import { Markdown } from "./Markdown";
 import { ExplorerIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
@@ -88,10 +89,10 @@ const LOADING_SPINNER = (
   </div>
 );
 
-type FileKind = "image" | "video" | "audio" | "binary" | "text" | "unknown";
+type FileKind = "image" | "video" | "audio" | "binary" | "text";
 
-const CODE_EXTENSIONS = new Set([
-  "ts", "tsx", "js", "jsx", "mjs", "cjs",
+const TEXT_EXTENSIONS = new Set([
+  "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs",
   "py", "rs", "go", "java", "kt", "swift", "c", "cpp", "cc", "h", "hpp",
   "cs", "rb", "php", "scala", "r", "dart", "lua", "ex", "exs", "erl", "hrl",
   "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
@@ -102,20 +103,36 @@ const CODE_EXTENSIONS = new Set([
   "tf", "hcl", "dockerfile", "makefile",
 ]);
 
-function mimeToKind(mime: string, ext: string): FileKind {
-  if (CODE_EXTENSIONS.has(ext)) return "text";
+const BINARY_MIMES = new Set([
+  "application/zip", "application/x-tar", "application/gzip",
+  "application/x-bzip2", "application/x-7z-compressed", "application/x-rar-compressed",
+  "application/octet-stream", "application/wasm",
+  "font/ttf", "font/otf", "font/woff", "font/woff2",
+  "application/x-sqlite3", "application/vnd.sqlite3",
+]);
+
+function classifyFile(mime: string, ext: string): FileKind {
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
-  const binaryMimes = new Set([
-    "application/zip", "application/x-tar", "application/gzip",
-    "application/x-bzip2", "application/x-7z-compressed", "application/x-rar-compressed",
-    "application/octet-stream", "application/wasm",
-    "font/ttf", "font/otf", "font/woff", "font/woff2",
-    "application/x-sqlite3", "application/vnd.sqlite3",
-  ]);
-  if (binaryMimes.has(mime)) return "binary";
+  if (BINARY_MIMES.has(mime)) return "binary";
   return "text";
+}
+
+const MEDIA_MIMES: Record<"video" | "audio", Record<string, string>> = {
+  video: {
+    mp4: "video/mp4", webm: "video/webm", ogg: "video/ogg",
+    mov: "video/quicktime", avi: "video/x-msvideo", mkv: "video/x-matroska", m4v: "video/mp4",
+  },
+  audio: {
+    mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac",
+    aac: "audio/aac", ogg: "audio/ogg", m4a: "audio/mp4", opus: "audio/opus",
+  },
+};
+
+function mediaMime(kind: "video" | "audio", path: string): string {
+  return MEDIA_MIMES[kind][api.getExt(path)] ?? (kind === "video" ? "video/mp4" : "audio/mpeg");
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
@@ -198,83 +215,55 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
   );
 }
 
-function NativeImageViewer({ path }: { path: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    api.readImageDataUrl(path)
-      .then((url) => { if (!cancelled) { setSrc(url); setLoading(false); } })
-      .catch((e) => { if (!cancelled) { setError(api.errorMessage(e)); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [path]);
-
-  if (loading) return <div className="FileViewerLoading"><div className="Spinner" /></div>;
-  if (error) return <div className="FileContent-msg">{error}</div>;
+function ImagePreview({ path, version }: { path: string; version: number }) {
+  const { src, error, loading } = useImageDataUrl(path, version);
+  if (loading) return LOADING_SPINNER;
+  if (error || !src) return <div className="FileContent-msg">{error ?? "Image could not be loaded"}</div>;
   return (
     <div className="NativeMediaViewer">
-      <img src={src!} alt={api.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+      <img src={src} alt={api.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
     </div>
   );
 }
 
-type MediaKind = "video" | "audio";
-
-const VIDEO_MIMES: Record<string, string> = {
-  mp4: "video/mp4", webm: "video/webm", ogg: "video/ogg",
-  mov: "video/quicktime", avi: "video/x-msvideo", mkv: "video/x-matroska", m4v: "video/mp4",
-};
-const AUDIO_MIMES: Record<string, string> = {
-  mp3: "audio/mpeg", wav: "audio/wav", flac: "audio/flac",
-  aac: "audio/aac", ogg: "audio/ogg", m4a: "audio/mp4", opus: "audio/opus",
-};
-
-function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
+function MediaPreview({ path, kind }: { path: string; kind: "video" | "audio" }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const ext = api.getExt(path);
+  const mime = mediaMime(kind, path);
 
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
-    setLoading(true);
+    setSrc(null);
     setError(null);
-    const type = kind === "video" ? (VIDEO_MIMES[ext] ?? "video/mp4") : (AUDIO_MIMES[ext] ?? "audio/mpeg");
-    api.readBinaryFile(path)
-      .then((buffer) => {
+    api.readBinaryFile(path).then(
+      (buffer) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([buffer], { type }));
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: mime }));
         setSrc(objectUrl);
-        setLoading(false);
-      })
-      .catch((e) => { if (!cancelled) { setError(api.errorMessage(e)); setLoading(false); } });
+      },
+      (e) => {
+        if (!cancelled) setError(api.errorMessage(e));
+      }
+    );
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [path, kind, ext]);
+  }, [path, mime]);
 
-  if (loading) return <div className="FileViewerLoading"><div className="Spinner" /></div>;
   if (error) return <div className="FileContent-msg">{error}</div>;
-
-  const mime = kind === "video"
-    ? (VIDEO_MIMES[ext] ?? "video/mp4")
-    : (AUDIO_MIMES[ext] ?? "audio/mpeg");
+  if (!src) return LOADING_SPINNER;
 
   return (
-    <div className={`NativeMediaViewer${kind === "audio" ? " NativeMediaViewer--audio" : ""}`}>
+    <div className={kind === "audio" ? "NativeMediaViewer NativeMediaViewer--audio" : "NativeMediaViewer"}>
       {kind === "video" ? (
         <video controls className="NativeMediaViewer-video">
-          <source src={src!} type={mime} />
+          <source src={src} type={mime} />
         </video>
       ) : (
         <audio controls className="NativeMediaViewer-audio">
-          <source src={src!} type={mime} />
+          <source src={src} type={mime} />
         </audio>
       )}
     </div>
@@ -282,16 +271,31 @@ function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
 }
 
 function BinaryFileMessage({ path }: { path: string }) {
-  const ext = api.getExt(path);
+  const name = api.getBasename(path);
   return (
     <div className="FileContent-msg">
       <div className="BinaryFileMsg">
-        <ExplorerIcon type="file" name={api.getBasename(path)} width={40} height={40} className="BinaryFileMsg-icon" />
-        <span className="BinaryFileMsg-name">{api.getBasename(path)}</span>
-        <span className="BinaryFileMsg-hint">Binary file (.{ext}) — cannot be displayed as text</span>
+        <ExplorerIcon type="file" name={name} width={40} height={40} className="BinaryFileMsg-icon" />
+        <span className="BinaryFileMsg-name">{name}</span>
+        <span className="BinaryFileMsg-hint">Binary file (.{api.getExt(path)}) — cannot be displayed as text</span>
       </div>
     </div>
   );
+}
+
+interface LoadedFile {
+  path: string;
+  kind: FileKind;
+  content: string;
+  truncated: boolean;
+}
+
+async function loadFile(path: string): Promise<LoadedFile> {
+  const meta = await api.readDocumentMetadata(path);
+  const kind = classifyFile(meta.mime, meta.extension);
+  if (kind !== "text") return { path, kind, content: "", truncated: false };
+  const file = await api.readTextFile(path);
+  return { path, kind, content: file.content, truncated: file.truncated };
 }
 
 export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
@@ -300,51 +304,45 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
 
   const isMd = Boolean(path && /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path));
   const [mode, setMode] = useState<"preview" | "code">("preview");
-  const [content, setContent] = useState("");
-  const [truncated, setTruncated] = useState(false);
+  const [file, setFile] = useState<LoadedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [fileKind, setFileKind] = useState<FileKind | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const current = file && file.path === path ? file : null;
+  const content = current?.content ?? "";
   const { copied, copy } = api.useCopy(content);
 
-  const load = useCallback(async (target: string) => {
-    setLoading(true);
-    setError(null);
-    setFileKind(null);
-    try {
-      const meta = await api.readDocumentMetadata(target);
-      const kind = mimeToKind(meta.mime, meta.extension);
-      setFileKind(kind);
-      if (kind === "text") {
-        const file = await api.readTextFile(target);
-        setContent(file.content);
-        setTruncated(file.truncated);
-      }
-    } catch (e) {
-      setContent("");
-      setTruncated(false);
-      setError(api.errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    setMode("preview");
+  }, [path]);
 
   useEffect(() => {
     if (!path) {
-      setContent("");
+      setFile(null);
       setError(null);
-      setFileKind(null);
+      setLoading(false);
       return;
     }
-    if (api.documentArtifactKindForPath(path)) return;
-    setMode("preview");
-    void load(path);
-  }, [path, load]);
-
-  useEffect(() => {
-    if (!path || version === 0 || api.documentArtifactKindForPath(path)) return;
-    void load(path);
-  }, [version, path, load]);
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    loadFile(path).then(
+      (loaded) => {
+        if (cancelled) return;
+        setFile(loaded);
+        setLoading(false);
+      },
+      (e) => {
+        if (cancelled) return;
+        setFile(null);
+        setError(api.errorMessage(e));
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [path, version, reloadTick]);
 
   if (!path) {
     return (
@@ -354,46 +352,19 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
     );
   }
 
-  if (fileKind === "image") {
-    return (
-      <div className="FileViewerFull">
-        <div className="FileViewerBar">
-          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
-        </div>
-        <div className="FileViewerBody"><NativeImageViewer path={path} /></div>
-      </div>
-    );
-  }
+  const kind = current?.kind;
 
-  if (fileKind === "video") {
+  if (kind && kind !== "text") {
     return (
       <div className="FileViewerFull">
         <div className="FileViewerBar">
           <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
         </div>
-        <div className="FileViewerBody"><NativeMediaViewer path={path} kind="video" /></div>
-      </div>
-    );
-  }
-
-  if (fileKind === "audio") {
-    return (
-      <div className="FileViewerFull">
-        <div className="FileViewerBar">
-          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
+        <div className="FileViewerBody">
+          {kind === "image" && <ImagePreview path={path} version={version + reloadTick} />}
+          {(kind === "video" || kind === "audio") && <MediaPreview key={`${path}:${version}`} path={path} kind={kind} />}
+          {kind === "binary" && <BinaryFileMessage path={path} />}
         </div>
-        <div className="FileViewerBody"><NativeMediaViewer path={path} kind="audio" /></div>
-      </div>
-    );
-  }
-
-  if (fileKind === "binary") {
-    return (
-      <div className="FileViewerFull">
-        <div className="FileViewerBar">
-          <div className="FileViewerBar-left"><FileBreadcrumb path={path} /></div>
-        </div>
-        <div className="FileViewerBody"><BinaryFileMessage path={path} /></div>
       </div>
     );
   }
@@ -403,7 +374,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       <div className="FileViewerBar">
         <div className="FileViewerBar-left">
           <FileBreadcrumb path={path} />
-          {truncated && <span className="FileContent-trunc">truncated</span>}
+          {current?.truncated && <span className="FileContent-trunc">truncated</span>}
         </div>
         <div className="FileViewerBar-right">
           {isMd && (
@@ -418,7 +389,12 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
             </Tooltip>
           )}
           <Tooltip content="Reload file" side="bottom">
-            <Button className="IconBtn" aria-label="Reload file" onClick={() => void load(path)} disabled={loading}>
+            <Button
+              className="IconBtn"
+              aria-label="Reload file"
+              onClick={() => setReloadTick((t) => t + 1)}
+              disabled={loading}
+            >
               <VscRefresh />
             </Button>
           </Tooltip>
@@ -440,10 +416,10 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
         </div>
       </div>
       <div className="FileViewerBody">
-        {loading && !content ? (
-          <div className="FileViewerLoading"><div className="Spinner" /></div>
-        ) : error ? (
+        {error ? (
           <div className="FileContent-msg">{error}</div>
+        ) : !current ? (
+          LOADING_SPINNER
         ) : isMd && mode === "preview" ? (
           <div className="FileViewerMarkdown"><Markdown>{content}</Markdown></div>
         ) : (

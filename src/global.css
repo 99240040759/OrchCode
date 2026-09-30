@@ -415,8 +415,6 @@ svg {
   will-change: transform;
 }
 
-
-/* ArtifactPanel owns its own header strip — tabs + actions */
 .ArtifactPanel-header {
   flex: 0 0 auto;
   height: 36px;
@@ -440,8 +438,6 @@ svg {
   overflow: hidden;
   border-right: 1px solid var(--border);
 }
-
-/* ── New chat ── */
 
 .Sidebar-header {
   flex: 0 0 auto;
@@ -478,8 +474,6 @@ svg {
 
 .Sidebar-newchat svg { width: 15px; height: 15px; flex-shrink: 0; }
 
-/* ── Thread list ── */
-
 .Sidebar-threads {
   flex: 1;
   min-height: 0;
@@ -504,8 +498,6 @@ svg {
   line-height: 1.5;
 }
 
-/* ── Footer ── */
-
 .Sidebar-footer {
   flex: 0 0 auto;
   display: flex;
@@ -514,8 +506,6 @@ svg {
   padding: 8px 8px 10px;
   border-top: 1px solid var(--border);
 }
-
-/* ── ThreadItem ── */
 
 .ThreadItem {
   display: flex;
@@ -620,8 +610,6 @@ svg {
 .ThreadItem-confirmYes svg,
 .ThreadItem-confirmNo svg { width: 13px; height: 13px; }
 
-/* ── Account ── */
-
 .Account {
   display: flex;
   align-items: center;
@@ -660,8 +648,6 @@ svg {
 
 .Account-logout svg { width: 15px; height: 15px; }
 
-/* ── Avatar ── */
-
 .Avatar {
   flex: 0 0 auto;
   border-radius: 50%;
@@ -685,8 +671,6 @@ svg {
   object-fit: cover;
   display: block;
 }
-
-/* ── BudgetBar ── */
 
 .BudgetBar {
   display: flex;
@@ -730,7 +714,6 @@ svg {
   font-weight: 600;
   color: var(--c-error);
 }
-
 
 .PanelResizeHandle {
   position: relative;
@@ -914,12 +897,10 @@ svg {
   align-items: stretch;
 }
 
-/* Consistent spacing: every block after the first gets a top margin */
 .Msg-assistant > * + * {
   margin-top: 6px;
 }
 
-/* Tool rows right after tool rows get no extra spacing — they're already grouped */
 .Msg-assistant > .ToolList + .ToolList {
   margin-top: 1px;
 }
@@ -1173,7 +1154,6 @@ svg {
   overflow: hidden;
 }
 
-/* Inline mention style — in the composer or message text */
 .Composer-input .FileTag,
 .Msg-bubble .FileTag {
   padding: 2px 6px;
@@ -1193,7 +1173,6 @@ svg {
   color: var(--text-hi);
 }
 
-/* Inline mention context: box highlight on hover */
 .Composer-input .FileTag-clickable:hover,
 .Composer-input .FileTag-clickable:focus-visible,
 .Msg-bubble .FileTag-clickable:hover,
@@ -1202,7 +1181,6 @@ svg {
   border-color: var(--border-strong);
 }
 
-/* Tool row context: brighten on hover */
 .ToolRow .FileTag-clickable:hover,
 .ToolRow .FileTag-clickable:focus-visible {
   color: var(--text-hi);
@@ -1217,30 +1195,6 @@ svg {
 .FileTag-added { color: var(--c-added); font-weight: 500; font-size: 11px; }
 
 .FileTag-removed { color: var(--c-removed); font-weight: 500; font-size: 11px; }
-
-.FileTag-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-med);
-  cursor: pointer;
-  padding: 0;
-  margin-left: 2px;
-  flex-shrink: 0;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
-.FileTag-remove:hover {
-  background: rgba(227,70,113,.25);
-  color: var(--c-removed);
-}
-
-.FileTag-remove svg { width: 10px; height: 10px; }
 
 .Composer-dock {
   flex: 0 0 auto;
@@ -3612,11 +3566,6 @@ svg {
   background: rgba(252,107,131,.28);
 }
 
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   WorkspacePicker — full-screen gate when no workspace is active
-   ───────────────────────────────────────────────────────────────────────────── */
-
 .WorkspacePicker {
   display: flex;
   flex-direction: column;
@@ -3734,22 +3683,24 @@ svg {
   border-radius: var(--r-md);
   color: var(--c-error);
   font-size: 12px;
-  cursor: pointer;
   margin-top: var(--sp-3);
   max-width: 360px;
   text-align: left;
 }
-
 .WorkspacePicker-error-dismiss {
+  display: inline-flex;
+  align-items: center;
   margin-left: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
   font-size: 16px;
   opacity: 0.6;
+  cursor: pointer;
   flex-shrink: 0;
 }
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Sidebar — workspace header
-   ───────────────────────────────────────────────────────────────────────────── */
+.WorkspacePicker-error-dismiss:hover { opacity: 1; }
 
 .Sidebar-workspace {
   padding: var(--sp-2) var(--sp-2) 0;
@@ -3801,17 +3752,12 @@ svg {
   opacity: 0.5;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   DropdownMenu separator
-   ───────────────────────────────────────────────────────────────────────────── */
-
 .DropdownMenu-separator {
   height: 1px;
   background: var(--border);
   margin: var(--sp-1) 0;
 }
 
-/* Workspace menu item with inline delete */
 .WsMenuItem {
   display: flex;
   align-items: center;

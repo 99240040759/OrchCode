@@ -106,15 +106,10 @@ export function ConnectorsView() {
     void listen<{ connector: ConnectorDto | null; error: string | null }>(
       "connector-changed",
       (event) => {
-        if (event.payload.error) {
-          setError(event.payload.error);
-        }
-        if (event.payload.connector) {
-          setConnectors((prev) =>
-            prev.map((c) =>
-              c.id === event.payload.connector!.id ? event.payload.connector! : c
-            )
-          );
+        const { connector, error } = event.payload;
+        if (error) setError(error);
+        if (connector) {
+          setConnectors((prev) => prev.map((c) => (c.id === connector.id ? connector : c)));
         } else {
           void refresh();
         }
@@ -132,8 +127,10 @@ export function ConnectorsView() {
 
   useEffect(() => {
     if (!actionId) return;
+    let focusTimer: number | undefined;
     const onFocus = () => {
-      window.setTimeout(() => {
+      window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
         setActionId(null);
         void refresh();
       }, 1500);
@@ -142,6 +139,7 @@ export function ConnectorsView() {
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
+      window.clearTimeout(focusTimer);
       window.clearTimeout(timeout);
     };
   }, [actionId, refresh]);

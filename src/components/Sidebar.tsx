@@ -123,10 +123,18 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
   const createQuick = useWorkspaceStore((s) => s.createQuickProject);
   const removeWs    = useWorkspaceStore((s) => s.remove);
+  const wsBusy      = useWorkspaceStore((s) => s.busy);
   const wsError     = useWorkspaceStore((s) => s.error);
   const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
+  const wsLocked = streaming || wsBusy;
+
+  const onWsMenuOpenChange = (open: boolean) => {
+    setWsMenuOpen(open);
+    if (!open) setPendingWsDelete(null);
+  };
 
   const usedPct =
     budget && budget.limitUsd > 0
@@ -139,7 +147,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     <aside className="Sidebar">
 
       <div className="Sidebar-workspace">
-        <DropdownMenu>
+        <DropdownMenu open={wsMenuOpen} onOpenChange={onWsMenuOpenChange}>
           <Tooltip content="Switch workspace" side="right">
             <DropdownMenuTrigger asChild>
               <button type="button" className="Sidebar-wsBtn" aria-label="Switch workspace">
@@ -156,8 +164,11 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                   type="button"
                   className="WsMenuItem-name"
                   data-active={ws.id === currentWs?.id}
-                  disabled={streaming}
-                  onClick={() => void switchTo(ws.id)}
+                  disabled={wsLocked}
+                  onClick={() => {
+                    onWsMenuOpenChange(false);
+                    if (ws.id !== currentWs?.id) void switchTo(ws.id);
+                  }}
                 >
                   {ws.name}
                   {ws.id === currentWs?.id && <VscCheck className="WsMenuItem-check" />}
@@ -168,6 +179,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                       type="button"
                       className="WsMenuItem-confirmYes"
                       title={ws.isQuickProject ? "Delete this quick project and its chats" : "Remove from list (files and chats are kept)"}
+                      disabled={wsLocked}
                       onClick={() => { setPendingWsDelete(null); void removeWs(ws.id); }}
                     >
                       <VscCheck />
@@ -186,7 +198,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     type="button"
                     className="WsMenuItem-del"
                     title={ws.isQuickProject ? "Delete quick project" : "Remove from list"}
-                    disabled={streaming}
+                    disabled={wsLocked}
                     onClick={(e) => { e.stopPropagation(); setPendingWsDelete(ws.id); }}
                   >
                     <VscTrash />
@@ -195,11 +207,11 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               </div>
             ))}
             {allWorkspaces.length > 0 && <div className="DropdownMenu-separator" />}
-            <DropdownMenuItem disabled={streaming} onSelect={() => void pickAndOpen()}>
+            <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
               <VscFolderOpened />
               <span>Open folder…</span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={streaming} onSelect={() => void createQuick()}>
+            <DropdownMenuItem disabled={wsLocked} onSelect={() => void createQuick()}>
               <VscRocket />
               <span>New quick project</span>
             </DropdownMenuItem>

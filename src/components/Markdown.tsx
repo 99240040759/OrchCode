@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import React, { useMemo } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { VscCheck, VscCopy } from "react-icons/vsc";
@@ -25,8 +25,9 @@ import "prismjs/components/prism-graphql";
 import "prismjs/components/prism-docker";
 import "prismjs/components/prism-ruby";
 
-import { looksLikePath, createMentionRegex } from "../lib/api";
+import { looksLikePath, createMentionRegex, useCopy } from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
+import { useImageDataUrl } from "../lib/images";
 import { FileTag } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
 
@@ -76,25 +77,25 @@ function workspacePathFromHref(href: string): string {
   }
 }
 
+const PRISM_ALIASES: Record<string, string> = {
+  js: "javascript",
+  ts: "typescript",
+  py: "python",
+  rs: "rust",
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  yml: "yaml",
+  md: "markdown",
+  cs: "csharp",
+  "c++": "cpp",
+  rb: "ruby",
+  dockerfile: "docker",
+  golang: "go",
+};
+
 function getPrismGrammar(lang: string): { grammar: Prism.Grammar; name: string } | null {
-  const norm = lang.toLowerCase();
-  const aliasMap: Record<string, string> = {
-    js: "javascript",
-    ts: "typescript",
-    py: "python",
-    rs: "rust",
-    sh: "bash",
-    shell: "bash",
-    zsh: "bash",
-    yml: "yaml",
-    md: "markdown",
-    cs: "csharp",
-    "c++": "cpp",
-    rb: "ruby",
-    dockerfile: "docker",
-    golang: "go",
-  };
-  const target = aliasMap[norm] || norm;
+  const target = PRISM_ALIASES[lang] ?? lang;
   const grammar = Prism.languages[target];
   return grammar ? { grammar, name: target } : null;
 }
@@ -114,50 +115,28 @@ function renderToken(token: Prism.Token | string, key: string): React.ReactNode 
   );
 }
 
-const CodeBlockComponent = React.memo(function CodeBlockComponent({
-  className,
-  children,
-}: {
-  className?: string;
-  children?: React.ReactNode;
-}) {
-  const match = /language-([a-zA-Z0-9_-]+)/.exec(className || "");
-  const rawLang = match ? match[1].toLowerCase() : "";
-  const codeString = String(children || "").replace(/\n$/, "");
-  const isInline = !match && !codeString.includes("\n");
+function nodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
 
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(codeString);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  const parsed = useMemo(() => (rawLang ? getPrismGrammar(rawLang) : null), [rawLang]);
-
-  const renderedTokens = useMemo(() => {
-    if (!parsed || !codeString) return null;
-    return Prism.tokenize(codeString, parsed.grammar).map((t, i) =>
-      renderToken(t, `tok-${i}`)
-    );
-  }, [codeString, parsed]);
-
-  if (isInline) {
-    return <code className={className}>{children}</code>;
-  }
+const CodeBlock = React.memo(function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const { copied, copy } = useCopy(code, 1500);
+  const parsed = useMemo(() => (lang ? getPrismGrammar(lang) : null), [lang]);
+  const tokens = useMemo(
+    () => (parsed && code ? Prism.tokenize(code, parsed.grammar).map((t, i) => renderToken(t, `tok-${i}`)) : null),
+    [code, parsed]
+  );
 
   return (
     <div className="CodeBlock">
       <div className="CodeBlock-header">
-        <span className="CodeBlock-lang">{rawLang || "text"}</span>
+        <span className="CodeBlock-lang">{lang || "text"}</span>
         <Tooltip content={copied ? "Copied" : "Copy code"} side="top">
-          <button
-            type="button"
-            className="CodeBlock-copy"
-            onClick={handleCopy}
-            aria-label="Copy code"
-          >
+          <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
             {copied ? (
               <>
                 <VscCheck className="CodeBlock-copyIconDone" />
@@ -173,15 +152,92 @@ const CodeBlockComponent = React.memo(function CodeBlockComponent({
         </Tooltip>
       </div>
       <pre className="CodeBlock-pre">
-        {renderedTokens ? (
-          <code className={`language-${parsed?.name || "text"}`}>{renderedTokens}</code>
-        ) : (
-          <code>{codeString}</code>
-        )}
+        {tokens ? <code className={`language-${parsed?.name ?? "text"}`}>{tokens}</code> : <code>{code}</code>}
       </pre>
     </div>
   );
 });
+
+function WorkspaceImage({ src, alt }: { src: string; alt?: string }) {
+  const isData = src.startsWith("data:");
+  const loaded = useImageDataUrl(isData ? null : workspacePathFromHref(src));
+  const url = isData ? src : loaded.src;
+  if (!url) {
+    return (
+      <span className="Markdown-imgCard">
+        <span className="Markdown-imgCaption">{loaded.loading ? "Loading image…" : alt || src}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="Markdown-imgCard">
+      <img src={url} alt={alt ?? ""} className="Markdown-imgThumb" loading="lazy" />
+      {alt && <span className="Markdown-imgCaption">{alt}</span>}
+    </span>
+  );
+}
+
+const MARKDOWN_COMPONENTS: Components = {
+  pre({ children }) {
+    const child = React.Children.toArray(children)[0];
+    const className = React.isValidElement<{ className?: string }>(child) ? child.props.className ?? "" : "";
+    const lang = /language-([a-zA-Z0-9_+-]+)/.exec(className)?.[1]?.toLowerCase() ?? "";
+    return <CodeBlock lang={lang} code={nodeText(children).replace(/\n$/, "")} />;
+  },
+  code({ node: _node, ...props }) {
+    return <code {...props} />;
+  },
+  a({ node: _node, href, children, ...props }) {
+    const link = href ?? "";
+    if (!link) return <a {...props}>{children}</a>;
+    if (isWorkspaceLink(link)) {
+      return (
+        <a
+          {...props}
+          href={link}
+          onClick={(event) => {
+            event.preventDefault();
+            useArtifactsStore.getState().openFile(workspacePathFromHref(link));
+          }}
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <a
+        {...props}
+        href={link}
+        rel="noreferrer"
+        onClick={(event) => {
+          event.preventDefault();
+          void openUrl(link);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+  img({ src, alt }) {
+    const source = typeof src === "string" ? src : "";
+    if (!source) return null;
+    if (/^https?:/i.test(source)) {
+      return (
+        <button
+          type="button"
+          className="Markdown-remoteImg"
+          title={source}
+          onClick={() => void openUrl(source)}
+        >
+          {alt || "Remote image"} ↗
+        </button>
+      );
+    }
+    return <WorkspaceImage src={source} alt={alt} />;
+  },
+};
+
+const REMARK_PLUGINS = [remarkGfm];
 
 function splitMarkdownBlocks(text: string): string[] {
   const blocks: string[] = [];
@@ -204,6 +260,14 @@ function splitMarkdownBlocks(text: string): string[] {
   return blocks;
 }
 
+const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+      {text}
+    </ReactMarkdown>
+  );
+});
+
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
   if (!children) return null;
   if (children.length < 4000) {
@@ -213,93 +277,11 @@ export const Markdown = React.memo(function Markdown({ children }: { children: s
       </div>
     );
   }
-  const blocks = splitMarkdownBlocks(children);
   return (
     <div className="Markdown">
-      {blocks.map((block, index) => (
+      {splitMarkdownBlocks(children).map((block, index) => (
         <MarkdownBlock key={index} text={block} />
       ))}
     </div>
-  );
-});
-
-const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
-  const openFile = useArtifactsStore((s) => s.openFile);
-  return (
-    <>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          pre({ children: preChildren }) {
-            return <>{preChildren}</>;
-          },
-          code({ className: codeClass, children: codeChildren }) {
-            return (
-              <CodeBlockComponent className={codeClass}>
-                {codeChildren}
-              </CodeBlockComponent>
-            );
-          },
-          a({ href, children: aChildren, ...props }) {
-            const link = href || "";
-            if (link && isWorkspaceLink(link)) {
-              const path = workspacePathFromHref(link);
-              return (
-                <a
-                  href={link}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    openFile(path);
-                  }}
-                  {...props}
-                >
-                  {aChildren}
-                </a>
-              );
-            }
-            if (link) {
-              return (
-                <a
-                  href={link}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    void openUrl(link);
-                  }}
-                  target="_blank"
-                  rel="noreferrer"
-                  {...props}
-                >
-                  {aChildren}
-                </a>
-              );
-            }
-            return <a href={link} {...props}>{aChildren}</a>;
-          },
-          img({ src, alt, ...props }) {
-            const source = typeof src === "string" ? src : "";
-            if (/^https?:/i.test(source)) {
-              return (
-                <button
-                  type="button"
-                  className="Markdown-remoteImg"
-                  title={source}
-                  onClick={() => void openUrl(source)}
-                >
-                  {alt || "Remote image"} ↗
-                </button>
-              );
-            }
-            return (
-              <div className="Markdown-imgCard">
-                <img src={src} alt={alt} className="Markdown-imgThumb" loading="lazy" {...props} />
-                {alt && <span className="Markdown-imgCaption">{alt}</span>}
-              </div>
-            );
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </>
   );
 });

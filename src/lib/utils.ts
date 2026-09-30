@@ -3,12 +3,12 @@ import { clsx } from "clsx";
 
 export { clsx as cn };
 
-export function splitPathParts(pathStr: string): string[] {
-  return pathStr.replace(/\\/g, "/").split("/").filter(Boolean);
+function normalizePath(pathStr: string): string {
+  return pathStr.replace(/\\/g, "/");
 }
 
-export function normalizePath(pathStr: string): string {
-  return pathStr.replace(/\\/g, "/");
+export function splitPathParts(pathStr: string): string[] {
+  return normalizePath(pathStr).split("/").filter(Boolean);
 }
 
 export function getBasename(pathStr: string): string {
@@ -41,13 +41,10 @@ export function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
 }
 
-export const MENTION_REGEX = new RegExp(
-  "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?",
-  "g"
-);
+const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
 
 export function createMentionRegex(): RegExp {
-  return new RegExp(MENTION_REGEX.source, "g");
+  return new RegExp(MENTION_PATTERN, "g");
 }
 
 const USD_FORMAT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -67,10 +64,14 @@ export function useCopy(text: string, resetMs = 2000) {
   }, []);
 
   const copy = useCallback(() => {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), resetMs);
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setCopied(false), resetMs);
+      },
+      () => setCopied(false)
+    );
   }, [text, resetMs]);
 
   return { copied, copy };

@@ -18,7 +18,7 @@ import { cn } from "../../lib/api";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 
-export const IS_MAC =
+const IS_MAC =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 function UpdateBadge() {
@@ -71,34 +71,39 @@ function WindowControls() {
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
+    let disposed = false;
     let unlisten: (() => void) | undefined;
-    const sync = () => { void appWindow.isMaximized().then(setIsMaximized); };
+    const sync = () => {
+      void appWindow.isMaximized().then((value) => {
+        if (!disposed) setIsMaximized(value);
+      });
+    };
     sync();
-    void appWindow.onResized(sync).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    void appWindow.onResized(sync).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
-  const minimize       = () => void getCurrentWindow().minimize();
-  const toggleMaximize = () => void getCurrentWindow().toggleMaximize();
-  const close          = () => void getCurrentWindow().close();
-
-  if (IS_MAC) {
-    return <div className="MacTrafficLightSpacer" data-tauri-drag-region />;
-  }
+  const appWindow = getCurrentWindow();
 
   return (
     <div className="WinControls">
-      <Button className="WinBtn" aria-label="Minimize" onClick={minimize}>
+      <Button className="WinBtn" aria-label="Minimize" onClick={() => void appWindow.minimize()}>
         <VscChromeMinimize />
       </Button>
       <Button
         className="WinBtn"
         aria-label={isMaximized ? "Restore" : "Maximize"}
-        onClick={toggleMaximize}
+        onClick={() => void appWindow.toggleMaximize()}
       >
         {isMaximized ? <VscChromeRestore /> : <VscChromeMaximize />}
       </Button>
-      <Button className="WinBtn WinBtn-close" aria-label="Close" onClick={close}>
+      <Button className="WinBtn WinBtn-close" aria-label="Close" onClick={() => void appWindow.close()}>
         <VscChromeClose />
       </Button>
     </div>
@@ -112,18 +117,44 @@ interface TitlebarProps {
   onToggleSidebar?: () => void;
 }
 
-export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: TitlebarProps) {
+function SessionTitle({ fallback }: { fallback?: string }) {
   const sessionTitle = useChatStore((s) => {
     const id = s.currentSessionId;
     return s.sessions.find((sess) => sess.id === id)?.title ?? null;
   });
+  const text = sessionTitle || fallback;
+  if (!text) return null;
+  return (
+    <span className="Titlebar-title" data-tauri-drag-region>
+      {text}
+    </span>
+  );
+}
 
+function ArtifactPanelToggle() {
   const panelOpen    = useArtifactsStore((s) => s.panelOpen);
   const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
+  const label = panelOpen ? "Hide artifact panel" : "Show artifact panel";
+  return (
+    <Tooltip content={label} side="bottom">
+      <Button
+        className="IconBtn Titlebar-iconBtn"
+        aria-label={label}
+        data-active={panelOpen}
+        onClick={() => setPanelOpen(!panelOpen)}
+      >
+        {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
+      </Button>
+    </Tooltip>
+  );
+}
+
+export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: TitlebarProps) {
+  const inShell = Boolean(onToggleSidebar);
 
   return (
     <div className={cn("Titlebar", IS_MAC && "Titlebar-mac", className)} data-tauri-drag-region>
-      {IS_MAC && <WindowControls />}
+      {IS_MAC && <div className="MacTrafficLightSpacer" data-tauri-drag-region />}
 
       <div className="Titlebar-left">
         {onToggleSidebar && (
@@ -138,12 +169,7 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
             </Button>
           </Tooltip>
         )}
-        {sessionTitle && (
-          <span className="Titlebar-title" data-tauri-drag-region>
-            {sessionTitle}
-          </span>
-        )}
-        {title && !sessionTitle && (
+        {inShell ? <SessionTitle fallback={title} /> : title && (
           <span className="Titlebar-title" data-tauri-drag-region>
             {title}
           </span>
@@ -154,16 +180,7 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: Tit
 
       <div className="Titlebar-right">
         <UpdateBadge />
-        <Tooltip content={panelOpen ? "Hide artifact panel" : "Show artifact panel"} side="bottom">
-          <Button
-            className="IconBtn Titlebar-iconBtn"
-            aria-label={panelOpen ? "Hide artifact panel" : "Show artifact panel"}
-            data-active={panelOpen}
-            onClick={() => setPanelOpen(!panelOpen)}
-          >
-            {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
-          </Button>
-        </Tooltip>
+        {inShell && <ArtifactPanelToggle />}
         {!IS_MAC && <WindowControls />}
       </div>
     </div>

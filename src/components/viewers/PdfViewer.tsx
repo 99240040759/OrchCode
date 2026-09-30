@@ -1,35 +1,27 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { errorMessage, readBinaryFile } from "../../lib/api";
+import { ViewerError, ViewerLoading } from "./ViewerChrome";
 
-interface PdfViewerProps {
-  path: string;
-}
-
-export function PdfViewer({ path }: PdfViewerProps) {
+export function PdfViewer({ path }: { path: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
-    setLoading(true);
-    setError(null);
     setUrl(null);
+    setError(null);
 
-    readBinaryFile(path)
-      .then((buffer) => {
+    readBinaryFile(path).then(
+      (buffer) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }));
         setUrl(objectUrl);
-        setLoading(false);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(errorMessage(e));
-          setLoading(false);
-        }
-      });
+      },
+      (e) => {
+        if (!cancelled) setError(errorMessage(e));
+      }
+    );
 
     return () => {
       cancelled = true;
@@ -37,23 +29,8 @@ export function PdfViewer({ path }: PdfViewerProps) {
     };
   }, [path]);
 
-  if (loading) {
-    return (
-      <div className="DocViewer-loading">
-        <div className="DocViewer-spinner" />
-        <span>Loading PDF…</span>
-      </div>
-    );
-  }
-
-  if (error || !url) {
-    return (
-      <div className="DocViewer-error">
-        <span className="DocViewer-error-icon">⚠</span>
-        <p>{error ?? "The PDF could not be loaded."}</p>
-      </div>
-    );
-  }
+  if (error) return <ViewerError message={error} />;
+  if (!url) return <ViewerLoading label="Loading PDF…" />;
 
   return (
     <div className="PdfViewer">
