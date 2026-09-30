@@ -60,74 +60,6 @@ async fn get_jira_cloud_id(manager: &ConnectorManager, token: &str) -> Result<St
     Ok(id)
 }
 
-pub async fn list_jira_instances(manager: &ConnectorManager, token: &str) -> Result<Vec<(String, String)>, ToolError> {
-    let json = request_json(
-        manager
-            .http()
-            .get("https://api.atlassian.com/oauth/token/accessible-resources")
-            .bearer_auth(token)
-            .header("Accept", "application/json"),
-        "Jira",
-    )
-    .await?;
-
-    let resources = json.as_array().cloned().unwrap_or_default();
-    Ok(resources
-        .iter()
-        .filter_map(|r| {
-            let id = r["id"].as_str()?.to_string();
-            let name = r["name"].as_str().unwrap_or(&id).to_string();
-            Some((id, name))
-        })
-        .collect())
-}
-
-#[derive(Clone)]
-pub struct JiraListInstances {
-    pub manager: Arc<ConnectorManager>,
-    pub memory: SqliteMemory,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct JiraListInstancesArgs {}
-
-impl Tool for JiraListInstances {
-    const NAME: &'static str = "jira_list_instances";
-    type Args = JiraListInstancesArgs;
-    type Output = String;
-    type Error = ToolError;
-
-    fn description(&self) -> String {
-        "List all Jira Cloud instances (sites) accessible to the authenticated user.".to_string()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
-    }
-
-    async fn call(&self, _ctx: &mut rig::tool::ToolContext, _args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let token = self
-            .manager
-            .get_access_token("jira", &self.memory)
-            .await
-            .map_err(|e| ToolError::msg(format!("Jira auth: {e}")))?;
-
-        let instances = list_jira_instances(&self.manager, &token).await?;
-
-        if instances.is_empty() {
-            return Ok("No Jira Cloud instances found.".to_string());
-        }
-
-        let mut out = format!("Found {} Jira Cloud instance(s):\n\n", instances.len());
-        for (id, name) in &instances {
-            out.push_str(&format!("• {name}\n  Cloud ID: {id}\n\n"));
-        }
-        out.push_str("Use the Cloud ID when calling other Jira tools if prompted.");
-
-        Ok(out)
-    }
-}
-
 #[derive(Clone)]
 pub struct JiraListIssues {
     pub manager: Arc<ConnectorManager>,
@@ -140,7 +72,94 @@ pub struct JiraListIssuesArgs {
     pub status: Option<String>,
     pub assignee: Option<String>,
     pub max_results: Option<u32>,
-    pub start_at: Option<u32>,
+    pub next_page_token: Option<String>,
+}
+
+fn jql_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+pub fn build_list_jql(project: Option<&str>, status: Option<&str>, assignee: Option<&str>) -> String {
+    let mut clauses = Vec::new();
+    if let Some(project) = project.filter(|p| !p.trim().is_empty()) {
+        clauses.push(format!("project = {}", jql_literal(project.trim())));
+    }
+    if let Some(status) = status.filter(|s| !s.trim().is_empty()) {
+        clauses.push(format!("status = {}", jql_literal(status.trim())));
+    }
+    if let Some(assignee) = assignee.filter(|a| !a.trim().is_empty()) {
+        let trimmed = assignee.trim();
+        if trimmed.eq_ignore_ascii_case("me") || trimmed.eq_ignore_ascii_case("currentUser()") {
+            clauses.push("assignee = currentUser()".to_string());
+        } else {
+            clauses.push(format!("assignee = {}", jql_literal(trimmed)));
+        }
+    }
+    if clauses.is_empty() {
+        clauses.push("updated >= -90d".to_string());
+    }
+    format!("{} ORDER BY updated DESC", clauses.join(" AND "))
+}
+
+async fn search_jql(
+    manager: &ConnectorManager,
+    token: &str,
+    cloud_id: &str,
+    jql: &str,
+    limit: u32,
+    next_page_token: Option<&str>,
+) -> Result<String, ToolError> {
+    let mut url = format!(
+        "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search/jql?jql={}&maxResults={limit}&fields=summary,status,assignee,priority,updated,issuetype",
+        urlencoding::encode(jql)
+    );
+    if let Some(page) = next_page_token.filter(|p| !p.is_empty()) {
+        url.push_str(&format!("&nextPageToken={}", urlencoding::encode(page)));
+    }
+
+    let json = request_json(
+        manager
+            .http()
+            .get(&url)
+            .bearer_auth(token)
+            .header("Accept", "application/json"),
+        "Jira",
+    )
+    .await?;
+
+    check_jira_errors(&json)?;
+
+    let issues = json["issues"].as_array().cloned().unwrap_or_default();
+    let next_token = json["nextPageToken"].as_str().filter(|t| !t.is_empty());
+    let is_last = json["isLast"].as_bool().unwrap_or(next_token.is_none());
+
+    if issues.is_empty() {
+        return Ok(format!("No issues match: {jql}"));
+    }
+
+    let mut out = format!("{} issue(s) for `{jql}`:\n\n", issues.len());
+    for issue in &issues {
+        let key = issue["key"].as_str().unwrap_or("—");
+        let summary = issue["fields"]["summary"].as_str().unwrap_or("(no title)");
+        let status = issue["fields"]["status"]["name"].as_str().unwrap_or("—");
+        let assignee = issue["fields"]["assignee"]["displayName"]
+            .as_str()
+            .unwrap_or("Unassigned");
+        let priority = issue["fields"]["priority"]["name"].as_str().unwrap_or("—");
+        let issue_type = issue["fields"]["issuetype"]["name"].as_str().unwrap_or("—");
+        let updated = issue["fields"]["updated"].as_str().unwrap_or("—");
+        out.push_str(&format!(
+            "• [{key}] {summary}\n  Type: {issue_type} | Status: {status} | Priority: {priority} | Assignee: {assignee}\n  Updated: {updated}\n\n"
+        ));
+    }
+
+    if let (false, Some(token)) = (is_last, next_token) {
+        out.push_str(&format!(
+            "\n[More results — pass page_token: \"{token}\" to fetch the next page]"
+        ));
+    }
+
+    Ok(out)
 }
 
 impl Tool for JiraListIssues {
@@ -150,7 +169,7 @@ impl Tool for JiraListIssues {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "List Jira issues with optional project key, status, and assignee filters. Supports pagination via start_at.".to_string()
+        "List Jira issues with optional project key, status, and assignee filters. Supports pagination via next_page_token.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -165,70 +184,13 @@ impl Tool for JiraListIssues {
             .map_err(|e| ToolError::msg(format!("Jira auth: {e}")))?;
 
         let cloud_id = get_jira_cloud_id(&self.manager, &token).await?;
-        let limit = args.max_results.unwrap_or(20).min(100);
-        let start = args.start_at.unwrap_or(0);
-
-        let mut jql_parts = Vec::new();
-        if let Some(proj) = &args.project {
-            jql_parts.push(format!("project = \"{}\"", proj.replace('"', "\\\"")));
-        }
-        if let Some(status) = &args.status {
-            jql_parts.push(format!("status = \"{}\"", status.replace('"', "\\\"")));
-        }
-        if let Some(assignee) = &args.assignee {
-            jql_parts.push(format!("assignee = \"{}\"", assignee.replace('"', "\\\"")));
-        }
-        jql_parts.push("ORDER BY updated DESC".to_string());
-
-        let jql = jql_parts.join(" AND ");
-        let url = format!(
-            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search/jql?jql={}&maxResults={limit}&startAt={start}&fields=summary,status,assignee,priority,updated,issuetype",
-            urlencoding::encode(&jql)
+        let limit = args.max_results.unwrap_or(20).clamp(1, 100);
+        let jql = build_list_jql(
+            args.project.as_deref(),
+            args.status.as_deref(),
+            args.assignee.as_deref(),
         );
-
-        let json = request_json(
-            self.manager
-                .http()
-                .get(&url)
-                .bearer_auth(&token)
-                .header("Accept", "application/json"),
-            "Jira",
-        )
-        .await?;
-
-        check_jira_errors(&json)?;
-
-        let issues = json["issues"].as_array().cloned().unwrap_or_default();
-        let total = json["total"].as_u64().unwrap_or(0);
-        let next_start = start as u64 + issues.len() as u64;
-
-        if issues.is_empty() {
-            return Ok("No issues found.".to_string());
-        }
-
-        let mut out = format!("Found {total} total issue(s) (showing {} from offset {start}):\n\n", issues.len());
-        for issue in &issues {
-            let key = issue["key"].as_str().unwrap_or("—");
-            let summary = issue["fields"]["summary"].as_str().unwrap_or("(no title)");
-            let status = issue["fields"]["status"]["name"].as_str().unwrap_or("—");
-            let assignee = issue["fields"]["assignee"]["displayName"]
-                .as_str()
-                .unwrap_or("Unassigned");
-            let priority = issue["fields"]["priority"]["name"].as_str().unwrap_or("—");
-            let issue_type = issue["fields"]["issuetype"]["name"].as_str().unwrap_or("—");
-            let updated = issue["fields"]["updated"].as_str().unwrap_or("—");
-            out.push_str(&format!(
-                "• [{key}] {summary}\n  Type: {issue_type} | Status: {status} | Priority: {priority} | Assignee: {assignee}\n  Updated: {updated}\n\n"
-            ));
-        }
-
-        if next_start < total {
-            out.push_str(&format!(
-                "\n[More results — use start_at: {next_start} to fetch next page]"
-            ));
-        }
-
-        Ok(out)
+        search_jql(&self.manager, &token, &cloud_id, &jql, limit, args.next_page_token.as_deref()).await
     }
 }
 
@@ -601,7 +563,7 @@ pub struct JiraSearchIssues {
 pub struct JiraSearchIssuesArgs {
     pub jql: String,
     pub max_results: Option<u32>,
-    pub start_at: Option<u32>,
+    pub next_page_token: Option<String>,
 }
 
 impl Tool for JiraSearchIssues {
@@ -611,7 +573,7 @@ impl Tool for JiraSearchIssues {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Search Jira issues using JQL (Jira Query Language). Example: 'project = MYPROJ AND status = \"In Progress\" ORDER BY priority DESC'. Supports pagination via start_at.".to_string()
+        "Search Jira issues using JQL (Jira Query Language). Example: 'project = MYPROJ AND status = \"In Progress\" ORDER BY priority DESC'. Queries must contain at least one restriction. Supports pagination via next_page_token.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -626,54 +588,13 @@ impl Tool for JiraSearchIssues {
             .map_err(|e| ToolError::msg(format!("Jira auth: {e}")))?;
 
         let cloud_id = get_jira_cloud_id(&self.manager, &token).await?;
-        let limit = args.max_results.unwrap_or(20).min(100);
-        let start = args.start_at.unwrap_or(0);
-
-        let url = format!(
-            "{JIRA_CLOUD_API}/{cloud_id}/rest/api/3/search/jql?jql={}&maxResults={limit}&startAt={start}&fields=summary,status,assignee,priority,issuetype,updated",
-            urlencoding::encode(&args.jql)
-        );
-
-        let json = request_json(
-            self.manager
-                .http()
-                .get(&url)
-                .bearer_auth(&token)
-                .header("Accept", "application/json"),
-            "Jira",
-        )
-        .await?;
-
-        check_jira_errors(&json)?;
-
-        let issues = json["issues"].as_array().cloned().unwrap_or_default();
-        let total = json["total"].as_u64().unwrap_or(0);
-        let next_start = start as u64 + issues.len() as u64;
-
-        if issues.is_empty() {
-            return Ok("No issues match the JQL query.".to_string());
-        }
-
-        let mut out = format!("Found {total} total issue(s) (showing {} from offset {start}):\n\n", issues.len());
-        for issue in &issues {
-            let key = issue["key"].as_str().unwrap_or("—");
-            let summary = issue["fields"]["summary"].as_str().unwrap_or("(no title)");
-            let status = issue["fields"]["status"]["name"].as_str().unwrap_or("—");
-            let priority = issue["fields"]["priority"]["name"].as_str().unwrap_or("—");
-            let issue_type = issue["fields"]["issuetype"]["name"].as_str().unwrap_or("—");
-            let assignee = issue["fields"]["assignee"]["displayName"].as_str().unwrap_or("Unassigned");
-            let updated = issue["fields"]["updated"].as_str().unwrap_or("—");
-            out.push_str(&format!(
-                "• [{key}] {summary}\n  Type: {issue_type} | Status: {status} | Priority: {priority} | Assignee: {assignee}\n  Updated: {updated}\n\n"
-            ));
-        }
-
-        if next_start < total {
-            out.push_str(&format!(
-                "\n[More results — use start_at: {next_start} to fetch next page]"
-            ));
-        }
-
-        Ok(out)
+        let limit = args.max_results.unwrap_or(20).clamp(1, 100);
+        let trimmed = args.jql.trim();
+        let jql = if trimmed.is_empty() || trimmed.to_uppercase().starts_with("ORDER BY") {
+            format!("updated >= -90d {trimmed}").trim().to_string()
+        } else {
+            trimmed.to_string()
+        };
+        search_jql(&self.manager, &token, &cloud_id, &jql, limit, args.next_page_token.as_deref()).await
     }
 }

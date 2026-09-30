@@ -11,9 +11,12 @@ export function MessageList() {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef    = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
+  const pinnedRef = useRef(true);
+  const lastCountRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+    pinnedRef.current = true;
     setShowJump(false);
   }, []);
 
@@ -21,15 +24,28 @@ export function MessageList() {
     const el = containerRef.current;
     if (!el) return;
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    pinnedRef.current = pinned;
     setShowJump(!pinned);
   }, []);
 
   useEffect(() => {
     if (messages.length > 0) scrollToBottom();
-  }, []);
+  }, [scrollToBottom]);
 
   useLayoutEffect(() => {
-    if (streaming && messages.length > 0) scrollToBottom();
+    const grew = messages.length > lastCountRef.current;
+    const lastIsUser = messages[messages.length - 1]?.role === "user" || messages[messages.length - 2]?.role === "user";
+    lastCountRef.current = messages.length;
+    if (messages.length === 0) return;
+    if (grew && lastIsUser && streaming) {
+      scrollToBottom();
+      return;
+    }
+    if (pinnedRef.current) {
+      bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+    } else if (streaming) {
+      setShowJump(true);
+    }
   }, [messages, scrollToBottom, streaming]);
 
   return (

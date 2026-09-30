@@ -68,17 +68,21 @@ impl ModelCatalog {
     }
 }
 
+fn default_allowed() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Budget {
-    #[serde(default)]
+    #[serde(default, alias = "costUsd", alias = "cost")]
     pub cost_usd: f64,
-    #[serde(default)]
+    #[serde(default, alias = "limitUsd", alias = "limit")]
     pub limit_usd: f64,
     #[serde(default)]
     pub remaining: f64,
     #[serde(default)]
     pub period: String,
-    #[serde(default)]
+    #[serde(default = "default_allowed")]
     pub allowed: bool,
 }
 

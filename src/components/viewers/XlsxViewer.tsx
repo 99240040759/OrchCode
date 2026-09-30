@@ -1,19 +1,12 @@
 import { useState, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { dataUrlToArrayBuffer, errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
+import { errorMessage, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
 
 interface XlsxViewerProps {
   path: string;
 }
 
-interface SheetData {
-  name: string;
-  rows: string[][];
-}
-
 export function XlsxViewer({ path }: XlsxViewerProps) {
-
-  const [sheets, setSheets] = useState<SheetData[]>([]);
+  const [sheets, setSheets] = useState<SpreadsheetSheet[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,17 +16,9 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
     setLoading(true);
     setError(null);
 
-    readBinaryFileAsDataUrl(path)
-      .then((dataUrl) => {
+    readSpreadsheet(path)
+      .then((parsed) => {
         if (cancelled) return;
-        const buf = dataUrlToArrayBuffer(dataUrl);
-        const workbook = XLSX.read(buf, { type: "array" });
-        const parsed: SheetData[] = workbook.SheetNames.map((name) => {
-          const sheet = workbook.Sheets[name];
-          const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" });
-          const filtered = (rows as string[][]).filter((row) => row.some((c) => c !== ""));
-          return { name, rows: filtered };
-        });
         setSheets(parsed);
         setActiveSheet(0);
         setLoading(false);
@@ -84,6 +69,11 @@ export function XlsxViewer({ path }: XlsxViewerProps) {
         </div>
       )}
       <div className="XlsxViewer-scroll">
+        {current?.truncated && (
+          <div className="DocViewer-meta">
+            Showing the first {current.rows.length.toLocaleString()} of {current.totalRows.toLocaleString()} rows
+          </div>
+        )}
         {current && current.rows.length > 0 ? (
           <table className="XlsxViewer-table">
             <tbody>

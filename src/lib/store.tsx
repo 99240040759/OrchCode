@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { newId } from "./api";
 import { useWorkspaceStore, registerWorkspaceActivatedCallback } from "./workspace";
+import { useArtifactsStore } from "./artifacts";
 import type {
   AttachmentRef,
   Budget,
@@ -59,6 +60,7 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  contextTokens: number;
 }
 
 export interface ChatMessage {
@@ -68,9 +70,10 @@ export interface ChatMessage {
   attachments: MessageAttachment[];
   streaming: boolean;
   error?: string;
+  notice?: string;
 }
 
-const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0 };
 
 function viewItemToLocal(item: MessageItemView): MessageItem {
   switch (item.type) {
@@ -110,6 +113,7 @@ function usageFrom(session: SessionSummary): TokenUsage {
     inputTokens: session.totalInputTokens,
     outputTokens: session.totalOutputTokens,
     totalTokens: session.totalTokens,
+    contextTokens: session.contextTokens ?? 0,
   };
 }
 
@@ -119,6 +123,7 @@ interface ChatState {
   sessionGeneration: number;
   messages: ChatMessage[];
   streaming: boolean;
+  streamingSessionId: string | null;
   sessionTokens: TokenUsage;
   models: ModelDto[];
   selectedModel: ModelDto | null;
@@ -151,6 +156,7 @@ const INITIAL_STATE: ChatState = {
   sessionGeneration: 0,
   messages: [],
   streaming: false,
+  streamingSessionId: null,
   sessionTokens: ZERO_USAGE,
   models: [],
   selectedModel: null,
@@ -208,8 +214,11 @@ export const useChatStore = create(
     },
 
     reloadForWorkspace: async () => {
+      const running = get().streamingSessionId;
+      if (running) await api.cancelChat(running).catch(() => undefined);
       const wsPath = useWorkspaceStore.getState().current?.path ?? null;
       const freshId = newId();
+      useArtifactsStore.getState().dropWorkspaceTabs();
 
       const sessions = wsPath
         ? await api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
@@ -222,11 +231,14 @@ export const useChatStore = create(
         s.messages = [];
         s.sessionTokens = ZERO_USAGE;
         s.streaming = false;
+        s.streamingSessionId = null;
         s.error = null;
       });
     },
 
     reset: () => {
+      const running = get().streamingSessionId;
+      if (running) void api.cancelChat(running).catch(() => undefined);
       unbindListeners();
       set((s) => {
         Object.assign(s, INITIAL_STATE, {
@@ -306,6 +318,7 @@ export const useChatStore = create(
           s.messages = [];
           s.sessionTokens = ZERO_USAGE;
           s.streaming = false;
+          if (s.streamingSessionId === id) s.streamingSessionId = null;
           s.error = null;
         }
       });
@@ -328,6 +341,7 @@ export const useChatStore = create(
       set((s) => {
         s.error = null;
         s.streaming = true;
+        s.streamingSessionId = sessionId;
         s.messages.push({
           id: userMsgId,
           role: "user",
@@ -362,9 +376,12 @@ export const useChatStore = create(
         settled = true;
         patch((m) => { m.streaming = false; });
         set((s) => {
+          if (s.streamingSessionId === sessionId) s.streamingSessionId = null;
           if (s.currentSessionId === sessionId) s.streaming = false;
         });
       };
+
+      let receivedEvents = false;
 
       let textBuffer = "";
       let reasoningBuffer = "";
@@ -398,6 +415,7 @@ export const useChatStore = create(
       };
 
       const handleEvent = (event: ChatStreamEvent) => {
+        receivedEvents = true;
         switch (event.type) {
           case "text":
             textBuffer += event.delta;
@@ -435,8 +453,11 @@ export const useChatStore = create(
           case "usage":
             set((s) => {
               if (s.currentSessionId === sessionId)
-                s.sessionTokens = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
+                s.sessionTokens = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens, contextTokens: event.contextTokens };
             });
+            break;
+          case "notice":
+            patch((m) => { m.notice = event.message; });
             break;
           case "compacted":
             set((s) => {
@@ -466,6 +487,13 @@ export const useChatStore = create(
       } catch (e) {
         const message = api.errorMessage(e);
         stopFlushTimer(); flush(); settle();
+        if (!receivedEvents) {
+          set((s) => {
+            s.messages = s.messages.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId);
+            if (s.currentSessionId === sessionId && message !== "cancelled") s.error = message;
+          });
+          return false;
+        }
         patch((m) => { m.error = message; });
         set((s) => {
           if (s.currentSessionId === sessionId) s.error = message;
@@ -475,7 +503,8 @@ export const useChatStore = create(
     },
 
     cancel: () => {
-      void api.cancelChat(get().currentSessionId).catch(() => undefined);
+      const target = get().streamingSessionId ?? get().currentSessionId;
+      void api.cancelChat(target).catch(() => undefined);
     },
 
     setSelectedModel: (key: string) => {

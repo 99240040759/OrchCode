@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   VscAdd,
   VscClose,
@@ -9,15 +9,22 @@ import {
 import { RiFolderOpenLine } from "react-icons/ri";
 import { listen } from "@tauri-apps/api/event";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../lib/artifacts";
-import { documentArtifactKindForPath, getBasename } from "../lib/api";
+import { getBasename } from "../lib/api";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
-import { FileViewer } from "./FileViewer";
 import { TerminalView } from "./TerminalView";
-import { PdfViewer } from "./viewers/PdfViewer";
-import { DocxViewer } from "./viewers/DocxViewer";
-import { XlsxViewer } from "./viewers/XlsxViewer";
-import { PptxViewer } from "./viewers/PptxViewer";
+
+const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.FileViewer })));
+const PdfViewer = lazy(() => import("./viewers/PdfViewer").then((m) => ({ default: m.PdfViewer })));
+const DocxViewer = lazy(() => import("./viewers/DocxViewer").then((m) => ({ default: m.DocxViewer })));
+const XlsxViewer = lazy(() => import("./viewers/XlsxViewer").then((m) => ({ default: m.XlsxViewer })));
+const PptxViewer = lazy(() => import("./viewers/PptxViewer").then((m) => ({ default: m.PptxViewer })));
+
+const VIEWER_FALLBACK = (
+  <div className="FileViewerLoading">
+    <div className="Spinner" />
+  </div>
+);
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import {
@@ -49,20 +56,22 @@ const EMPTY_CARDS = [
 ];
 
 function useFileWrittenListener() {
-  const openFile     = useArtifactsStore((s) => s.openFile);
-  const openDocument = useArtifactsStore((s) => s.openDocument);
+  const fileWritten = useArtifactsStore((s) => s.fileWritten);
 
   useEffect(() => {
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<string>("file-written", (event) => {
-      const path = event.payload;
-      if (!path) return;
-      const kind = documentArtifactKindForPath(path);
-      if (kind) openDocument(path, kind);
-      else openFile(path);
-    }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
-  }, [openFile, openDocument]);
+      if (event.payload) fileWritten(event.payload);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [fileWritten]);
 }
 
 function ArtifactPanelHeader() {
@@ -156,6 +165,8 @@ function ArtifactPanelHeader() {
 }
 
 function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
+  const stateful = tab.kind === "terminal" || tab.kind === "browser";
+  if (!active && !stateful) return null;
   return (
     <div
       className="ArtifactTabPanel"
@@ -163,12 +174,14 @@ function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
       aria-hidden={!active}
     >
       {tab.kind === "terminal" && <TerminalView id={tab.id} />}
-      {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
       {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
-      {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
-      {tab.kind === "docx" && tab.path && <DocxViewer path={tab.path} />}
-      {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
-      {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
+      <Suspense fallback={VIEWER_FALLBACK}>
+        {tab.kind === "file" && <FileViewer tabId={tab.id} path={tab.path} />}
+        {tab.kind === "pdf" && tab.path && <PdfViewer path={tab.path} />}
+        {tab.kind === "docx" && tab.path && <DocxViewer path={tab.path} />}
+        {tab.kind === "xlsx" && tab.path && <XlsxViewer path={tab.path} />}
+        {tab.kind === "pptx" && tab.path && <PptxViewer path={tab.path} />}
+      </Suspense>
     </div>
   );
 }

@@ -1,14 +1,15 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use reqwest::RequestBuilder;
-use rig::tool::Tool;
+use reqwest::{RequestBuilder, Response, StatusCode};
+use rig::tool::{Tool, ToolExecutionError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::connectors::ConnectorManager;
 use crate::persistence::SqliteMemory;
-use crate::tools::ToolError;
+use crate::tools::{tool_failure, ToolError};
 
 pub mod github;
 pub mod gmail;
@@ -17,32 +18,44 @@ pub mod jira;
 pub mod notion;
 pub mod slack;
 
-pub async fn request_json(request: RequestBuilder, provider: &str) -> Result<Value, ToolError> {
-    let response = request
-        .send()
-        .await
-        .map_err(|e| ToolError::msg(format!("{provider} request failed: {e}")))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| ToolError::msg(format!("{provider} response read failed: {e}")))?;
-    if !status.is_success() {
-        return Err(ToolError::msg(format!(
-            "{provider} API error ({}): {}",
-            status.as_u16(),
-            body
-        )));
-    }
-    serde_json::from_str(&body)
-        .map_err(|e| ToolError::msg(format!("{provider} response parse failed: {e} — body: {}", &body[..body.len().min(200)])))
+const MAX_RETRIES: usize = 3;
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
+const MAX_DOWNLOAD_BYTES: usize = 25 * 1024 * 1024;
+
+fn retry_delay(response: &Response, attempt: usize) -> Duration {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_millis(500 * (1 << attempt) as u64))
+        .min(MAX_RETRY_WAIT)
 }
 
-pub async fn request_text(request: RequestBuilder, provider: &str) -> Result<String, ToolError> {
-    let response = request
-        .send()
-        .await
-        .map_err(|e| ToolError::msg(format!("{provider} request failed: {e}")))?;
+async fn send_with_retry(request: RequestBuilder, provider: &str) -> Result<Response, ToolError> {
+    let mut attempt = 0usize;
+    let mut current = request;
+    loop {
+        let retry = current.try_clone();
+        let response = current
+            .send()
+            .await
+            .map_err(|e| ToolError::msg(format!("{provider} request failed: {e}")))?;
+        let status = response.status();
+        let retryable = status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::SERVICE_UNAVAILABLE;
+        match retry {
+            Some(next) if retryable && attempt < MAX_RETRIES => {
+                tokio::time::sleep(retry_delay(&response, attempt)).await;
+                attempt += 1;
+                current = next;
+            }
+            _ => return Ok(response),
+        }
+    }
+}
+
+async fn read_success_body(response: Response, provider: &str) -> Result<String, ToolError> {
     let status = response.status();
     let body = response
         .text()
@@ -52,10 +65,54 @@ pub async fn request_text(request: RequestBuilder, provider: &str) -> Result<Str
         return Err(ToolError::msg(format!(
             "{provider} API error ({}): {}",
             status.as_u16(),
-            body
+            crate::util::truncate_chars(&body, 1_000)
         )));
     }
     Ok(body)
+}
+
+pub async fn request_json(request: RequestBuilder, provider: &str) -> Result<Value, ToolError> {
+    let response = send_with_retry(request, provider).await?;
+    let body = read_success_body(response, provider).await?;
+    serde_json::from_str(&body).map_err(|e| {
+        ToolError::msg(format!(
+            "{provider} response parse failed: {e} — body: {}",
+            crate::util::truncate_chars(&body, 200)
+        ))
+    })
+}
+
+pub async fn request_text(request: RequestBuilder, provider: &str) -> Result<String, ToolError> {
+    let response = send_with_retry(request, provider).await?;
+    read_success_body(response, provider).await
+}
+
+pub async fn request_bytes(request: RequestBuilder, provider: &str) -> Result<Vec<u8>, ToolError> {
+    let response = send_with_retry(request, provider).await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(read_success_body(response, provider).await.err().unwrap_or_else(|| {
+            ToolError::msg(format!("{provider} API error ({})", status.as_u16()))
+        }));
+    }
+    if let Some(length) = response.content_length() {
+        if length as usize > MAX_DOWNLOAD_BYTES {
+            return Err(ToolError::msg(format!(
+                "{provider} file is too large to read ({length} bytes)"
+            )));
+        }
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| ToolError::msg(format!("{provider} download failed: {e}")))?;
+    if bytes.len() > MAX_DOWNLOAD_BYTES {
+        return Err(ToolError::msg(format!(
+            "{provider} file is too large to read ({} bytes)",
+            bytes.len()
+        )));
+    }
+    Ok(bytes.to_vec())
 }
 
 pub fn truncate_text(text: &str, limit: usize, suffix: &str) -> String {
@@ -91,6 +148,10 @@ impl Tool for ConnectorSearch {
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
@@ -143,7 +204,7 @@ impl Tool for ConnectorSearch {
                     .call(_ctx, jira::JiraSearchIssuesArgs {
                         jql: args.query,
                         max_results: args.max_results,
-                        start_at: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                        next_page_token: args.page_token,
                     }).await
             }
             unknown => Err(ToolError::msg(format!(
@@ -178,6 +239,10 @@ impl Tool for ConnectorRead {
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
@@ -265,6 +330,10 @@ impl Tool for ConnectorList {
         serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
     }
 
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
+    }
+
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let p = args.provider.to_lowercase();
         let manager = &self.manager;
@@ -318,7 +387,7 @@ impl Tool for ConnectorList {
                         status: None,
                         assignee: None,
                         max_results: args.max_results,
-                        start_at: args.page_token.as_deref().and_then(|s| s.parse().ok()),
+                        next_page_token: args.page_token,
                     }).await
             }
             unknown => Err(ToolError::msg(format!(

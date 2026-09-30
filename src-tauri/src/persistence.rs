@@ -5,14 +5,16 @@ use std::pin::Pin;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use rig::completion::Message;
 use rig::memory::{ConversationMemory, MemoryError};
-use rig::message::{AssistantContent, DocumentSourceKind, MimeType, UserContent};
+use rig::message::{AssistantContent, DocumentSourceKind, MimeType, ToolResultContent, UserContent};
+use rig::OneOrMany;
 
+use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
 use crate::llm::{is_payload_part, payload_part_label};
@@ -122,13 +124,75 @@ const KNOWLEDGE_SCHEMA: &str = "
  END;
 ";
 
+const PASSAGE_INDEX_SCHEMA: &str = "
+ DROP TRIGGER IF EXISTS passages_ai;
+ DROP TRIGGER IF EXISTS passages_ad;
+ DROP TRIGGER IF EXISTS passages_au;
+ DROP TABLE IF EXISTS passages_fts;
 
+ CREATE TABLE passages_v2 (
+     pid          INTEGER PRIMARY KEY,
+     id           TEXT NOT NULL UNIQUE,
+     document_id  TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+     seq          INTEGER NOT NULL,
+     text         TEXT NOT NULL,
+     page_number  INTEGER,
+     char_start   INTEGER,
+     char_end     INTEGER
+ );
+ INSERT INTO passages_v2 (id, document_id, seq, text, page_number, char_start, char_end)
+     SELECT id, document_id, seq, text, page_number, char_start, char_end
+     FROM passages ORDER BY document_id, seq;
+ DROP TABLE passages;
+ ALTER TABLE passages_v2 RENAME TO passages;
+ CREATE INDEX IF NOT EXISTS idx_passages_document ON passages(document_id, seq);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CompactionMarker {
-    summary: String,
-    original_message_count: usize,
-}
+ CREATE VIRTUAL TABLE passages_fts USING fts5(
+     text,
+     content='passages',
+     content_rowid='pid',
+     tokenize='unicode61 remove_diacritics 2'
+ );
+
+ CREATE TRIGGER passages_ai AFTER INSERT ON passages BEGIN
+     INSERT INTO passages_fts(rowid, text) VALUES (new.pid, new.text);
+ END;
+
+ CREATE TRIGGER passages_ad AFTER DELETE ON passages BEGIN
+     INSERT INTO passages_fts(passages_fts, rowid, text) VALUES ('delete', old.pid, old.text);
+ END;
+
+ CREATE TRIGGER passages_au AFTER UPDATE ON passages BEGIN
+     INSERT INTO passages_fts(passages_fts, rowid, text) VALUES ('delete', old.pid, old.text);
+     INSERT INTO passages_fts(rowid, text) VALUES (new.pid, new.text);
+ END;
+
+ INSERT INTO passages_fts(passages_fts) VALUES ('rebuild');
+";
+
+const CONVERSATION_SCOPE_SCHEMA: &str = "
+ CREATE TABLE IF NOT EXISTS compactions (
+     conversation_id        TEXT NOT NULL,
+     upto_seq               INTEGER NOT NULL,
+     summary                TEXT NOT NULL,
+     original_message_count INTEGER NOT NULL,
+     ts                     INTEGER NOT NULL,
+     PRIMARY KEY (conversation_id, upto_seq)
+ );
+ INSERT OR REPLACE INTO compactions (conversation_id, upto_seq, summary, original_message_count, ts)
+     SELECT conversation_id,
+            seq,
+            COALESCE(json_extract(data, '$.summary'), ''),
+            COALESCE(json_extract(data, '$.original_message_count'), 0),
+            ts
+     FROM messages WHERE kind = 'compaction';
+ DELETE FROM messages WHERE kind = 'compaction';
+
+ ALTER TABLE sessions ADD COLUMN user_id TEXT;
+ ALTER TABLE sessions ADD COLUMN last_context_tokens INTEGER NOT NULL DEFAULT 0;
+ CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
+     ON sessions(workspace_path, user_id, updated_at DESC);
+";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +204,7 @@ pub struct SessionSummary {
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
     pub total_tokens: i64,
+    pub context_tokens: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,10 +259,16 @@ pub struct CompactionInput {
     pub prior_message_count: usize,
     pub summarize: Vec<Message>,
     pub summarize_upto_seq: i64,
-    pub first_seq: i64,
 }
 
-const POOL_SIZE: u32 = 4;
+struct CompactionRecord {
+    upto_seq: i64,
+    summary: String,
+    original_message_count: usize,
+    ts: i64,
+}
+
+const POOL_SIZE: u32 = 6;
 
 pub(crate) type SqlitePool = Pool<SqliteConnectionManager>;
 
@@ -221,6 +292,8 @@ impl SqliteMemory {
             rusqlite_migration::M::up(KNOWLEDGE_SCHEMA),
             rusqlite_migration::M::up(RENAME_TOKEN_COLUMNS),
             rusqlite_migration::M::up(crate::run_persistence::DURABLE_RUN_SCHEMA),
+            rusqlite_migration::M::up(PASSAGE_INDEX_SCHEMA),
+            rusqlite_migration::M::up(CONVERSATION_SCOPE_SCHEMA),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -248,21 +321,31 @@ impl SqliteMemory {
     pub async fn list_sessions_for_workspace(
         &self,
         workspace_path: &str,
+        user_id: &str,
     ) -> AppResult<Vec<SessionSummary>> {
         let pool = self.pool.clone();
         let ws = workspace_path.to_string();
+        let uid = user_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
+            c.execute(
+                "UPDATE sessions SET user_id = ?1 WHERE user_id IS NULL",
+                params![uid],
+            )
+            .map_err(sql_err)?;
             let mut stmt = c
                 .prepare(
-                    "SELECT id, title, workspace_path, updated_at, total_input_tokens, total_output_tokens, total_tokens
+                    "SELECT id, title, workspace_path, updated_at, total_input_tokens,
+                            total_output_tokens, total_tokens, last_context_tokens
                      FROM sessions
-                     WHERE workspace_path = ?1
+                     WHERE workspace_path = ?1 AND user_id = ?2
+                       AND (EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = sessions.id)
+                            OR EXISTS (SELECT 1 FROM chat_runs r WHERE r.conversation_id = sessions.id))
                      ORDER BY updated_at DESC",
                 )
                 .map_err(sql_err)?;
             let rows = stmt
-                .query_map(params![ws], |row| {
+                .query_map(params![ws, uid], |row| {
                     Ok(SessionSummary {
                         id: row.get(0)?,
                         title: row.get(1)?,
@@ -271,8 +354,29 @@ impl SqliteMemory {
                         total_input_tokens: row.get(4)?,
                         total_output_tokens: row.get(5)?,
                         total_tokens: row.get(6)?,
+                        context_tokens: row.get(7)?,
                     })
                 })
+                .map_err(sql_err)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(sql_err)?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    pub async fn session_ids_for_workspace(&self, workspace_path: &str) -> AppResult<Vec<String>> {
+        let pool = self.pool.clone();
+        let ws = workspace_path.to_string();
+        run_db_task(move || {
+            let c = pool.get().map_err(pool_err)?;
+            let mut stmt = c
+                .prepare("SELECT id FROM sessions WHERE workspace_path = ?1")
+                .map_err(sql_err)?;
+            let rows = stmt
+                .query_map(params![ws], |row| row.get::<_, String>(0))
                 .map_err(sql_err)?;
             let mut out = Vec::new();
             for r in rows {
@@ -289,67 +393,36 @@ impl SqliteMemory {
         run_db_task(move || {
             let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-
-            tx.execute(
-                "DELETE FROM messages WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)",
-                params![ws],
-            )
-            .map_err(sql_err)?;
-
-            tx.execute(
-                "DELETE FROM reasoning_durations WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)",
-                params![ws],
-            )
-            .map_err(sql_err)?;
-
-            tx.execute(
-                "DELETE FROM sessions WHERE workspace_path = ?1",
-                params![ws],
-            )
-            .map_err(sql_err)?;
-
+            for table in ["messages", "reasoning_durations", "compactions"] {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)"
+                    ),
+                    params![ws],
+                )
+                .map_err(sql_err)?;
+            }
+            tx.execute("DELETE FROM sessions WHERE workspace_path = ?1", params![ws])
+                .map_err(sql_err)?;
             tx.commit().map_err(sql_err)?;
             Ok(())
         })
         .await
     }
 
-    pub async fn set_session_workspace(
-        &self,
-        conversation_id: &str,
-        workspace_path: Option<&str>,
-    ) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        let ws = workspace_path.map(|s| s.to_string());
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let now = now_ms();
-            c.execute(
-                "INSERT INTO sessions (id, workspace_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
-                 ON CONFLICT(id) DO UPDATE SET workspace_path = ?2, updated_at = ?3",
-                params![cid, ws, now],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<()> {
+    pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<bool> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         let t = title.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let now = now_ms();
-            c.execute(
-                "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)
-                 ON CONFLICT(id) DO UPDATE SET title = ?2, updated_at = ?3",
-                params![cid, t, now],
-            )
-            .map_err(sql_err)?;
-            Ok(())
+            let changed = c
+                .execute(
+                    "UPDATE sessions SET title = ?2 WHERE id = ?1 AND (title IS NULL OR title = '')",
+                    params![cid, t],
+                )
+                .map_err(sql_err)?;
+            Ok(changed > 0)
         })
         .await
     }
@@ -370,52 +443,20 @@ impl SqliteMemory {
         .await
     }
 
-    pub async fn update_session_tokens(
-        &self,
-        conversation_id: &str,
-        input_tokens: u64,
-        output_tokens: u64,
-        total_tokens: u64,
-    ) -> AppResult<()> {
+    pub async fn session_context_tokens(&self, conversation_id: &str) -> AppResult<u64> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let now = now_ms();
-            c.execute(
-                "UPDATE sessions SET total_input_tokens = ?1, total_output_tokens = ?2, total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
-                params![input_tokens as i64, output_tokens as i64, total_tokens as i64, now, cid],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_session_tokens(
-        &self,
-        conversation_id: &str,
-    ) -> AppResult<(u64, u64, u64)> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.query_row(
-                "SELECT total_input_tokens, total_output_tokens, total_tokens FROM sessions WHERE id = ?1",
-                params![cid],
-                |row| {
-                    let i: i64 = row.get(0)?;
-                    let o: i64 = row.get(1)?;
-                    let t: i64 = row.get(2)?;
-                    Ok((i.max(0) as u64, o.max(0) as u64, t.max(0) as u64))
-                },
-            )
-            .map(Some)
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(sql_err(other)),
-            })
-            .map(|opt| opt.unwrap_or((0, 0, 0)))
+            let value: Option<i64> = c
+                .query_row(
+                    "SELECT last_context_tokens FROM sessions WHERE id = ?1",
+                    params![cid],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sql_err)?;
+            Ok(value.unwrap_or(0).max(0) as u64)
         })
         .await
     }
@@ -453,9 +494,6 @@ impl SqliteMemory {
             let mut assignments: Vec<(String, u64)> = Vec::new();
 
             'outer: for row in &rows {
-                if row.kind != "message" {
-                    continue;
-                }
                 let Ok(Message::Assistant { content, .. }) =
                     serde_json::from_str::<Message>(&row.data)
                 else {
@@ -469,19 +507,20 @@ impl SqliteMemory {
                                 continue;
                             }
                             match pending.next() {
-                                Some(secs) => {
-                                    assignments.push((
-                                        stable_id(&cid, row.seq, item_idx, Some("reasoning")),
-                                        secs,
-                                    ));
-                                }
+                                Some(secs) => assignments.push((
+                                    stable_id(&cid, row.seq, item_idx, Some("reasoning")),
+                                    secs,
+                                )),
                                 None => break 'outer,
                             }
                             item_idx += 1;
                         }
-                        AssistantContent::ToolCall(_) | AssistantContent::Text(_) => {
-                            item_idx += 1;
+                        AssistantContent::Text(t) => {
+                            if !t.text.is_empty() {
+                                item_idx += 1;
+                            }
                         }
+                        AssistantContent::ToolCall(_) => item_idx += 1,
                         _ => {}
                     }
                 }
@@ -516,33 +555,15 @@ impl SqliteMemory {
         let cid = conversation_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let rows = load_all(&c, &cid).map_err(sql_err)?;
-            let boundary = rows.iter().rposition(|r| r.kind == "compaction");
+            let latest = latest_compaction(&c, &cid).map_err(sql_err)?;
+            let after = latest.as_ref().map(|r| r.upto_seq).unwrap_or(-1);
+            let rows = load_after(&c, &cid, after).map_err(sql_err)?;
 
-            let (previous_summary, prior_message_count, tail_start) = match boundary {
-                Some(idx) => {
-                    let marker: CompactionMarker = serde_json::from_str(&rows[idx].data)
-                        .map_err(|e| {
-                            AppError::other(format!("compaction marker decode failed: {e}"))
-                        })?;
-                    (Some(marker.summary), marker.original_message_count, idx + 1)
-                }
-                None => (None, 0, 0),
-            };
-
-            let tail = &rows[tail_start..];
-            let mut decoded: Vec<(i64, Message)> = Vec::new();
-            for row in tail {
-                if row.kind != "message" {
-                    continue;
-                }
+            let mut decoded: Vec<(i64, Message)> = Vec::with_capacity(rows.len());
+            for row in rows {
                 let msg: Message = serde_json::from_str(&row.data)
                     .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
                 decoded.push((row.seq, msg));
-            }
-
-            if decoded.is_empty() {
-                return Ok(None);
             }
 
             let user_turn_positions: Vec<usize> = decoded
@@ -552,27 +573,29 @@ impl SqliteMemory {
                 .map(|(i, _)| i)
                 .collect();
 
-            let cut = if user_turn_positions.len() > keep_recent_user_turns {
-                user_turn_positions[user_turn_positions.len() - keep_recent_user_turns]
-            } else {
+            if user_turn_positions.len() < 2 {
                 return Ok(None);
-            };
-
+            }
+            let keep = keep_recent_user_turns
+                .max(1)
+                .min(user_turn_positions.len() - 1);
+            let cut = user_turn_positions[user_turn_positions.len() - keep];
             if cut == 0 {
                 return Ok(None);
             }
 
-            let summarize: Vec<Message> =
-                decoded[..cut].iter().map(|(_, m)| m.clone()).collect();
-            let first_seq = decoded[0].0;
+            let summarize: Vec<Message> = decoded[..cut].iter().map(|(_, m)| m.clone()).collect();
             let summarize_upto_seq = decoded[cut - 1].0;
+            let (previous_summary, prior_message_count) = match latest {
+                Some(record) => (Some(record.summary), record.original_message_count),
+                None => (None, 0),
+            };
 
             Ok(Some(CompactionInput {
                 previous_summary,
                 prior_message_count,
                 summarize,
                 summarize_upto_seq,
-                first_seq,
             }))
         })
         .await
@@ -583,7 +606,6 @@ impl SqliteMemory {
         conversation_id: &str,
         summary: &str,
         original_message_count: usize,
-        first_seq: i64,
         upto_seq: i64,
     ) -> AppResult<i64> {
         let pool = self.pool.clone();
@@ -591,23 +613,12 @@ impl SqliteMemory {
         let summary = summary.to_string();
         run_db_task(move || {
             let now = now_ms();
-            let marker = CompactionMarker {
-                summary,
-                original_message_count,
-            };
-            let data = serde_json::to_string(&marker)
-                .map_err(|e| AppError::other(format!("serialize compaction marker: {e}")))?;
-
             let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
             tx.execute(
-                "DELETE FROM messages WHERE conversation_id = ?1 AND seq <= ?2",
-                params![cid, upto_seq],
-            )
-            .map_err(sql_err)?;
-            tx.execute(
-                "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'compaction')",
-                params![cid, first_seq, now, data],
+                "INSERT OR REPLACE INTO compactions (conversation_id, upto_seq, summary, original_message_count, ts)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![cid, upto_seq, summary, original_message_count as i64, now],
             )
             .map_err(sql_err)?;
             tx.execute(
@@ -627,6 +638,7 @@ impl SqliteMemory {
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
             let rows = load_all(&c, &cid).map_err(sql_err)?;
+            let compactions = list_compactions(&c, &cid).map_err(sql_err)?;
 
             let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
             {
@@ -646,59 +658,41 @@ impl SqliteMemory {
                 }
             }
 
-            let mut tool_outputs: HashMap<String, String> = HashMap::new();
+            let mut decoded: Vec<(i64, Message)> = Vec::with_capacity(rows.len());
             for row in &rows {
-                if row.kind != "message" {
-                    continue;
-                }
-                if let Ok(Message::User { content }) = serde_json::from_str::<Message>(&row.data) {
+                let msg: Message = serde_json::from_str(&row.data)
+                    .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
+                decoded.push((row.seq, msg));
+            }
+
+            let mut tool_outputs: HashMap<String, String> = HashMap::new();
+            for (_, msg) in &decoded {
+                if let Message::User { content } = msg {
                     for part in content.iter() {
                         if let UserContent::ToolResult(tr) = part {
-                            let call_id = tr.call_id.clone().unwrap_or_else(|| tr.id.clone());
-                            use rig::message::ToolResultContent;
                             let output: String = tr
                                 .content
                                 .iter()
-                                .filter_map(|c| {
-                                    if let ToolResultContent::Text(t) = c {
-                                        Some(t.text.as_str())
-                                    } else {
-                                        None
-                                    }
+                                .filter_map(|c| match c {
+                                    ToolResultContent::Text(t) => Some(t.text.as_str()),
+                                    _ => None,
                                 })
                                 .collect();
-                            tool_outputs.insert(call_id, output);
+                            tool_outputs.insert(tr.id.clone(), output);
                         }
                     }
                 }
             }
 
             let mut views: Vec<MessageView> = Vec::new();
+            let mut pending_compactions = compactions.iter().peekable();
 
-            for row in &rows {
-                let msg_id = stable_id(&cid, row.seq, 0, None);
-
-                if row.kind == "compaction" {
-                    let marker: CompactionMarker = serde_json::from_str(&row.data)
-                        .map_err(|e| {
-                            AppError::other(format!("compaction marker decode failed: {e}"))
-                        })?;
-                    views.push(MessageView {
-                        id: msg_id,
-                        role: "system".to_string(),
-                        items: vec![MessageItemView::CompactionNotice {
-                            id: stable_id(&cid, row.seq, 0, Some("compaction")),
-                            original_message_count: marker.original_message_count,
-                            ts: row.ts,
-                        }],
-                        attachments: vec![],
-                    });
-                    continue;
+            for (seq, msg) in &decoded {
+                while let Some(record) = pending_compactions.next_if(|r| r.upto_seq < *seq) {
+                    views.push(compaction_view(&cid, record));
                 }
 
-                let msg: Message = serde_json::from_str(&row.data)
-                    .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
-
+                let msg_id = stable_id(&cid, *seq, 0, None);
                 match msg {
                     Message::User { content } => {
                         let mut text = String::new();
@@ -727,20 +721,17 @@ impl SqliteMemory {
                                         .unwrap_or_else(|| "image/png".to_string());
                                     let data_url = match &img.data {
                                         DocumentSourceKind::Base64(b64) => {
-                                            Some(format!("data:{mime};base64,{b64}"))
+                                            crate::media::thumbnail_data_url_from_base64(b64, &mime, 320)
                                         }
                                         DocumentSourceKind::Url(url) => Some(url.clone()),
                                         _ => None,
                                     };
-                                    if let Some(data_url) = data_url {
-                                        let ext =
-                                            mime.split('/').nth(1).unwrap_or("png").to_string();
-                                        attachments.push(AttachmentView {
-                                            name: format!("image.{ext}"),
-                                            is_image: true,
-                                            data_url: Some(data_url),
-                                        });
-                                    }
+                                    let ext = mime.split('/').nth(1).unwrap_or("png").to_string();
+                                    attachments.push(AttachmentView {
+                                        name: format!("image.{ext}"),
+                                        is_image: true,
+                                        data_url,
+                                    });
                                 }
                                 _ => {}
                             }
@@ -757,7 +748,7 @@ impl SqliteMemory {
                                 vec![]
                             } else {
                                 vec![MessageItemView::Text {
-                                    id: stable_id(&cid, row.seq, 0, Some("text")),
+                                    id: stable_id(&cid, *seq, 0, Some("text")),
                                     text,
                                 }]
                             },
@@ -774,10 +765,8 @@ impl SqliteMemory {
                                     if text.is_empty() {
                                         continue;
                                     }
-                                    let item_id =
-                                        stable_id(&cid, row.seq, item_idx, Some("reasoning"));
-                                    let duration_seconds =
-                                        reasoning_durations.get(&item_id).copied();
+                                    let item_id = stable_id(&cid, *seq, item_idx, Some("reasoning"));
+                                    let duration_seconds = reasoning_durations.get(&item_id).copied();
                                     items.push(MessageItemView::Reasoning {
                                         id: item_id,
                                         text,
@@ -787,8 +776,7 @@ impl SqliteMemory {
                                 }
                                 AssistantContent::ToolCall(tc) => {
                                     let args = tc.function.arguments.to_string();
-                                    let display_info =
-                                        parse_display_info(&tc.function.name, &args);
+                                    let display_info = parse_display_info(&tc.function.name, &args);
                                     let raw = tool_outputs.get(&tc.id);
                                     let status = match raw {
                                         Some(o) if tool_output_is_error(o) => "error",
@@ -796,11 +784,15 @@ impl SqliteMemory {
                                         None => "error",
                                     };
                                     items.push(MessageItemView::ToolCall {
-                                        id: tc.id.clone(),
+                                        id: stable_id(&cid, *seq, item_idx, Some("tool")),
                                         name: tc.function.name.clone(),
                                         args,
-                                        output: raw
-                                            .map(|o| strip_tool_error_sentinel(o).to_string()),
+                                        output: raw.map(|o| {
+                                            crate::util::clip_middle(
+                                                strip_tool_error_sentinel(o),
+                                                config::MAX_VIEW_TOOL_OUTPUT_CHARS,
+                                            )
+                                        }),
                                         display_info,
                                         status: status.to_string(),
                                     });
@@ -811,7 +803,7 @@ impl SqliteMemory {
                                         continue;
                                     }
                                     items.push(MessageItemView::Text {
-                                        id: stable_id(&cid, row.seq, item_idx, Some("text")),
+                                        id: stable_id(&cid, *seq, item_idx, Some("text")),
                                         text: t.text.clone(),
                                     });
                                     item_idx += 1;
@@ -831,9 +823,57 @@ impl SqliteMemory {
                     _ => {}
                 }
             }
+            for record in pending_compactions {
+                views.push(compaction_view(&cid, record));
+            }
             Ok(views)
         })
         .await
+    }
+}
+
+fn compaction_view(cid: &str, record: &CompactionRecord) -> MessageView {
+    MessageView {
+        id: stable_id(cid, record.upto_seq, 0, Some("compaction-message")),
+        role: "system".to_string(),
+        items: vec![MessageItemView::CompactionNotice {
+            id: stable_id(cid, record.upto_seq, 0, Some("compaction")),
+            original_message_count: record.original_message_count,
+            ts: record.ts,
+        }],
+        attachments: vec![],
+    }
+}
+
+fn elide_old_images(messages: &mut [Message]) {
+    let user_turns: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| is_user_turn(m))
+        .map(|(i, _)| i)
+        .collect();
+    if user_turns.len() <= 2 {
+        return;
+    }
+    let keep_from = user_turns[user_turns.len() - 2];
+    for message in messages.iter_mut().take(keep_from) {
+        if let Message::User { content } = message {
+            if !content.iter().any(|c| matches!(c, UserContent::Image(_))) {
+                continue;
+            }
+            let replaced: Vec<UserContent> = content
+                .iter()
+                .map(|c| match c {
+                    UserContent::Image(_) => {
+                        UserContent::text("[An image attached to this earlier message is omitted from context.]")
+                    }
+                    other => other.clone(),
+                })
+                .collect();
+            if let Ok(next) = OneOrMany::many(replaced) {
+                *content = next;
+            }
+        }
     }
 }
 
@@ -847,30 +887,22 @@ impl ConversationMemory for SqliteMemory {
         Box::pin(async move {
             run_mem_task(move || {
                 let c = pool.get().map_err(mem_pool)?;
-                let rows = load_all(&c, &cid).map_err(mem_sql)?;
-                let boundary = rows.iter().rposition(|r| r.kind == "compaction");
+                let latest = latest_compaction(&c, &cid).map_err(mem_sql)?;
+                let after = latest.as_ref().map(|r| r.upto_seq).unwrap_or(-1);
+                let rows = load_after(&c, &cid, after).map_err(mem_sql)?;
 
-                let mut out = Vec::new();
-                let tail_start = match boundary {
-                    Some(idx) => {
-                        let marker: CompactionMarker =
-                            serde_json::from_str(&rows[idx].data).map_err(MemoryError::backend)?;
-                        out.push(Message::user(format!(
-                            "[CONTEXT SUMMARY — {} prior turns summarized for memory efficiency]\n\n{}\n\n[END CONTEXT SUMMARY — Continue task with recent turns below]",
-                            marker.original_message_count, marker.summary
-                        )));
-                        idx + 1
-                    }
-                    None => 0,
-                };
-
-                for row in &rows[tail_start..] {
-                    if row.kind == "message" {
-                        let msg: Message =
-                            serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
-                        out.push(msg);
-                    }
+                let mut out = Vec::with_capacity(rows.len() + 1);
+                if let Some(record) = latest {
+                    out.push(Message::user(format!(
+                        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[END CONTEXT SUMMARY — continue with the recent messages below]",
+                        record.original_message_count, record.summary
+                    )));
                 }
+                for row in &rows {
+                    let msg: Message = serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
+                    out.push(msg);
+                }
+                elide_old_images(&mut out);
                 Ok(out)
             })
             .await
@@ -928,18 +960,15 @@ impl ConversationMemory for SqliteMemory {
             run_mem_task(move || {
                 let mut c = pool.get().map_err(mem_pool)?;
                 let tx = c.transaction().map_err(mem_sql)?;
-                tx.execute(
-                    "DELETE FROM messages WHERE conversation_id = ?1",
-                    params![cid],
-                )
-                .map_err(mem_sql)?;
+                for table in ["messages", "reasoning_durations", "compactions"] {
+                    tx.execute(
+                        &format!("DELETE FROM {table} WHERE conversation_id = ?1"),
+                        params![cid],
+                    )
+                    .map_err(mem_sql)?;
+                }
                 tx.execute("DELETE FROM sessions WHERE id = ?1", params![cid])
                     .map_err(mem_sql)?;
-                tx.execute(
-                    "DELETE FROM reasoning_durations WHERE conversation_id = ?1",
-                    params![cid],
-                )
-                .map_err(mem_sql)?;
                 tx.commit().map_err(mem_sql)?;
                 Ok(())
             })
@@ -958,26 +987,18 @@ pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
 
 struct MessageRow {
     seq: i64,
-    ts: i64,
-    kind: String,
     data: String,
 }
 
 fn map_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
     Ok(MessageRow {
         seq: row.get(0)?,
-        ts: row.get(1)?,
-        kind: row.get(2)?,
-        data: row.get(3)?,
+        data: row.get(1)?,
     })
 }
 
 fn load_all(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<MessageRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 ORDER BY seq ASC",
-    )?;
-    let rows = stmt.query_map(params![conversation_id], map_message_row)?;
-    rows.collect()
+    load_after(conn, conversation_id, i64::MIN)
 }
 
 fn load_after(
@@ -986,13 +1007,43 @@ fn load_after(
     after_seq: i64,
 ) -> rusqlite::Result<Vec<MessageRow>> {
     let mut stmt = conn.prepare(
-        "SELECT seq, ts, kind, data FROM messages WHERE conversation_id = ?1 AND seq > ?2 ORDER BY seq ASC",
+        "SELECT seq, data FROM messages
+         WHERE conversation_id = ?1 AND seq > ?2 AND kind = 'message'
+         ORDER BY seq ASC",
     )?;
     let rows = stmt.query_map(params![conversation_id, after_seq], map_message_row)?;
     rows.collect()
 }
 
-fn is_user_turn(msg: &Message) -> bool {
+fn map_compaction_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CompactionRecord> {
+    Ok(CompactionRecord {
+        upto_seq: row.get(0)?,
+        summary: row.get(1)?,
+        original_message_count: row.get::<_, i64>(2)?.max(0) as usize,
+        ts: row.get(3)?,
+    })
+}
+
+fn latest_compaction(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Option<CompactionRecord>> {
+    conn.query_row(
+        "SELECT upto_seq, summary, original_message_count, ts FROM compactions
+         WHERE conversation_id = ?1 ORDER BY upto_seq DESC LIMIT 1",
+        params![conversation_id],
+        map_compaction_row,
+    )
+    .optional()
+}
+
+fn list_compactions(conn: &Connection, conversation_id: &str) -> rusqlite::Result<Vec<CompactionRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT upto_seq, summary, original_message_count, ts FROM compactions
+         WHERE conversation_id = ?1 ORDER BY upto_seq ASC",
+    )?;
+    let rows = stmt.query_map(params![conversation_id], map_compaction_row)?;
+    rows.collect()
+}
+
+pub(crate) fn is_user_turn(msg: &Message) -> bool {
     match msg {
         Message::User { content } => content.iter().any(|c| matches!(c, UserContent::Text(_))),
         _ => false,
@@ -1008,12 +1059,12 @@ fn basename(label: &str) -> String {
         .to_string()
 }
 
-fn fts5_query(raw: &str) -> String {
+fn fts5_query(raw: &str, joiner: &str) -> String {
     raw.split_whitespace()
         .filter(|t| !t.is_empty())
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(joiner)
 }
 
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
@@ -1060,7 +1111,6 @@ fn mem_pool(e: r2d2::Error) -> MemoryError {
 fn mem_sql(e: rusqlite::Error) -> MemoryError {
     MemoryError::backend(e)
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1118,6 +1168,43 @@ pub struct ConnectorRecord {
     pub updated_at: i64,
 }
 
+fn search_passages(conn: &Connection, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
+                    snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
+                    bm25(passages_fts),
+                    p.page_number
+             FROM passages_fts
+             JOIN passages p ON p.pid = passages_fts.rowid
+             JOIN documents d ON d.id = p.document_id
+             WHERE passages_fts MATCH ?1
+             ORDER BY bm25(passages_fts)
+             LIMIT ?2",
+        )
+        .map_err(sql_err)?;
+    let rows = stmt
+        .query_map(params![query, limit as i64], |row| {
+            Ok(SearchHit {
+                document_id: row.get(0)?,
+                passage_id: row.get(1)?,
+                document_title: row.get(2)?,
+                file_type: row.get(3)?,
+                source: row.get(4)?,
+                file_path: row.get(5)?,
+                snippet: row.get(6)?,
+                score: row.get(7)?,
+                page_number: row.get(8)?,
+            })
+        })
+        .map_err(sql_err)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(sql_err)?);
+    }
+    Ok(out)
+}
+
 impl SqliteMemory {
     pub async fn replace_document_with_passages(
         &self,
@@ -1128,12 +1215,8 @@ impl SqliteMemory {
         run_db_task(move || {
             let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-            let document_id = doc.id.clone();
-            tx.execute(
-                "DELETE FROM documents WHERE id = ?1",
-                rusqlite::params![document_id],
-            )
-            .map_err(sql_err)?;
+            tx.execute("DELETE FROM documents WHERE id = ?1", params![doc.id])
+                .map_err(sql_err)?;
 
             let meta = serde_json::to_string(&doc.metadata).map_err(|e| {
                 AppError::other(format!("document metadata serialization failed: {e}"))
@@ -1142,7 +1225,7 @@ impl SqliteMemory {
                 "INSERT INTO documents (id, title, file_path, source, source_id, file_type,
                   size_bytes, page_count, word_count, metadata, indexed_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-                rusqlite::params![
+                params![
                     doc.id,
                     doc.title,
                     doc.file_path,
@@ -1167,7 +1250,7 @@ impl SqliteMemory {
                     )
                     .map_err(sql_err)?;
                 for passage in passages {
-                    stmt.execute(rusqlite::params![
+                    stmt.execute(params![
                         passage.id,
                         passage.document_id,
                         passage.seq,
@@ -1192,10 +1275,11 @@ impl SqliteMemory {
         let did = document_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            c.execute("DELETE FROM documents WHERE id=?1", rusqlite::params![did])
+            c.execute("DELETE FROM documents WHERE id=?1", params![did])
                 .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn list_documents(
@@ -1211,7 +1295,7 @@ impl SqliteMemory {
             let mut sql = String::from(
                 "SELECT id, title, file_path, source, source_id, file_type,
                         size_bytes, page_count, word_count, metadata, indexed_at, updated_at
-                 FROM documents WHERE 1=1"
+                 FROM documents WHERE 1=1",
             );
             let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
             if let Some(s) = source {
@@ -1234,7 +1318,8 @@ impl SqliteMemory {
                 out.push(r.map_err(sql_err)?);
             }
             Ok(out)
-        }).await
+        })
+        .await
     }
 
     pub async fn get_document(&self, document_id: &str) -> AppResult<Option<DocumentRecord>> {
@@ -1242,18 +1327,17 @@ impl SqliteMemory {
         let did = document_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c.prepare(
+            c.query_row(
                 "SELECT id, title, file_path, source, source_id, file_type,
                         size_bytes, page_count, word_count, metadata, indexed_at, updated_at
-                 FROM documents WHERE id=?1"
-            ).map_err(sql_err)?;
-            let mut rows = stmt.query_map(rusqlite::params![did], map_document_row).map_err(sql_err)?;
-            if let Some(r) = rows.next() {
-                Ok(Some(r.map_err(sql_err)?))
-            } else {
-                Ok(None)
-            }
-        }).await
+                 FROM documents WHERE id=?1",
+                params![did],
+                map_document_row,
+            )
+            .optional()
+            .map_err(sql_err)
+        })
+        .await
     }
 
     pub async fn document_exists_by_path(&self, path: &str) -> AppResult<Option<String>> {
@@ -1261,61 +1345,33 @@ impl SqliteMemory {
         let p = path.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c.prepare("SELECT id FROM documents WHERE file_path=?1 LIMIT 1")
-                .map_err(sql_err)?;
-            let mut rows = stmt.query_map(rusqlite::params![p], |row| row.get::<_, String>(0))
-                .map_err(sql_err)?;
-            if let Some(r) = rows.next() {
-                Ok(Some(r.map_err(sql_err)?))
-            } else {
-                Ok(None)
-            }
-        }).await
+            c.query_row(
+                "SELECT id FROM documents WHERE file_path=?1 LIMIT 1",
+                params![p],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_err)
+        })
+        .await
     }
 
     pub async fn search_documents(&self, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
-        let q = fts5_query(query);
-        if q.is_empty() {
+        let strict = fts5_query(query, " ");
+        if strict.is_empty() {
             return Ok(Vec::new());
         }
+        let loose = fts5_query(query, " OR ");
         let pool = self.pool.clone();
-        let lim = limit;
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c.prepare(
-                "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
-                        snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
-                        bm25(passages_fts),
-                        p.page_number
-                 FROM passages_fts
-                 JOIN passages p ON p.id = passages_fts.passage_id
-                 JOIN documents d ON d.id = p.document_id
-                 WHERE passages_fts MATCH ?1
-                 ORDER BY bm25(passages_fts)
-                 LIMIT ?2"
-            ).map_err(sql_err)?;
-            let rows = stmt.query_map(
-                rusqlite::params![q, lim as i64],
-                |row| {
-                    Ok(SearchHit {
-                        document_id: row.get(0)?,
-                        passage_id: row.get(1)?,
-                        document_title: row.get(2)?,
-                        file_type: row.get(3)?,
-                        source: row.get(4)?,
-                        file_path: row.get(5)?,
-                        snippet: row.get(6)?,
-                        score: row.get(7)?,
-                        page_number: row.get(8)?,
-                    })
-                }
-            ).map_err(sql_err)?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r.map_err(sql_err)?);
+            let hits = search_passages(&c, &strict, limit)?;
+            if hits.is_empty() && loose != strict {
+                return search_passages(&c, &loose, limit);
             }
-            Ok(out)
-        }).await
+            Ok(hits)
+        })
+        .await
     }
 
     pub async fn count_documents(&self) -> AppResult<i64> {
@@ -1324,7 +1380,8 @@ impl SqliteMemory {
             let c = pool.get().map_err(pool_err)?;
             c.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
                 .map_err(sql_err)
-        }).await
+        })
+        .await
     }
 
     pub async fn upsert_connector(&self, rec: ConnectorRecord) -> AppResult<()> {
@@ -1339,41 +1396,54 @@ impl SqliteMemory {
                    auth_kind=excluded.auth_kind, has_token=excluded.has_token,
                    token_expires_at=excluded.token_expires_at,
                    error=excluded.error, updated_at=excluded.updated_at",
-                rusqlite::params![
-                    rec.id, rec.name, rec.enabled as i64, rec.auth_kind,
-                    rec.has_token as i64, rec.token_expires_at, rec.error, rec.updated_at
+                params![
+                    rec.id,
+                    rec.name,
+                    rec.enabled as i64,
+                    rec.auth_kind,
+                    rec.has_token as i64,
+                    rec.token_expires_at,
+                    rec.error,
+                    rec.updated_at
                 ],
-            ).map_err(sql_err)?;
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn list_connectors(&self) -> AppResult<Vec<ConnectorRecord>> {
         let pool = self.pool.clone();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c.prepare(
-                "SELECT id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at
-                 FROM connectors ORDER BY id"
-            ).map_err(sql_err)?;
-            let rows = stmt.query_map([], |row| {
-                Ok(ConnectorRecord {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    enabled: row.get::<_, i64>(2)? != 0,
-                    auth_kind: row.get(3)?,
-                    has_token: row.get::<_, i64>(4)? != 0,
-                    token_expires_at: row.get(5)?,
-                    error: row.get(6)?,
-                    updated_at: row.get(7)?,
+            let mut stmt = c
+                .prepare(
+                    "SELECT id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at
+                     FROM connectors ORDER BY id",
+                )
+                .map_err(sql_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ConnectorRecord {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        enabled: row.get::<_, i64>(2)? != 0,
+                        auth_kind: row.get(3)?,
+                        has_token: row.get::<_, i64>(4)? != 0,
+                        token_expires_at: row.get(5)?,
+                        error: row.get(6)?,
+                        updated_at: row.get(7)?,
+                    })
                 })
-            }).map_err(sql_err)?;
+                .map_err(sql_err)?;
             let mut out = Vec::new();
             for r in rows {
                 out.push(r.map_err(sql_err)?);
             }
             Ok(out)
-        }).await
+        })
+        .await
     }
 
     pub async fn set_connector_enabled(&self, id: &str, enabled: bool) -> AppResult<()> {
@@ -1384,10 +1454,12 @@ impl SqliteMemory {
             let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET enabled=?1, updated_at=?2 WHERE id=?3",
-                rusqlite::params![enabled as i64, ts, cid],
-            ).map_err(sql_err)?;
+                params![enabled as i64, ts, cid],
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn set_connector_token_state(
@@ -1405,10 +1477,29 @@ impl SqliteMemory {
             let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET has_token=?1, token_expires_at=?2, error=?3, updated_at=?4 WHERE id=?5",
-                rusqlite::params![has_token as i64, expires_at, err, ts, cid],
-            ).map_err(sql_err)?;
+                params![has_token as i64, expires_at, err, ts, cid],
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
+    }
+
+    pub async fn set_connector_error(&self, id: &str, error: Option<&str>) -> AppResult<()> {
+        let pool = self.pool.clone();
+        let cid = id.to_string();
+        let ts = now_ms();
+        let err = error.map(|s| s.to_string());
+        run_db_task(move || {
+            let c = pool.get().map_err(pool_err)?;
+            c.execute(
+                "UPDATE connectors SET error=?1, updated_at=?2 WHERE id=?3",
+                params![err, ts, cid],
+            )
+            .map_err(sql_err)?;
+            Ok(())
+        })
+        .await
     }
 
     pub async fn clear_all_connector_tokens(&self) -> AppResult<()> {
@@ -1418,16 +1509,19 @@ impl SqliteMemory {
             let c = pool.get().map_err(pool_err)?;
             c.execute(
                 "UPDATE connectors SET enabled=0, has_token=0, token_expires_at=NULL, error=NULL, updated_at=?1",
-                rusqlite::params![ts],
-            ).map_err(sql_err)?;
+                params![ts],
+            )
+            .map_err(sql_err)?;
             Ok(())
-        }).await
+        })
+        .await
     }
 }
 
 fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
     let meta_str: String = row.get(9)?;
-    let metadata = serde_json::from_str(&meta_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    let metadata =
+        serde_json::from_str(&meta_str).unwrap_or(serde_json::Value::Object(Default::default()));
     Ok(DocumentRecord {
         id: row.get(0)?,
         title: row.get(1)?,

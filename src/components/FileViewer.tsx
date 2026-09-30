@@ -4,11 +4,11 @@ import * as monaco from "monaco-editor";
 import { useDebouncedCallback } from "use-debounce";
 import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
 
-import editorWorker from "monaco-editor/editor/editor.worker?worker&inline";
-import jsonWorker from "monaco-editor/language/json/json.worker?worker&inline";
-import cssWorker from "monaco-editor/language/css/css.worker?worker&inline";
-import htmlWorker from "monaco-editor/language/html/html.worker?worker&inline";
-import tsWorker from "monaco-editor/language/typescript/ts.worker?worker&inline";
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/language/json/json.worker?worker";
+import cssWorker from "monaco-editor/language/css/css.worker?worker";
+import htmlWorker from "monaco-editor/language/html/html.worker?worker";
+import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 
 import * as api from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
@@ -241,13 +241,23 @@ function NativeMediaViewer({ path, kind }: { path: string; kind: MediaKind }) {
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     setLoading(true);
     setError(null);
-    api.readBinaryFileAsDataUrl(path)
-      .then((url) => { if (!cancelled) { setSrc(url); setLoading(false); } })
+    const type = kind === "video" ? (VIDEO_MIMES[ext] ?? "video/mp4") : (AUDIO_MIMES[ext] ?? "audio/mpeg");
+    api.readBinaryFile(path)
+      .then((buffer) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type }));
+        setSrc(objectUrl);
+        setLoading(false);
+      })
       .catch((e) => { if (!cancelled) { setError(api.errorMessage(e)); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [path]);
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path, kind, ext]);
 
   if (loading) return <div className="FileViewerLoading"><div className="Spinner" /></div>;
   if (error) return <div className="FileContent-msg">{error}</div>;
@@ -286,6 +296,7 @@ function BinaryFileMessage({ path }: { path: string }) {
 
 export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const setTabPath = useArtifactsStore((s) => s.setTabPath);
+  const version = useArtifactsStore((s) => (path ? s.fileVersions[path] ?? 0 : 0));
 
   const isMd = Boolean(path && /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path));
   const [mode, setMode] = useState<"preview" | "code">("preview");
@@ -329,6 +340,11 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
     setMode("preview");
     void load(path);
   }, [path, load]);
+
+  useEffect(() => {
+    if (!path || version === 0 || api.documentArtifactKindForPath(path)) return;
+    void load(path);
+  }, [version, path, load]);
 
   if (!path) {
     return (

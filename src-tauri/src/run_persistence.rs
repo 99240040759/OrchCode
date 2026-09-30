@@ -1,12 +1,16 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use rig::completion::Message;
 use rig::memory::{ConversationMemory, MemoryError};
+use rig::message::{AssistantContent, ToolResultContent, UserContent};
+use rig::OneOrMany;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::error::{AppError, AppResult};
 use crate::persistence::SqliteMemory;
+use crate::tools::TOOL_ERROR_SENTINEL;
 use crate::util::now_ms;
 
 pub const DURABLE_RUN_SCHEMA: &str = r#"
@@ -89,6 +93,16 @@ pub struct RunScopedMemory {
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+pub struct BeginRun<'a> {
+    pub run_id: &'a str,
+    pub conversation_id: &'a str,
+    pub model: &'a str,
+    pub raw_prompt: &'a str,
+    pub initial_user_message: &'a Message,
+    pub workspace_path: &'a str,
+    pub user_id: &'a str,
+}
+
 impl SqliteMemory {
     pub fn scoped_to_run(&self, run_id: &str) -> RunScopedMemory {
         RunScopedMemory {
@@ -97,22 +111,15 @@ impl SqliteMemory {
         }
     }
 
-    pub async fn begin_chat_run(
-        &self,
-        run_id: &str,
-        conversation_id: &str,
-        model: &str,
-        raw_prompt: &str,
-        initial_user_message: &Message,
-        workspace_path: Option<&str>,
-    ) -> AppResult<RunTokenBaseline> {
+    pub async fn begin_chat_run(&self, begin: BeginRun<'_>) -> AppResult<RunTokenBaseline> {
         let pool = self.pool.clone();
-        let run_id = run_id.to_string();
-        let conversation_id = conversation_id.to_string();
-        let model = model.to_string();
-        let raw_prompt = raw_prompt.to_string();
-        let workspace_path = workspace_path.map(str::to_string);
-        let user_message = serde_json::to_string(initial_user_message)
+        let run_id = begin.run_id.to_string();
+        let conversation_id = begin.conversation_id.to_string();
+        let model = begin.model.to_string();
+        let raw_prompt = begin.raw_prompt.to_string();
+        let workspace_path = begin.workspace_path.to_string();
+        let user_id = begin.user_id.to_string();
+        let user_message = serde_json::to_string(begin.initial_user_message)
             .map_err(|error| AppError::other(format!("serialize durable user message: {error}")))?;
 
         run_db_task(move || {
@@ -122,10 +129,13 @@ impl SqliteMemory {
 
             transaction
                 .execute(
-                    "INSERT INTO sessions (id, workspace_path, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?3)
-                     ON CONFLICT(id) DO UPDATE SET workspace_path = ?2, updated_at = ?3",
-                    params![conversation_id, workspace_path, now],
+                    "INSERT INTO sessions (id, workspace_path, user_id, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4)
+                     ON CONFLICT(id) DO UPDATE SET
+                         workspace_path = COALESCE(sessions.workspace_path, excluded.workspace_path),
+                         user_id = COALESCE(sessions.user_id, excluded.user_id),
+                         updated_at = excluded.updated_at",
+                    params![conversation_id, workspace_path, user_id, now],
                 )
                 .map_err(sql_err)?;
 
@@ -208,37 +218,21 @@ impl SqliteMemory {
         let kind = kind.to_string();
         let payload = payload.to_string();
         run_db_task(move || {
-            let mut connection = pool.get().map_err(pool_err)?;
-            let transaction = connection.transaction().map_err(sql_err)?;
-            let active: bool = transaction
-                .query_row(
-                    "SELECT commit_kind IS NULL FROM chat_runs WHERE run_id = ?1",
-                    params![run_id],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(sql_err)?
-                .unwrap_or(false);
-            if !active {
-                return Err(AppError::other("chat run is missing or already finalized"));
-            }
+            let connection = pool.get().map_err(pool_err)?;
             let now = now_ms();
-            transaction
+            let inserted = connection
                 .execute(
                     "INSERT INTO chat_run_events (run_id, event_seq, kind, payload, ts)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     SELECT ?1, ?2, ?3, ?4, ?5
+                     WHERE EXISTS (SELECT 1 FROM chat_runs WHERE run_id = ?1 AND commit_kind IS NULL)
                      ON CONFLICT(run_id, event_seq) DO UPDATE SET
                          kind = excluded.kind, payload = excluded.payload, ts = excluded.ts",
                     params![run_id, to_db_token(event_seq), kind, payload, now],
                 )
                 .map_err(sql_err)?;
-            transaction
-                .execute(
-                    "UPDATE chat_runs SET updated_at = ?1 WHERE run_id = ?2",
-                    params![now, run_id],
-                )
-                .map_err(sql_err)?;
-            transaction.commit().map_err(sql_err)?;
+            if inserted == 0 {
+                return Err(AppError::other("chat run is missing or already finalized"));
+            }
             Ok(())
         })
         .await
@@ -379,12 +373,7 @@ impl SqliteMemory {
         let terminal_error = terminal_error.map(str::to_string);
         run_db_task(move || {
             let mut connection = pool.get().map_err(pool_err)?;
-            finalize_chat_run_sync(
-                &mut connection,
-                &run_id,
-                &status,
-                terminal_error.as_deref(),
-            )
+            finalize_chat_run_sync(&mut connection, &run_id, &status, terminal_error.as_deref())
         })
         .await
     }
@@ -420,12 +409,7 @@ impl SqliteMemory {
                 return Ok(());
             }
 
-            insert_run_messages(
-                &transaction,
-                &conversation_id,
-                &run_id,
-                &messages,
-            )?;
+            insert_run_messages(&transaction, &conversation_id, &run_id, &messages)?;
             let now = now_ms();
             transaction
                 .execute(
@@ -480,10 +464,7 @@ impl ConversationMemory for RunScopedMemory {
         })
     }
 
-    fn clear<'a>(
-        &'a self,
-        conversation_id: &'a str,
-    ) -> MemoryFuture<'a, Result<(), MemoryError>> {
+    fn clear<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<(), MemoryError>> {
         <SqliteMemory as ConversationMemory>::clear(&self.inner, conversation_id)
     }
 }
@@ -512,7 +493,7 @@ pub(crate) fn recover_interrupted_runs(connection: &mut Connection) -> AppResult
             connection,
             &run_id,
             "interrupted",
-            Some("the application stopped before the agent run finished"),
+            Some("the app closed before this run finished"),
         )?;
     }
     Ok(())
@@ -582,18 +563,9 @@ fn finalize_chat_run_sync(
         .as_deref()
         .and_then(|encoded| serde_json::from_str::<Message>(encoded).ok())
         .unwrap_or_else(|| Message::user(raw_prompt));
-    let partial_response = render_run_events(&events);
-    let assistant_message = Message::assistant(fallback_assistant_text(
-        &partial_response,
-        status,
-        terminal_error,
-    ));
-    insert_run_messages(
-        &transaction,
-        &conversation_id,
-        run_id,
-        &[user_message, assistant_message],
-    )?;
+    let mut messages = vec![user_message];
+    messages.extend(reconstruct_partial_run(&events, status, terminal_error));
+    insert_run_messages(&transaction, &conversation_id, run_id, &messages)?;
 
     let now = now_ms();
     transaction
@@ -616,6 +588,183 @@ fn finalize_chat_run_sync(
         .map_err(sql_err)?;
     transaction.commit().map_err(sql_err)?;
     Ok(RunCommitKind::Fallback)
+}
+
+struct PendingCall {
+    internal_id: String,
+    call_id: String,
+    provider_call_id: Option<String>,
+    name: String,
+    args: serde_json::Value,
+}
+
+#[derive(Default)]
+struct TurnBuilder {
+    parts: Vec<AssistantContent>,
+    calls: Vec<PendingCall>,
+    results: HashMap<String, (String, bool)>,
+}
+
+impl TurnBuilder {
+    fn push_text(&mut self, text: &str) {
+        if let Some(AssistantContent::Text(existing)) = self.parts.last_mut() {
+            existing.text.push_str(text);
+            return;
+        }
+        self.parts.push(AssistantContent::text(text));
+    }
+
+    fn push_reasoning(&mut self, text: &str) {
+        if let Some(AssistantContent::Reasoning(existing)) = self.parts.last() {
+            let merged = format!("{}{}", existing.display_text(), text);
+            self.parts.pop();
+            self.parts.push(AssistantContent::reasoning(merged));
+            return;
+        }
+        self.parts.push(AssistantContent::reasoning(text));
+    }
+
+    fn awaiting_next_turn(&self) -> bool {
+        !self.results.is_empty()
+    }
+
+    fn finish(&mut self, out: &mut Vec<Message>) {
+        let mut assistant_parts: Vec<AssistantContent> = Vec::new();
+        let mut tool_results: Vec<UserContent> = Vec::new();
+        let mut call_iter = self.calls.drain(..);
+        for part in self.parts.drain(..) {
+            match part {
+                AssistantContent::ToolCall(_) => {
+                    let Some(call) = call_iter.next() else { continue };
+                    let Some((output, is_error)) = self.results.get(&call.internal_id) else {
+                        continue;
+                    };
+                    let content = if *is_error {
+                        format!("{TOOL_ERROR_SENTINEL}{output}")
+                    } else {
+                        output.clone()
+                    };
+                    assistant_parts.push(match call.provider_call_id.clone() {
+                        Some(provider) => AssistantContent::tool_call_with_call_id(
+                            call.call_id.clone(),
+                            provider,
+                            call.name.clone(),
+                            call.args.clone(),
+                        ),
+                        None => AssistantContent::tool_call(
+                            call.call_id.clone(),
+                            call.name.clone(),
+                            call.args.clone(),
+                        ),
+                    });
+                    let body = OneOrMany::one(ToolResultContent::text(content));
+                    tool_results.push(match call.provider_call_id {
+                        Some(provider) => UserContent::tool_result_with_call_id(call.call_id, provider, body),
+                        None => UserContent::tool_result(call.call_id, body),
+                    });
+                }
+                AssistantContent::Text(t) if t.text.trim().is_empty() => {}
+                other => assistant_parts.push(other),
+            }
+        }
+        self.results.clear();
+        if let Ok(content) = OneOrMany::many(assistant_parts) {
+            out.push(Message::Assistant { id: None, content });
+        }
+        if let Ok(content) = OneOrMany::many(tool_results) {
+            out.push(Message::User { content });
+        }
+    }
+}
+
+fn reconstruct_partial_run(
+    events: &[(String, String)],
+    status: &str,
+    detail: Option<&str>,
+) -> Vec<Message> {
+    let mut out: Vec<Message> = Vec::new();
+    let mut turn = TurnBuilder::default();
+
+    for (kind, payload) in events {
+        match kind.as_str() {
+            "text" | "reasoning" | "tool_call" if turn.awaiting_next_turn() => {
+                turn.finish(&mut out);
+                apply_event(&mut turn, kind, payload);
+            }
+            "model_turn_retried" => {
+                turn = TurnBuilder::default();
+            }
+            _ => apply_event(&mut turn, kind, payload),
+        }
+    }
+    turn.finish(&mut out);
+
+    let note = fallback_note(status, detail);
+    match out.last_mut() {
+        Some(Message::Assistant { content, .. }) => {
+            let mut parts: Vec<AssistantContent> = content.iter().cloned().collect();
+            parts.push(AssistantContent::text(format!("\n\n{note}")));
+            if let Ok(next) = OneOrMany::many(parts) {
+                *content = next;
+            }
+        }
+        _ => out.push(Message::assistant(note)),
+    }
+    out
+}
+
+fn apply_event(turn: &mut TurnBuilder, kind: &str, payload: &str) {
+    match kind {
+        "text" => turn.push_text(payload),
+        "reasoning" => turn.push_reasoning(payload),
+        "tool_call" => {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                return;
+            };
+            let internal_id = value["id"].as_str().unwrap_or_default().to_string();
+            let call_id = value["callId"].as_str().unwrap_or(&internal_id).to_string();
+            if internal_id.is_empty() || call_id.is_empty() {
+                return;
+            }
+            let args = value["args"]
+                .as_str()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let name = value["name"].as_str().unwrap_or("unknown").to_string();
+            turn.parts
+                .push(AssistantContent::tool_call(call_id.clone(), name.clone(), args.clone()));
+            turn.calls.push(PendingCall {
+                internal_id,
+                call_id,
+                provider_call_id: value["providerCallId"].as_str().map(str::to_string),
+                name,
+                args,
+            });
+        }
+        "tool_result" => {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                return;
+            };
+            let Some(internal_id) = value["id"].as_str() else {
+                return;
+            };
+            let output = value["output"].as_str().unwrap_or("").to_string();
+            let is_error = value["isError"].as_bool().unwrap_or(false);
+            turn.results.insert(internal_id.to_string(), (output, is_error));
+        }
+        _ => {}
+    }
+}
+
+fn fallback_note(status: &str, detail: Option<&str>) -> String {
+    let detail = detail.map(str::trim).filter(|value| !value.is_empty());
+    match (status, detail) {
+        ("cancelled", _) => "_Stopped before completion._".to_string(),
+        ("interrupted", _) => "_The app closed before this run finished._".to_string(),
+        ("completed", _) => "_The run ended before its transcript was saved._".to_string(),
+        (_, Some(detail)) => format!("_Run failed: {detail}_"),
+        _ => "_Run failed before completion._".to_string(),
+    }
 }
 
 fn insert_run_messages(
@@ -699,11 +848,12 @@ fn update_run_and_session_usage(
     transaction
         .execute(
             "UPDATE sessions SET total_input_tokens = ?1, total_output_tokens = ?2,
-                 total_tokens = ?3, updated_at = ?4 WHERE id = ?5",
+                 total_tokens = ?3, last_context_tokens = ?4, updated_at = ?5 WHERE id = ?6",
             params![
                 cumulative_input,
                 cumulative_output,
                 cumulative_total,
+                last_turn_input.max(0),
                 now,
                 conversation_id
             ],
@@ -716,117 +866,6 @@ fn update_run_and_session_usage(
         cumulative_total_tokens: from_db_token(cumulative_total),
         last_turn_input_tokens: from_db_token(last_turn_input),
     })
-}
-
-fn render_run_events(events: &[(String, String)]) -> String {
-    let mut output = String::new();
-    let mut in_reasoning = false;
-
-    for (kind, payload) in events {
-        match kind.as_str() {
-            "text" => {
-                close_reasoning_section(&mut output, &mut in_reasoning);
-                output.push_str(payload);
-            }
-            "reasoning" => {
-                if !in_reasoning {
-                    ensure_paragraph_break(&mut output);
-                    output.push_str("[Reasoning]\n");
-                    in_reasoning = true;
-                }
-                output.push_str(payload);
-            }
-            "reasoning_done" => close_reasoning_section(&mut output, &mut in_reasoning),
-            "tool_call" => {
-                close_reasoning_section(&mut output, &mut in_reasoning);
-                ensure_paragraph_break(&mut output);
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
-                    let name = value.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    let args = value.get("args").and_then(|v| v.as_str()).unwrap_or("{}");
-                    output.push_str(&format!("[Tool call: {name}]\nArguments: {args}"));
-                } else {
-                    output.push_str("[Tool call]\n");
-                    output.push_str(payload);
-                }
-            }
-            "tool_execution" => {
-                close_reasoning_section(&mut output, &mut in_reasoning);
-                ensure_paragraph_break(&mut output);
-                output.push_str("[Tool execution committed]\n");
-                output.push_str(payload);
-            }
-            "tool_result" => {
-                close_reasoning_section(&mut output, &mut in_reasoning);
-                ensure_paragraph_break(&mut output);
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
-                    let id = value.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    let result = value.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                    let label = if value.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        "Tool error"
-                    } else {
-                        "Tool result"
-                    };
-                    output.push_str(&format!("[{label}: {id}]\n{result}"));
-                } else {
-                    output.push_str("[Tool result]\n");
-                    output.push_str(payload);
-                }
-            }
-            "model_turn_retried" => {
-                close_reasoning_section(&mut output, &mut in_reasoning);
-                ensure_paragraph_break(&mut output);
-                output.push_str("[The preceding provisional model turn was rejected and retried.] ");
-                output.push_str(payload);
-            }
-            _ => {}
-        }
-    }
-    close_reasoning_section(&mut output, &mut in_reasoning);
-    output
-}
-
-fn fallback_assistant_text(partial: &str, status: &str, detail: Option<&str>) -> String {
-    let explanation = match (status, detail.filter(|value| !value.trim().is_empty())) {
-        ("cancelled", Some(detail)) => format!("Agent run cancelled before completion: {detail}"),
-        ("cancelled", None) => "Agent run cancelled before completion.".to_string(),
-        ("interrupted", Some(detail)) => format!("Agent run interrupted: {detail}"),
-        ("interrupted", None) => "Agent run interrupted before completion.".to_string(),
-        ("completed", _) => {
-            "Agent output ended before its canonical transcript commit was observed.".to_string()
-        }
-        (_, Some(detail)) => format!("Agent run failed before completion: {detail}"),
-        _ => "Agent run failed before completion.".to_string(),
-    };
-
-    if partial.trim().is_empty() {
-        format!("[{explanation}]")
-    } else {
-        format!("{}\n\n[{explanation}]", partial.trim_end())
-    }
-}
-
-fn close_reasoning_section(output: &mut String, in_reasoning: &mut bool) {
-    if *in_reasoning {
-        if !output.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push_str("[End reasoning]");
-        *in_reasoning = false;
-    }
-}
-
-fn ensure_paragraph_break(output: &mut String) {
-    if output.is_empty() {
-        return;
-    }
-    if output.ends_with("\n\n") {
-        return;
-    }
-    if output.ends_with('\n') {
-        output.push('\n');
-    } else {
-        output.push_str("\n\n");
-    }
 }
 
 fn normalized_total(input_tokens: u64, output_tokens: u64, total_tokens: u64) -> u64 {

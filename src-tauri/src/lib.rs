@@ -12,9 +12,10 @@ pub mod fsapi;
 pub mod gateway;
 pub mod ipc;
 pub mod llm;
+pub mod media;
 pub mod persistence;
-pub mod run_persistence;
 pub mod platform;
+pub mod run_persistence;
 pub mod skills;
 pub mod state;
 pub mod terminal;
@@ -26,94 +27,7 @@ use tauri::{Emitter, Manager};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
-async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
-    let url_lower = raw_url.to_lowercase();
-    if let Some(rest_lower) = url_lower.strip_prefix("orch://oauth/") {
-        let rest = &raw_url[raw_url.len() - rest_lower.len()..];
-        let state = app.state::<AppState>();
-        let (connector_id, code, oauth_state, callback_error) = parse_connector_oauth_callback(rest);
-        if let Some(error) = callback_error {
-            let _ = app.emit(
-                "connector-changed",
-                serde_json::json!({
-                    "connector": null,
-                    "error": error,
-                    "connectorId": connector_id
-                }),
-            );
-        } else if connector_id.is_empty() || code.is_empty() || oauth_state.is_empty() {
-            let _ = app.emit(
-                "connector-changed",
-                serde_json::json!({
-                    "connector": null,
-                    "error": "Invalid connector OAuth callback",
-                    "connectorId": connector_id
-                }),
-            );
-        } else {
-            match ipc::complete_connector_auth(
-                state.clone(),
-                connector_id.clone(),
-                code,
-                oauth_state,
-            )
-            .await
-            {
-                Ok(dto) => {
-                    let _ = app.emit(
-                        "connector-changed",
-                        serde_json::json!({ "connector": dto, "error": null }),
-                    );
-                }
-                Err(err) => {
-                    let _ = app.emit(
-                        "connector-changed",
-                        serde_json::json!({
-                            "connector": null,
-                            "error": err,
-                            "connectorId": connector_id
-                        }),
-                    );
-                }
-            }
-        }
-        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-        return;
-    }
-
-    let state = app.state::<AppState>();
-
-    if !state.consume_sign_in_window() {
-        let _ = app.emit(
-            "auth-changed",
-            serde_json::json!({
-                "user": null,
-                "error": "Unexpected sign-in callback: start sign-in from the app and try again"
-            }),
-        );
-        return;
-    }
-
-    match auth::handle_auth_callback(&state.token, raw_url).await {
-        Ok(user) => {
-            state.set_authenticated_user(&user.id);
-            let _ = app.emit(
-                "auth-changed",
-                serde_json::json!({ "user": user, "error": null }),
-            );
-        }
-        Err(err) => {
-            let _ = app.emit(
-                "auth-changed",
-                serde_json::json!({ "user": null, "error": err }),
-            );
-        }
-    }
-
+fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -121,8 +35,71 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     }
 }
 
+async fn handle_connector_callback(app: &tauri::AppHandle, rest: &str) {
+    let state = app.state::<AppState>();
+    let (connector_id, code, oauth_state, callback_error) = parse_connector_oauth_callback(rest);
+    let payload = if let Some(error) = callback_error {
+        serde_json::json!({ "connector": null, "error": error, "connectorId": connector_id })
+    } else if connector_id.is_empty() || code.is_empty() || oauth_state.is_empty() {
+        serde_json::json!({
+            "connector": null,
+            "error": "Invalid connector sign-in callback",
+            "connectorId": connector_id
+        })
+    } else {
+        match ipc::complete_connector_auth(&state, connector_id.clone(), code, oauth_state).await {
+            Ok(dto) => serde_json::json!({ "connector": dto, "error": null, "connectorId": connector_id }),
+            Err(err) => serde_json::json!({ "connector": null, "error": err, "connectorId": connector_id }),
+        }
+    };
+    let _ = app.emit("connector-changed", payload);
+}
+
+async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
+    let state = app.state::<AppState>();
+    let Some(session_id) = state.consume_sign_in_window() else {
+        if state.current_user_id().is_none() {
+            let _ = app.emit(
+                "auth-error",
+                serde_json::json!({
+                    "error": "This sign-in link has expired. Start sign-in from the app and try again."
+                }),
+            );
+        }
+        return;
+    };
+
+    match auth::handle_auth_callback(raw_url, session_id.as_deref()).await {
+        Ok(completed) => {
+            state
+                .complete_sign_in(completed.id_token, &completed.profile)
+                .await;
+            let _ = app.emit(
+                "auth-changed",
+                serde_json::json!({
+                    "user": auth::UserDisplay::from_profile(&completed.profile),
+                    "error": null
+                }),
+            );
+        }
+        Err(err) => {
+            let _ = app.emit("auth-error", serde_json::json!({ "error": err }));
+        }
+    }
+}
+
+async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
+    if let Some(rest) = util::strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
+        handle_connector_callback(app, rest).await;
+    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://").is_some() {
+        handle_sign_in_callback(app, raw_url).await;
+    }
+    focus_main_window(app);
+}
+
 fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option<String>) {
     let (connector_id, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let connector_id = connector_id.trim_end_matches('/');
     let mut code = String::new();
     let mut state = String::new();
     let mut error = None;
@@ -131,13 +108,14 @@ fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option
         let Some((key, value)) = part.split_once('=') else {
             continue;
         };
-        let value = urlencoding::decode(value)
+        let value = urlencoding::decode(&value.replace('+', " "))
             .map(|decoded| decoded.into_owned())
             .unwrap_or_else(|_| value.to_string());
         match key {
             "code" => code = value,
             "state" => state = value,
-            "error" | "error_description" if error.is_none() => error = Some(value),
+            "error_description" => error = Some(value),
+            "error" if error.is_none() => error = Some(value),
             _ => {}
         }
     }
@@ -150,10 +128,15 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
+                let mut handled = false;
                 for arg in args {
-                    if arg.to_lowercase().starts_with("orch://") {
+                    if util::strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
+                        handled = true;
                         handle_deep_link_url(&app_handle, &arg).await;
                     }
+                }
+                if !handled {
+                    focus_main_window(&app_handle);
                 }
             });
         }))
@@ -165,6 +148,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            util::warm_login_shell_path();
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             skills::seed_bundled_skills(&data_dir);
@@ -175,11 +159,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
-                if let Err(e) = state
-                    .connector_manager
-                    .initialize(&state.memory)
-                    .await
-                {
+                if let Err(e) = state.connector_manager.initialize(&state.memory).await {
                     eprintln!("connector manager init failed: {e}");
                 }
             });
@@ -216,16 +196,17 @@ pub fn run() {
             fsapi::list_workspace_files,
             fsapi::read_text_file,
             fsapi::read_image_data_url,
-            fsapi::read_binary_file_as_data_url,
+            fsapi::read_binary_file,
             fsapi::read_document_metadata,
             fsapi::read_parsed_document,
+            fsapi::read_spreadsheet,
             ipc::get_auth_user,
             ipc::get_oauth_url,
             ipc::sign_out_auth,
             ipc::set_workspace,
             ipc::create_quick_project_dir,
             ipc::list_sessions_for_workspace,
-            ipc::delete_workspace_data,
+            ipc::forget_workspace,
             ipc::list_models,
             ipc::get_budget,
             ipc::get_session_view,
@@ -242,7 +223,6 @@ pub fn run() {
             ipc::terminal_close,
             ipc::list_connectors,
             ipc::get_connector_auth_url,
-            ipc::complete_connector_auth,
             ipc::disconnect_connector,
             ipc::ipc_ingest_document,
             ipc::ipc_list_documents,

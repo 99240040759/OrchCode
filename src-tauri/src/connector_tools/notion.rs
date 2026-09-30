@@ -13,6 +13,7 @@ use crate::tools::ToolError;
 
 const NOTION_API: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2022-06-28";
+const NOTION_CONTENT_BUDGET: usize = 60_000;
 
 #[derive(Clone)]
 pub struct NotionListPages {
@@ -51,7 +52,10 @@ impl Tool for NotionListPages {
         let limit = args.max_results.unwrap_or(20).min(100);
 
         let request = if let Some(db_id) = args.database_id {
-            let url = format!("{NOTION_API}/databases/{db_id}/query");
+            let url = format!(
+                "{NOTION_API}/databases/{}/query",
+                urlencoding::encode(&db_id.replace('-', ""))
+            );
             let mut body = serde_json::json!({ "page_size": limit });
             if let Some(cursor) = &args.cursor {
                 body["start_cursor"] = Value::String(cursor.clone());
@@ -171,7 +175,26 @@ impl Tool for NotionReadPage {
             .await
             .map_err(|e| ToolError::msg(format!("Notion auth: {e}")))?;
 
-        let clean_id = args.page_id.replace('-', "");
+        let clean_id: String = args
+            .page_id
+            .trim()
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .rsplit('-')
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect();
+        let clean_id = if clean_id.len() == 32 {
+            clean_id
+        } else {
+            args.page_id.replace('-', "").chars().filter(|c| c.is_ascii_hexdigit()).collect()
+        };
+        if clean_id.is_empty() {
+            return Err(ToolError::msg(format!("invalid Notion page id: {}", args.page_id)));
+        }
 
         let meta: Value = request_json(
             self.manager
@@ -195,7 +218,11 @@ impl Tool for NotionReadPage {
         )
         .await?;
 
-        let content = truncate_text(&content, 60_000, "\n\n[Content truncated — page is very large]");
+        let complete = content.len() <= NOTION_CONTENT_BUDGET;
+        let mut content = truncate_text(&content, NOTION_CONTENT_BUDGET, "");
+        if !complete {
+            content.push_str("\n\n[Content truncated — page is very large]");
+        }
         Ok(content)
     }
 }
@@ -211,6 +238,9 @@ async fn fetch_blocks_recursive(
     let indent = "  ".repeat(depth);
 
     loop {
+        if out.len() > NOTION_CONTENT_BUDGET {
+            return Ok(());
+        }
         let mut url = format!("{NOTION_API}/blocks/{block_id}/children?page_size=100");
         if let Some(c) = &cursor {
             url.push_str(&format!("&start_cursor={}", urlencoding::encode(c)));
@@ -231,6 +261,9 @@ async fn fetch_blocks_recursive(
         let next_cursor = blocks_json["next_cursor"].as_str().map(|s| s.to_string());
 
         for block in &blocks {
+            if out.len() > NOTION_CONTENT_BUDGET {
+                return Ok(());
+            }
             render_block(block, &indent, out);
 
             let has_children = block["has_children"].as_bool().unwrap_or(false);

@@ -219,7 +219,7 @@ export function LibraryView() {
         filters: [
           {
             name: "Documents",
-            extensions: ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "csv", "json"],
+            extensions: ["pdf", "docx", "xlsx", "xls", "ods", "pptx", "txt", "md", "markdown", "csv", "json", "html", "htm", "xml", "rtf"],
           },
         ],
       });

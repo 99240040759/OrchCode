@@ -60,6 +60,9 @@ function isWorkspaceLink(href: string): boolean {
   if (href.startsWith("#") || href.startsWith("//") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) {
     return false;
   }
+  if (/^www\./i.test(href) || /^[\w-]+(\.[\w-]+)*\.(com|org|net|io|dev|ai|app|co|edu|gov)(\/|$)/i.test(href)) {
+    return false;
+  }
   return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
 }
 
@@ -180,12 +183,50 @@ const CodeBlockComponent = React.memo(function CodeBlockComponent({
   );
 });
 
-export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
-  const openFile = useArtifactsStore((s) => s.openFile);
-  if (!children) return null;
+function splitMarkdownBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fence: string | null = null;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trimStart();
+    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
+    if (fenceMatch) {
+      if (fence === null) fence = fenceMatch[1][0];
+      else if (trimmed.startsWith(fence)) fence = null;
+    }
+    current.push(line);
+    if (fence === null && line.trim() === "" && current.some((l) => l.trim() !== "")) {
+      blocks.push(current.join("\n"));
+      current = [];
+    }
+  }
+  if (current.length > 0) blocks.push(current.join("\n"));
+  return blocks;
+}
 
+export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
+  if (!children) return null;
+  if (children.length < 4000) {
+    return (
+      <div className="Markdown">
+        <MarkdownBlock text={children} />
+      </div>
+    );
+  }
+  const blocks = splitMarkdownBlocks(children);
   return (
     <div className="Markdown">
+      {blocks.map((block, index) => (
+        <MarkdownBlock key={index} text={block} />
+      ))}
+    </div>
+  );
+});
+
+const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
+  const openFile = useArtifactsStore((s) => s.openFile);
+  return (
+    <>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -235,6 +276,19 @@ export const Markdown = React.memo(function Markdown({ children }: { children: s
             return <a href={link} {...props}>{aChildren}</a>;
           },
           img({ src, alt, ...props }) {
+            const source = typeof src === "string" ? src : "";
+            if (/^https?:/i.test(source)) {
+              return (
+                <button
+                  type="button"
+                  className="Markdown-remoteImg"
+                  title={source}
+                  onClick={() => void openUrl(source)}
+                >
+                  {alt || "Remote image"} ↗
+                </button>
+              );
+            }
             return (
               <div className="Markdown-imgCard">
                 <img src={src} alt={alt} className="Markdown-imgThumb" loading="lazy" {...props} />
@@ -244,8 +298,8 @@ export const Markdown = React.memo(function Markdown({ children }: { children: s
           },
         }}
       >
-        {children}
+        {text}
       </ReactMarkdown>
-    </div>
+    </>
   );
 });

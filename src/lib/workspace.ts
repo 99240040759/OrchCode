@@ -1,8 +1,15 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
-import { getUserPref, setUserPref, errorMessage, newId } from "./api";
+import {
+  getUserPref,
+  setUserPref,
+  errorMessage,
+  newId,
+  setWorkspace,
+  createQuickProjectDir,
+  forgetWorkspace,
+} from "./api";
 
 type WorkspaceActivatedFn = () => void;
 let _onWorkspaceActivated: WorkspaceActivatedFn | null = null;
@@ -42,7 +49,7 @@ interface WorkspaceActions {
   pickAndOpen: () => Promise<void>;
   createQuickProject: () => Promise<void>;
   switchTo: (id: string) => Promise<void>;
-  remove: (id: string) => void;
+  remove: (id: string) => Promise<void>;
   dismissError: () => void;
   reset: () => void;
 }
@@ -59,26 +66,56 @@ const INITIAL_STATE: WorkspaceState = {
   error: null,
 };
 
-async function loadAll(): Promise<WorkspaceMeta[]> {
-  const raw = await getUserPref(PREF_ALL_WORKSPACES);
+function parseList(raw: string | null): WorkspaceMeta[] {
   if (!raw) return [];
-  return JSON.parse(raw) as WorkspaceMeta[];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as WorkspaceMeta[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadAll(): Promise<WorkspaceMeta[]> {
+  const scoped = await getUserPref(PREF_ALL_WORKSPACES, true);
+  if (scoped !== null) return parseList(scoped);
+  const legacy = parseList(await getUserPref(PREF_ALL_WORKSPACES));
+  if (legacy.length > 0) {
+    await setUserPref(PREF_ALL_WORKSPACES, JSON.stringify(legacy), true);
+    await setUserPref(PREF_ALL_WORKSPACES, "[]");
+  }
+  return legacy;
 }
 
 async function saveAll(list: WorkspaceMeta[]): Promise<void> {
-  await setUserPref(PREF_ALL_WORKSPACES, JSON.stringify(list));
+  await setUserPref(PREF_ALL_WORKSPACES, JSON.stringify(list), true).catch(() => undefined);
 }
 
 async function loadLastId(): Promise<string | null> {
+  const scoped = await getUserPref(PREF_LAST_WORKSPACE, true).catch(() => null);
+  if (scoped) return scoped;
   return getUserPref(PREF_LAST_WORKSPACE).catch(() => null);
 }
 
 async function saveLastId(id: string): Promise<void> {
-  await setUserPref(PREF_LAST_WORKSPACE, id).catch(() => undefined);
+  await setUserPref(PREF_LAST_WORKSPACE, id, true).catch(() => undefined);
 }
 
-async function activateWorkspace(meta: WorkspaceMeta): Promise<void> {
-  await invoke("set_workspace", { path: meta.path });
+async function activateWorkspace(meta: WorkspaceMeta): Promise<WorkspaceMeta> {
+  const canonical = await setWorkspace(meta.path);
+  return canonical === meta.path ? meta : { ...meta, path: canonical };
+}
+
+function upsert(list: WorkspaceMeta[], meta: WorkspaceMeta): WorkspaceMeta[] {
+  const index = list.findIndex((w) => w.id === meta.id || w.path === meta.path);
+  if (index === -1) return [...list, meta];
+  const next = [...list];
+  next[index] = { ...next[index], path: meta.path };
+  return next;
+}
+
+function failureStatus(current: WorkspaceMeta | null): WorkspacePickStatus {
+  return current ? "ready" : "error";
 }
 
 const ADJECTIVES = [
@@ -130,7 +167,7 @@ export const useWorkspaceStore = create(
         s.all = all;
       });
 
-      if (all.length === 0 || !lastId) {
+      if (all.length === 0) {
         set((s) => {
           s.status = "needs_pick";
         });
@@ -140,9 +177,12 @@ export const useWorkspaceStore = create(
       const last = all.find((w) => w.id === lastId) ?? all[0];
 
       try {
-        await activateWorkspace(last);
+        const active = await activateWorkspace(last);
+        const next = upsert(all, active);
+        if (active !== last) await saveAll(next);
         set((s) => {
-          s.current = last;
+          s.all = next;
+          s.current = active;
           s.status = "ready";
         });
       } catch (e) {
@@ -160,8 +200,7 @@ export const useWorkspaceStore = create(
       const path = selected;
       const name = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
 
-      const existing = get().all.find((w) => w.path === path);
-      const meta: WorkspaceMeta = existing ?? {
+      let meta: WorkspaceMeta = {
         id: newId(),
         name,
         path,
@@ -170,16 +209,18 @@ export const useWorkspaceStore = create(
       };
 
       try {
-        await activateWorkspace(meta);
+        meta = await activateWorkspace(meta);
       } catch (e) {
         set((s) => {
           s.error = errorMessage(e);
-          s.status = "error";
+          s.status = failureStatus(s.current);
         });
         return;
       }
 
-      const next = existing ? get().all : [...get().all, meta];
+      const existing = get().all.find((w) => w.path === meta.path);
+      if (existing) meta = existing;
+      const next = upsert(get().all, meta);
       await saveAll(next);
       await saveLastId(meta.id);
 
@@ -200,16 +241,16 @@ export const useWorkspaceStore = create(
 
       let path: string;
       try {
-        path = await invoke<string>("create_quick_project_dir", { id, name });
+        path = await createQuickProjectDir(id, name);
       } catch (e) {
         set((s) => {
           s.error = errorMessage(e);
-          s.status = "error";
+          s.status = failureStatus(s.current);
         });
         return;
       }
 
-      const meta: WorkspaceMeta = {
+      let meta: WorkspaceMeta = {
         id,
         name,
         path,
@@ -218,16 +259,16 @@ export const useWorkspaceStore = create(
       };
 
       try {
-        await activateWorkspace(meta);
+        meta = await activateWorkspace(meta);
       } catch (e) {
         set((s) => {
           s.error = errorMessage(e);
-          s.status = "error";
+          s.status = failureStatus(s.current);
         });
         return;
       }
 
-      const next = [...get().all, meta];
+      const next = upsert(get().all, meta);
       await saveAll(next);
       await saveLastId(meta.id);
 
@@ -245,10 +286,13 @@ export const useWorkspaceStore = create(
       const meta = get().all.find((w) => w.id === id);
       if (!meta) return;
       try {
-        await activateWorkspace(meta);
+        const active = await activateWorkspace(meta);
         await saveLastId(id);
+        const next = upsert(get().all, active);
+        if (active !== meta) await saveAll(next);
         set((s) => {
-          s.current = meta;
+          s.all = next;
+          s.current = active;
           s.status = "ready";
           s.error = null;
         });
@@ -260,22 +304,28 @@ export const useWorkspaceStore = create(
       }
     },
 
-    remove: (id: string) => {
+    remove: async (id: string) => {
       const target = get().all.find((w) => w.id === id);
       if (!target) return;
       const next = get().all.filter((w) => w.id !== id);
-      void saveAll(next);
-      void invoke("delete_workspace_data", {
-        workspacePath: target.path,
-        isQuickProject: target.isQuickProject,
-      }).catch(() => undefined);
+      try {
+        await forgetWorkspace(target.path, target.isQuickProject);
+      } catch (e) {
+        set((s) => {
+          s.error = errorMessage(e);
+        });
+        return;
+      }
+      await saveAll(next);
+      const wasCurrent = get().current?.id === id;
       set((s) => {
         s.all = next;
-        if (s.current?.id === id) {
+        if (wasCurrent) {
           s.current = null;
           s.status = "needs_pick";
         }
       });
+      if (wasCurrent) notifyChatStore();
     },
 
     dismissError: () => {

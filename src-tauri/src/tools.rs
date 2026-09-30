@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use circular_buffer::CircularBuffer;
 use command_group::AsyncCommandGroup;
 use ignore::WalkBuilder;
 use path_clean::PathClean;
-use rig::tool::Tool;
+use rig::tool::{Tool, ToolExecutionError};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tauri::Manager;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Notify;
 
@@ -20,7 +20,6 @@ use crate::error::{AppError, AppResult};
 use crate::events::{ToolDisplayInfo, ToolIcon};
 use crate::gateway::{Gateway, TavilyRequest};
 use crate::skills::load_all_skills;
-use crate::state::WorkspaceHandle;
 
 pub const TOOL_ERROR_SENTINEL: &str = "[[tool-error]] ";
 pub const FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
@@ -56,6 +55,10 @@ impl From<AppError> for ToolError {
     }
 }
 
+pub fn tool_failure(error: ToolError) -> ToolExecutionError {
+    ToolExecutionError::other(error.to_string())
+}
+
 pub fn tool_output_is_error(output: &str) -> bool {
     output.starts_with(TOOL_ERROR_SENTINEL)
 }
@@ -64,11 +67,10 @@ pub fn strip_tool_error_sentinel(output: &str) -> &str {
     output.strip_prefix(TOOL_ERROR_SENTINEL).unwrap_or(output)
 }
 
-pub fn workspace_root(handle: &WorkspaceHandle) -> Result<PathBuf, ToolError> {
-    match handle.read() {
-        Err(_) => Err(ToolError::msg("workspace state lock is poisoned")),
-        Ok(guard) => guard.clone().ok_or_else(|| ToolError::msg("no workspace is open")),
-    }
+pub fn workspace_root(workspace: &Option<PathBuf>) -> Result<PathBuf, ToolError> {
+    workspace
+        .clone()
+        .ok_or_else(|| ToolError::msg("no workspace is open"))
 }
 
 pub mod fs_util {
@@ -103,21 +105,35 @@ pub mod fs_util {
         } else {
             canonical_root.join(raw)
         };
-
         let cleaned = joined.clean();
 
-        if let Ok(canonical) = dunce::canonicalize(&cleaned) {
-            if !canonical.starts_with(&canonical_root) {
-                return Err(AppError::PathEscapesWorkspace(input.to_string()));
+        let mut existing = cleaned.clone();
+        let mut missing: Vec<std::ffi::OsString> = Vec::new();
+        let resolved = loop {
+            match dunce::canonicalize(&existing) {
+                Ok(canonical) => {
+                    let mut out = canonical;
+                    for part in missing.iter().rev() {
+                        out.push(part);
+                    }
+                    break out;
+                }
+                Err(_) => {
+                    let Some(name) = existing.file_name().map(|n| n.to_os_string()) else {
+                        return Err(AppError::PathEscapesWorkspace(input.to_string()));
+                    };
+                    missing.push(name);
+                    if !existing.pop() {
+                        return Err(AppError::PathEscapesWorkspace(input.to_string()));
+                    }
+                }
             }
-            return Ok(canonical);
-        }
+        };
 
-        if !cleaned.starts_with(&canonical_root) {
+        if !resolved.starts_with(&canonical_root) {
             return Err(AppError::PathEscapesWorkspace(input.to_string()));
         }
-
-        Ok(cleaned)
+        Ok(resolved)
     }
 
     pub fn resolve_existing_file(root: &Path, input: &str) -> AppResult<PathBuf> {
@@ -149,18 +165,59 @@ pub mod fs_util {
         }
     }
 
+    pub fn file_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
+        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+        let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = locks.lock().unwrap_or_else(|e| e.into_inner());
+        guard.retain(|_, lock| Arc::strong_count(lock) > 1);
+        guard
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
     pub async fn atomic_write(path: &Path, content: &[u8]) -> AppResult<()> {
-        let target_path = path.to_path_buf();
+        let requested = path.to_path_buf();
         let bytes = content.to_vec();
         tokio::task::spawn_blocking(move || -> AppResult<()> {
             use std::io::Write;
-            let parent = target_path
+            let target = dunce::canonicalize(&requested).unwrap_or(requested);
+            let existing = std::fs::metadata(&target).ok();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if let Some(meta) = existing.as_ref() {
+                    if meta.nlink() > 1 {
+                        let mut file = std::fs::OpenOptions::new()
+                            .write(true)
+                            .truncate(true)
+                            .open(&target)?;
+                        file.write_all(&bytes)?;
+                        file.sync_all()?;
+                        return Ok(());
+                    }
+                }
+            }
+
+            let parent = target
                 .parent()
                 .ok_or_else(|| AppError::other("target path has no parent directory"))?;
-            let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(AppError::Io)?;
-            tmp.write_all(&bytes).map_err(AppError::Io)?;
-            tmp.as_file().sync_all().map_err(AppError::Io)?;
-            tmp.persist(&target_path).map_err(|e| AppError::Io(e.error))?;
+            let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+            tmp.write_all(&bytes)?;
+            tmp.as_file().sync_all()?;
+            match existing {
+                Some(meta) => tmp.as_file().set_permissions(meta.permissions())?,
+                None => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        tmp.as_file()
+                            .set_permissions(std::fs::Permissions::from_mode(0o644))?;
+                    }
+                }
+            }
+            tmp.persist(&target).map_err(|e| AppError::Io(e.error))?;
             Ok(())
         })
         .await
@@ -357,6 +414,7 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
 
 const OUTPUT_RING_BYTES: usize = 100 * 1024;
 const TASK_MAX_AGE: Duration = Duration::from_secs(3600);
+const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Debug)]
 pub struct TaskStatus {
@@ -370,22 +428,41 @@ pub struct TaskStatus {
 
 struct InnerTask {
     task_id: String,
+    run_id: String,
+    background: bool,
     command: String,
     status: String,
     exit_code: Option<i32>,
     output: RingBuffer,
     started_at: Instant,
-    kill_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    pid: Option<u32>,
+    cancel_requested: bool,
+}
+
+impl InnerTask {
+    fn request_kill(&mut self) -> bool {
+        if self.status != "running" {
+            return false;
+        }
+        self.cancel_requested = true;
+        match self.pid {
+            Some(pid) => {
+                crate::util::kill_process_tree(pid);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 struct RingBuffer {
-    data: CircularBuffer<OUTPUT_RING_BYTES, u8>,
+    data: Box<CircularBuffer<OUTPUT_RING_BYTES, u8>>,
 }
 
 impl RingBuffer {
     fn new() -> Self {
         Self {
-            data: CircularBuffer::new(),
+            data: CircularBuffer::boxed(),
         }
     }
 
@@ -408,20 +485,28 @@ impl CommandManager {
         Self::default()
     }
 
-    pub fn spawn_task(&self, command_str: &str, cwd: &Path) -> (String, Arc<Notify>) {
+    pub fn spawn_task(
+        &self,
+        command_str: &str,
+        cwd: &Path,
+        run_id: &str,
+        background: bool,
+    ) -> (String, Arc<Notify>) {
         self.prune_old_tasks();
 
         let task_id = format!("task-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-        let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
         let done = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(InnerTask {
             task_id: task_id.clone(),
+            run_id: run_id.to_string(),
+            background,
             command: command_str.to_string(),
             status: "running".to_string(),
             exit_code: None,
             output: RingBuffer::new(),
             started_at: Instant::now(),
-            kill_tx: Some(kill_tx),
+            pid: None,
+            cancel_requested: false,
         }));
 
         {
@@ -435,30 +520,46 @@ impl CommandManager {
 
         tokio::spawn(async move {
             #[cfg(target_os = "windows")]
-            let mut cmd = Command::new("powershell.exe");
-            #[cfg(target_os = "windows")]
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
-                .current_dir(&cwd_buf)
+            let mut cmd = {
+                let mut cmd = Command::new("powershell.exe");
+                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
+                    .creation_flags(0x08000000);
+                cmd
+            };
+
+            #[cfg(not(target_os = "windows"))]
+            let mut cmd = {
+                let mut cmd = Command::new("/bin/sh");
+                cmd.args(["-c", &cmd_str]);
+                if let Some(path) = crate::util::login_shell_path() {
+                    cmd.env("PATH", path);
+                }
+                cmd
+            };
+
+            cmd.current_dir(&cwd_buf)
+                .env("CI", "1")
+                .env("TERM", "dumb")
+                .env("NO_COLOR", "1")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .creation_flags(0x08000000)
                 .kill_on_drop(true);
 
-            #[cfg(not(target_os = "windows"))]
-            let mut cmd = Command::new("sh");
-            #[cfg(not(target_os = "windows"))]
-            cmd.args(["-c", &cmd_str])
-                .current_dir(&cwd_buf)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-
-            let child_res = cmd.group_spawn();
-
-            match child_res {
+            match cmd.group_spawn() {
                 Ok(mut child) => {
+                    let pid = child.id();
+                    let killed_before_start = {
+                        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                        g.pid = pid;
+                        g.cancel_requested
+                    };
+                    if killed_before_start {
+                        if let Some(pid) = pid {
+                            crate::util::kill_process_tree(pid);
+                        }
+                    }
+
                     let stdout_task = child.inner().stdout.take().map(|out| {
                         let inner_ref = inner.clone();
                         tokio::spawn(async move { pump(out, inner_ref).await })
@@ -468,46 +569,37 @@ impl CommandManager {
                         tokio::spawn(async move { pump(err, inner_ref).await })
                     });
 
-                    let wait_result = tokio::select! {
-                        res = child.wait() => Some(res),
-                        _ = kill_rx => {
-                            let _ = child.kill();
-                            None
+                    let wait_result = child.wait().await;
+
+                    for handle in [stdout_task, stderr_task].into_iter().flatten() {
+                        let abort = handle.abort_handle();
+                        if tokio::time::timeout(PIPE_DRAIN_GRACE, handle).await.is_err() {
+                            abort.abort();
                         }
-                    };
-
-                    if let Some(handle) = stdout_task {
-                        let _ = handle.await;
-                    }
-                    if let Some(handle) = stderr_task {
-                        let _ = handle.await;
                     }
 
-                    if let Ok(mut g) = inner.lock() {
-                        g.kill_tx = None;
-                        match wait_result {
-                            Some(Ok(status)) => {
-                                g.exit_code = status.code();
-                                g.status = if status.success() {
-                                    "completed".to_string()
-                                } else {
-                                    "failed".to_string()
-                                };
-                            }
-                            Some(Err(e)) => {
-                                g.status = "failed".to_string();
-                                g.output.push(format!("\nprocess wait error: {e}\n").as_bytes());
-                            }
-                            None => g.status = "cancelled".to_string(),
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    g.pid = None;
+                    match wait_result {
+                        Ok(_) if g.cancel_requested => g.status = "cancelled".to_string(),
+                        Ok(status) => {
+                            g.exit_code = status.code();
+                            g.status = if status.success() {
+                                "completed".to_string()
+                            } else {
+                                "failed".to_string()
+                            };
+                        }
+                        Err(e) => {
+                            g.status = "failed".to_string();
+                            g.output.push(format!("\nprocess wait error: {e}\n").as_bytes());
                         }
                     }
                 }
                 Err(e) => {
-                    if let Ok(mut g) = inner.lock() {
-                        g.kill_tx = None;
-                        g.status = "failed".to_string();
-                        g.output.push(format!("spawn error: {e}").as_bytes());
-                    }
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    g.status = "failed".to_string();
+                    g.output.push(format!("spawn error: {e}").as_bytes());
                 }
             }
 
@@ -518,8 +610,10 @@ impl CommandManager {
     }
 
     pub fn get_status(&self, task_id: &str) -> Option<TaskStatus> {
-        let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        let task = guard.get(task_id)?;
+        let task = {
+            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            guard.get(task_id)?.clone()
+        };
         let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
         let output = g.output.as_string();
         Some(TaskStatus {
@@ -533,23 +627,34 @@ impl CommandManager {
     }
 
     pub fn kill_task(&self, task_id: &str) -> bool {
-        let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(task) = guard.get(task_id) else {
-            return false;
+        let task = {
+            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.get(task_id) {
+                Some(task) => task.clone(),
+                None => return false,
+            }
         };
         let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
-        match g.kill_tx.take() {
-            Some(tx) => tx.send(()).is_ok(),
-            None => false,
-        }
+        g.request_kill()
+    }
+
+    pub fn kill_foreground_for_run(&self, run_id: &str) {
+        self.kill_matching(|task| task.run_id == run_id && !task.background);
     }
 
     pub fn kill_all(&self) {
-        let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        for task in guard.values() {
+        self.kill_matching(|_| true);
+    }
+
+    fn kill_matching(&self, predicate: impl Fn(&InnerTask) -> bool) {
+        let tasks: Vec<Arc<Mutex<InnerTask>>> = {
+            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            guard.values().cloned().collect()
+        };
+        for task in tasks {
             let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(tx) = g.kill_tx.take() {
-                let _ = tx.send(());
+            if predicate(&g) {
+                g.request_kill();
             }
         }
     }
@@ -567,14 +672,13 @@ async fn pump<R>(mut reader: R, inner: Arc<Mutex<InnerTask>>)
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let mut buf = [0u8; 4096];
+    let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
-                if let Ok(mut g) = inner.lock() {
-                    g.output.push(&buf[..n]);
-                }
+                let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                g.output.push(&buf[..n]);
             }
             Err(_) => break,
         }
@@ -591,41 +695,53 @@ pub struct ReadFileArgs {
 }
 
 pub struct ReadFile {
-    workspace: WorkspaceHandle,
+    workspace: Option<PathBuf>,
 }
 
-impl ReadFile {
-    pub fn new(workspace: WorkspaceHandle) -> Self {
-        Self { workspace }
-    }
-}
-
-fn mime_for_image(ext: &str) -> &'static str {
+fn raster_mime(ext: &str) -> &'static str {
     match ext {
         "jpg" | "jpeg" => "image/jpeg",
         "webp" => "image/webp",
         "gif" => "image/gif",
-        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
         _ => "image/png",
     }
 }
 
-pub(crate) fn slice_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
-    if start.is_none() && end.is_none() {
-        return content.to_string();
+pub(crate) fn window_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if total == 0 {
+        return String::new();
     }
-    let from = start.unwrap_or(1).max(1);
-    let to = end.unwrap_or(usize::MAX);
-    content
-        .lines()
-        .enumerate()
-        .filter(|(i, _)| {
-            let n = i + 1;
-            n >= from && n <= to
-        })
-        .map(|(_, l)| l)
-        .collect::<Vec<_>>()
-        .join("\n")
+    let from = start.unwrap_or(1).max(1).min(total);
+    let requested_to = match (start, end) {
+        (_, Some(e)) => e.max(from).min(total),
+        (Some(_), None) => total,
+        (None, None) => total,
+    };
+    let line_cap = from + config::MAX_READ_FILE_LINES - 1;
+    let mut to = requested_to.min(line_cap);
+
+    let mut out = String::new();
+    let mut last = from - 1;
+    for (idx, line) in lines.iter().enumerate().take(to).skip(from - 1) {
+        if out.len() + line.len() + 1 > config::MAX_READ_FILE_CHARS && idx + 1 > from {
+            break;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        last = idx + 1;
+    }
+    to = last;
+    if to < requested_to || (start.is_none() && end.is_none() && to < total) {
+        out.push_str(&format!(
+            "\n\n[truncated: showing lines {from}-{to} of {total}. Call read_file with start_line/end_line to read other sections.]"
+        ));
+    }
+    out
 }
 
 impl Tool for ReadFile {
@@ -635,16 +751,19 @@ impl Tool for ReadFile {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read the contents of any file in the workspace. \
-Returns the raw text content. \
-Supports text files, source code, config files, markdown, JSON, and binary formats like PDF and images. \
-For large files, pass start_line and end_line (1-based, inclusive) to read only the relevant section. \
-ALWAYS call this before editing any file."
+        "Read the contents of a file in the workspace. \
+Returns text content for source code, config, markdown, JSON, SVG, PDF, Word, Excel and PowerPoint files. \
+Output is limited to about 2000 lines per call; pass start_line and end_line (1-based, inclusive) to read other sections. \
+Raster images return their dimensions only. ALWAYS call this before editing any file."
             .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ReadFileArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -653,83 +772,63 @@ ALWAYS call this before editing any file."
         args: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
         let root = workspace_root(&self.workspace)?;
-        let path = fs_util::resolve_in_workspace(&root, &args.path)?;
+        let path = fs_util::resolve_existing_file(&root, &args.path)?;
+        let rel = fs_util::display_relative(&root, &path);
         let ext = path
             .extension()
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
 
-        if ext == "pdf" {
-            let pdf_path = path.clone();
-            let text = tokio::task::spawn_blocking(move || {
-                crate::document::extract_pdf_text(&pdf_path, None)
-            })
-            .await
-            .map_err(|e| ToolError::msg(format!("pdf extraction task failed: {e}")))??;
-            return Ok(slice_lines(&text, args.start_line, args.end_line));
+        if crate::document::is_parseable_document(&path) {
+            let doc_path = path.clone();
+            let parsed = tokio::task::spawn_blocking(move || crate::document::parse_document_file(&doc_path))
+                .await
+                .map_err(|e| ToolError::msg(format!("document extraction task failed: {e}")))??;
+            if parsed.full_text.trim().is_empty() {
+                return Err(ToolError::msg(format!("{rel} contains no extractable text")));
+            }
+            return Ok(window_lines(&parsed.full_text, args.start_line, args.end_line));
         }
 
-        if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg") {
-            fs_util::check_file_size(&path)?;
+        if crate::media::is_raster_extension(&ext) {
+            let size = fs_util::check_file_size(&path)?;
             let bytes = tokio::fs::read(&path)
                 .await
-                .map_err(|e| ToolError::msg(format!("cannot read image {}: {e}", args.path)))?;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            return Ok(serde_json::json!({
-                "type": "image",
-                "data": b64,
-                "mimeType": mime_for_image(&ext),
-            })
-            .to_string());
+                .map_err(|e| ToolError::msg(format!("cannot read image {rel}: {e}")))?;
+            let dims = tokio::task::spawn_blocking(move || crate::media::image_dimensions(&bytes))
+                .await
+                .ok()
+                .flatten();
+            let dimension_text = dims
+                .map(|(w, h)| format!("{w}x{h} px, "))
+                .unwrap_or_default();
+            return Ok(format!(
+                "Image file {rel} ({dimension_text}{size} bytes, {}). Image pixels cannot be returned through tools; if visual inspection is needed, ask the user to attach the image to a chat message.",
+                raster_mime(&ext)
+            ));
         }
 
         let meta = tokio::fs::metadata(&path)
             .await
-            .map_err(|e| ToolError::msg(format!("cannot stat {}: {e}", args.path)))?;
+            .map_err(|e| ToolError::msg(format!("cannot stat {rel}: {e}")))?;
         if meta.len() > FILE_SIZE_LIMIT {
             return Err(ToolError::msg(format!(
-                "file too large ({} bytes): {}",
-                meta.len(),
-                args.path
+                "file too large ({} bytes): {rel}",
+                meta.len()
             )));
         }
-
-        let file = tokio::fs::File::open(&path)
+        let bytes = tokio::fs::read(&path)
             .await
-            .map_err(|e| ToolError::msg(format!("cannot open {}: {e}", args.path)))?;
-        let mut reader = tokio::io::BufReader::new(file);
-
-        let from = args.start_line.unwrap_or(1).max(1);
-        let to = args.end_line.unwrap_or(usize::MAX);
-
-        let mut lines: Vec<String> = Vec::new();
-        let mut line_no = 0usize;
-        let mut line_buf = String::new();
-
-        loop {
-            line_buf.clear();
-            let read = reader
-                .read_line(&mut line_buf)
-                .await
-                .map_err(|e| ToolError::msg(format!("read error on {}: {e}", args.path)))?;
-            if read == 0 {
-                break;
-            }
-            line_no += 1;
-            if line_no >= from && line_no <= to {
-                lines.push(
-                    line_buf
-                        .trim_end_matches(|c| c == '\r' || c == '\n')
-                        .to_string(),
-                );
-            }
-            if line_no >= to {
-                break;
-            }
+            .map_err(|e| ToolError::msg(format!("cannot read {rel}: {e}")))?;
+        if crate::util::looks_binary(&bytes) {
+            return Err(ToolError::msg(format!(
+                "{rel} is a binary file ({} bytes) and cannot be read as text",
+                bytes.len()
+            )));
         }
-
-        Ok(lines.join("\n"))
+        let text = String::from_utf8_lossy(&bytes);
+        Ok(window_lines(&text, args.start_line, args.end_line))
     }
 }
 
@@ -740,14 +839,14 @@ pub struct WriteFileArgs {
 }
 
 pub struct WriteFile {
-    workspace: WorkspaceHandle,
+    workspace: Option<PathBuf>,
     app: tauri::AppHandle,
 }
 
-impl WriteFile {
-    pub fn new(workspace: WorkspaceHandle, app: tauri::AppHandle) -> Self {
-        Self { workspace, app }
-    }
+fn notify_file_written(app: &tauri::AppHandle, root: &Path, path: &Path) {
+    app.state::<crate::state::AppState>().invalidate_file_index();
+    let rel = fs_util::display_relative(root, path);
+    let _ = tauri::Emitter::emit(app, "file-written", &rel);
 }
 
 impl Tool for WriteFile {
@@ -757,12 +856,17 @@ impl Tool for WriteFile {
     type Output = String;
 
     fn description(&self) -> String {
-        "Create a new file, or completely overwrite an existing file, with the provided content."
+        "Create a new file, or completely overwrite an existing file, with the provided content. \
+File permissions, symlinks and hard links of existing files are preserved."
             .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(WriteFileArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -781,6 +885,8 @@ impl Tool for WriteFile {
         }
 
         let path = fs_util::resolve_in_workspace(&root, &args.path)?;
+        let lock = fs_util::file_lock(&path);
+        let _guard = lock.lock().await;
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
@@ -792,8 +898,7 @@ impl Tool for WriteFile {
         let bytes = args.content.len();
         fs_util::atomic_write(&path, args.content.as_bytes()).await?;
 
-        let full_path = path.to_string_lossy().replace('\\', "/");
-        let _ = tauri::Emitter::emit(&self.app, "file-written", &full_path);
+        notify_file_written(&self.app, &root, &path);
 
         let rel = fs_util::display_relative(&root, &path);
         let verb = if existed { "Overwrote" } else { "Created" };
@@ -814,14 +919,12 @@ pub struct MultiReplaceArgs {
 }
 
 pub struct MultiReplaceFileContent {
-    workspace: WorkspaceHandle,
+    workspace: Option<PathBuf>,
     app: tauri::AppHandle,
 }
 
-impl MultiReplaceFileContent {
-    pub fn new(workspace: WorkspaceHandle, app: tauri::AppHandle) -> Self {
-        Self { workspace, app }
-    }
+fn to_crlf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
 impl Tool for MultiReplaceFileContent {
@@ -831,12 +934,17 @@ impl Tool for MultiReplaceFileContent {
     type Output = String;
 
     fn description(&self) -> String {
-        "Edit an existing file by applying one or more exact string replacements in order."
+        "Edit an existing file by applying one or more exact string replacements in order. \
+Each old_string must match exactly one location. Line endings are normalized automatically."
             .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(MultiReplaceArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -849,23 +957,22 @@ impl Tool for MultiReplaceFileContent {
         }
 
         let root = workspace_root(&self.workspace)?;
-        let path = fs_util::resolve_in_workspace(&root, &args.path)?;
+        let path = fs_util::resolve_existing_file(&root, &args.path)?;
+        let lock = fs_util::file_lock(&path);
+        let _guard = lock.lock().await;
 
         let meta = tokio::fs::metadata(&path)
             .await
             .map_err(|e| ToolError::msg(format!("cannot stat {}: {e}", args.path)))?;
         if meta.len() > FILE_SIZE_LIMIT {
-            return Err(ToolError::msg(format!(
-                "file too large to edit: {}",
-                args.path
-            )));
+            return Err(ToolError::msg(format!("file too large to edit: {}", args.path)));
         }
 
         let mut content = tokio::fs::read_to_string(&path)
             .await
-            .map_err(|e| ToolError::msg(format!("cannot read {}: {e}", args.path)))?;
+            .map_err(|e| ToolError::msg(format!("cannot read {} as UTF-8 text: {e}", args.path)))?;
+        let uses_crlf = content.contains("\r\n");
 
-        let mut total = 0usize;
         for (i, r) in args.replacements.iter().enumerate() {
             if r.old_string.is_empty() {
                 return Err(ToolError::msg(format!(
@@ -873,33 +980,35 @@ impl Tool for MultiReplaceFileContent {
                     i + 1
                 )));
             }
-            let count = content.matches(&r.old_string).count();
+            let (old, new) = if uses_crlf && !r.old_string.contains('\r') {
+                (to_crlf(&r.old_string), to_crlf(&r.new_string))
+            } else {
+                (r.old_string.clone(), r.new_string.clone())
+            };
+            let count = content.matches(old.as_str()).count();
             if count == 0 {
                 return Err(ToolError::msg(format!(
-                    "replacement #{} not applied: old_string not found in {}. Re-read the file first.",
+                    "replacement #{} not applied: old_string not found in {}. Re-read the file and copy the exact text.",
                     i + 1,
                     args.path
                 )));
             }
             if count > 1 {
                 return Err(ToolError::msg(format!(
-                    "replacement #{} is ambiguous: old_string matches {count} locations in {}. Expand context.",
+                    "replacement #{} is ambiguous: old_string matches {count} locations in {}. Include more surrounding context.",
                     i + 1,
                     args.path
                 )));
             }
-            content = content.replace(&r.old_string, &r.new_string);
-            total += 1;
+            content = content.replacen(old.as_str(), &new, 1);
         }
 
         fs_util::atomic_write(&path, content.as_bytes()).await?;
-
-        let full_path = path.to_string_lossy().replace('\\', "/");
-        let _ = tauri::Emitter::emit(&self.app, "file-written", &full_path);
+        notify_file_written(&self.app, &root, &path);
 
         let rel = fs_util::display_relative(&root, &path);
         Ok(format!(
-            "Applied {} replacement(s) ({total} occurrence(s)) to {rel}",
+            "Applied {} replacement(s) to {rel}",
             args.replacements.len()
         ))
     }
@@ -917,13 +1026,7 @@ pub struct SearchWorkspaceArgs {
 }
 
 pub struct SearchWorkspace {
-    workspace: WorkspaceHandle,
-}
-
-impl SearchWorkspace {
-    pub fn new(workspace: WorkspaceHandle) -> Self {
-        Self { workspace }
-    }
+    workspace: Option<PathBuf>,
 }
 
 impl Tool for SearchWorkspace {
@@ -933,12 +1036,16 @@ impl Tool for SearchWorkspace {
     type Output = String;
 
     fn description(&self) -> String {
-        "Case-insensitive regex search over all files in the workspace."
+        "Case-insensitive regex search over text files in the workspace. Binary files are skipped and long lines are shortened."
             .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(SearchWorkspaceArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -959,22 +1066,23 @@ impl Tool for SearchWorkspace {
     }
 }
 
-fn search_text(
-    root: &PathBuf,
-    search_path: &PathBuf,
-    query: &str,
-    max_hits: usize,
-) -> Result<String, ToolError> {
+fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) -> Result<String, ToolError> {
     let matcher = grep_regex::RegexMatcherBuilder::new()
         .case_insensitive(true)
         .build(query)
         .map_err(|e| ToolError::msg(format!("invalid search pattern: {e}")))?;
 
     let mut results: Vec<String> = Vec::new();
-    let mut searcher = grep_searcher::Searcher::new();
+    let mut total_chars = 0usize;
+    let mut searcher = grep_searcher::SearcherBuilder::new()
+        .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
+        .line_number(true)
+        .build();
+    let mut truncated = false;
 
     for entry in fs_util::workspace_walker(search_path).build().flatten() {
-        if results.len() >= max_hits {
+        if results.len() >= max_hits || total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
+            truncated = true;
             break;
         }
         if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
@@ -988,9 +1096,15 @@ fn search_text(
         let file_path = entry.path();
         let rel_path = fs_util::display_relative(root, file_path);
         let results_ref = &mut results;
+        let chars_ref = &mut total_chars;
         let sink = grep_searcher::sinks::UTF8(|line_num, line| {
-            results_ref.push(format!("{rel_path}:{line_num}: {}", line.trim()));
-            Ok(results_ref.len() < max_hits)
+            let trimmed = line.trim();
+            let shown = crate::util::truncate_chars(trimmed, config::MAX_SEARCH_LINE_CHARS);
+            let suffix = if shown.len() < trimmed.len() { " …" } else { "" };
+            let entry = format!("{rel_path}:{line_num}: {shown}{suffix}");
+            *chars_ref += entry.len() + 1;
+            results_ref.push(entry);
+            Ok(results_ref.len() < max_hits && *chars_ref < config::MAX_SEARCH_OUTPUT_CHARS)
         });
         let _ = searcher.search_path(&matcher, file_path, sink);
     }
@@ -998,7 +1112,11 @@ fn search_text(
     if results.is_empty() {
         Ok(format!("No matches found for pattern: '{query}'"))
     } else {
-        Ok(results.join("\n"))
+        let mut out = results.join("\n");
+        if truncated || results.len() >= max_hits {
+            out.push_str("\n\n[results limited; narrow the pattern or pass path to search a subdirectory]");
+        }
+        Ok(out)
     }
 }
 
@@ -1012,14 +1130,9 @@ pub struct RunCommandArgs {
 }
 
 pub struct RunCommand {
-    workspace: WorkspaceHandle,
+    workspace: Option<PathBuf>,
     manager: CommandManager,
-}
-
-impl RunCommand {
-    pub fn new(workspace: WorkspaceHandle, manager: CommandManager) -> Self {
-        Self { workspace, manager }
-    }
+    run_id: String,
 }
 
 fn format_completed(s: &TaskStatus) -> String {
@@ -1035,7 +1148,7 @@ fn format_completed(s: &TaskStatus) -> String {
         out.push_str("(no output)");
     } else {
         out.push_str("--- output ---\n");
-        out.push_str(&s.output);
+        out.push_str(&crate::util::clip_middle(&s.output, config::MAX_TOOL_OUTPUT_CHARS));
     }
     out
 }
@@ -1047,12 +1160,18 @@ impl Tool for RunCommand {
     type Output = String;
 
     fn description(&self) -> String {
-        "Run a shell command in the workspace root directory."
+        "Run a shell command in the workspace (or a subdirectory via cwd) using the user's login PATH. \
+Foreground commands return their output, or a task_id if they run longer than 30 seconds. \
+Set background=true for servers and watchers."
             .to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(RunCommandArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -1076,12 +1195,13 @@ impl Tool for RunCommand {
             )));
         }
 
-        let (task_id, done) = self.manager.spawn_task(&args.command, &cwd);
+        let background = args.background.unwrap_or(false);
+        let (task_id, done) = self
+            .manager
+            .spawn_task(&args.command, &cwd, &self.run_id, background);
 
-        if args.background.unwrap_or(false) {
-            return Ok(format!(
-                "Background task started with task_id: '{task_id}'."
-            ));
+        if background {
+            return Ok(format!("Background task started with task_id: '{task_id}'."));
         }
 
         let handoff = Duration::from_secs(config::COMMAND_FOREGROUND_HANDOFF_SECS);
@@ -1099,7 +1219,7 @@ impl Tool for RunCommand {
             let remaining = handoff.saturating_sub(started.elapsed());
             if remaining.is_zero() {
                 return Ok(format!(
-                    "Command still running after {}s and is now tracked as task_id: '{task_id}'.",
+                    "Command still running after {}s and is now tracked as task_id: '{task_id}'. Use get_command_status to check it.",
                     config::COMMAND_FOREGROUND_HANDOFF_SECS
                 ));
             }
@@ -1124,12 +1244,6 @@ pub struct GetCommandStatus {
     manager: CommandManager,
 }
 
-impl GetCommandStatus {
-    pub fn new(manager: CommandManager) -> Self {
-        Self { manager }
-    }
-}
-
 impl Tool for GetCommandStatus {
     const NAME: &'static str = "get_command_status";
     type Error = ToolError;
@@ -1137,12 +1251,15 @@ impl Tool for GetCommandStatus {
     type Output = String;
 
     fn description(&self) -> String {
-        "Check current status of a background command."
-            .to_string()
+        "Check the status, exit code and latest output of a command task.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(GetCommandStatusArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -1170,7 +1287,10 @@ impl Tool for GetCommandStatus {
         if lines.is_empty() {
             out.push_str("(no output)");
         } else {
-            out.push_str(&lines[start..].join("\n"));
+            out.push_str(&crate::util::clip_middle(
+                &lines[start..].join("\n"),
+                config::MAX_TOOL_OUTPUT_CHARS,
+            ));
         }
 
         Ok(out)
@@ -1186,12 +1306,6 @@ pub struct StopCommand {
     manager: CommandManager,
 }
 
-impl StopCommand {
-    pub fn new(manager: CommandManager) -> Self {
-        Self { manager }
-    }
-}
-
 impl Tool for StopCommand {
     const NAME: &'static str = "stop_command";
     type Error = ToolError;
@@ -1199,12 +1313,15 @@ impl Tool for StopCommand {
     type Output = String;
 
     fn description(&self) -> String {
-        "Cancel a running background command."
-            .to_string()
+        "Terminate a running command task and all of its child processes.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(StopCommandArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -1213,9 +1330,12 @@ impl Tool for StopCommand {
         args: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
         if self.manager.kill_task(&args.task_id) {
-            Ok(format!("Requested cancellation of task '{}'.", args.task_id))
+            Ok(format!("Stopped task '{}'.", args.task_id))
         } else {
-            Err(ToolError::msg(format!("task '{}' is not running or does not exist", args.task_id)))
+            Err(ToolError::msg(format!(
+                "task '{}' is not running or does not exist",
+                args.task_id
+            )))
         }
     }
 }
@@ -1229,12 +1349,6 @@ pub struct ReadSkill {
     data_dir: PathBuf,
 }
 
-impl ReadSkill {
-    pub fn new(data_dir: PathBuf) -> Self {
-        Self { data_dir }
-    }
-}
-
 impl Tool for ReadSkill {
     const NAME: &'static str = "read_skill";
     type Error = ToolError;
@@ -1242,12 +1356,15 @@ impl Tool for ReadSkill {
     type Output = String;
 
     fn description(&self) -> String {
-        "Load step-by-step instructions for a named skill."
-            .to_string()
+        "Load step-by-step instructions for a named skill.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ReadSkillArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -1284,12 +1401,6 @@ pub struct WebSearch {
     gateway: Arc<Gateway>,
 }
 
-impl WebSearch {
-    pub fn new(gateway: Arc<Gateway>) -> Self {
-        Self { gateway }
-    }
-}
-
 impl Tool for WebSearch {
     const NAME: &'static str = "web_search";
     type Error = ToolError;
@@ -1297,12 +1408,15 @@ impl Tool for WebSearch {
     type Output = String;
 
     fn description(&self) -> String {
-        "Search the live web and return relevant results."
-            .to_string()
+        "Search the live web and return relevant results.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(WebSearchArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(
@@ -1333,7 +1447,7 @@ impl Tool for WebSearch {
         }
 
         for (i, r) in resp.results.iter().enumerate() {
-            let snippet: String = r.content.chars().take(500).collect();
+            let snippet = crate::util::truncate_chars(&r.content, 500);
             out.push_str(&format!(
                 "{}. {}\n   {}\n   {}\n",
                 i + 1,
@@ -1353,13 +1467,7 @@ pub struct ListDirArgs {
 }
 
 pub struct ListDir {
-    workspace: WorkspaceHandle,
-}
-
-impl ListDir {
-    pub fn new(workspace: WorkspaceHandle) -> Self {
-        Self { workspace }
-    }
+    workspace: Option<PathBuf>,
 }
 
 impl Tool for ListDir {
@@ -1377,6 +1485,10 @@ Useful to explore the codebase structure."
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ListDirArgs)).unwrap_or_default()
+    }
+
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
     }
 
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
@@ -1436,7 +1548,8 @@ Useful to explore the codebase structure."
 }
 
 pub struct ToolContext {
-    pub workspace: WorkspaceHandle,
+    pub workspace: Option<PathBuf>,
+    pub run_id: String,
     pub gateway: Arc<Gateway>,
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
@@ -1447,37 +1560,63 @@ pub struct ToolContext {
 
 impl ToolContext {
     pub fn list_dir(&self) -> ListDir {
-        ListDir::new(self.workspace.clone())
+        ListDir {
+            workspace: self.workspace.clone(),
+        }
     }
     pub fn read_file(&self) -> ReadFile {
-        ReadFile::new(self.workspace.clone())
+        ReadFile {
+            workspace: self.workspace.clone(),
+        }
     }
     pub fn read_skill(&self) -> ReadSkill {
-        ReadSkill::new(self.data_dir.clone())
+        ReadSkill {
+            data_dir: self.data_dir.clone(),
+        }
     }
     pub fn write_file(&self) -> WriteFile {
-        WriteFile::new(self.workspace.clone(), self.app_handle.clone())
+        WriteFile {
+            workspace: self.workspace.clone(),
+            app: self.app_handle.clone(),
+        }
     }
     pub fn multi_replace(&self) -> MultiReplaceFileContent {
-        MultiReplaceFileContent::new(self.workspace.clone(), self.app_handle.clone())
+        MultiReplaceFileContent {
+            workspace: self.workspace.clone(),
+            app: self.app_handle.clone(),
+        }
     }
     pub fn search_workspace(&self) -> SearchWorkspace {
-        SearchWorkspace::new(self.workspace.clone())
+        SearchWorkspace {
+            workspace: self.workspace.clone(),
+        }
     }
     pub fn web_search(&self) -> WebSearch {
-        WebSearch::new(self.gateway.clone())
+        WebSearch {
+            gateway: self.gateway.clone(),
+        }
     }
     pub fn run_command(&self) -> RunCommand {
-        RunCommand::new(self.workspace.clone(), self.command_manager.clone())
+        RunCommand {
+            workspace: self.workspace.clone(),
+            manager: self.command_manager.clone(),
+            run_id: self.run_id.clone(),
+        }
     }
     pub fn get_command_status(&self) -> GetCommandStatus {
-        GetCommandStatus::new(self.command_manager.clone())
+        GetCommandStatus {
+            manager: self.command_manager.clone(),
+        }
     }
     pub fn stop_command(&self) -> StopCommand {
-        StopCommand::new(self.command_manager.clone())
+        StopCommand {
+            manager: self.command_manager.clone(),
+        }
     }
     pub fn search_documents(&self) -> SearchDocuments {
-        SearchDocuments { memory: self.memory.clone() }
+        SearchDocuments {
+            memory: self.memory.clone(),
+        }
     }
 
     pub fn connector_search(&self) -> crate::connector_tools::ConnectorSearch {
@@ -1520,15 +1659,19 @@ impl Tool for SearchDocuments {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Search the company knowledge library (PDFs, Word docs, Excel files, presentations, etc.) using full-text search. Returns matching passages with document names, file types, and page numbers.".to_string()
+        "Search the knowledge library (PDFs, Word docs, Excel files, presentations, text) using full-text search. Returns matching passages with document names, file types, and page numbers.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
     }
 
+    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
+        tool_failure(error)
+    }
+
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let limit = args.limit.unwrap_or(10).min(20);
+        let limit = args.limit.unwrap_or(10).clamp(1, 20);
         let hits = self
             .memory
             .search_documents(&args.query, limit)
@@ -1541,22 +1684,22 @@ impl Tool for SearchDocuments {
 
         let mut out = format!("Found {} matching passage(s) for '{}':\n\n", hits.len(), args.query);
         for (i, hit) in hits.iter().enumerate() {
-            let page_info = hit.page_number
+            let page_info = hit
+                .page_number
                 .map(|p| format!(" (page {p})"))
                 .unwrap_or_default();
+            let snippet = hit.snippet.replace("<b>", "**").replace("</b>", "**");
             out.push_str(&format!(
-                "{}. **{}** [{}]{}\n   Source: {}\n   {}\n\n",
+                "{}. {} [{}]{}\n   Source: {}\n   {}\n\n",
                 i + 1,
                 hit.document_title,
                 hit.file_type,
                 page_info,
-                hit.source,
-                hit.snippet
+                hit.file_path.as_deref().unwrap_or(&hit.source),
+                snippet
             ));
         }
 
         Ok(out)
     }
 }
-
-

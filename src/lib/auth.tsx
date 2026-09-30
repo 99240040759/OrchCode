@@ -94,6 +94,14 @@ export const useAuthStore = create(
         set((s) => applySignedOut(s, error));
       });
 
+      await listen<{ error: string }>("auth-error", (event) => {
+        clearSignInTimeout();
+        set((s) => {
+          s.signingIn = false;
+          s.error = event.payload.error;
+        });
+      });
+
       try {
         const user = await api.getAuthUser();
         set((s) => {

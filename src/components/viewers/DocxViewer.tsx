@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { renderAsync } from "docx-preview";
-import { dataUrlToArrayBuffer, errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
+import { errorMessage, readBinaryFile } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
 
 interface DocxViewerProps {
@@ -33,8 +33,7 @@ export function DocxViewer({ path }: DocxViewerProps) {
 
     async function loadDoc() {
       try {
-        const dataUrl = await readBinaryFileAsDataUrl(path);
-        const buffer = dataUrlToArrayBuffer(dataUrl);
+        const buffer = await readBinaryFile(path);
         if (cancelled || !containerRef.current) return;
         containerRef.current.innerHTML = "";
         await renderAsync(buffer, containerRef.current, undefined, {
@@ -90,7 +89,7 @@ export function DocxViewer({ path }: DocxViewerProps) {
       >
         <div
           className="DocxViewer-scaleWrap"
-          style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
+          style={{ zoom }}
         >
           <div ref={containerRef} className="DocxViewer-render" />
         </div>

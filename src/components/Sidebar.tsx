@@ -123,6 +123,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
   const createQuick = useWorkspaceStore((s) => s.createQuickProject);
   const removeWs    = useWorkspaceStore((s) => s.remove);
+  const wsError     = useWorkspaceStore((s) => s.error);
+  const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
 
@@ -154,6 +156,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                   type="button"
                   className="WsMenuItem-name"
                   data-active={ws.id === currentWs?.id}
+                  disabled={streaming}
                   onClick={() => void switchTo(ws.id)}
                 >
                   {ws.name}
@@ -164,8 +167,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     <button
                       type="button"
                       className="WsMenuItem-confirmYes"
-                      title="Confirm remove"
-                      onClick={() => { setPendingWsDelete(null); removeWs(ws.id); }}
+                      title={ws.isQuickProject ? "Delete this quick project and its chats" : "Remove from list (files and chats are kept)"}
+                      onClick={() => { setPendingWsDelete(null); void removeWs(ws.id); }}
                     >
                       <VscCheck />
                     </button>
@@ -182,7 +185,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                   <button
                     type="button"
                     className="WsMenuItem-del"
-                    title="Remove workspace"
+                    title={ws.isQuickProject ? "Delete quick project" : "Remove from list"}
+                    disabled={streaming}
                     onClick={(e) => { e.stopPropagation(); setPendingWsDelete(ws.id); }}
                   >
                     <VscTrash />
@@ -191,17 +195,26 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               </div>
             ))}
             {allWorkspaces.length > 0 && <div className="DropdownMenu-separator" />}
-            <DropdownMenuItem onSelect={() => void pickAndOpen()}>
+            <DropdownMenuItem disabled={streaming} onSelect={() => void pickAndOpen()}>
               <VscFolderOpened />
               <span>Open folder…</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void createQuick()}>
+            <DropdownMenuItem disabled={streaming} onSelect={() => void createQuick()}>
               <VscRocket />
               <span>New quick project</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {wsError && (
+        <div className="ChatPane-error" role="alert">
+          <span>{wsError}</span>
+          <button type="button" className="ChatPane-errorClose" aria-label="Dismiss error" onClick={dismissWsError}>
+            <VscClose />
+          </button>
+        </div>
+      )}
 
       <div className="Sidebar-header">
         <Button

@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use reqwest::Client;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::credentials;
@@ -28,6 +30,12 @@ impl AuthKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenAuthStyle {
+    FormSecret,
+    BasicJson,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectorDef {
     pub id: &'static str,
@@ -41,6 +49,8 @@ pub struct ConnectorDef {
     pub token_url: &'static str,
     pub scopes: &'static [&'static str],
     pub deep_link_id: &'static str,
+    pub pkce: bool,
+    pub token_auth: TokenAuthStyle,
 }
 
 impl ConnectorDef {
@@ -48,14 +58,14 @@ impl ConnectorDef {
         if self.client_id_env.is_empty() {
             return String::new();
         }
-        option_env_static(self.client_id_env)
+        compiled_env(self.client_id_env)
     }
 
     pub fn client_secret(&self) -> String {
         if self.client_secret_env.is_empty() {
             return String::new();
         }
-        option_env_static(self.client_secret_env)
+        compiled_env(self.client_secret_env)
     }
 
     pub fn is_configured(&self) -> bool {
@@ -66,25 +76,21 @@ impl ConnectorDef {
     }
 }
 
-fn option_env_static(key: &str) -> String {
-    if let Ok(val) = std::env::var(key) {
-        if !val.is_empty() {
-            return val;
-        }
-    }
-    match key {
-        "GOOGLE_CLIENT_ID" => option_env!("GOOGLE_CLIENT_ID").unwrap_or("").to_string(),
-        "GOOGLE_CLIENT_SECRET" => option_env!("GOOGLE_CLIENT_SECRET").unwrap_or("").to_string(),
-        "GITHUB_CLIENT_ID" => option_env!("GITHUB_CLIENT_ID").unwrap_or("").to_string(),
-        "GITHUB_CLIENT_SECRET" => option_env!("GITHUB_CLIENT_SECRET").unwrap_or("").to_string(),
-        "NOTION_CLIENT_ID" => option_env!("NOTION_CLIENT_ID").unwrap_or("").to_string(),
-        "NOTION_CLIENT_SECRET" => option_env!("NOTION_CLIENT_SECRET").unwrap_or("").to_string(),
-        "SLACK_CLIENT_ID" => option_env!("SLACK_CLIENT_ID").unwrap_or("").to_string(),
-        "SLACK_CLIENT_SECRET" => option_env!("SLACK_CLIENT_SECRET").unwrap_or("").to_string(),
-        "JIRA_CLIENT_ID" => option_env!("JIRA_CLIENT_ID").unwrap_or("").to_string(),
-        "JIRA_CLIENT_SECRET" => option_env!("JIRA_CLIENT_SECRET").unwrap_or("").to_string(),
-        _ => String::new(),
-    }
+fn compiled_env(key: &str) -> String {
+    let value = match key {
+        "GOOGLE_CLIENT_ID" => option_env!("GOOGLE_CLIENT_ID"),
+        "GOOGLE_CLIENT_SECRET" => option_env!("GOOGLE_CLIENT_SECRET"),
+        "GITHUB_CLIENT_ID" => option_env!("GITHUB_CLIENT_ID"),
+        "GITHUB_CLIENT_SECRET" => option_env!("GITHUB_CLIENT_SECRET"),
+        "NOTION_CLIENT_ID" => option_env!("NOTION_CLIENT_ID"),
+        "NOTION_CLIENT_SECRET" => option_env!("NOTION_CLIENT_SECRET"),
+        "SLACK_CLIENT_ID" => option_env!("SLACK_CLIENT_ID"),
+        "SLACK_CLIENT_SECRET" => option_env!("SLACK_CLIENT_SECRET"),
+        "JIRA_CLIENT_ID" => option_env!("JIRA_CLIENT_ID"),
+        "JIRA_CLIENT_SECRET" => option_env!("JIRA_CLIENT_SECRET"),
+        _ => None,
+    };
+    value.unwrap_or("").to_string()
 }
 
 pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
@@ -103,6 +109,8 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
             "https://www.googleapis.com/auth/drive.metadata.readonly",
         ],
         deep_link_id: "google_drive",
+        pkce: true,
+        token_auth: TokenAuthStyle::FormSecret,
     },
     ConnectorDef {
         id: "gmail",
@@ -114,10 +122,10 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         client_secret_env: "GOOGLE_CLIENT_SECRET",
         auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
         token_url: "https://oauth2.googleapis.com/token",
-        scopes: &[
-            "https://www.googleapis.com/auth/gmail.readonly",
-        ],
+        scopes: &["https://www.googleapis.com/auth/gmail.readonly"],
         deep_link_id: "gmail",
+        pkce: true,
+        token_auth: TokenAuthStyle::FormSecret,
     },
     ConnectorDef {
         id: "github",
@@ -131,6 +139,8 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         token_url: "https://github.com/login/oauth/access_token",
         scopes: &["repo", "read:user"],
         deep_link_id: "github",
+        pkce: true,
+        token_auth: TokenAuthStyle::FormSecret,
     },
     ConnectorDef {
         id: "notion",
@@ -144,6 +154,8 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         token_url: "https://api.notion.com/v1/oauth/token",
         scopes: &[],
         deep_link_id: "notion",
+        pkce: false,
+        token_auth: TokenAuthStyle::BasicJson,
     },
     ConnectorDef {
         id: "slack",
@@ -158,12 +170,16 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         scopes: &[
             "channels:history",
             "channels:read",
+            "groups:history",
+            "groups:read",
             "files:read",
             "search:read",
             "users:read",
             "users.profile:read",
         ],
         deep_link_id: "slack",
+        pkce: false,
+        token_auth: TokenAuthStyle::FormSecret,
     },
     ConnectorDef {
         id: "jira",
@@ -177,6 +193,8 @@ pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
         token_url: "https://auth.atlassian.com/oauth/token",
         scopes: &["read:jira-work", "read:jira-user", "offline_access"],
         deep_link_id: "jira",
+        pkce: false,
+        token_auth: TokenAuthStyle::FormSecret,
     },
 ];
 
@@ -199,7 +217,7 @@ pub fn save_connector_access_token(connector_id: &str, token: &str) -> AppResult
         .map_err(|e| AppError::ConnectorAuthError(e.to_string()))
 }
 
-pub fn load_connector_access_token(connector_id: &str) -> Option<String> {
+pub fn load_connector_access_token(connector_id: &str) -> AppResult<Option<String>> {
     credentials::load(&keyring_account_access(connector_id))
 }
 
@@ -208,7 +226,7 @@ pub fn save_connector_refresh_token(connector_id: &str, token: &str) -> AppResul
         .map_err(|e| AppError::ConnectorAuthError(e.to_string()))
 }
 
-pub fn load_connector_refresh_token(connector_id: &str) -> Option<String> {
+pub fn load_connector_refresh_token(connector_id: &str) -> AppResult<Option<String>> {
     credentials::load(&keyring_account_refresh(connector_id))
 }
 
@@ -232,6 +250,10 @@ pub struct TokenResponse {
     pub token_type: Option<String>,
     #[serde(default)]
     pub authed_user: Option<AuthedUser>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub error_description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,6 +286,7 @@ impl TokenResponse {
             .as_ref()
             .and_then(|u| u.refresh_token.clone())
             .or_else(|| self.refresh_token.clone())
+            .filter(|t| !t.is_empty())
     }
 
     pub fn effective_expires_in(&self) -> Option<i64> {
@@ -272,44 +295,86 @@ impl TokenResponse {
             .and_then(|u| u.expires_in)
             .or(self.expires_in)
     }
+
+    fn provider_error(&self) -> Option<String> {
+        self.error.as_ref().map(|error| match &self.error_description {
+            Some(description) if !description.is_empty() => format!("{error}: {description}"),
+            _ => error.clone(),
+        })
+    }
+}
+
+async fn post_token_request(
+    def: &ConnectorDef,
+    http: &Client,
+    fields: Vec<(&str, String)>,
+    context: &str,
+) -> AppResult<TokenResponse> {
+    let client_id = def.client_id();
+    let secret = def.client_secret();
+    let request = match def.token_auth {
+        TokenAuthStyle::BasicJson => {
+            let body: serde_json::Map<String, serde_json::Value> = fields
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), serde_json::Value::String(v)))
+                .collect();
+            http.post(def.token_url)
+                .basic_auth(&client_id, Some(&secret))
+                .header("Accept", "application/json")
+                .json(&body)
+        }
+        TokenAuthStyle::FormSecret => {
+            let mut form = fields;
+            form.push(("client_id", client_id));
+            if !secret.is_empty() {
+                form.push(("client_secret", secret));
+            }
+            http.post(def.token_url)
+                .header("Accept", "application/json")
+                .form(&form)
+        }
+    };
+
+    let resp = request
+        .send()
+        .await
+        .map_err(|e| AppError::ConnectorAuthError(format!("{context} request failed: {e}")))?;
+    let status = resp.status();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| AppError::ConnectorAuthError(format!("{context} response failed: {e}")))?;
+    if !status.is_success() {
+        return Err(AppError::ConnectorAuthError(format!(
+            "{context} failed ({}): {}",
+            status.as_u16(),
+            crate::util::truncate_chars(&body, 500)
+        )));
+    }
+    let parsed: TokenResponse = serde_json::from_str(&body)
+        .map_err(|e| AppError::ConnectorAuthError(format!("{context} parse error: {e}")))?;
+    if let Some(error) = parsed.provider_error() {
+        return Err(AppError::ConnectorAuthError(format!("{context} failed: {error}")));
+    }
+    Ok(parsed)
 }
 
 pub async fn exchange_code(
     def: &ConnectorDef,
     code: &str,
     redirect_uri: &str,
+    code_verifier: Option<&str>,
     http: &Client,
 ) -> AppResult<TokenResponse> {
-    let client_id = def.client_id();
-    let secret = def.client_secret();
-    let mut params: Vec<(&str, &str)> = vec![
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", redirect_uri),
-        ("client_id", &client_id),
+    let mut fields = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("redirect_uri", redirect_uri.to_string()),
     ];
-    if !secret.is_empty() {
-        params.push(("client_secret", &secret));
+    if let Some(verifier) = code_verifier {
+        fields.push(("code_verifier", verifier.to_string()));
     }
-
-    let resp = http
-        .post(def.token_url)
-        .header("Accept", "application/json")
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| AppError::ConnectorAuthError(e.to_string()))?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::ConnectorAuthError(format!(
-            "token exchange failed: {body}"
-        )));
-    }
-
-    resp.json::<TokenResponse>()
-        .await
-        .map_err(|e| AppError::ConnectorAuthError(format!("token parse error: {e}")))
+    post_token_request(def, http, fields, "token exchange").await
 }
 
 pub const CONNECTOR_REDIRECT_BASE: &str = "https://orch.live/oauth";
@@ -318,7 +383,18 @@ pub fn connector_redirect_uri(deep_link_id: &str) -> String {
     format!("{}/{}", CONNECTOR_REDIRECT_BASE, deep_link_id)
 }
 
-pub fn build_auth_url(def: &ConnectorDef, state: &str) -> AppResult<String> {
+fn pkce_pair() -> (String, String) {
+    let verifier = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(Sha256::digest(verifier.as_bytes()));
+    (verifier, challenge)
+}
+
+pub fn build_auth_url(def: &ConnectorDef, state: &str, code_challenge: Option<&str>) -> AppResult<String> {
     if !def.is_configured() {
         return Err(AppError::ConnectorNotConfigured(def.id.to_string()));
     }
@@ -336,6 +412,10 @@ pub fn build_auth_url(def: &ConnectorDef, state: &str) -> AppResult<String> {
             let scope_param = if def.id == "slack" { "user_scope" } else { "scope" };
             query.append_pair(scope_param, &def.scopes.join(" "));
         }
+        if let Some(challenge) = code_challenge {
+            query.append_pair("code_challenge", challenge);
+            query.append_pair("code_challenge_method", "S256");
+        }
         match def.id {
             "google_drive" | "gmail" => {
                 query.append_pair("access_type", "offline");
@@ -344,6 +424,9 @@ pub fn build_auth_url(def: &ConnectorDef, state: &str) -> AppResult<String> {
             "jira" => {
                 query.append_pair("audience", "api.atlassian.com");
                 query.append_pair("prompt", "consent");
+            }
+            "notion" => {
+                query.append_pair("owner", "user");
             }
             _ => {}
         }
@@ -357,12 +440,19 @@ struct ConnectorRuntimeState {
     expires_at: Option<i64>,
 }
 
+struct PendingOAuth {
+    connector_id: String,
+    created: Instant,
+    code_verifier: Option<String>,
+}
+
 pub struct ConnectorManager {
     states: Arc<RwLock<HashMap<String, ConnectorRuntimeState>>>,
-    pending_oauth: Mutex<HashMap<String, (String, Instant)>>,
+    pending_oauth: Mutex<HashMap<String, PendingOAuth>>,
     http: Client,
     refresh_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
     jira_cloud_id: RwLock<Option<String>>,
+    slack_users: Mutex<HashMap<String, String>>,
 }
 
 impl ConnectorManager {
@@ -377,6 +467,7 @@ impl ConnectorManager {
             http: crate::util::http_client(),
             refresh_locks,
             jira_cloud_id: RwLock::new(None),
+            slack_users: Mutex::new(HashMap::new()),
         }
     }
 
@@ -387,7 +478,6 @@ impl ConnectorManager {
 
         for def in CONNECTOR_DEFS {
             if !existing_ids.contains(def.id) {
-                let ts = now_ms();
                 memory
                     .upsert_connector(ConnectorRecord {
                         id: def.id.to_string(),
@@ -397,7 +487,7 @@ impl ConnectorManager {
                         has_token: false,
                         token_expires_at: None,
                         error: None,
-                        updated_at: ts,
+                        updated_at: now_ms(),
                     })
                     .await?;
             }
@@ -406,11 +496,17 @@ impl ConnectorManager {
         let records = memory.list_connectors().await?;
         let mut loaded = Vec::new();
         for rec in records {
-            let token = load_connector_access_token(&rec.id);
+            let token = match load_connector_access_token(&rec.id) {
+                Ok(token) => token,
+                Err(error) => {
+                    eprintln!("[connectors] keychain read failed for {}: {error}", rec.id);
+                    continue;
+                }
+            };
             let has_token = token.is_some();
             if rec.has_token != has_token || rec.enabled != has_token {
                 memory
-                    .set_connector_token_state(&rec.id, has_token, rec.token_expires_at, None)
+                    .set_connector_token_state(&rec.id, has_token, rec.token_expires_at, rec.error.as_deref())
                     .await?;
                 memory.set_connector_enabled(&rec.id, has_token).await?;
             }
@@ -431,26 +527,42 @@ impl ConnectorManager {
         Ok(())
     }
 
-    pub fn begin_oauth(&self, connector_id: &str) -> AppResult<String> {
-        if find_def(connector_id).is_none() {
-            return Err(AppError::ConnectorNotFound(connector_id.to_string()));
-        }
+    pub fn begin_oauth(&self, connector_id: &str) -> AppResult<(String, Option<String>)> {
+        let def = find_def(connector_id)
+            .ok_or_else(|| AppError::ConnectorNotFound(connector_id.to_string()))?;
         let state = uuid::Uuid::new_v4().to_string();
+        let (verifier, challenge) = if def.pkce {
+            let (verifier, challenge) = pkce_pair();
+            (Some(verifier), Some(challenge))
+        } else {
+            (None, None)
+        };
         let mut pending = self.pending_oauth.lock().unwrap_or_else(|e| e.into_inner());
-        pending.retain(|_, (_, created)| created.elapsed() <= CONNECTOR_OAUTH_STATE_TTL);
-        pending.insert(state.clone(), (connector_id.to_string(), Instant::now()));
-        Ok(state)
+        pending.retain(|_, entry| entry.created.elapsed() <= CONNECTOR_OAUTH_STATE_TTL);
+        pending.insert(
+            state.clone(),
+            PendingOAuth {
+                connector_id: connector_id.to_string(),
+                created: Instant::now(),
+                code_verifier: verifier,
+            },
+        );
+        Ok((state, challenge))
     }
 
-    pub fn consume_oauth(&self, connector_id: &str, state: &str) -> AppResult<()> {
+    pub fn consume_oauth(&self, connector_id: &str, state: &str) -> AppResult<Option<String>> {
         let mut pending = self.pending_oauth.lock().unwrap_or_else(|e| e.into_inner());
-        let Some((expected_connector, created)) = pending.remove(state) else {
-            return Err(AppError::ConnectorAuthError("invalid OAuth state".to_string()));
+        let Some(entry) = pending.remove(state) else {
+            return Err(AppError::ConnectorAuthError(
+                "this sign-in link expired or was already used; start the connection again".to_string(),
+            ));
         };
-        if created.elapsed() > CONNECTOR_OAUTH_STATE_TTL || expected_connector != connector_id {
-            return Err(AppError::ConnectorAuthError("invalid OAuth state".to_string()));
+        if entry.created.elapsed() > CONNECTOR_OAUTH_STATE_TTL || entry.connector_id != connector_id {
+            return Err(AppError::ConnectorAuthError(
+                "this sign-in link expired or does not match the connector".to_string(),
+            ));
         }
-        Ok(())
+        Ok(entry.code_verifier)
     }
 
     pub async fn store_tokens(
@@ -467,7 +579,9 @@ impl ConnectorManager {
             save_connector_refresh_token(connector_id, &rt)?;
         }
 
-        let expires_at = token_resp.effective_expires_in().map(|secs| now_ms() + secs * 1000);
+        let expires_at = token_resp
+            .effective_expires_in()
+            .map(|secs| now_ms() + secs * 1000);
 
         {
             let mut states = self.states.write().unwrap_or_else(|e| e.into_inner());
@@ -488,47 +602,22 @@ impl ConnectorManager {
         Ok(())
     }
 
-    async fn refresh_access_token(
-        &self,
-        connector_id: &str,
-        memory: &SqliteMemory,
-    ) -> AppResult<String> {
+    async fn refresh_access_token(&self, connector_id: &str, memory: &SqliteMemory) -> AppResult<String> {
         let def = find_def(connector_id)
             .ok_or_else(|| AppError::ConnectorNotFound(connector_id.to_string()))?;
 
-        let refresh_token = load_connector_refresh_token(connector_id)
-            .ok_or_else(|| AppError::ConnectorAuthError("no refresh token stored".to_string()))?;
+        let refresh_token = load_connector_refresh_token(connector_id)?.ok_or_else(|| {
+            AppError::ConnectorAuthError(format!(
+                "{} access expired and cannot be renewed; reconnect it in Integrations",
+                def.name
+            ))
+        })?;
 
-        let client_id = def.client_id();
-        let secret = def.client_secret();
-        let mut params: Vec<(&str, &str)> = vec![
-            ("grant_type", "refresh_token"),
-            ("refresh_token", &refresh_token),
-            ("client_id", &client_id),
+        let fields = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token),
         ];
-        if !secret.is_empty() {
-            params.push(("client_secret", &secret));
-        }
-
-        let resp = self
-            .http
-            .post(def.token_url)
-            .header("Accept", "application/json")
-            .form(&params)
-            .send()
-            .await
-            .map_err(|e| AppError::ConnectorAuthError(e.to_string()))?;
-
-        if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::ConnectorAuthError(format!("token refresh failed: {body}")));
-        }
-
-        let new_tokens = resp
-            .json::<TokenResponse>()
-            .await
-            .map_err(|e| AppError::ConnectorAuthError(format!("token parse error: {e}")))?;
-
+        let new_tokens = post_token_request(def, &self.http, fields, "token refresh").await?;
         let access_token = new_tokens.effective_access_token().ok_or_else(|| {
             AppError::ConnectorAuthError("refresh response contained no access token".to_string())
         })?;
@@ -536,20 +625,25 @@ impl ConnectorManager {
         Ok(access_token)
     }
 
-    pub async fn get_access_token(
-        &self,
-        connector_id: &str,
-        memory: &SqliteMemory,
-    ) -> AppResult<String> {
+    pub async fn get_access_token(&self, connector_id: &str, memory: &SqliteMemory) -> AppResult<String> {
         let threshold = now_ms() + 300_000;
 
-        let (token, expires_at) = {
+        let read_state = || {
             let states = self.states.read().unwrap_or_else(|e| e.into_inner());
             let s = states.get(connector_id);
-            (s.and_then(|s| s.access_token.clone()), s.and_then(|s| s.expires_at))
+            (
+                s.and_then(|s| s.access_token.clone()),
+                s.and_then(|s| s.expires_at),
+            )
         };
 
-        if let Some(tok) = token {
+        let (token, expires_at) = read_state();
+        let Some(_) = token.as_ref() else {
+            return Err(AppError::ConnectorAuthError(format!(
+                "{connector_id} is not connected; connect it in Integrations"
+            )));
+        };
+        if let Some(tok) = token.clone() {
             if expires_at.map(|e| e > threshold).unwrap_or(true) {
                 return Ok(tok);
             }
@@ -562,19 +656,21 @@ impl ConnectorManager {
             .clone();
         let _refresh_guard = lock.lock().await;
 
-        let (token2, expires_at2) = {
-            let states = self.states.read().unwrap_or_else(|e| e.into_inner());
-            let s = states.get(connector_id);
-            (s.and_then(|s| s.access_token.clone()), s.and_then(|s| s.expires_at))
-        };
-
+        let (token2, expires_at2) = read_state();
         if let Some(tok) = token2 {
             if expires_at2.map(|e| e > threshold).unwrap_or(true) {
                 return Ok(tok);
             }
         }
 
-        self.refresh_access_token(connector_id, memory).await
+        match self.refresh_access_token(connector_id, memory).await {
+            Ok(token) => Ok(token),
+            Err(error) => {
+                let message = error.to_string();
+                let _ = memory.set_connector_error(connector_id, Some(&message)).await;
+                Err(error)
+            }
+        }
     }
 
     pub async fn disconnect(&self, connector_id: &str, memory: &SqliteMemory) -> AppResult<()> {
@@ -587,6 +683,9 @@ impl ConnectorManager {
         if connector_id == "jira" {
             *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = None;
         }
+        if connector_id == "slack" {
+            self.slack_users.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
 
         memory
             .set_connector_token_state(connector_id, false, None, None)
@@ -598,11 +697,13 @@ impl ConnectorManager {
 
     pub fn enabled_ids(&self) -> Vec<String> {
         let states = self.states.read().unwrap_or_else(|e| e.into_inner());
-        states
+        let mut ids: Vec<String> = states
             .iter()
             .filter(|(_, s)| s.access_token.is_some())
             .map(|(id, _)| id.clone())
-            .collect()
+            .collect();
+        ids.sort();
+        ids
     }
 
     pub async fn logout_all(&self, memory: &SqliteMemory) -> AppResult<()> {
@@ -612,6 +713,7 @@ impl ConnectorManager {
             states.clear();
         }
         *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = None;
+        self.slack_users.lock().unwrap_or_else(|e| e.into_inner()).clear();
         memory.clear_all_connector_tokens().await?;
         Ok(())
     }
@@ -625,6 +727,21 @@ impl ConnectorManager {
 
     pub fn set_jira_cloud_id(&self, id: &str) {
         *self.jira_cloud_id.write().unwrap_or_else(|e| e.into_inner()) = Some(id.to_string());
+    }
+
+    pub fn cached_slack_user(&self, id: &str) -> Option<String> {
+        self.slack_users
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+    }
+
+    pub fn cache_slack_user(&self, id: &str, name: &str) {
+        self.slack_users
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string(), name.to_string());
     }
 
     pub fn has_token(&self, connector_id: &str) -> bool {

@@ -130,6 +130,22 @@ export function ConnectorsView() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!actionId) return;
+    const onFocus = () => {
+      window.setTimeout(() => {
+        setActionId(null);
+        void refresh();
+      }, 1500);
+    };
+    const timeout = window.setTimeout(() => setActionId(null), 120_000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearTimeout(timeout);
+    };
+  }, [actionId, refresh]);
+
   const handleConnect = useCallback(async (id: string) => {
     setActionId(id);
     setError(null);

@@ -1,12 +1,15 @@
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
 use crate::error::{AppError, AppResult};
-use crate::gateway::TokenHandle;
 
 const KEYRING_REFRESH_ACCOUNT: &str = "refresh_token";
+const CACHED_USER_FILE: &str = "user.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserProfile {
@@ -70,8 +73,27 @@ pub struct AuthSession {
     pub user: Option<UserProfile>,
 }
 
+pub struct OAuthStart {
+    pub auth_uri: String,
+    pub session_id: Option<String>,
+}
+
 pub struct FirebaseAuthClient {
     client: Client,
+}
+
+impl Default for FirebaseAuthClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn request_timeout() -> Duration {
+    Duration::from_secs(config::AUTH_REQUEST_TIMEOUT_SECS)
+}
+
+fn network_error(context: &str, error: reqwest::Error) -> AppError {
+    AppError::Network(format!("{context}: {error}"))
 }
 
 impl FirebaseAuthClient {
@@ -81,7 +103,7 @@ impl FirebaseAuthClient {
         }
     }
 
-    pub async fn get_google_oauth_url(&self, redirect_to: &str) -> AppResult<String> {
+    pub async fn get_google_oauth_url(&self, redirect_to: &str) -> AppResult<OAuthStart> {
         let url = format!(
             "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key={}",
             config::firebase_api_key()
@@ -89,24 +111,32 @@ impl FirebaseAuthClient {
         let resp = self
             .client
             .post(&url)
+            .timeout(request_timeout())
             .json(&serde_json::json!({
                 "providerId": "google.com",
                 "continueUri": redirect_to
             }))
             .send()
             .await
-            .map_err(|e| AppError::other(format!("auth uri fetch network error: {e}")))?;
+            .map_err(|e| network_error("auth uri request failed", e))?;
 
-        check_status_text(resp, "auth uri").await.and_then(|body| {
-            #[derive(Deserialize)]
-            struct Resp {
-                #[serde(rename = "authUri")]
-                auth_uri: Option<String>,
-            }
-            let res: Resp = serde_json::from_str(&body)
-                .map_err(|e| AppError::other(format!("auth uri parse error: {e}")))?;
-            res.auth_uri
-                .ok_or_else(|| AppError::other("no authUri returned from Firebase".to_string()))
+        let body = check_status_text(resp, "auth uri").await?;
+
+        #[derive(Deserialize)]
+        struct Resp {
+            #[serde(rename = "authUri")]
+            auth_uri: Option<String>,
+            #[serde(rename = "sessionId")]
+            session_id: Option<String>,
+        }
+        let res: Resp = serde_json::from_str(&body)
+            .map_err(|e| AppError::other(format!("auth uri parse error: {e}")))?;
+        let auth_uri = res
+            .auth_uri
+            .ok_or_else(|| AppError::other("no authUri returned from Firebase"))?;
+        Ok(OAuthStart {
+            auth_uri,
+            session_id: res.session_id.filter(|s| !s.is_empty()),
         })
     }
 
@@ -115,16 +145,15 @@ impl FirebaseAuthClient {
             "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={}",
             config::firebase_api_key()
         );
-        let body = check_status_text(
-            self.client
-                .post(&url)
-                .json(&serde_json::json!({ "idToken": id_token }))
-                .send()
-                .await
-                .map_err(|e| AppError::other(format!("user fetch network error: {e}")))?,
-            "user lookup",
-        )
-        .await?;
+        let resp = self
+            .client
+            .post(&url)
+            .timeout(request_timeout())
+            .json(&serde_json::json!({ "idToken": id_token }))
+            .send()
+            .await
+            .map_err(|e| network_error("user lookup failed", e))?;
+        let body = check_status_text(resp, "user lookup").await?;
 
         #[derive(Deserialize)]
         struct FirebaseAccount {
@@ -146,7 +175,10 @@ impl FirebaseAuthClient {
         let user = lookup
             .users
             .and_then(|u| u.into_iter().next())
-            .ok_or_else(|| AppError::other("user not found in Firebase response".to_string()))?;
+            .ok_or_else(|| AppError::Gateway {
+                status: 401,
+                body: "user not found in Firebase response".to_string(),
+            })?;
 
         Ok(UserProfile {
             id: user.local_id,
@@ -161,6 +193,7 @@ impl FirebaseAuthClient {
         token_or_code: &str,
         is_code: bool,
         request_uri: &str,
+        session_id: Option<&str>,
     ) -> AppResult<(AuthSession, UserProfile)> {
         let url = format!(
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key={}",
@@ -168,25 +201,28 @@ impl FirebaseAuthClient {
         );
         let encoded_token = urlencoding::encode(token_or_code);
         let post_body = if is_code {
-            format!("code={}&providerId=google.com", encoded_token)
+            format!("code={encoded_token}&providerId=google.com")
         } else {
-            format!("id_token={}&providerId=google.com", encoded_token)
+            format!("id_token={encoded_token}&providerId=google.com")
         };
-        let body = check_status_text(
-            self.client
-                .post(&url)
-                .json(&serde_json::json!({
-                    "postBody": post_body,
-                    "requestUri": request_uri,
-                    "returnIdpCredential": true,
-                    "returnSecureToken": true
-                }))
-                .send()
-                .await
-                .map_err(|e| AppError::other(format!("signInWithIdp network error: {e}")))?,
-            "signInWithIdp",
-        )
-        .await?;
+        let mut payload = serde_json::json!({
+            "postBody": post_body,
+            "requestUri": request_uri,
+            "returnIdpCredential": true,
+            "returnSecureToken": true
+        });
+        if let Some(session) = session_id {
+            payload["sessionId"] = serde_json::Value::String(session.to_string());
+        }
+        let resp = self
+            .client
+            .post(&url)
+            .timeout(request_timeout())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| network_error("signInWithIdp failed", e))?;
+        let body = check_status_text(resp, "signInWithIdp").await?;
 
         #[derive(Deserialize)]
         struct FirebaseIdpResponse {
@@ -228,17 +264,16 @@ impl FirebaseAuthClient {
             "grant_type=refresh_token&refresh_token={}",
             urlencoding::encode(refresh_token)
         );
-        let body = check_status_text(
-            self.client
-                .post(&url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(body_str)
-                .send()
-                .await
-                .map_err(|e| AppError::other(format!("session refresh network error: {e}")))?,
-            "token refresh",
-        )
-        .await?;
+        let resp = self
+            .client
+            .post(&url)
+            .timeout(request_timeout())
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|e| network_error("session refresh failed", e))?;
+        let body = check_status_text(resp, "token refresh").await?;
 
         #[derive(Deserialize)]
         struct FirebaseTokenResponse {
@@ -260,16 +295,19 @@ impl FirebaseAuthClient {
     }
 }
 
-async fn check_status_text(
-    resp: reqwest::Response,
-    context: &str,
-) -> AppResult<String> {
+async fn check_status_text(resp: reqwest::Response, context: &str) -> AppResult<String> {
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| network_error(&format!("{context} response"), e))?;
     if status.is_success() {
         Ok(body)
     } else {
-        Err(AppError::Gateway { status: status.as_u16(), body: format!("{context}: {body}") })
+        Err(AppError::Gateway {
+            status: status.as_u16(),
+            body: format!("{context}: {body}"),
+        })
     }
 }
 
@@ -280,7 +318,7 @@ pub fn save_refresh_token(token: &str) -> AppResult<()> {
     crate::credentials::save(KEYRING_REFRESH_ACCOUNT, token)
 }
 
-pub fn load_refresh_token() -> Option<String> {
+pub fn load_refresh_token() -> AppResult<Option<String>> {
     crate::credentials::load(KEYRING_REFRESH_ACCOUNT)
 }
 
@@ -288,10 +326,29 @@ pub fn clear_tokens() {
     crate::credentials::delete(KEYRING_REFRESH_ACCOUNT);
 }
 
+fn cached_user_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(CACHED_USER_FILE)
+}
+
+pub fn save_cached_user(data_dir: &Path, profile: &UserProfile) {
+    if let Ok(json) = serde_json::to_vec(profile) {
+        let _ = std::fs::write(cached_user_path(data_dir), json);
+    }
+}
+
+pub fn load_cached_user(data_dir: &Path) -> Option<UserProfile> {
+    let raw = std::fs::read(cached_user_path(data_dir)).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+pub fn clear_cached_user(data_dir: &Path) {
+    let _ = std::fs::remove_file(cached_user_path(data_dir));
+}
+
 pub fn jwt_expiry(token: &str) -> Option<i64> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
+        .decode(payload.trim_end_matches('='))
         .ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     value.get("exp")?.as_i64()
@@ -325,11 +382,9 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
 }
 
 pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
-    let raw_lower = raw.to_lowercase();
-    let normalized = if raw_lower.starts_with("orch://") {
-        raw.replacen(&raw[..7], "http://localhost/", 1)
-    } else {
-        raw.to_string()
+    let normalized = match crate::util::strip_prefix_ignore_ascii_case(raw, "orch://") {
+        Some(rest) => format!("http://localhost/{rest}"),
+        None => raw.to_string(),
     };
     let mut params = AuthCallbackParams::default();
 
@@ -352,10 +407,16 @@ pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
     params
 }
 
+pub struct CompletedSignIn {
+    pub id_token: String,
+    pub refresh_token: Option<String>,
+    pub profile: UserProfile,
+}
+
 pub async fn handle_auth_callback(
-    token: &TokenHandle,
     raw_url: &str,
-) -> Result<UserDisplay, String> {
+    session_id: Option<&str>,
+) -> Result<CompletedSignIn, String> {
     let params = parse_auth_callback(raw_url);
 
     if let Some(err) = params.error {
@@ -368,32 +429,36 @@ pub async fn handle_auth_callback(
 
     let client = FirebaseAuthClient::new();
 
-    let (firebase_id_token, firebase_refresh_token, user_display) =
-        if let Some(rt) = params.refresh_token {
-            let profile = client
-                .get_user(&id_or_access_token)
-                .await
-                .map_err(|e| e.to_string())?;
-            (id_or_access_token, Some(rt), UserDisplay::from_profile(&profile))
-        } else {
-            let (session, profile) = client
-                .sign_in_with_idp(
-                    &id_or_access_token,
-                    params.is_code,
-                    config::AUTH_REDIRECT_URL,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-            (session.access_token, session.refresh_token, UserDisplay::from_profile(&profile))
-        };
+    let completed = if let Some(rt) = params.refresh_token {
+        let profile = client
+            .get_user(&id_or_access_token)
+            .await
+            .map_err(|e| e.to_string())?;
+        CompletedSignIn {
+            id_token: id_or_access_token,
+            refresh_token: Some(rt),
+            profile,
+        }
+    } else {
+        let (session, profile) = client
+            .sign_in_with_idp(
+                &id_or_access_token,
+                params.is_code,
+                config::AUTH_REDIRECT_URL,
+                session_id,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        CompletedSignIn {
+            id_token: session.access_token,
+            refresh_token: session.refresh_token,
+            profile,
+        }
+    };
 
-    if let Some(rt) = firebase_refresh_token {
-        save_refresh_token(&rt).map_err(|e| e.to_string())?;
+    if let Some(rt) = completed.refresh_token.as_deref() {
+        save_refresh_token(rt).map_err(|e| e.to_string())?;
     }
 
-    if let Ok(mut guard) = token.write() {
-        *guard = Some(firebase_id_token);
-    }
-
-    Ok(user_display)
+    Ok(completed)
 }

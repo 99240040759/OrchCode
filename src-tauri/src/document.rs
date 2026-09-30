@@ -166,30 +166,19 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count), page_boundaries })
 }
 
-pub fn extract_pdf_text(path: &Path, max_bytes: Option<usize>) -> AppResult<String> {
-    let mut text = parse_pdf(path)?.full_text;
-    if let Some(cap) = max_bytes {
-        if text.len() > cap {
-            let boundary = floor_char_boundary(&text, cap);
-            text.truncate(boundary);
-        }
-    }
-    if text.trim().is_empty() {
-        return Err(AppError::DocumentParseError(format!(
-            "PDF contains no extractable text: {}",
-            path.display()
-        )));
-    }
-    Ok(text)
-}
-
 fn clean_pdf_text(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
-        .collect::<String>()
-        .split_whitespace()
+    text.lines()
+        .map(|line| {
+            line.chars()
+                .filter(|c| !c.is_control() || *c == '\t')
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join(" ")
+        .join("\n")
 }
 
 enum OfficeXmlKind {
@@ -441,10 +430,11 @@ fn chunk_text_into_passages(
 
     let mut passages = Vec::new();
     let mut start = 0usize;
+    let mut previous_end = 0usize;
     let mut seq = 0i64;
 
     while start < text.len() {
-        let end = find_chunk_end(text, start, PASSAGE_CHARS);
+        let end = find_chunk_end(text, start, previous_end, PASSAGE_CHARS);
         let chunk = &text[start..end];
 
         if !chunk.trim().is_empty() {
@@ -470,58 +460,69 @@ fn chunk_text_into_passages(
             break;
         }
 
-        start = floor_char_boundary(text, end.saturating_sub(PASSAGE_OVERLAP));
-        while start < end {
-            let Some(ch) = text[start..].chars().next() else { break };
-            if ch.is_whitespace() { break }
-            start += ch.len_utf8();
-        }
-        while start < text.len() {
-            let Some(ch) = text[start..].chars().next() else { break };
-            if !ch.is_whitespace() { break }
-            start += ch.len_utf8();
-        }
-        if start >= end {
-            start = end;
-        }
+        previous_end = end;
+        start = next_chunk_start(text, start, end);
     }
 
     passages
 }
 
-fn floor_char_boundary(text: &str, index: usize) -> usize {
-    let mut boundary = index.min(text.len());
-    while boundary > 0 && !text.is_char_boundary(boundary) {
-        boundary -= 1;
+fn next_chunk_start(text: &str, current_start: usize, end: usize) -> usize {
+    let mut start = floor_char_boundary(text, end.saturating_sub(PASSAGE_OVERLAP)).max(current_start);
+    while start < end {
+        let Some(ch) = text[start..].chars().next() else { break };
+        if ch.is_whitespace() {
+            break;
+        }
+        start += ch.len_utf8();
     }
-    boundary
+    while start < end {
+        let Some(ch) = text[start..].chars().next() else { break };
+        if !ch.is_whitespace() {
+            break;
+        }
+        start += ch.len_utf8();
+    }
+    if start <= current_start || start >= end {
+        end
+    } else {
+        start
+    }
 }
 
-fn find_chunk_end(text: &str, start: usize, max_chars: usize) -> usize {
-    let target = (start + max_chars).min(text.len());
-    let end = floor_char_boundary(text, target);
-    if end >= text.len() {
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    crate::util::floor_char_boundary(text, index)
+}
+
+fn find_chunk_end(text: &str, start: usize, previous_end: usize, max_chars: usize) -> usize {
+    let hard_end = floor_char_boundary(text, start + max_chars);
+    if hard_end >= text.len() {
         return text.len();
     }
-    if let Some(pos) = text[start..end].rfind("\n\n") {
-        return start + pos + 2;
+    let search_from = previous_end.max(start);
+    if hard_end <= search_from {
+        let forward = floor_char_boundary(text, search_from + max_chars);
+        return if forward > search_from { forward } else { text.len() };
     }
-    if let Some(pos) = text[start..end].rfind('\n') {
-        return start + pos + 1;
+    let window = &text[search_from..hard_end];
+    if let Some(pos) = window.rfind("\n\n") {
+        return search_from + pos + 2;
     }
-    for delimiter in [". ", "! ", "? "] {
-        if let Some(pos) = text[start..end].rfind(delimiter) {
-            return start + pos + delimiter.len();
+    if let Some(pos) = window.rfind('\n') {
+        return search_from + pos + 1;
+    }
+    for delimiter in [". ", "! ", "? ", "; "] {
+        if let Some(pos) = window.rfind(delimiter) {
+            return search_from + pos + delimiter.len();
         }
     }
-    if let Some((pos, ch)) = text[start..end]
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| ch.is_whitespace())
-    {
-        return start + pos + ch.len_utf8();
+    if let Some((pos, ch)) = window.char_indices().rev().find(|(_, ch)| ch.is_whitespace()) {
+        let candidate = search_from + pos + ch.len_utf8();
+        if candidate > search_from {
+            return candidate;
+        }
     }
-    end
+    hard_end
 }
 
 fn count_words(text: &str) -> usize {
@@ -562,4 +563,93 @@ pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
         page_count: parsed.page_count,
         full_text: parsed.full_text,
     })
+}
+
+pub fn is_parseable_document(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .as_deref(),
+        Some("pdf" | "docx" | "xlsx" | "xls" | "ods" | "pptx")
+    )
+}
+
+pub fn parse_document_bytes(bytes: &[u8], extension: &str) -> AppResult<ParsedDocumentDto> {
+    use std::io::Write;
+    let mut file = tempfile::Builder::new()
+        .suffix(&format!(".{}", extension.trim_start_matches('.')))
+        .tempfile()
+        .map_err(AppError::Io)?;
+    file.write_all(bytes).map_err(AppError::Io)?;
+    file.flush().map_err(AppError::Io)?;
+    let file_type = detect_file_type(file.path())?;
+    let parsed = parse_document(file.path(), &file_type)?;
+    Ok(ParsedDocumentDto {
+        title: parsed.title,
+        file_type,
+        page_count: parsed.page_count,
+        full_text: parsed.full_text,
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetSheet {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+    pub total_rows: usize,
+    pub truncated: bool,
+}
+
+pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppResult<Vec<SpreadsheetSheet>> {
+    use calamine::{open_workbook_auto, Data, Reader};
+
+    let mut workbook = open_workbook_auto(path)
+        .map_err(|e| AppError::DocumentParseError(format!("spreadsheet open failed: {e}")))?;
+    let names = workbook.sheet_names().to_vec();
+    let mut sheets = Vec::with_capacity(names.len());
+    for name in names {
+        let Ok(range) = workbook.worksheet_range(&name) else {
+            continue;
+        };
+        let mut rows = Vec::new();
+        let mut total_rows = 0usize;
+        for row in range.rows() {
+            let cells: Vec<String> = row
+                .iter()
+                .take(max_cols)
+                .map(|cell| match cell {
+                    Data::Empty => String::new(),
+                    Data::String(s) => s.clone(),
+                    Data::Float(f) => {
+                        if *f == f.floor() && f.abs() < 1e15 {
+                            format!("{}", *f as i64)
+                        } else {
+                            format!("{f}")
+                        }
+                    }
+                    Data::Int(i) => i.to_string(),
+                    Data::Bool(b) => b.to_string(),
+                    Data::DateTime(dt) => format!("{dt}"),
+                    Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
+                    Data::Error(e) => format!("#{e:?}"),
+                })
+                .collect();
+            if cells.iter().all(|c| c.is_empty()) {
+                continue;
+            }
+            total_rows += 1;
+            if rows.len() < max_rows {
+                rows.push(cells);
+            }
+        }
+        sheets.push(SpreadsheetSheet {
+            name,
+            truncated: total_rows > rows.len(),
+            total_rows,
+            rows,
+        });
+    }
+    Ok(sheets)
 }

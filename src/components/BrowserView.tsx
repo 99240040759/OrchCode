@@ -9,6 +9,7 @@ import { DEFAULT_BROWSER_URL } from "../lib/artifacts";
 import { newId } from "../lib/api";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
+import { useOverlayStore } from "./ui/DropdownMenu";
 
 const OFFSCREEN = -100000;
 
@@ -31,6 +32,9 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
+  const overlayOpen = useOverlayStore((s) => s.count > 0);
+  const overlayRef = useRef(overlayOpen);
+  const syncRef = useRef<() => void>(() => {});
   const initialUrlRef = useRef(startUrl);
   const lastPropUrl = useRef(startUrl);
 
@@ -72,6 +76,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       const bounds = host.getBoundingClientRect();
       const isValid =
         visible &&
+        !overlayRef.current &&
         bounds.width > 20 &&
         bounds.height > 20 &&
         bounds.top >= 0 &&
@@ -104,6 +109,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
     if (host.parentElement) resizeObserver.observe(host.parentElement);
 
     window.addEventListener("resize", syncPosition);
+    syncRef.current = syncPosition;
     syncPosition();
 
     return () => {
@@ -118,6 +124,11 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
     };
 
   }, []);
+
+  useEffect(() => {
+    overlayRef.current = overlayOpen;
+    syncRef.current();
+  }, [overlayOpen]);
 
   const navigate = useCallback((next: string) => {
     setInput(next);

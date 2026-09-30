@@ -76,7 +76,8 @@ impl Tool for GmailListEmails {
             .map(|msg| {
                 let id = msg["id"].as_str().unwrap_or("").to_string();
                 let meta_url = format!(
-                    "{GMAIL_API}/messages/{id}?format=metadata&metadataHeaders=Subject,From,Date,To"
+                    "{GMAIL_API}/messages/{}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date&metadataHeaders=To",
+                    urlencoding::encode(&id)
                 );
                 let req = http.get(&meta_url).bearer_auth(&token);
                 async move { (id, request_json(req, "Gmail").await) }
@@ -85,7 +86,8 @@ impl Tool for GmailListEmails {
 
         let results = join_all(fetch_futures).await;
 
-        let mut out = format!("Found {} email(s):\n\n", results.len());
+        let failed = results.iter().filter(|(_, r)| r.is_err()).count();
+        let mut out = format!("Found {} email(s):\n\n", results.len() - failed);
         for (id, result) in results {
             if let Ok(meta) = result {
                 let headers = meta["payload"]["headers"].as_array().cloned().unwrap_or_default();
@@ -101,6 +103,10 @@ impl Tool for GmailListEmails {
                     "• ID: {id}\n  Subject: {subject}\n  From: {from}\n  Date: {date}\n  Preview: {snippet}\n\n"
                 ));
             }
+        }
+
+        if failed > 0 {
+            out.push_str(&format!("[{failed} email(s) could not be loaded]\n"));
         }
 
         if let Some(pt) = next_page {
@@ -152,7 +158,7 @@ impl Tool for GmailReadEmail {
             .await
             .map_err(|e| ToolError::msg(format!("Gmail auth: {e}")))?;
 
-        let url = format!("{GMAIL_API}/messages/{}?format=full", args.message_id);
+        let url = format!("{GMAIL_API}/messages/{}?format=full", urlencoding::encode(args.message_id.trim()));
         let json = request_json(
             self.manager.http().get(&url).bearer_auth(&token),
             "Gmail",
@@ -248,6 +254,29 @@ fn extract_best_body(payload: &Value) -> String {
     String::from("(No readable body found)")
 }
 
+fn decode_entity(rest: &str) -> Option<(char, usize)> {
+    let end = rest.find(';')?;
+    let entity = &rest[1..end];
+    let decoded = match entity {
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "nbsp" => ' ',
+        "quot" => '"',
+        "apos" => '\'',
+        "#39" => '\'',
+        _ => {
+            let numeric = entity.strip_prefix('#')?;
+            let code = match numeric.strip_prefix('x').or_else(|| numeric.strip_prefix('X')) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                None => numeric.parse::<u32>().ok()?,
+            };
+            char::from_u32(code)?
+        }
+    };
+    Some((decoded, rest[..=end].chars().count()))
+}
+
 fn strip_html_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
@@ -289,15 +318,17 @@ fn strip_html_tags(html: &str) -> String {
                 tag_buf.push(c);
             }
             '&' if !in_tag && !in_style && !in_script => {
-                let rest: String = chars[i..].iter().take(10).collect();
-                if rest.starts_with("&amp;") { out.push('&'); i += 4; }
-                else if rest.starts_with("&lt;") { out.push('<'); i += 3; }
-                else if rest.starts_with("&gt;") { out.push('>'); i += 3; }
-                else if rest.starts_with("&nbsp;") { out.push(' '); i += 5; }
-                else if rest.starts_with("&quot;") { out.push('"'); i += 5; }
-                else if rest.starts_with("&#39;") { out.push('\''); i += 4; }
-                else { out.push(c); }
-                i += 1;
+                let rest: String = chars[i..].iter().take(12).collect();
+                match decode_entity(&rest) {
+                    Some((decoded, consumed)) => {
+                        out.push(decoded);
+                        i += consumed;
+                    }
+                    None => {
+                        out.push(c);
+                        i += 1;
+                    }
+                }
                 continue;
             }
             _ if !in_tag && !in_style && !in_script => {

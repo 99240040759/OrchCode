@@ -10,6 +10,8 @@ pub enum AppError {
     PathEscapesWorkspace(String),
     #[error("gateway request failed ({status}): {body}")]
     Gateway { status: u16, body: String },
+    #[error("network error: {0}")]
+    Network(String),
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("io error: {0}")]
@@ -43,6 +45,14 @@ impl AppError {
         match self {
             AppError::NoToken => true,
             AppError::Gateway { status, .. } => matches!(status, 400 | 401 | 403),
+            _ => false,
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            AppError::Network(_) | AppError::Http(_) => true,
+            AppError::Gateway { status, .. } => *status == 429 || *status >= 500,
             _ => false,
         }
     }

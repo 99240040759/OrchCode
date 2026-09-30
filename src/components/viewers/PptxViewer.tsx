@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PPTXViewer } from "pptxviewjs";
-import { dataUrlToArrayBuffer, errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
+import { errorMessage, readBinaryFile } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
 
 interface PptxViewerProps {
@@ -51,10 +51,10 @@ export function PptxViewer({ path }: PptxViewerProps) {
     setSlideCount(0);
     setZoom(1.0);
 
-    readBinaryFileAsDataUrl(path)
-      .then((dataUrl) => {
+    readBinaryFile(path)
+      .then((buffer) => {
         if (cancelled) return;
-        pendingBufferRef.current = dataUrlToArrayBuffer(dataUrl);
+        pendingBufferRef.current = buffer;
         setLoading(false);
       })
       .catch((e) => {

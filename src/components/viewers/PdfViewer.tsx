@@ -1,30 +1,40 @@
 import { useState, useEffect } from "react";
-import { errorMessage, readBinaryFileAsDataUrl } from "../../lib/api";
+import { errorMessage, readBinaryFile } from "../../lib/api";
 
 interface PdfViewerProps {
   path: string;
 }
 
 export function PdfViewer({ path }: PdfViewerProps) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     setLoading(true);
     setError(null);
-    setDataUrl(null);
+    setUrl(null);
 
-    readBinaryFileAsDataUrl(path)
-      .then((url) => {
-        if (!cancelled) { setDataUrl(url); setLoading(false); }
+    readBinaryFile(path)
+      .then((buffer) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }));
+        setUrl(objectUrl);
+        setLoading(false);
       })
       .catch((e) => {
-        if (!cancelled) { setError(errorMessage(e)); setLoading(false); }
+        if (!cancelled) {
+          setError(errorMessage(e));
+          setLoading(false);
+        }
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [path]);
 
   if (loading) {
@@ -36,23 +46,18 @@ export function PdfViewer({ path }: PdfViewerProps) {
     );
   }
 
-  if (error) {
+  if (error || !url) {
     return (
       <div className="DocViewer-error">
         <span className="DocViewer-error-icon">⚠</span>
-        <p>{error}</p>
+        <p>{error ?? "The PDF could not be loaded."}</p>
       </div>
     );
   }
 
   return (
     <div className="PdfViewer">
-      <embed
-        src={dataUrl!}
-        type="application/pdf"
-        className="PdfViewer-embed"
-        title="PDF Document"
-      />
+      <embed src={url} type="application/pdf" className="PdfViewer-embed" title="PDF Document" />
     </div>
   );
 }

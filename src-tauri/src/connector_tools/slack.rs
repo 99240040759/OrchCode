@@ -20,28 +20,38 @@ async fn resolve_user_names(
     user_ids: &[String],
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
+    let mut missing = Vec::new();
     for id in user_ids {
         if id.is_empty() || id == "unknown" {
             continue;
         }
-        let url = format!("{SLACK_API}/users.info?user={id}");
-        if let Ok(json) = request_json(
-            manager.http().get(&url).bearer_auth(token),
-            "Slack",
-        )
-        .await
-        {
-            if json["ok"].as_bool().unwrap_or(false) {
-                let display_name = json["user"]["profile"]["display_name"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| json["user"]["real_name"].as_str())
-                    .or_else(|| json["user"]["name"].as_str())
-                    .unwrap_or(id)
-                    .to_string();
-                map.insert(id.clone(), display_name);
+        match manager.cached_slack_user(id) {
+            Some(name) => {
+                map.insert(id.clone(), name);
             }
+            None => missing.push(id.clone()),
         }
+    }
+
+    let lookups = missing.into_iter().map(|id| async move {
+        let url = format!("{SLACK_API}/users.info?user={}", urlencoding::encode(&id));
+        let result = request_json(manager.http().get(&url).bearer_auth(token), "Slack").await;
+        (id, result)
+    });
+    for (id, result) in futures::future::join_all(lookups).await {
+        let Ok(json) = result else { continue };
+        if !json["ok"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        let display_name = json["user"]["profile"]["display_name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| json["user"]["real_name"].as_str())
+            .or_else(|| json["user"]["name"].as_str())
+            .unwrap_or(&id)
+            .to_string();
+        manager.cache_slack_user(&id, &display_name);
+        map.insert(id, display_name);
     }
     map
 }

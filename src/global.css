@@ -93,7 +93,7 @@
   --font: "SF Pro", "SF Pro Display";
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
 
-  --titlebar-h: 34px;
+  --titlebar-h: 32px;
   --sidebar-w: 256px;
   --composer-w: 640px;
 
@@ -945,6 +945,36 @@ svg {
 }
 
 .Msg-error svg { flex: 0 0 auto; width: 14px; height: 14px; }
+
+.Msg-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: rgba(241,180,103,.08);
+  border: 1px solid rgba(241,180,103,.28);
+  color: #F1B467;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.Msg-notice svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; }
+
+.Main-view { min-width: 0; min-height: 0; }
+
+.Markdown-remoteImg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+  border: 1px dashed rgba(255,255,255,.18);
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
 
 .CompactionNotice {
   display: flex;

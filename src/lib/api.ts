@@ -42,6 +42,7 @@ export interface SessionSummary {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
+  contextTokens: number;
 }
 
 export type ToolIcon =
@@ -124,8 +125,9 @@ export type ChatStreamEvent =
   | { type: "reasoningDone"; durationSeconds: number }
   | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
   | { type: "toolResult"; id: string; output: string; isError: boolean }
-  | { type: "usage"; inputTokens: number; outputTokens: number; totalTokens: number }
+  | { type: "usage"; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number }
   | { type: "compacted"; originalMessageCount: number; ts: number }
+  | { type: "notice"; message: string }
   | { type: "done" }
   | { type: "cancelled" }
   | { type: "error"; message: string };
@@ -150,8 +152,16 @@ export function signOutAuth(): Promise<void> {
   return invoke("sign_out_auth");
 }
 
-export function setWorkspace(path: string): Promise<void> {
+export function setWorkspace(path: string): Promise<string> {
   return invoke("set_workspace", { path });
+}
+
+export function createQuickProjectDir(id: string, name: string): Promise<string> {
+  return invoke("create_quick_project_dir", { id, name });
+}
+
+export function forgetWorkspace(workspacePath: string, deleteProject: boolean): Promise<void> {
+  return invoke("forget_workspace", { workspacePath, deleteProject });
 }
 
 export function listSessionsForWorkspace(workspacePath: string): Promise<SessionSummary[]> {
@@ -174,12 +184,12 @@ export function clearSession(sessionId: string): Promise<void> {
   return invoke("clear_session", { sessionId });
 }
 
-export function getUserPref(key: string): Promise<string | null> {
-  return invoke("get_user_pref", { key });
+export function getUserPref(key: string, scoped = false): Promise<string | null> {
+  return invoke("get_user_pref", { key, scoped });
 }
 
-export function setUserPref(key: string, value: string): Promise<void> {
-  return invoke("set_user_pref", { key, value });
+export function setUserPref(key: string, value: string, scoped = false): Promise<void> {
+  return invoke("set_user_pref", { key, value, scoped });
 }
 
 export function startChat(
@@ -210,8 +220,19 @@ export function readImageDataUrl(path: string): Promise<string> {
   return invoke("read_image_data_url", { path });
 }
 
-export function readBinaryFileAsDataUrl(path: string): Promise<string> {
-  return invoke("read_binary_file_as_data_url", { path });
+export function readBinaryFile(path: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("read_binary_file", { path });
+}
+
+export interface SpreadsheetSheet {
+  name: string;
+  rows: string[][];
+  totalRows: number;
+  truncated: boolean;
+}
+
+export function readSpreadsheet(path: string): Promise<SpreadsheetSheet[]> {
+  return invoke("read_spreadsheet", { path });
 }
 
 export interface DocumentFileMeta {
@@ -286,15 +307,6 @@ export function formatRelativeTime(ts?: number): string {
   return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });
 }
 
-export function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
-  const base64 = dataUrl.split(",")[1];
-  if (!base64) throw new Error("Invalid data URL");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-
 export interface ConnectorDto {
   id: string;
   name: string;
@@ -313,14 +325,6 @@ export function listConnectors(): Promise<ConnectorDto[]> {
 
 export function getConnectorAuthUrl(connectorId: string): Promise<string> {
   return invoke("get_connector_auth_url", { connectorId });
-}
-
-export function completeConnectorAuth(
-  connectorId: string,
-  code: string,
-  oauthState: string
-): Promise<ConnectorDto> {
-  return invoke("complete_connector_auth", { connectorId, code, oauthState });
 }
 
 export function disconnectConnector(connectorId: string): Promise<void> {
@@ -413,11 +417,10 @@ export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
 
 const DOCUMENT_ARTIFACT_KINDS: Record<string, DocumentArtifactKind> = {
   pdf: "pdf",
-  doc: "docx",
   docx: "docx",
   xls: "xlsx",
   xlsx: "xlsx",
-  ppt: "pptx",
+  ods: "xlsx",
   pptx: "pptx",
 };
 
@@ -434,11 +437,10 @@ export function documentArtifactKindForPath(path: string): DocumentArtifactKind 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   pdf: "PDF",
   docx: "Word",
-  doc: "Word",
   xlsx: "Excel",
   xls: "Excel",
+  ods: "Spreadsheet",
   pptx: "PowerPoint",
-  ppt: "PowerPoint",
   txt: "Text",
   md: "Markdown",
   csv: "CSV",

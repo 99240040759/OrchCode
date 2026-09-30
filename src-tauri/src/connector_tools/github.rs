@@ -1,4 +1,4 @@
-use super::{request_json, truncate_text};
+use super::{request_bytes, request_json, truncate_text};
 
 use std::sync::Arc;
 
@@ -24,7 +24,21 @@ fn github_request(manager: &ConnectorManager, token: &str, url: &str) -> reqwest
         .header("User-Agent", "Orch-App")
 }
 
+fn is_valid_repo(repo: &str) -> bool {
+    let mut parts = repo.split('/');
+    let valid = |part: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if valid(owner) && valid(name))
+}
+
 fn check_github_error(json: &serde_json::Value) -> Result<(), ToolError> {
+    if json.is_array() {
+        return Ok(());
+    }
     if let Some(msg) = json["message"].as_str() {
         let docs = json["documentation_url"].as_str().unwrap_or("");
         if docs.is_empty() {
@@ -150,33 +164,36 @@ impl Tool for GitHubReadFile {
             .await
             .map_err(|e| ToolError::msg(format!("GitHub auth: {e}")))?;
 
-        let clean_path = args.path.trim_start_matches('/');
-        let mut url = format!(
-            "{GITHUB_API}/repos/{}/contents/{}",
-            args.repo,
-            urlencoding::encode(clean_path)
-        );
+        if !is_valid_repo(&args.repo) {
+            return Err(ToolError::msg(format!(
+                "invalid repository '{}': expected 'owner/repo'",
+                args.repo
+            )));
+        }
+        let clean_path = args.path.trim_matches('/');
+        let encoded_path = clean_path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| urlencoding::encode(segment).into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let mut url = format!("{GITHUB_API}/repos/{}/contents/{encoded_path}", args.repo);
         if let Some(r) = &args.ref_ {
             url.push_str(&format!("?ref={}", urlencoding::encode(r)));
         }
 
-        let json = request_json(
-            github_request(&self.manager, &token, &url),
-            "GitHub",
-        )
-        .await?;
+        let json = request_json(github_request(&self.manager, &token, &url), "GitHub").await?;
 
         check_github_error(&json)?;
 
-        if json.is_array() {
-            let entries = json.as_array().unwrap();
+        if let Some(entries) = json.as_array() {
             let mut out = format!("Directory listing for {}/{}:\n\n", args.repo, clean_path);
             for entry in entries {
                 let name = entry["name"].as_str().unwrap_or("(unknown)");
                 let entry_type = entry["type"].as_str().unwrap_or("?");
                 let size = entry["size"].as_u64().unwrap_or(0);
-                let icon = if entry_type == "dir" { "📁" } else { "📄" };
-                out.push_str(&format!("{icon} {name}  ({size} bytes)\n"));
+                let kind = if entry_type == "dir" { "dir " } else { "file" };
+                out.push_str(&format!("[{kind}] {name}  ({size} bytes)\n"));
             }
             return Ok(out);
         }
@@ -188,18 +205,31 @@ impl Tool for GitHubReadFile {
         let size = json["size"].as_u64().unwrap_or(0);
         let html_url = json["html_url"].as_str().unwrap_or("");
 
-        if encoding != "base64" && !content_raw.is_empty() {
-            return Ok(format!("File: {name} (sha: {sha}, {size} bytes)\nURL: {html_url}\n\n{content_raw}"));
-        }
+        let bytes: Vec<u8> = if encoding == "base64" && !content_raw.is_empty() {
+            let cleaned: String = content_raw.chars().filter(|c| !c.is_whitespace()).collect();
+            base64::engine::general_purpose::STANDARD
+                .decode(cleaned.as_bytes())
+                .map_err(|e| ToolError::msg(format!("base64 decode failed: {e}")))?
+        } else if size == 0 {
+            return Ok(format!("File: {name} (sha: {sha}, 0 bytes)\nURL: {html_url}\n\n[Empty file]"));
+        } else if let Some(download_url) = json["download_url"].as_str() {
+            request_bytes(
+                github_request(&self.manager, &token, download_url)
+                    .header("Accept", "application/vnd.github.raw"),
+                "GitHub",
+            )
+            .await?
+        } else {
+            return Err(ToolError::msg(format!(
+                "{name} ({size} bytes) could not be downloaded from GitHub"
+            )));
+        };
 
-        if content_raw.is_empty() {
-            return Ok(format!("File: {name} (sha: {sha}, {size} bytes)\nURL: {html_url}\n\n[Empty file]"));
+        if crate::util::looks_binary(&bytes) {
+            return Ok(format!(
+                "File: {name} (sha: {sha}, {size} bytes)\nURL: {html_url}\n\n[Binary file — content not shown]"
+            ));
         }
-
-        let cleaned: String = content_raw.chars().filter(|c| !c.is_whitespace()).collect();
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(cleaned.as_bytes())
-            .map_err(|e| ToolError::msg(format!("base64 decode failed: {e}")))?;
 
         let content = String::from_utf8_lossy(&bytes).into_owned();
         let char_count = content.chars().count();
@@ -282,86 +312,6 @@ impl Tool for GitHubSearchCode {
             let repo = item["repository"]["full_name"].as_str().unwrap_or("—");
             let html_url = item["html_url"].as_str().unwrap_or("");
             out.push_str(&format!("• {name}\n  Repo: {repo}\n  Path: {path}\n  URL: {html_url}\n\n"));
-        }
-
-        if (page as u64) < total_pages {
-            out.push_str(&format!("\n[More results — use page: {} to fetch next page]", page + 1));
-        }
-
-        Ok(out)
-    }
-}
-
-#[derive(Clone)]
-pub struct GitHubSearchRepos {
-    pub manager: Arc<ConnectorManager>,
-    pub memory: SqliteMemory,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct GitHubSearchReposArgs {
-    pub query: String,
-    pub max_results: Option<u32>,
-    pub page: Option<u32>,
-}
-
-impl Tool for GitHubSearchRepos {
-    const NAME: &'static str = "github_search_repos";
-    type Args = GitHubSearchReposArgs;
-    type Output = String;
-    type Error = ToolError;
-
-    fn description(&self) -> String {
-        "Search GitHub repositories by name, description, or topics. Example: 'language:rust stars:>1000'. Supports pagination via page.".to_string()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
-    }
-
-    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let token = self
-            .manager
-            .get_access_token("github", &self.memory)
-            .await
-            .map_err(|e| ToolError::msg(format!("GitHub auth: {e}")))?;
-
-        let limit = args.max_results.unwrap_or(20).min(100);
-        let page = args.page.unwrap_or(1).max(1);
-        let url = format!(
-            "{GITHUB_API}/search/repositories?q={}&sort=stars&order=desc&per_page={limit}&page={page}",
-            urlencoding::encode(&args.query)
-        );
-
-        let json = request_json(
-            github_request(&self.manager, &token, &url),
-            "GitHub",
-        )
-        .await?;
-
-        check_github_error(&json)?;
-
-        let total = json["total_count"].as_u64().unwrap_or(0);
-        let items = json["items"].as_array().cloned().unwrap_or_default();
-        let total_pages = (total + limit as u64 - 1) / limit as u64;
-
-        if items.is_empty() {
-            return Ok(format!("No repositories found for '{}'.", args.query));
-        }
-
-        let mut out = format!(
-            "Found {total} total repositories (page {page} of {total_pages}, showing {}):\n\n",
-            items.len()
-        );
-        for repo in &items {
-            let name = repo["full_name"].as_str().unwrap_or("(unnamed)");
-            let desc = repo["description"].as_str().filter(|s| !s.is_empty()).unwrap_or("No description");
-            let lang = repo["language"].as_str().unwrap_or("—");
-            let stars = repo["stargazers_count"].as_u64().unwrap_or(0);
-            let html_url = repo["html_url"].as_str().unwrap_or("");
-            out.push_str(&format!(
-                "• {name} [{lang}] ★{stars}\n  {desc}\n  URL: {html_url}\n\n"
-            ));
         }
 
         if (page as u64) < total_pages {

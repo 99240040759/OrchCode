@@ -24,6 +24,11 @@ impl DictationHandle {
     pub fn stop(&self) {
         self.recording.store(false, Ordering::SeqCst);
     }
+
+    pub fn cancel(&self) {
+        self.finished.store(true, Ordering::SeqCst);
+        self.recording.store(false, Ordering::SeqCst);
+    }
 }
 
 pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResult<DictationHandle> {
@@ -174,7 +179,10 @@ async fn transcribe_when_stopped(
     }
 
     let sr = sample_rate.load(Ordering::SeqCst);
-    let snapshot: Vec<i16> = samples.lock().map(|b| b.clone()).unwrap_or_default();
+    let snapshot: Vec<i16> = samples
+        .lock()
+        .map(|mut b| std::mem::take(&mut *b))
+        .unwrap_or_default();
 
     let event = if sr == 0 || snapshot.is_empty() {
         DictationEvent::Final {
@@ -189,12 +197,40 @@ async fn transcribe_when_stopped(
         }
     };
 
-    finished.store(true, Ordering::SeqCst);
+    if finished.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let _ = channel.send(event);
 }
 
+fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
+    if from_rate <= to_rate || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let ratio = from_rate as f64 / to_rate as f64;
+    let out_len = (samples.len() as f64 / ratio).floor() as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let start = (i as f64 * ratio) as usize;
+        let end = (((i + 1) as f64 * ratio) as usize).min(samples.len()).max(start + 1);
+        let window = &samples[start..end.min(samples.len())];
+        if window.is_empty() {
+            break;
+        }
+        let sum: i64 = window.iter().map(|s| *s as i64).sum();
+        out.push((sum / window.len() as i64) as i16);
+    }
+    out
+}
+
 async fn transcribe(gateway: &Gateway, samples: &[i16], sample_rate: u32) -> AppResult<String> {
-    let wav = encode_wav(samples, sample_rate)?;
+    let target = crate::config::DICTATION_TARGET_SAMPLE_RATE;
+    let (samples, sample_rate) = if sample_rate > target {
+        (resample(samples, sample_rate, target), target)
+    } else {
+        (samples.to_vec(), sample_rate)
+    };
+    let wav = encode_wav(&samples, sample_rate)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
     gateway.transcribe(&b64).await
 }

@@ -1,4 +1,4 @@
-use super::{request_json, request_text, truncate_text};
+use super::{request_bytes, request_json, request_text, truncate_text};
 
 use std::sync::Arc;
 
@@ -13,6 +13,39 @@ use crate::persistence::SqliteMemory;
 
 const GDRIVE_API: &str = "https://www.googleapis.com/drive/v3";
 const GDRIVE_EXPORT_API: &str = "https://www.googleapis.com/drive/v3/files";
+
+fn document_extension(mime: &str, name: &str) -> Option<&'static str> {
+    let by_mime = match mime {
+        "application/pdf" => Some("pdf"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some("xlsx"),
+        "application/vnd.ms-excel" => Some("xls"),
+        "application/vnd.oasis.opendocument.spreadsheet" => Some("ods"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
+        _ => None,
+    };
+    by_mime.or_else(|| {
+        let lower = name.to_lowercase();
+        ["pdf", "docx", "xlsx", "xls", "ods", "pptx"]
+            .into_iter()
+            .find(|ext| lower.ends_with(&format!(".{ext}")))
+    })
+}
+
+fn is_textual_mime(mime: &str) -> bool {
+    mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json"
+                | "application/xml"
+                | "application/javascript"
+                | "application/x-yaml"
+                | "application/yaml"
+                | "application/x-sh"
+                | "application/sql"
+                | "image/svg+xml"
+        )
+}
 
 fn escape_gdrive_query(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
@@ -137,7 +170,7 @@ impl Tool for GoogleDriveReadFile {
     type Error = ToolError;
 
     fn description(&self) -> String {
-        "Read the content of a Google Drive file by its ID. Google Docs/Sheets/Slides are exported as plain text automatically. Binary files are described but not decoded.".to_string()
+        "Read the content of a Google Drive file by its ID. Google Docs and Slides are exported as text and Sheets as CSV; PDF, Word, Excel and PowerPoint files are parsed to text. Other binary files are described but not decoded.".to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -167,45 +200,72 @@ impl Tool for GoogleDriveReadFile {
         let modified = meta["modifiedTime"].as_str().unwrap_or("—");
         let link = meta["webViewLink"].as_str().unwrap_or("");
 
-        let binary_mimes = [
-            "image/", "video/", "audio/", "application/octet-stream",
-            "application/zip", "application/x-zip", "application/pdf",
-        ];
-        let is_binary = binary_mimes.iter().any(|prefix| mime.starts_with(prefix))
-            && !mime.starts_with("application/vnd.google-apps");
+        let header = format!("File: {name}\nType: {mime}\nSize: {size} bytes\nModified: {modified}\nLink: {link}\n\n");
+        let file_url = format!("{GDRIVE_EXPORT_API}/{}", urlencoding::encode(&args.file_id));
 
-        if is_binary {
-            return Ok(format!(
-                "File: {name}\nType: {mime}\nSize: {size} bytes\nModified: {modified}\nLink: {link}\n\n[Binary file — cannot display content]"
-            ));
-        }
-
-        let (url, _is_export) = if mime.starts_with("application/vnd.google-apps") {
+        let content = if mime.starts_with("application/vnd.google-apps") {
+            let default_export = match mime.as_str() {
+                "application/vnd.google-apps.spreadsheet" => "text/csv",
+                "application/vnd.google-apps.drawing" => "image/svg+xml",
+                "application/vnd.google-apps.script" => "application/vnd.google-apps.script+json",
+                _ => "text/plain",
+            };
             let export_mime = args
                 .export_mime_type
                 .as_deref()
-                .unwrap_or("text/plain")
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or(default_export)
                 .to_string();
-            (
-                format!(
-                    "{GDRIVE_EXPORT_API}/{}/export?mimeType={}",
-                    urlencoding::encode(&args.file_id),
-                    urlencoding::encode(&export_mime)
-                ),
-                true,
+            if matches!(
+                mime.as_str(),
+                "application/vnd.google-apps.folder"
+                    | "application/vnd.google-apps.form"
+                    | "application/vnd.google-apps.map"
+                    | "application/vnd.google-apps.site"
+                    | "application/vnd.google-apps.shortcut"
+            ) {
+                return Ok(format!("{header}[This Google item type has no readable content]"));
+            }
+            request_text(
+                self.manager
+                    .http()
+                    .get(format!("{file_url}/export?mimeType={}", urlencoding::encode(&export_mime)))
+                    .bearer_auth(&token),
+                "Google Drive",
             )
+            .await?
+        } else if let Some(extension) = document_extension(&mime, &name) {
+            let bytes = request_bytes(
+                self.manager
+                    .http()
+                    .get(format!("{file_url}?alt=media"))
+                    .bearer_auth(&token),
+                "Google Drive",
+            )
+            .await?;
+            let extension = extension.to_string();
+            let parsed = tokio::task::spawn_blocking(move || {
+                crate::document::parse_document_bytes(&bytes, &extension)
+            })
+            .await
+            .map_err(|e| ToolError::msg(format!("document parse task failed: {e}")))??;
+            parsed.full_text
+        } else if is_textual_mime(&mime) {
+            let bytes = request_bytes(
+                self.manager
+                    .http()
+                    .get(format!("{file_url}?alt=media"))
+                    .bearer_auth(&token),
+                "Google Drive",
+            )
+            .await?;
+            if crate::util::looks_binary(&bytes) {
+                return Ok(format!("{header}[Binary file — cannot display content]"));
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
         } else {
-            (
-                format!("{GDRIVE_EXPORT_API}/{}?alt=media", urlencoding::encode(&args.file_id)),
-                false,
-            )
+            return Ok(format!("{header}[Binary file — cannot display content]"));
         };
-
-        let content = request_text(
-            self.manager.http().get(&url).bearer_auth(&token),
-            "Google Drive",
-        )
-        .await?;
 
         let char_count = content.chars().count();
         let truncated = truncate_text(
@@ -214,7 +274,8 @@ impl Tool for GoogleDriveReadFile {
             &format!("\n\n[Truncated: showing first 50,000 of {char_count} chars — file has more content]"),
         );
 
-        Ok(format!("File: {name}\nType: {mime}\nSize: {size} bytes\nModified: {modified}\nLink: {link}\n\n{truncated}"))
+        Ok(format!("{header}{truncated}"))
+
     }
 }
 

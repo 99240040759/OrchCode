@@ -9,6 +9,7 @@ import {
   VscMic,
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { renderToStaticMarkup } from "react-dom/server";
 import { useDebouncedCallback } from "use-debounce";
 import * as api from "../lib/api";
@@ -234,30 +235,30 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const [highlighted, setHighlighted] = useState(0);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+  const searchSeqRef = useRef(0);
 
   const maxContext = selectedModel?.contextWindow ?? 0;
   const fillPct =
     maxContext > 0
-      ? Math.min(100, Math.max(0, Math.round((sessionTokens.totalTokens / maxContext) * 100)))
+      ? Math.min(100, Math.max(0, Math.round((sessionTokens.contextTokens / maxContext) * 100)))
       : 0;
   const modelSupportsImages = selectedModel?.capabilities.includes("images") ?? false;
 
   const addAttachments = useCallback(
     (paths: string[]) => {
       if (paths.length === 0) return;
-      const rejected: string[] = [];
+      const rejected = paths
+        .filter((path) => api.isImagePath(path) && !modelSupportsImages)
+        .map((path) => api.getBasename(path));
+      const accepted = paths.filter((path) => !(api.isImagePath(path) && !modelSupportsImages));
       setAttachments((previous) => {
         const known = new Set(previous.map((a) => a.path));
         const next = [...previous];
-        for (const path of paths) {
+        for (const path of accepted) {
           if (known.has(path)) continue;
-          const image = api.isImagePath(path);
-          if (image && !modelSupportsImages) {
-            rejected.push(api.getBasename(path));
-            continue;
-          }
           known.add(path);
-          next.push({ path, name: api.getBasename(path), isImage: image });
+          next.push({ path, name: api.getBasename(path), isImage: api.isImagePath(path) });
         }
         return next;
       });
@@ -282,21 +283,25 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   }, [addAttachments]);
 
   const searchFiles = useDebouncedCallback(async (text: string) => {
+    const seq = ++searchSeqRef.current;
     setLoadingFiles(true);
     try {
       const hits = await api.listWorkspaceFiles(text, 100);
-      setFileHits(hits);
+      if (seq === searchSeqRef.current) setFileHits(hits);
     } catch {
-      setFileHits([]);
+      if (seq === searchSeqRef.current) setFileHits([]);
     } finally {
-      setLoadingFiles(false);
-      setHighlighted(0);
+      if (seq === searchSeqRef.current) {
+        setLoadingFiles(false);
+        setHighlighted(0);
+      }
     }
   }, 120);
 
   useEffect(() => {
     if (trigger !== "@") {
       searchFiles.cancel();
+      searchSeqRef.current += 1;
       setFileHits([]);
       setLoadingFiles(false);
       return;
@@ -334,6 +339,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       setQuery("");
       return;
     }
+    savedRangeRef.current = sel.getRangeAt(0).cloneRange();
 
     try {
       const range = sel.getRangeAt(0);
@@ -400,6 +406,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const activeIndex = hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (popoverOpen) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -466,8 +473,24 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       await api.startDictation((event) => {
         setRecording(false);
         if (event.type === "final") {
-          if (event.text && editorRef.current) {
-            insertTextAtCaret(event.text);
+          const editor = editorRef.current;
+          if (event.text && editor) {
+            const sel = window.getSelection();
+            const saved = savedRangeRef.current;
+            editor.focus();
+            if (sel) {
+              sel.removeAllRanges();
+              if (saved && editor.contains(saved.startContainer)) {
+                sel.addRange(saved);
+              } else {
+                const range = document.createRange();
+                range.selectNodeContents(editor);
+                range.collapse(false);
+                sel.addRange(range);
+              }
+            }
+            const needsSpace = editor.textContent && !/\s$/.test(editor.textContent);
+            insertTextAtCaret(needsSpace ? ` ${event.text}` : event.text);
             syncEditor();
           }
         } else {
@@ -482,8 +505,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
   const pickFiles = useCallback(
     async (imagesOnly: boolean) => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({
+      const selected = await openDialog({
         multiple: true,
         filters: imagesOnly
           ? [{ name: "Images", extensions: [...api.IMAGE_EXTENSIONS] }]
@@ -631,7 +653,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
             {maxContext > 0 && (
               <Tooltip
-                content={`Context: ${sessionTokens.totalTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+                content={`Context: ${sessionTokens.contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%) · ${sessionTokens.totalTokens.toLocaleString()} tokens used in this chat`}
                 side="top"
               >
                 <div className="TokenRing">

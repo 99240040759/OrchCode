@@ -31,7 +31,9 @@ function AppShell() {
       <div className="AppShell-body">
         {sidebarOpen && <Sidebar currentView={view} onViewChange={setView} />}
         <div className="Main">
-          {view === "chat" && <ChatPanel />}
+          <div className="Main-view" style={{ display: view === "chat" ? "contents" : "none" }}>
+            <ChatPanel />
+          </div>
           {view === "library" && <LibraryView />}
           {view === "connectors" && <ConnectorsView />}
         </div>
@@ -73,12 +75,12 @@ function Root() {
   const initWorkspace   = useWorkspaceStore((s) => s.initialize);
 
   useEffect(() => {
+    void getCurrentWindow().show();
     void initializeAuth();
   }, [initializeAuth]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
-    void getCurrentWindow().show();
     void startUpdater();
   }, [authStatus, startUpdater]);
 
@@ -94,7 +96,7 @@ function Root() {
 
   if (
     authStatus === "loading" ||
-    (authStatus === "signedIn" && workspaceStatus === "loading")
+    (authStatus === "signedIn" && (workspaceStatus === "loading" || workspaceStatus === "idle"))
   ) {
     return (
       <div className="AuthLoading">

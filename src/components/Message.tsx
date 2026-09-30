@@ -268,6 +268,12 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
         }
         return <Markdown key={group.id}>{group.text}</Markdown>;
       })}
+      {message.notice && (
+        <div className="Msg-notice" role="status">
+          <VscWarning aria-hidden="true" />
+          <span>{message.notice}</span>
+        </div>
+      )}
       {message.streaming && message.items.length === 0 && <ThinkingShimmer />}
       {message.error && (
         <div className="Msg-error" role="alert">

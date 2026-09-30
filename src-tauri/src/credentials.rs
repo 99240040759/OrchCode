@@ -15,15 +15,13 @@ pub fn save(account: &str, value: &str) -> AppResult<()> {
     })
 }
 
-pub fn load(account: &str) -> Option<String> {
-    let entry = entry(account).ok()?;
-    match entry.get_password() {
-        Ok(value) if !value.is_empty() => Some(value),
-        Ok(_) | Err(keyring::Error::NoEntry) => None,
-        Err(e) => {
-            eprintln!("[credentials] could not read {account} from the credential store: {e}");
-            None
-        }
+pub fn load(account: &str) -> AppResult<Option<String>> {
+    match entry(account)?.get_password() {
+        Ok(value) if !value.is_empty() => Ok(Some(value)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AppError::other(format!(
+            "could not read {account} from the credential store: {e}"
+        ))),
     }
 }
 

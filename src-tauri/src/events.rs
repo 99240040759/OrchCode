@@ -59,11 +59,15 @@ pub enum ChatEvent {
         input_tokens: u64,
         output_tokens: u64,
         total_tokens: u64,
+        context_tokens: u64,
     },
     #[serde(rename_all = "camelCase")]
     Compacted {
         original_message_count: usize,
         ts: i64,
+    },
+    Notice {
+        message: String,
     },
     Done,
     Cancelled,

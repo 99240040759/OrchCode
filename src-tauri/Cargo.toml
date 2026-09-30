@@ -1,6 +1,6 @@
 [package]
 name = "orch"
-version = "0.0.5"
+version = "0.0.6"
 description = "Orch Desktop Application"
 authors = ["you"]
 edition = "2021"
@@ -38,6 +38,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "str
 cpal = "0.15"
 hound = "3"
 
+bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 thiserror = "2"
@@ -78,6 +79,11 @@ url = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSView", "NSButton"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry"] }
 
 [profile.release]
 opt-level = 3
