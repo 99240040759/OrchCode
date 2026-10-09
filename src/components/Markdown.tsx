@@ -194,7 +194,8 @@ const MARKDOWN_COMPONENTS: Components = {
       return (
         <a
           {...props}
-          href={link}
+          role="button"
+          tabIndex={0}
           onClick={(event) => {
             event.preventDefault();
             useArtifactsStore.getState().openFile(workspacePathFromHref(link));
@@ -207,8 +208,8 @@ const MARKDOWN_COMPONENTS: Components = {
     return (
       <a
         {...props}
-        href={link}
-        rel="noreferrer"
+        role="button"
+        tabIndex={0}
         onClick={(event) => {
           event.preventDefault();
           void openUrl(link);

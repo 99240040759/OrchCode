@@ -16,6 +16,12 @@ const OPTIONAL_VARS: &[&str] = &[
 
 fn main() {
     load_dotenv_for_compile();
+    #[cfg(target_os = "windows")]
+    {
+        let mut res = winresource::WindowsResource::new();
+        res.set_manifest_file("orch.exe.manifest");
+        res.compile().unwrap();
+    }
     tauri_build::build();
 }
 

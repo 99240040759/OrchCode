@@ -75,6 +75,26 @@ function Root() {
   const initWorkspace   = useWorkspaceStore((s) => s.initialize);
 
   useEffect(() => {
+    const blockMiddleClick = (e: MouseEvent) => {
+      if (e.button === 1 && (e.target as HTMLElement).closest("a")) {
+        e.preventDefault();
+      }
+    };
+    const blockDragStart = (e: DragEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "IMG" || target.tagName === "A") {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("mousedown", blockMiddleClick);
+    document.addEventListener("dragstart", blockDragStart);
+    return () => {
+      document.removeEventListener("mousedown", blockMiddleClick);
+      document.removeEventListener("dragstart", blockDragStart);
+    };
+  }, []);
+
+  useEffect(() => {
     void getCurrentWindow().show();
     void initializeAuth();
   }, [initializeAuth]);

@@ -12,6 +12,7 @@ crate-type = ["rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 dotenvy = "0.15"
+winresource = "0.1"
 
 [dependencies]
 tauri = { version = "2", features = ["unstable"] }
@@ -91,3 +92,7 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = "debuginfo"
+
+[profile.dist]
+inherits = "release"
+lto = "fat"

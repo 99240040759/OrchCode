@@ -4,5 +4,16 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Orch uses the microphone for voice dictation in the chat composer.</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>LSMinimumSystemVersionByArchitecture</key>
+  <dict>
+    <key>x86_64</key>
+    <string>10.15</string>
+    <key>arm64</key>
+    <string>11.0</string>
+  </dict>
 </dict>
 </plist>

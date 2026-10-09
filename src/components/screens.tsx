@@ -13,7 +13,8 @@ const PRIVACY_URL = "https://orch.live/privacy";
 function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <a
-      href={href}
+      role="button"
+      tabIndex={0}
       className="ExternalLink"
       onClick={(event) => {
         event.preventDefault();
@@ -24,6 +25,7 @@ function ExternalLink({ href, children }: { href: string; children: React.ReactN
     </a>
   );
 }
+
 
 export function Greeting({
   user,
