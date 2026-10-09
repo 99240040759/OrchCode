@@ -201,9 +201,6 @@ pub struct SessionSummary {
     pub title: Option<String>,
     pub workspace_path: Option<String>,
     pub updated_at: i64,
-    pub total_input_tokens: i64,
-    pub total_output_tokens: i64,
-    pub total_tokens: i64,
     pub context_tokens: i64,
 }
 
@@ -335,8 +332,7 @@ impl SqliteMemory {
             .map_err(sql_err)?;
             let mut stmt = c
                 .prepare(
-                    "SELECT id, title, workspace_path, updated_at, total_input_tokens,
-                            total_output_tokens, total_tokens, last_context_tokens
+                    "SELECT id, title, workspace_path, updated_at, last_context_tokens
                      FROM sessions
                      WHERE workspace_path = ?1 AND user_id = ?2
                        AND (EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = sessions.id)
@@ -351,10 +347,7 @@ impl SqliteMemory {
                         title: row.get(1)?,
                         workspace_path: row.get(2)?,
                         updated_at: row.get(3)?,
-                        total_input_tokens: row.get(4)?,
-                        total_output_tokens: row.get(5)?,
-                        total_tokens: row.get(6)?,
-                        context_tokens: row.get(7)?,
+                        context_tokens: row.get(4)?,
                     })
                 })
                 .map_err(sql_err)?;

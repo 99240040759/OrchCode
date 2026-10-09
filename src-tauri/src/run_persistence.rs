@@ -73,9 +73,6 @@ pub struct RunTokenBaseline {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DurableRunUsage {
-    pub cumulative_input_tokens: u64,
-    pub cumulative_output_tokens: u64,
-    pub cumulative_total_tokens: u64,
     pub last_turn_input_tokens: u64,
 }
 
@@ -272,16 +269,6 @@ impl SqliteMemory {
                 )
                 .map_err(sql_err)?;
 
-            let (run_input, run_output, run_total): (i64, i64, i64) = transaction
-                .query_row(
-                    "SELECT COALESCE(SUM(input_tokens), 0),
-                            COALESCE(SUM(output_tokens), 0),
-                            COALESCE(SUM(total_tokens), 0)
-                     FROM chat_run_usage WHERE run_id = ?1",
-                    params![run_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .map_err(sql_err)?;
             let last_turn_input: i64 = transaction
                 .query_row(
                     "SELECT input_tokens FROM chat_run_usage
@@ -294,9 +281,6 @@ impl SqliteMemory {
             let usage = update_run_and_session_usage(
                 &transaction,
                 &run_id,
-                run_input,
-                run_output,
-                run_total,
                 last_turn_input,
                 false,
             )?;
@@ -319,27 +303,14 @@ impl SqliteMemory {
         run_db_task(move || {
             let mut connection = pool.get().map_err(pool_err)?;
             let transaction = connection.transaction().map_err(sql_err)?;
-            let (stored_input, stored_output, stored_total, stored_last): (i64, i64, i64, i64) =
-                transaction
-                    .query_row(
-                        "SELECT usage_input_tokens, usage_output_tokens,
-                                usage_total_tokens, last_turn_input_tokens
-                         FROM chat_runs WHERE run_id = ?1",
-                        params![run_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                    )
-                    .map_err(sql_err)?;
-
-            let provider_reported = input_tokens != 0 || output_tokens != 0 || total_tokens != 0;
-            let (run_input, run_output, run_total) = if provider_reported {
-                (
-                    to_db_token(input_tokens),
-                    to_db_token(output_tokens),
-                    to_db_token(normalized_total(input_tokens, output_tokens, total_tokens)),
+            let stored_last: i64 = transaction
+                .query_row(
+                    "SELECT last_turn_input_tokens FROM chat_runs WHERE run_id = ?1",
+                    params![run_id],
+                    |row| row.get(0),
                 )
-            } else {
-                (stored_input, stored_output, stored_total)
-            };
+                .map_err(sql_err)?;
+
             let last_turn_input = if last_turn_input_tokens == 0 {
                 stored_last
             } else {
@@ -349,9 +320,6 @@ impl SqliteMemory {
             let usage = update_run_and_session_usage(
                 &transaction,
                 &run_id,
-                run_input,
-                run_output,
-                run_total,
                 last_turn_input,
                 true,
             )?;
@@ -806,38 +774,25 @@ fn insert_run_messages(
 fn update_run_and_session_usage(
     transaction: &Transaction<'_>,
     run_id: &str,
-    run_input: i64,
-    run_output: i64,
-    run_total: i64,
     last_turn_input: i64,
     complete: bool,
 ) -> AppResult<DurableRunUsage> {
-    let (conversation_id, prior_input, prior_output, prior_total): (String, i64, i64, i64) =
-        transaction
-            .query_row(
-                "SELECT conversation_id, prior_input_tokens, prior_output_tokens,
-                        prior_total_tokens
-                 FROM chat_runs WHERE run_id = ?1",
-                params![run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .map_err(sql_err)?;
+    let conversation_id: String = transaction
+        .query_row(
+            "SELECT conversation_id FROM chat_runs WHERE run_id = ?1",
+            params![run_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_err)?;
 
-    let cumulative_input = prior_input.saturating_add(run_input).max(0);
-    let cumulative_output = prior_output.saturating_add(run_output).max(0);
-    let cumulative_total = prior_total.saturating_add(run_total).max(0);
     let now = now_ms();
     transaction
         .execute(
             "UPDATE chat_runs SET
-                 usage_input_tokens = ?1, usage_output_tokens = ?2,
-                 usage_total_tokens = ?3, last_turn_input_tokens = ?4,
-                 usage_complete = ?5, updated_at = ?6
-             WHERE run_id = ?7",
+                 last_turn_input_tokens = ?1,
+                 usage_complete = ?2, updated_at = ?3
+             WHERE run_id = ?4",
             params![
-                run_input.max(0),
-                run_output.max(0),
-                run_total.max(0),
                 last_turn_input.max(0),
                 i64::from(complete),
                 now,
@@ -847,12 +802,8 @@ fn update_run_and_session_usage(
         .map_err(sql_err)?;
     transaction
         .execute(
-            "UPDATE sessions SET total_input_tokens = ?1, total_output_tokens = ?2,
-                 total_tokens = ?3, last_context_tokens = ?4, updated_at = ?5 WHERE id = ?6",
+            "UPDATE sessions SET last_context_tokens = ?1, updated_at = ?2 WHERE id = ?3",
             params![
-                cumulative_input,
-                cumulative_output,
-                cumulative_total,
                 last_turn_input.max(0),
                 now,
                 conversation_id
@@ -861,9 +812,6 @@ fn update_run_and_session_usage(
         .map_err(sql_err)?;
 
     Ok(DurableRunUsage {
-        cumulative_input_tokens: from_db_token(cumulative_input),
-        cumulative_output_tokens: from_db_token(cumulative_output),
-        cumulative_total_tokens: from_db_token(cumulative_total),
         last_turn_input_tokens: from_db_token(last_turn_input),
     })
 }

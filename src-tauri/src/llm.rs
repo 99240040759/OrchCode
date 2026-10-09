@@ -805,9 +805,6 @@ pub async fn run_chat(
                 };
                 last_turn_input = usage.last_turn_input_tokens;
                 let _ = channel.send(ChatEvent::Usage {
-                    input_tokens: usage.cumulative_input_tokens,
-                    output_tokens: usage.cumulative_output_tokens,
-                    total_tokens: usage.cumulative_total_tokens,
                     context_tokens: last_turn_input,
                 });
 
@@ -852,9 +849,6 @@ pub async fn run_chat(
                 };
                 last_turn_input = usage.last_turn_input_tokens;
                 let _ = channel.send(ChatEvent::Usage {
-                    input_tokens: usage.cumulative_input_tokens,
-                    output_tokens: usage.cumulative_output_tokens,
-                    total_tokens: usage.cumulative_total_tokens,
                     context_tokens: last_turn_input,
                 });
                 saw_final_response = true;

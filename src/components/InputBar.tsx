@@ -673,7 +673,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
             {maxContext > 0 && (
               <Tooltip
-                content={`Context: ${sessionTokens.contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%) · ${sessionTokens.totalTokens.toLocaleString()} tokens used in this chat`}
+                content={`Context Window: ${sessionTokens.contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
                 side="top"
               >
                 <div className="TokenRing">

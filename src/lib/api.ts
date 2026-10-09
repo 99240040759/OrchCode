@@ -40,9 +40,6 @@ export interface SessionSummary {
   title?: string | null;
   workspacePath?: string | null;
   updatedAt: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalTokens: number;
   contextTokens: number;
 }
 
@@ -126,7 +123,7 @@ export type ChatStreamEvent =
   | { type: "reasoningDone"; durationSeconds: number }
   | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
   | { type: "toolResult"; id: string; output: string; isError: boolean }
-  | { type: "usage"; inputTokens: number; outputTokens: number; totalTokens: number; contextTokens: number }
+  | { type: "usage"; contextTokens: number }
   | { type: "compacted"; originalMessageCount: number; ts: number }
   | { type: "notice"; message: string }
   | { type: "done" }

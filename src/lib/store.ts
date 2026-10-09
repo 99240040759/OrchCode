@@ -57,9 +57,6 @@ export interface CompactionNoticeItem {
 export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNoticeItem;
 
 export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
   contextTokens: number;
 }
 
@@ -73,7 +70,7 @@ export interface ChatMessage {
   notice?: string;
 }
 
-const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, contextTokens: 0 };
+const ZERO_USAGE: TokenUsage = { contextTokens: 0 };
 
 function viewItemToLocal(item: MessageItemView): MessageItem {
   switch (item.type) {
@@ -110,9 +107,6 @@ function viewItemToLocal(item: MessageItemView): MessageItem {
 
 function usageFrom(session: SessionSummary): TokenUsage {
   return {
-    inputTokens: session.totalInputTokens,
-    outputTokens: session.totalOutputTokens,
-    totalTokens: session.totalTokens,
     contextTokens: session.contextTokens,
   };
 }
@@ -456,7 +450,7 @@ export const useChatStore = create(
           case "usage":
             set((s) => {
               if (s.currentSessionId === sessionId)
-                s.sessionTokens = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens, contextTokens: event.contextTokens };
+                s.sessionTokens = { contextTokens: event.contextTokens };
             });
             break;
           case "notice":
