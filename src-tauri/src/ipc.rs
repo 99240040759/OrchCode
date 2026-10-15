@@ -21,6 +21,7 @@ use crate::terminal;
 use crate::tools::ToolContext;
 
 use rig::completion::Message;
+use rig::id::ConversationId;
 use rig::memory::ConversationMemory;
 
 fn is_safe_path_segment(s: &str) -> bool {
@@ -440,6 +441,7 @@ pub async fn start_chat(
         connector_manager: state.connector_manager.clone(),
     };
     let enabled_connectors = state.connector_manager.enabled_ids();
+    let tool_errors = crate::llm::ToolErrorTracker::new();
     let agent = build_agent(
         AgentInputs {
             client: &client,
@@ -450,6 +452,7 @@ pub async fn start_chat(
             enabled_connectors: &enabled_connectors,
         },
         state.memory.scoped_to_run(&run_id),
+        tool_errors.clone(),
     );
     let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
 
@@ -463,6 +466,7 @@ pub async fn start_chat(
         cancel,
         on_event.clone(),
         state.memory.clone(),
+        tool_errors,
     )
     .await;
     state.command_manager.kill_foreground_for_run(&run_id);
@@ -596,7 +600,7 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
         .await;
     state
         .memory
-        .clear(&session_id)
+        .clear(&ConversationId::from(session_id.as_str()))
         .await
         .map_err(|e| e.to_string())?;
     let _ = app.emit("sessions-updated", ());

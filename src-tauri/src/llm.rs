@@ -6,21 +6,20 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use futures::StreamExt;
 use rig::agent::{
-    Agent, AgentHook, CompletionCallAction, CompletionCallEvent, HookContext, MultiTurnStreamItem,
-    RequestPatch, ToolResultAction, ToolResultEvent,
+    Agent, AgentBuilder, AgentHook, HookContext, MultiTurnStreamItem,
 };
-use rig::client::{AgentClientExt, CompletionClient};
-use rig::completion::{CompletionModel, Message};
+use rig::agent::hook::{OutcomeAction, OutcomeEvent};
+use rig::completion::Message;
 use rig::http_client::{
-    self, HeaderValue, HttpClientExt, LazyBody, MultipartForm, Request, Response, StreamingResponse,
+    self, HeaderValue, HttpClientExt, LazyBody, MultipartForm, Request, ReqwestClient, Response,
+    StreamingResponse,
 };
+use rig::id::ConversationId;
 use rig::memory::ConversationMemory;
 use rig::message::{
     AssistantContent, ImageDetail, ToolResult, ToolResultContent, UserContent,
 };
-use rig::streaming::{StreamedAssistantContent, StreamedUserContent, StreamingPrompt};
 use rig::wasm_compat::WasmCompatSend;
-use rig::OneOrMany;
 use serde::Deserialize;
 use tauri::ipc::Channel;
 use tokio_util::sync::CancellationToken;
@@ -30,15 +29,12 @@ use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
 use crate::gateway::{ModelInfo, TokenHandle};
 use crate::persistence::SqliteMemory;
-use crate::tokenizer;
-use crate::tools::{
-    parse_display_info, strip_tool_error_sentinel, tool_output_is_error, window_lines, ToolContext,
-};
+use crate::tools::{parse_display_info, window_lines, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
 
 #[derive(Clone, Default)]
 pub struct AuthedHttp {
-    inner: reqwest::Client,
+    inner: ReqwestClient,
     token: TokenHandle,
 }
 
@@ -98,24 +94,20 @@ impl HttpClientExt for AuthedHttp {
     }
 }
 
-pub type ChatClient = rig::providers::openai::CompletionsClient<AuthedHttp>;
-pub type ChatModel = rig::providers::openai::completion::CompletionModel<AuthedHttp>;
-pub type ChatAgent = Agent<ChatModel>;
+pub type ChatClient = rig::providers::openai::OpenAI;
+pub type ChatModel = rig::driver::Model<rig::providers::openai::wire::OpenAiWire>;
+pub type ChatAgent = Agent;
 
 pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient> {
     let initial = token.read().ok().and_then(|g| g.clone()).unwrap_or_default();
     let http = AuthedHttp {
-        inner: crate::util::streaming_http_client(),
+        inner: ReqwestClient::from(crate::util::streaming_http_client()),
         token,
     };
-    let client = rig::providers::openai::Client::builder()
-        .api_key(initial.as_str())
-        .base_url(&config::inference_base_url(provider))
-        .http_client(http)
-        .build()
-        .map_err(|e| AppError::other(format!("failed to build inference client: {e:?}")))?
-        .completions_api();
-    Ok(client)
+    let config = rig::providers::openai::OpenAIConfig::new(initial.as_str())
+        .with_base_url(&config::inference_base_url(provider))
+        .with_route(rig::providers::openai::Route::Chat);
+    Ok(config.connect(http))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,82 +149,50 @@ fn parse_line_range(lr: &str) -> (Option<usize>, Option<usize>) {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct ToolErrorTracker(std::sync::Arc<std::sync::Mutex<HashSet<String>>>);
+
+impl ToolErrorTracker {
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())))
+    }
+
+    pub fn mark_error(&self, id: &str) {
+        if let Ok(mut g) = self.0.lock() {
+            g.insert(id.to_string());
+        }
+    }
+
+    pub fn is_error(&self, id: &str) -> bool {
+        self.0.lock().map(|g| g.contains(id)).unwrap_or(false)
+    }
+}
+
 pub struct ContextGuard {
-    budget_tokens: usize,
+    tool_errors: ToolErrorTracker,
 }
 
 impl ContextGuard {
-    pub fn for_model(model: &ModelInfo) -> Self {
-        if model.context_window == 0 {
-            return Self {
-                budget_tokens: usize::MAX,
-            };
-        }
-        let window = model.context_window as f64;
-        let reserved_output = (model.max_tokens as f64).min(window * 0.25);
-        let tokens = (window * config::CONTEXT_BUDGET_RATIO - reserved_output).max(window * 0.3);
-        let tokens = (tokens as usize).saturating_sub(config::PREAMBLE_TOKEN_RESERVE);
-        Self {
-            budget_tokens: tokens.max(4_000),
-        }
+    pub fn new(tool_errors: ToolErrorTracker) -> Self {
+        Self { tool_errors }
     }
 }
 
 impl AgentHook for ContextGuard {
-    async fn on_completion_call(
-        &self,
-        _ctx: &HookContext,
-        event: CompletionCallEvent<'_>,
-    ) -> CompletionCallAction {
-        match prune_history(event.history, event.prompt, self.budget_tokens) {
-            Some(history) => CompletionCallAction::patch(RequestPatch::new().history(history)),
-            None => CompletionCallAction::continue_run(),
+    async fn on_outcome(&self, _ctx: &HookContext, event: OutcomeEvent<'_>) -> OutcomeAction {
+        if let Some(res) = event.tool_result() {
+            if res.is_error() || res.is_refused() {
+                if let Some(call_id) = event.call_id {
+                    self.tool_errors.mark_error(&call_id.to_string());
+                }
+            }
+            let rendered = res.output().render();
+            if rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
+                return OutcomeAction::rewrite_tool_result(&event, clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS));
+            }
         }
+        OutcomeAction::proceed()
     }
-
-    async fn on_tool_result(&self, _ctx: &HookContext, event: ToolResultEvent<'_>) -> ToolResultAction {
-        let rendered = event.presentation.render();
-        if rendered.chars().count() <= config::MAX_TOOL_OUTPUT_CHARS {
-            return ToolResultAction::keep();
-        }
-        ToolResultAction::rewrite(clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS))
-    }
-}
-
-fn prune_history(history: &[Message], prompt: &Message, budget_tokens: usize) -> Option<Vec<Message>> {
-    let prompt_tokens = tokenizer::count_message_tokens(prompt);
-    let total: usize = tokenizer::count_messages_tokens(history) + prompt_tokens;
-    if total <= budget_tokens {
-        return None;
-    }
-
-    let mut pruned = history.to_vec();
-    let protected_from = pruned.len().saturating_sub(config::PROTECTED_TAIL_MESSAGES);
-    let mut drop_until = 0usize;
-    let mut running = total;
-
-    for (index, message) in pruned.iter().enumerate().take(protected_from) {
-        if running <= budget_tokens && crate::persistence::is_user_turn(message) {
-            drop_until = index;
-            break;
-        }
-        running = running.saturating_sub(tokenizer::count_message_tokens(message));
-        drop_until = index + 1;
-    }
-
-    while drop_until < pruned.len() && !crate::persistence::is_user_turn(&pruned[drop_until]) {
-        drop_until += 1;
-    }
-
-    if drop_until > 0 && drop_until < pruned.len() {
-        let mut kept = vec![Message::user(
-            "[Earlier conversation turns were archived to fit the context window.]",
-        )];
-        kept.extend(pruned.drain(drop_until..));
-        pruned = kept;
-    }
-
-    Some(pruned)
 }
 
 pub struct AgentInputs<'a> {
@@ -244,12 +204,15 @@ pub struct AgentInputs<'a> {
     pub enabled_connectors: &'a [String],
 }
 
-pub fn build_agent(inputs: AgentInputs<'_>, memory: impl ConversationMemory + 'static) -> ChatAgent {
+pub fn build_agent(
+    inputs: AgentInputs<'_>,
+    memory: impl ConversationMemory + 'static,
+    tool_errors: ToolErrorTracker,
+) -> ChatAgent {
     let preamble = build_preamble(inputs.data_dir, inputs.workspace, inputs.enabled_connectors);
     let ctx = inputs.tools;
-    let mut builder = inputs
-        .client
-        .agent(inputs.model.target_model_id())
+    let model = inputs.client.completion(inputs.model.target_model_id());
+    let mut builder = AgentBuilder::new(model)
         .preamble(&preamble)
         .default_max_turns(config::DEFAULT_MAX_TURNS)
         .tool(ctx.list_dir())
@@ -273,7 +236,7 @@ pub fn build_agent(inputs: AgentInputs<'_>, memory: impl ConversationMemory + 's
 
     builder = builder
         .memory(memory)
-        .add_hook(ContextGuard::for_model(inputs.model));
+        .add_hook(ContextGuard::new(tool_errors));
 
     if inputs.model.max_tokens > 0 {
         builder = builder.max_tokens(inputs.model.max_tokens);
@@ -356,7 +319,7 @@ If you have enough information to act, act. If you need information, get it with
 - **web_search** returns titles, URLs, and snippets from current online sources.
 - **search_documents** searches indexed files in the knowledge library.
 
-Tool failures start with [[tool-error]] followed by the reason. Read the reason and change your approach; \
+When a tool call fails, read the error reason and change your approach; \
 never repeat an identical failing call. Very large tool outputs are shortened in the middle, and older tool \
 outputs may be removed from context when the conversation grows — re-run a tool if you need that data again.
 
@@ -499,13 +462,14 @@ pub async fn run_chat(
     cancel: CancellationToken,
     channel: Channel<ChatEvent>,
     memory: SqliteMemory,
+    tool_errors: ToolErrorTracker,
 ) -> RunResult {
     let mut stream = agent
-        .stream_prompt(request.user_message)
-        .conversation(request.session_id.clone())
+        .prompt(request.user_message)
+        .conversation(ConversationId::from(request.session_id.as_str()))
         .max_turns(config::DEFAULT_MAX_TURNS)
         .tool_concurrency(config::DEFAULT_TOOL_CONCURRENCY)
-        .await;
+        .stream();
 
     let mut checkpoints = Checkpointer::new(memory.clone(), request.run_id.clone());
     let mut reasoning = ReasoningClock {
@@ -515,6 +479,7 @@ pub async fn run_chat(
     let mut last_turn_input: u64 = 0;
     let mut saw_final_response = false;
     let mut pending_tools: HashSet<String> = HashSet::new();
+    let mut tool_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let tool_timeout = Duration::from_secs(config::TOOL_EXECUTION_TIMEOUT_SECS);
     let mut last_activity = tokio::time::Instant::now();
@@ -575,77 +540,65 @@ pub async fn run_chat(
         };
 
         match item {
-            Ok(MultiTurnStreamItem::StreamAssistantItem(content)) => match content {
-                StreamedAssistantContent::Text(text) => {
-                    check!(reasoning.close(&channel, &mut checkpoints).await);
-                    let _ = channel.send(ChatEvent::Text {
-                        delta: text.text.clone(),
-                    });
-                    check!(checkpoints.delta("text", &text.text).await);
-                }
-                StreamedAssistantContent::Reasoning(r) => {
-                    if reasoning.started.is_none() {
-                        reasoning.started = Some(Instant::now());
-                    }
-                    let delta = r.display_text();
-                    let _ = channel.send(ChatEvent::Reasoning { delta: delta.clone() });
-                    check!(checkpoints.delta("reasoning", &delta).await);
-                }
-                StreamedAssistantContent::ReasoningDelta { reasoning: delta, .. } => {
-                    if reasoning.started.is_none() {
-                        reasoning.started = Some(Instant::now());
-                    }
-                    let _ = channel.send(ChatEvent::Reasoning { delta: delta.clone() });
-                    check!(checkpoints.delta("reasoning", &delta).await);
-                }
-                StreamedAssistantContent::ToolCall {
-                    tool_call,
-                    internal_call_id,
-                } => {
-                    check!(reasoning.close(&channel, &mut checkpoints).await);
-                    let args_value = match &tool_call.function.arguments {
-                        serde_json::Value::String(value) => {
-                            serde_json::from_str::<serde_json::Value>(value.as_str())
-                                .unwrap_or_else(|_| tool_call.function.arguments.clone())
+            Ok(MultiTurnStreamItem::StreamAssistantItem(item)) => {
+                if let rig::streaming::Item::Event(event) = item {
+                    match event {
+                        rig::streaming::StreamEvent::Text { text, .. } => {
+                            check!(reasoning.close(&channel, &mut checkpoints).await);
+                            let _ = channel.send(ChatEvent::Text {
+                                delta: text.clone(),
+                            });
+                            check!(checkpoints.delta("text", &text).await);
                         }
-                        other => other.clone(),
-                    };
-                    let args = args_value.to_string();
-                    pending_tools.insert(internal_call_id.clone());
-                    let display_info = parse_display_info(&tool_call.function.name, &args);
-                    let _ = channel.send(ChatEvent::ToolCall {
-                        id: internal_call_id.clone(),
-                        name: tool_call.function.name.clone(),
-                        args: args.clone(),
-                        display_info,
-                    });
-                    let payload = serde_json::json!({
-                        "id": internal_call_id,
-                        "callId": tool_call.id,
-                        "providerCallId": tool_call.call_id,
-                        "name": tool_call.function.name,
-                        "args": args,
-                    })
-                    .to_string();
-                    check!(checkpoints.event("tool_call", &payload).await);
+                        rig::streaming::StreamEvent::Reasoning { text, .. } => {
+                            if reasoning.started.is_none() {
+                                reasoning.started = Some(Instant::now());
+                            }
+                            let _ = channel.send(ChatEvent::Reasoning { delta: text.clone() });
+                            check!(checkpoints.delta("reasoning", &text).await);
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
-            },
-            Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
-                tool_result,
-                internal_call_id,
-            })) => {
-                pending_tools.remove(&internal_call_id);
-                let raw = stringify_tool_result(&tool_result);
-                let is_error = tool_output_is_error(&raw);
-                let output = strip_tool_error_sentinel(&raw).to_string();
+            }
+            Ok(MultiTurnStreamItem::ToolCall { tool_call }) => {
+                check!(reasoning.close(&channel, &mut checkpoints).await);
+                let args_value = serde_json::Value::Object(tool_call.function.arguments.clone());
+                let args = args_value.to_string();
+                let wire_id = tool_call.id.to_string();
+                let call_name = tool_call.function.name.to_string();
+                tool_id_map.insert(wire_id.clone(), wire_id.clone());
+                pending_tools.insert(wire_id.clone());
+                let display_info = parse_display_info(&call_name, &args);
+                let _ = channel.send(ChatEvent::ToolCall {
+                    id: wire_id.clone(),
+                    name: call_name.clone(),
+                    args: args.clone(),
+                    display_info,
+                });
+                let payload = serde_json::json!({
+                    "id": wire_id,
+                    "callId": wire_id,
+                    "name": call_name,
+                    "args": args,
+                })
+                .to_string();
+                check!(checkpoints.event("tool_call", &payload).await);
+            }
+            Ok(MultiTurnStreamItem::ToolResult { tool_result }) => {
+                let wire_id = tool_result.call.to_string();
+                let event_id = tool_id_map.get(&wire_id).cloned().unwrap_or_else(|| wire_id.clone());
+                pending_tools.remove(&event_id);
+                pending_tools.remove(&wire_id);
+                let is_error = tool_result.is_error || tool_errors.is_error(&wire_id) || tool_errors.is_error(&event_id);
+                let output = stringify_tool_result(&tool_result);
                 let _ = channel.send(ChatEvent::ToolResult {
-                    id: internal_call_id.clone(),
+                    id: event_id.clone(),
                     output: output.clone(),
                     is_error,
                 });
                 let payload = serde_json::json!({
-                    "id": internal_call_id,
+                    "id": event_id,
                     "output": output,
                     "isError": is_error,
                 })
@@ -658,9 +611,9 @@ pub async fn run_chat(
                     .record_chat_run_completion_usage(
                         &request.run_id,
                         call.call_index,
-                        turn.input_tokens,
-                        turn.output_tokens,
-                        turn.total_tokens,
+                        turn.input_tokens.unwrap_or(0),
+                        turn.output_tokens.unwrap_or(0),
+                        turn.total_tokens.unwrap_or(0),
                     )
                     .await
                 {
@@ -679,20 +632,13 @@ pub async fn run_chat(
             }
             Ok(MultiTurnStreamItem::FinalResponse(response)) => {
                 check!(reasoning.close(&channel, &mut checkpoints).await);
-                let aggregate = response.usage();
                 let terminal_last_input = response
                     .completion_calls()
                     .last()
-                    .map(|call| call.usage.input_tokens)
+                    .and_then(|call| call.usage.input_tokens)
                     .unwrap_or(last_turn_input);
                 let usage = match memory
-                    .reconcile_chat_run_usage(
-                        &request.run_id,
-                        aggregate.input_tokens,
-                        aggregate.output_tokens,
-                        aggregate.total_tokens,
-                        terminal_last_input,
-                    )
+                    .reconcile_chat_run_usage(&request.run_id, terminal_last_input)
                     .await
                 {
                     Ok(usage) => usage,
@@ -954,10 +900,8 @@ pub async fn build_user_message(
         }));
     }
 
-    let content = OneOrMany::many(parts)
-        .unwrap_or_else(|_| OneOrMany::one(UserContent::text(prompt.to_string())));
     BuiltUserMessage {
-        message: Message::User { content },
+        message: Message::User { content: parts },
         notes,
     }
 }
@@ -1018,8 +962,8 @@ pub async fn maybe_compact(
         "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[END CONTEXT SUMMARY — continue with the recent messages below]",
         original_message_count, summary
     ));
-    let new_context_tokens = (crate::tokenizer::count_message_tokens(&summary_msg)
-        + crate::tokenizer::count_messages_tokens(&input.remaining)) as u64;
+    let new_context_tokens = estimate_messages_tokens(&[summary_msg])
+        + estimate_messages_tokens(&input.remaining);
     let ts = memory
         .apply_compaction(
             session_id,
@@ -1035,6 +979,50 @@ pub async fn maybe_compact(
         ts,
         new_context_tokens,
     }))
+}
+
+fn estimate_message_tokens(message: &Message) -> u64 {
+    let mut chars = 0usize;
+    match message {
+        Message::User { content } => {
+            for part in content.iter() {
+                match part {
+                    UserContent::Text(t) => chars += t.text.len(),
+                    UserContent::ToolResult(tr) => {
+                        for c in tr.content.iter() {
+                            if let ToolResultContent::Text(t) = c {
+                                chars += t.text.len();
+                            }
+                        }
+                    }
+                    _ => chars += 100,
+                }
+            }
+        }
+        Message::Assistant(assistant) => {
+            for part in assistant.content.iter() {
+                match part {
+                    AssistantContent::Text(t) => chars += t.text.len(),
+                    AssistantContent::ToolCall(tc) => {
+                        chars += tc.function.name.to_string().len()
+                            + serde_json::to_string(&tc.function.arguments)
+                                .map(|s| s.len())
+                                .unwrap_or(0);
+                    }
+                    AssistantContent::Reasoning(r) => chars += r.text.len(),
+                    _ => {}
+                }
+            }
+        }
+        Message::System { content } => {
+            chars += content.len();
+        }
+    }
+    ((chars / 4).max(1)) as u64
+}
+
+fn estimate_messages_tokens(messages: &[Message]) -> u64 {
+    messages.iter().map(estimate_message_tokens).sum()
 }
 
 fn render_transcript(messages: &[Message], budget_chars: usize) -> String {
@@ -1063,8 +1051,9 @@ fn render_transcript(messages: &[Message], budget_chars: usize) -> String {
                     Some(parts.join("\n"))
                 }
             }
-            Message::Assistant { content, .. } => {
-                let parts: Vec<String> = content
+            Message::Assistant(assistant) => {
+                let parts: Vec<String> = assistant
+                    .content
                     .iter()
                     .filter_map(|c| match c {
                         AssistantContent::Text(t) if !t.text.is_empty() => {
@@ -1073,7 +1062,10 @@ fn render_transcript(messages: &[Message], budget_chars: usize) -> String {
                         AssistantContent::ToolCall(tc) => Some(format!(
                             "Tool call: {} ({})",
                             tc.function.name,
-                            truncate_chars(&tc.function.arguments.to_string(), 400)
+                            truncate_chars(
+                                &serde_json::to_string(&tc.function.arguments).unwrap_or_default(),
+                                400
+                            )
                         )),
                         _ => None,
                     })
@@ -1120,9 +1112,8 @@ Conversation excerpt:\n---\n{transcript}\n---"
     );
 
     let completion = client
-        .completion_model(model_info.target_model_id())
-        .completion_request(&summary_prompt)
-        .send()
+        .completion(model_info.target_model_id())
+        .call(rig::completion::CompletionRequest::new(&summary_prompt))
         .await
         .map_err(|e| AppError::other(format!("compaction model call failed: {e}")))?;
 

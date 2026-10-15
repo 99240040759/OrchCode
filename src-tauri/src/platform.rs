@@ -31,14 +31,14 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
 
 #[cfg(target_os = "macos")]
 pub fn setup_native_window(window: &tauri::WebviewWindow) {
-    position_traffic_lights(window, 12.0, 10.0);
+    position_traffic_lights(window);
     let win = window.clone();
     window.on_window_event(move |event| {
         match event {
             tauri::WindowEvent::Resized(_)
             | tauri::WindowEvent::ScaleFactorChanged { .. }
             | tauri::WindowEvent::Focused(true) => {
-                position_traffic_lights(&win, 12.0, 10.0);
+                position_traffic_lights(&win);
             }
             _ => {}
         }
@@ -46,13 +46,12 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
 }
 
 #[cfg(target_os = "macos")]
-fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64, y_from_top: f64) {
+fn position_traffic_lights(window: &tauri::WebviewWindow) {
     if window.is_fullscreen().unwrap_or(false) {
         return;
     }
 
-    use objc2::rc::Retained;
-    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+    use objc2_app_kit::{NSWindow, NSWindowButton};
     use objc2_foundation::NSPoint;
 
     let ns_win_ptr = match window.ns_window() {
@@ -73,27 +72,25 @@ fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64, y_from_top: f6
         };
 
         let btn_h = close.frame().size.height;
-
-        let title_bar_container: Retained<NSView> = {
-            let sv1 = close.superview();
-            match sv1.and_then(|v| v.superview()) {
-                Some(v) => v,
-                None    => return,
-            }
+        let superview = match close.superview() {
+            Some(v) => v,
+            None => return,
         };
 
-        let tb_h = title_bar_container.frame().size.height;
+        let is_flipped = superview.isFlipped();
+        let target_y_from_top = (34.0 - btn_h) / 2.0;
 
-        let origin_y = if tb_h >= (y_from_top + btn_h) {
-            tb_h - y_from_top - btn_h
+        let origin_y = if is_flipped {
+            target_y_from_top
         } else {
-            (tb_h - btn_h) / 2.0
+            let tb_h = superview.frame().size.height;
+            tb_h - target_y_from_top - btn_h
         };
 
-        let spacing = miniatur.frame().origin.x - close.frame().origin.x;
-        let spacing = if spacing >= 18.0 && spacing <= 24.0 { spacing } else { 20.0 };
+        let x = 12.0;
+        let spacing = 20.0;
 
-        let buttons: &[&NSView] = &[&*close, &*miniatur, &*zoom];
+        let buttons = [&*close, &*miniatur, &*zoom];
         for (i, btn) in buttons.iter().enumerate() {
             btn.setFrameOrigin(NSPoint {
                 x: x + (i as f64) * spacing,
@@ -102,7 +99,6 @@ fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64, y_from_top: f6
         }
     }
 }
-
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn setup_native_window(_window: &tauri::WebviewWindow) {}

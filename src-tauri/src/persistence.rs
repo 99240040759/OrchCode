@@ -10,15 +10,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use rig::completion::Message;
+use rig::id::ConversationId;
 use rig::memory::{ConversationMemory, MemoryError};
 use rig::message::{AssistantContent, DocumentSourceKind, MimeType, ToolResultContent, UserContent};
-use rig::OneOrMany;
 
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
 use crate::llm::{is_payload_part, payload_part_label};
-use crate::tools::{parse_display_info, strip_tool_error_sentinel, tool_output_is_error};
+use crate::tools::parse_display_info;
 use crate::util::now_ms;
 
 type MemoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -488,16 +488,16 @@ impl SqliteMemory {
             let mut assignments: Vec<(String, u64)> = Vec::new();
 
             'outer: for row in &rows {
-                let Ok(Message::Assistant { content, .. }) =
+                let Ok(Message::Assistant(assistant)) =
                     serde_json::from_str::<Message>(&row.data)
                 else {
                     continue;
                 };
                 let mut item_idx = 0usize;
-                for part in content.iter() {
+                for part in assistant.content.iter() {
                     match part {
                         AssistantContent::Reasoning(r) => {
-                            if r.display_text().is_empty() {
+                            if r.text.is_empty() {
                                 continue;
                             }
                             match pending.next() {
@@ -675,7 +675,7 @@ impl SqliteMemory {
                                     _ => None,
                                 })
                                 .collect();
-                            tool_outputs.insert(tr.id.clone(), output);
+                            tool_outputs.insert(tr.call.to_string(), output);
                         }
                     }
                 }
@@ -752,13 +752,13 @@ impl SqliteMemory {
                             attachments,
                         });
                     }
-                    Message::Assistant { content, .. } => {
+                    Message::Assistant(assistant) => {
                         let mut items: Vec<MessageItemView> = Vec::new();
                         let mut item_idx = 0usize;
-                        for part in content.iter() {
+                        for part in assistant.content.iter() {
                             match part {
                                 AssistantContent::Reasoning(r) => {
-                                    let text = r.display_text();
+                                    let text = r.text.clone();
                                     if text.is_empty() {
                                         continue;
                                     }
@@ -772,21 +772,20 @@ impl SqliteMemory {
                                     item_idx += 1;
                                 }
                                 AssistantContent::ToolCall(tc) => {
-                                    let args = tc.function.arguments.to_string();
-                                    let display_info = parse_display_info(&tc.function.name, &args);
-                                    let raw = tool_outputs.get(&tc.id);
+                                    let args = serde_json::to_string(&tc.function.arguments).unwrap_or_default();
+                                    let display_info = parse_display_info(&tc.function.name.to_string(), &args);
+                                    let raw = tool_outputs.get(&tc.id.to_string());
                                     let status = match raw {
-                                        Some(o) if tool_output_is_error(o) => "error",
                                         Some(_) => "done",
                                         None => "error",
                                     };
                                     items.push(MessageItemView::ToolCall {
                                         id: stable_id(&cid, *seq, item_idx, Some("tool")),
-                                        name: tc.function.name.clone(),
+                                        name: tc.function.name.to_string(),
                                         args,
                                         output: raw.map(|o| {
                                             crate::util::clip_middle(
-                                                strip_tool_error_sentinel(o),
+                                                o,
                                                 config::MAX_VIEW_TOOL_OUTPUT_CHARS,
                                             )
                                         }),
@@ -867,9 +866,7 @@ fn elide_old_images(messages: &mut [Message]) {
                     other => other.clone(),
                 })
                 .collect();
-            if let Ok(next) = OneOrMany::many(replaced) {
-                *content = next;
-            }
+            *content = replaced;
         }
     }
 }
@@ -877,7 +874,7 @@ fn elide_old_images(messages: &mut [Message]) {
 impl ConversationMemory for SqliteMemory {
     fn load<'a>(
         &'a self,
-        conversation_id: &'a str,
+        conversation_id: &'a ConversationId,
     ) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
@@ -908,7 +905,7 @@ impl ConversationMemory for SqliteMemory {
 
     fn append<'a>(
         &'a self,
-        conversation_id: &'a str,
+        conversation_id: &'a ConversationId,
         messages: Vec<Message>,
     ) -> MemoryFuture<'a, Result<(), MemoryError>> {
         let pool = self.pool.clone();
@@ -950,7 +947,7 @@ impl ConversationMemory for SqliteMemory {
         })
     }
 
-    fn clear<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<(), MemoryError>> {
+    fn clear<'a>(&'a self, conversation_id: &'a ConversationId) -> MemoryFuture<'a, Result<(), MemoryError>> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {

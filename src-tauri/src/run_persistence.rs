@@ -3,14 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 
 use rig::completion::Message;
+use rig::id::ConversationId;
 use rig::memory::{ConversationMemory, MemoryError};
-use rig::message::{AssistantContent, ToolResultContent, UserContent};
-use rig::OneOrMany;
+use rig::message::{AssistantContent, AssistantMessage, CallId, ToolName, ToolResultContent, UserContent};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::error::{AppError, AppResult};
 use crate::persistence::SqliteMemory;
-use crate::tools::TOOL_ERROR_SENTINEL;
 use crate::util::now_ms;
 
 pub const DURABLE_RUN_SCHEMA: &str = r#"
@@ -293,9 +292,6 @@ impl SqliteMemory {
     pub async fn reconcile_chat_run_usage(
         &self,
         run_id: &str,
-        input_tokens: u64,
-        output_tokens: u64,
-        total_tokens: u64,
         last_turn_input_tokens: u64,
     ) -> AppResult<DurableRunUsage> {
         let pool = self.pool.clone();
@@ -407,14 +403,14 @@ impl SqliteMemory {
 impl ConversationMemory for RunScopedMemory {
     fn load<'a>(
         &'a self,
-        conversation_id: &'a str,
+        conversation_id: &'a ConversationId,
     ) -> MemoryFuture<'a, Result<Vec<Message>, MemoryError>> {
         <SqliteMemory as ConversationMemory>::load(&self.inner, conversation_id)
     }
 
     fn append<'a>(
         &'a self,
-        conversation_id: &'a str,
+        conversation_id: &'a ConversationId,
         messages: Vec<Message>,
     ) -> MemoryFuture<'a, Result<(), MemoryError>> {
         let memory = self.inner.clone();
@@ -432,7 +428,7 @@ impl ConversationMemory for RunScopedMemory {
         })
     }
 
-    fn clear<'a>(&'a self, conversation_id: &'a str) -> MemoryFuture<'a, Result<(), MemoryError>> {
+    fn clear<'a>(&'a self, conversation_id: &'a ConversationId) -> MemoryFuture<'a, Result<(), MemoryError>> {
         <SqliteMemory as ConversationMemory>::clear(&self.inner, conversation_id)
     }
 }
@@ -561,7 +557,6 @@ fn finalize_chat_run_sync(
 struct PendingCall {
     internal_id: String,
     call_id: String,
-    provider_call_id: Option<String>,
     name: String,
     args: serde_json::Value,
 }
@@ -584,7 +579,7 @@ impl TurnBuilder {
 
     fn push_reasoning(&mut self, text: &str) {
         if let Some(AssistantContent::Reasoning(existing)) = self.parts.last() {
-            let merged = format!("{}{}", existing.display_text(), text);
+            let merged = format!("{}{}", existing.text, text);
             self.parts.pop();
             self.parts.push(AssistantContent::reasoning(merged));
             return;
@@ -604,43 +599,33 @@ impl TurnBuilder {
             match part {
                 AssistantContent::ToolCall(_) => {
                     let Some(call) = call_iter.next() else { continue };
-                    let Some((output, is_error)) = self.results.get(&call.internal_id) else {
+                    let Some((output, _)) = self.results.get(&call.internal_id) else {
                         continue;
                     };
-                    let content = if *is_error {
-                        format!("{TOOL_ERROR_SENTINEL}{output}")
-                    } else {
-                        output.clone()
-                    };
-                    assistant_parts.push(match call.provider_call_id.clone() {
-                        Some(provider) => AssistantContent::tool_call_with_call_id(
-                            call.call_id.clone(),
-                            provider,
-                            call.name.clone(),
-                            call.args.clone(),
-                        ),
-                        None => AssistantContent::tool_call(
-                            call.call_id.clone(),
-                            call.name.clone(),
-                            call.args.clone(),
-                        ),
-                    });
-                    let body = OneOrMany::one(ToolResultContent::text(content));
-                    tool_results.push(match call.provider_call_id {
-                        Some(provider) => UserContent::tool_result_with_call_id(call.call_id, provider, body),
-                        None => UserContent::tool_result(call.call_id, body),
-                    });
+                    let content = output.clone();
+                    let tool_name = ToolName::new(&call.name).or_else(|_| ToolName::new("unknown")).expect("fallback is non-empty");
+                    assistant_parts.push(AssistantContent::tool_call(
+                        call.call_id.clone(),
+                        tool_name.clone(),
+                        call.args.clone(),
+                    ));
+                    let body = vec![ToolResultContent::text(content)];
+                    tool_results.push(UserContent::tool_result(
+                        CallId::from_wire(&call.call_id),
+                        tool_name,
+                        body,
+                    ));
                 }
                 AssistantContent::Text(t) if t.text.trim().is_empty() => {}
                 other => assistant_parts.push(other),
             }
         }
         self.results.clear();
-        if let Ok(content) = OneOrMany::many(assistant_parts) {
-            out.push(Message::Assistant { id: None, content });
+        if !assistant_parts.is_empty() {
+            out.push(Message::Assistant(AssistantMessage::new(assistant_parts)));
         }
-        if let Ok(content) = OneOrMany::many(tool_results) {
-            out.push(Message::User { content });
+        if !tool_results.is_empty() {
+            out.push(Message::User { content: tool_results });
         }
     }
 }
@@ -669,12 +654,8 @@ fn reconstruct_partial_run(
 
     let note = fallback_note(status, detail);
     match out.last_mut() {
-        Some(Message::Assistant { content, .. }) => {
-            let mut parts: Vec<AssistantContent> = content.iter().cloned().collect();
-            parts.push(AssistantContent::text(format!("\n\n{note}")));
-            if let Ok(next) = OneOrMany::many(parts) {
-                *content = next;
-            }
+        Some(Message::Assistant(assistant)) => {
+            assistant.content.push(AssistantContent::text(format!("\n\n{note}")));
         }
         _ => out.push(Message::assistant(note)),
     }
@@ -699,12 +680,12 @@ fn apply_event(turn: &mut TurnBuilder, kind: &str, payload: &str) {
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
                 .unwrap_or_else(|| serde_json::json!({}));
             let name = value["name"].as_str().unwrap_or("unknown").to_string();
+            let tool_name = ToolName::new(&name).or_else(|_| ToolName::new("unknown")).expect("fallback is non-empty");
             turn.parts
-                .push(AssistantContent::tool_call(call_id.clone(), name.clone(), args.clone()));
+                .push(AssistantContent::tool_call(call_id.clone(), tool_name, args.clone()));
             turn.calls.push(PendingCall {
                 internal_id,
                 call_id,
-                provider_call_id: value["providerCallId"].as_str().map(str::to_string),
                 name,
                 args,
             });

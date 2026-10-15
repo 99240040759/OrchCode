@@ -21,7 +21,6 @@ use crate::events::{ToolDisplayInfo, ToolIcon};
 use crate::gateway::{Gateway, TavilyRequest};
 use crate::skills::load_all_skills;
 
-pub const TOOL_ERROR_SENTINEL: &str = "[[tool-error]] ";
 pub const FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
 pub const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -39,7 +38,7 @@ pub const SKIP_DIRS: &[&str] = &[
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
-    #[error("[[tool-error]] {0}")]
+    #[error("{0}")]
     Msg(String),
 }
 
@@ -57,14 +56,6 @@ impl From<AppError> for ToolError {
 
 pub fn tool_failure(error: ToolError) -> ToolExecutionError {
     ToolExecutionError::other(error.to_string())
-}
-
-pub fn tool_output_is_error(output: &str) -> bool {
-    output.starts_with(TOOL_ERROR_SENTINEL)
-}
-
-pub fn strip_tool_error_sentinel(output: &str) -> &str {
-    output.strip_prefix(TOOL_ERROR_SENTINEL).unwrap_or(output)
 }
 
 pub fn workspace_root(workspace: &Option<PathBuf>) -> Result<PathBuf, ToolError> {
