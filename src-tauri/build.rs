@@ -16,13 +16,18 @@ const OPTIONAL_VARS: &[&str] = &[
 
 fn main() {
     load_dotenv_for_compile();
-    #[cfg(target_os = "windows")]
-    {
-        let mut res = winresource::WindowsResource::new();
-        res.set_manifest_file("orch.exe.manifest");
-        res.compile().unwrap();
+
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let mut attrs = tauri_build::Attributes::new();
+
+    if target.contains("windows") {
+        let windows = tauri_build::WindowsAttributes::new()
+            .app_manifest(include_str!("orch.exe.manifest"));
+        attrs = attrs.windows_attributes(windows);
+        println!("cargo:rerun-if-changed=orch.exe.manifest");
     }
-    tauri_build::build();
+
+    tauri_build::try_build(attrs).expect("failed to run tauri build");
 }
 
 fn load_dotenv_for_compile() {
