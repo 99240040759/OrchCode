@@ -31,11 +31,26 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
 
 #[cfg(target_os = "macos")]
 pub fn setup_native_window(window: &tauri::WebviewWindow) {
-    position_traffic_lights(window, 14.0);
+    position_traffic_lights(window, 12.0, 10.0);
+    let win = window.clone();
+    window.on_window_event(move |event| {
+        match event {
+            tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::ScaleFactorChanged { .. }
+            | tauri::WindowEvent::Focused(true) => {
+                position_traffic_lights(&win, 12.0, 10.0);
+            }
+            _ => {}
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]
-fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64) {
+fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64, y_from_top: f64) {
+    if window.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+
     use objc2::rc::Retained;
     use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
     use objc2_foundation::NSPoint;
@@ -69,11 +84,14 @@ fn position_traffic_lights(window: &tauri::WebviewWindow, x: f64) {
 
         let tb_h = title_bar_container.frame().size.height;
 
-        // Vertical center of the button within the title bar container,
-        // computed from real geometry (not a hardcoded fudge value).
-        let origin_y = (tb_h - btn_h) / 2.0;
+        let origin_y = if tb_h >= (y_from_top + btn_h) {
+            tb_h - y_from_top - btn_h
+        } else {
+            (tb_h - btn_h) / 2.0
+        };
 
         let spacing = miniatur.frame().origin.x - close.frame().origin.x;
+        let spacing = if spacing >= 18.0 && spacing <= 24.0 { spacing } else { 20.0 };
 
         let buttons: &[&NSView] = &[&*close, &*miniatur, &*zoom];
         for (i, btn) in buttons.iter().enumerate() {

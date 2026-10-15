@@ -256,6 +256,7 @@ pub struct CompactionInput {
     pub prior_message_count: usize,
     pub summarize: Vec<Message>,
     pub summarize_upto_seq: i64,
+    pub remaining: Vec<Message>,
 }
 
 struct CompactionRecord {
@@ -579,6 +580,7 @@ impl SqliteMemory {
 
             let summarize: Vec<Message> = decoded[..cut].iter().map(|(_, m)| m.clone()).collect();
             let summarize_upto_seq = decoded[cut - 1].0;
+            let remaining: Vec<Message> = decoded[cut..].iter().map(|(_, m)| m.clone()).collect();
             let (previous_summary, prior_message_count) = match latest {
                 Some(record) => (Some(record.summary), record.original_message_count),
                 None => (None, 0),
@@ -589,6 +591,7 @@ impl SqliteMemory {
                 prior_message_count,
                 summarize,
                 summarize_upto_seq,
+                remaining,
             }))
         })
         .await
@@ -600,6 +603,7 @@ impl SqliteMemory {
         summary: &str,
         original_message_count: usize,
         upto_seq: i64,
+        new_context_tokens: u64,
     ) -> AppResult<i64> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
@@ -615,8 +619,8 @@ impl SqliteMemory {
             )
             .map_err(sql_err)?;
             tx.execute(
-                "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
-                params![now, cid],
+                "UPDATE sessions SET updated_at = ?1, last_context_tokens = ?3 WHERE id = ?2",
+                params![now, cid, new_context_tokens as i64],
             )
             .map_err(sql_err)?;
             tx.commit().map_err(sql_err)?;

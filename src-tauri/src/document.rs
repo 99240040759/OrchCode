@@ -9,9 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::persistence::{DocumentRecord, PassageRecord, SqliteMemory};
 use crate::util::now_ms;
 
-const CHARS_PER_TOKEN: usize = 4;
-const PASSAGE_TOKENS: usize = 512;
-const PASSAGE_CHARS: usize = PASSAGE_TOKENS * CHARS_PER_TOKEN;
+const PASSAGE_CHARS: usize = 2048;
 const PASSAGE_OVERLAP: usize = 200;
 
 #[derive(Debug, Clone)]

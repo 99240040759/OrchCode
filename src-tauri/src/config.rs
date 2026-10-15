@@ -49,7 +49,6 @@ const DEFAULT_INFERENCE_PROVIDER: &str = "nvidia";
 
 pub const DEFAULT_MAX_TURNS: usize = 100;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;
-pub const BUDGET_RECHECK_EVERY_TURNS: u32 = 10;
 pub const COMMAND_FOREGROUND_HANDOFF_SECS: u64 = 30;
 
 pub const MAX_ATTACHMENT_SOURCE_BYTES: u64 = 25 * 1024 * 1024;
@@ -65,8 +64,7 @@ pub const MAX_SEARCH_OUTPUT_CHARS: usize = 40_000;
 pub const MAX_VIEW_TOOL_OUTPUT_CHARS: usize = 16_000;
 
 pub const CONTEXT_BUDGET_RATIO: f64 = 0.72;
-pub const PREAMBLE_CHAR_RESERVE: usize = 24_000;
-pub const CHARS_PER_TOKEN: usize = 4;
+pub const PREAMBLE_TOKEN_RESERVE: usize = 6_000;
 pub const PROTECTED_TAIL_MESSAGES: usize = 4;
 
 pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.7;

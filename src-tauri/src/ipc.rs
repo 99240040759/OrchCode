@@ -400,6 +400,10 @@ pub async fn start_chat(
                 original_message_count: outcome.original_message_count,
                 ts: outcome.ts,
             });
+            let _ = on_event.send(ChatEvent::Usage {
+                context_tokens: outcome.new_context_tokens,
+            });
+            let _ = app.emit("sessions-updated", ());
         }
         Ok(None) => {}
         Err(error) => eprintln!("[chat] pre-run compaction failed: {error}"),
@@ -458,7 +462,6 @@ pub async fn start_chat(
         },
         cancel,
         on_event.clone(),
-        state.gateway.clone(),
         state.memory.clone(),
     )
     .await;

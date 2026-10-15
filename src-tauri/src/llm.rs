@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -29,8 +28,9 @@ use tokio_util::sync::CancellationToken;
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
-use crate::gateway::{Gateway, ModelInfo, TokenHandle};
+use crate::gateway::{ModelInfo, TokenHandle};
 use crate::persistence::SqliteMemory;
+use crate::tokenizer;
 use crate::tools::{
     parse_display_info, strip_tool_error_sentinel, tool_output_is_error, window_lines, ToolContext,
 };
@@ -158,24 +158,22 @@ fn parse_line_range(lr: &str) -> (Option<usize>, Option<usize>) {
 }
 
 pub struct ContextGuard {
-    budget_chars: usize,
+    budget_tokens: usize,
 }
 
 impl ContextGuard {
     pub fn for_model(model: &ModelInfo) -> Self {
         if model.context_window == 0 {
             return Self {
-                budget_chars: usize::MAX,
+                budget_tokens: usize::MAX,
             };
         }
         let window = model.context_window as f64;
         let reserved_output = (model.max_tokens as f64).min(window * 0.25);
         let tokens = (window * config::CONTEXT_BUDGET_RATIO - reserved_output).max(window * 0.3);
-        let chars = (tokens as usize)
-            .saturating_mul(config::CHARS_PER_TOKEN)
-            .saturating_sub(config::PREAMBLE_CHAR_RESERVE);
+        let tokens = (tokens as usize).saturating_sub(config::PREAMBLE_TOKEN_RESERVE);
         Self {
-            budget_chars: chars.max(16_000),
+            budget_tokens: tokens.max(4_000),
         }
     }
 }
@@ -186,7 +184,7 @@ impl AgentHook for ContextGuard {
         _ctx: &HookContext,
         event: CompletionCallEvent<'_>,
     ) -> CompletionCallAction {
-        match prune_history(event.history, event.prompt, self.budget_chars) {
+        match prune_history(event.history, event.prompt, self.budget_tokens) {
             Some(history) => CompletionCallAction::patch(RequestPatch::new().history(history)),
             None => CompletionCallAction::continue_run(),
         }
@@ -201,167 +199,37 @@ impl AgentHook for ContextGuard {
     }
 }
 
-const IMAGE_CHAR_WEIGHT: usize = 6_000;
-
-fn tool_result_chars(tr: &ToolResult) -> usize {
-    tr.content
-        .iter()
-        .map(|c| match c {
-            ToolResultContent::Text(t) => t.text.len(),
-            ToolResultContent::Json { value } => value.to_string().len(),
-            ToolResultContent::Image(_) => IMAGE_CHAR_WEIGHT,
-        })
-        .sum()
-}
-
-fn message_chars(message: &Message) -> usize {
-    match message {
-        Message::User { content } => content
-            .iter()
-            .map(|c| match c {
-                UserContent::Text(t) => t.text.len(),
-                UserContent::ToolResult(tr) => tool_result_chars(tr),
-                UserContent::Image(_) => IMAGE_CHAR_WEIGHT,
-                _ => 2_000,
-            })
-            .sum(),
-        Message::Assistant { content, .. } => content
-            .iter()
-            .map(|c| match c {
-                AssistantContent::Text(t) => t.text.len(),
-                AssistantContent::ToolCall(tc) => {
-                    tc.function.name.len() + tc.function.arguments.to_string().len()
-                }
-                AssistantContent::Reasoning(r) => r.display_text().len(),
-                _ => 0,
-            })
-            .sum(),
-        _ => 0,
-    }
-}
-
-fn rewrite_user(message: &mut Message, mut map: impl FnMut(&UserContent) -> Option<UserContent>) -> bool {
-    let Message::User { content } = message else {
-        return false;
-    };
-    let mut changed = false;
-    let parts: Vec<UserContent> = content
-        .iter()
-        .map(|part| match map(part) {
-            Some(next) => {
-                changed = true;
-                next
-            }
-            None => part.clone(),
-        })
-        .collect();
-    if changed {
-        if let Ok(next) = OneOrMany::many(parts) {
-            *content = next;
-        }
-    }
-    changed
-}
-
-fn prune_history(history: &[Message], prompt: &Message, budget: usize) -> Option<Vec<Message>> {
-    let mut total: usize = history.iter().map(message_chars).sum::<usize>() + message_chars(prompt);
-    if total <= budget {
+fn prune_history(history: &[Message], prompt: &Message, budget_tokens: usize) -> Option<Vec<Message>> {
+    let prompt_tokens = tokenizer::count_message_tokens(prompt);
+    let total: usize = tokenizer::count_messages_tokens(history) + prompt_tokens;
+    if total <= budget_tokens {
         return None;
     }
 
     let mut pruned = history.to_vec();
     let protected_from = pruned.len().saturating_sub(config::PROTECTED_TAIL_MESSAGES);
+    let mut drop_until = 0usize;
+    let mut running = total;
 
-    for message in pruned.iter_mut().take(protected_from) {
-        if total <= budget {
+    for (index, message) in pruned.iter().enumerate().take(protected_from) {
+        if running <= budget_tokens && crate::persistence::is_user_turn(message) {
+            drop_until = index;
             break;
         }
-        let before = message_chars(message);
-        rewrite_user(message, |part| match part {
-            UserContent::ToolResult(tr) if tool_result_chars(tr) > 600 => {
-                Some(UserContent::ToolResult(ToolResult {
-                    id: tr.id.clone(),
-                    call_id: tr.call_id.clone(),
-                    content: OneOrMany::one(ToolResultContent::text(format!(
-                        "[earlier tool output removed to fit the context window ({} characters)]",
-                        tool_result_chars(tr)
-                    ))),
-                }))
-            }
-            _ => None,
-        });
-        total = total - before + message_chars(message);
+        running = running.saturating_sub(tokenizer::count_message_tokens(message));
+        drop_until = index + 1;
     }
 
-    for message in pruned.iter_mut().take(protected_from) {
-        if total <= budget {
-            break;
-        }
-        let before = message_chars(message);
-        rewrite_user(message, |part| match part {
-            UserContent::Image(_) => Some(UserContent::text(
-                "[earlier image removed to fit the context window]",
-            )),
-            _ => None,
-        });
-        total = total - before + message_chars(message);
+    while drop_until < pruned.len() && !crate::persistence::is_user_turn(&pruned[drop_until]) {
+        drop_until += 1;
     }
 
-    for message in pruned.iter_mut().take(protected_from) {
-        if total <= budget {
-            break;
-        }
-        let before = message_chars(message);
-        match message {
-            Message::User { .. } => {
-                rewrite_user(message, |part| match part {
-                    UserContent::Text(t) if t.text.len() > 4_000 => {
-                        Some(UserContent::text(clip_middle(&t.text, 1_500)))
-                    }
-                    _ => None,
-                });
-            }
-            Message::Assistant { content, .. } => {
-                let parts: Vec<AssistantContent> = content
-                    .iter()
-                    .filter(|part| !matches!(part, AssistantContent::Reasoning(_)))
-                    .map(|part| match part {
-                        AssistantContent::Text(t) if t.text.len() > 4_000 => {
-                            AssistantContent::text(clip_middle(&t.text, 1_500))
-                        }
-                        other => other.clone(),
-                    })
-                    .collect();
-                if let Ok(next) = OneOrMany::many(parts) {
-                    *content = next;
-                }
-            }
-            _ => {}
-        }
-        total = total - before + message_chars(message);
-    }
-
-    if total > budget {
-        let mut drop_until = 0usize;
-        let mut running = total;
-        for (index, message) in pruned.iter().enumerate().take(protected_from) {
-            if running <= budget && crate::persistence::is_user_turn(message) {
-                drop_until = index;
-                break;
-            }
-            running -= message_chars(message);
-            drop_until = index + 1;
-        }
-        while drop_until < pruned.len() && !crate::persistence::is_user_turn(&pruned[drop_until]) {
-            drop_until += 1;
-        }
-        if drop_until > 0 && drop_until < pruned.len() {
-            let mut kept = vec![Message::user(
-                "[Earlier conversation messages were removed to fit the model's context window.]",
-            )];
-            kept.extend(pruned.drain(drop_until..));
-            pruned = kept;
-        }
+    if drop_until > 0 && drop_until < pruned.len() {
+        let mut kept = vec![Message::user(
+            "[Earlier conversation turns were archived to fit the context window.]",
+        )];
+        kept.extend(pruned.drain(drop_until..));
+        pruned = kept;
     }
 
     Some(pruned)
@@ -630,7 +498,6 @@ pub async fn run_chat(
     request: RunRequest,
     cancel: CancellationToken,
     channel: Channel<ChatEvent>,
-    gateway: Arc<Gateway>,
     memory: SqliteMemory,
 ) -> RunResult {
     let mut stream = agent
@@ -646,7 +513,6 @@ pub async fn run_chat(
         durations: Vec::new(),
     };
     let mut last_turn_input: u64 = 0;
-    let mut completion_calls_since_budget_check: u32 = 0;
     let mut saw_final_response = false;
     let mut pending_tools: HashSet<String> = HashSet::new();
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
@@ -807,19 +673,6 @@ pub async fn run_chat(
                 let _ = channel.send(ChatEvent::Usage {
                     context_tokens: last_turn_input,
                 });
-
-                completion_calls_since_budget_check += 1;
-                if completion_calls_since_budget_check >= config::BUDGET_RECHECK_EVERY_TURNS {
-                    completion_calls_since_budget_check = 0;
-                    if let Ok(budget) = gateway.budget().await {
-                        if !budget.allowed {
-                            finish!(RunOutcome::Failed(format!(
-                                "usage limit reached for this {}: {:.2} of {:.2} USD used",
-                                budget.period, budget.cost_usd, budget.limit_usd
-                            )));
-                        }
-                    }
-                }
             }
             Ok(MultiTurnStreamItem::ModelTurnRetried { turn }) => {
                 check!(checkpoints.event("model_turn_retried", &format!("turn {turn}")).await);
@@ -1112,6 +965,7 @@ pub async fn build_user_message(
 pub struct CompactionOutcome {
     pub original_message_count: usize,
     pub ts: i64,
+    pub new_context_tokens: u64,
 }
 
 pub async fn maybe_compact(
@@ -1138,7 +992,14 @@ pub async fn maybe_compact(
         return Ok(None);
     };
 
-    let transcript = render_transcript(&input.summarize);
+    let transcript_budget = if model_info.context_window > 0 {
+        ((model_info.context_window as usize).saturating_sub(6_000) * 3)
+            .min(400_000)
+            .max(12_000)
+    } else {
+        100_000
+    };
+    let transcript = render_transcript(&input.summarize, transcript_budget);
     if transcript.trim().is_empty() {
         return Ok(None);
     }
@@ -1153,18 +1014,30 @@ pub async fn maybe_compact(
     }
 
     let original_message_count = input.prior_message_count + input.summarize.len();
+    let summary_msg = Message::user(format!(
+        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[END CONTEXT SUMMARY — continue with the recent messages below]",
+        original_message_count, summary
+    ));
+    let new_context_tokens = (crate::tokenizer::count_message_tokens(&summary_msg)
+        + crate::tokenizer::count_messages_tokens(&input.remaining)) as u64;
     let ts = memory
-        .apply_compaction(session_id, &summary, original_message_count, input.summarize_upto_seq)
+        .apply_compaction(
+            session_id,
+            &summary,
+            original_message_count,
+            input.summarize_upto_seq,
+            new_context_tokens,
+        )
         .await?;
 
     Ok(Some(CompactionOutcome {
         original_message_count,
         ts,
+        new_context_tokens,
     }))
 }
 
-fn render_transcript(messages: &[Message]) -> String {
-    const TRANSCRIPT_BUDGET: usize = 400_000;
+fn render_transcript(messages: &[Message], budget_chars: usize) -> String {
     let rendered = messages
         .iter()
         .filter_map(|m| match m {
@@ -1215,7 +1088,7 @@ fn render_transcript(messages: &[Message]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    clip_middle(&rendered, TRANSCRIPT_BUDGET)
+    clip_middle(&rendered, budget_chars)
 }
 
 async fn summarize(
@@ -1226,17 +1099,24 @@ async fn summarize(
 ) -> AppResult<String> {
     let prior_context = match previous_summary {
         Some(prev) => format!(
-            "Here is the summary of everything before this excerpt:\n---\n{prev}\n---\n\n\
-Merge it with the new excerpt below into a single updated summary — do not just describe the new excerpt in isolation.\n\n"
+            "Previous structured checkpoint:\n---\n{prev}\n---\n\n\
+Integrate the previous checkpoint with the new conversation excerpt below into an updated structured checkpoint.\n\n"
         ),
         None => String::new(),
     };
 
     let summary_prompt = format!(
-        "Produce a concise but complete summary of the following conversation excerpt. \
-Capture: the user's goals, key decisions, files or code modified, commands run and their results, important findings, and open items. \
-Write in third-person past tense. Output only the summary, no preamble or sign-off.\n\n{prior_context}\
----\n{transcript}\n---"
+        "Generate a structured execution checkpoint from the conversation below. Use this exact format:\n\n\
+### Goal & Scope\n\
+- Summary of user intent and current task\n\n\
+### Modified & Referenced Files\n\
+- List of file paths with brief status of modifications\n\n\
+### Decisions & Findings\n\
+- Architecture choices, test results, or discovered constraints\n\n\
+### Next Actions\n\
+- Pending or incomplete tasks\n\n\
+{prior_context}\
+Conversation excerpt:\n---\n{transcript}\n---"
     );
 
     let completion = client

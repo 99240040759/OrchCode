@@ -22,6 +22,10 @@
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 12,
+          "y": 10
+        },
         "shadow": true,
         "visible": false,
         "backgroundColor": "#121212",

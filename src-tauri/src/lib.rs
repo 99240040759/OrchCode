@@ -19,6 +19,7 @@ pub mod run_persistence;
 pub mod skills;
 pub mod state;
 pub mod terminal;
+pub mod tokenizer;
 pub mod tools;
 pub mod util;
 
