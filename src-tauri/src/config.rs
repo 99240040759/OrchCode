@@ -45,7 +45,7 @@ pub fn tavily_url() -> String {
     format!("{}/tavily", gcp_functions_url())
 }
 
-const DEFAULT_INFERENCE_PROVIDER: &str = "nvidia";
+const DEFAULT_INFERENCE_PROVIDER: &str = "vertex";
 
 pub const DEFAULT_MAX_TURNS: usize = 100;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;

@@ -479,7 +479,6 @@ pub async fn run_chat(
     let mut last_turn_input: u64 = 0;
     let mut saw_final_response = false;
     let mut pending_tools: HashSet<String> = HashSet::new();
-    let mut tool_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let tool_timeout = Duration::from_secs(config::TOOL_EXECUTION_TIMEOUT_SECS);
     let mut last_activity = tokio::time::Instant::now();
@@ -567,7 +566,6 @@ pub async fn run_chat(
                 let args = args_value.to_string();
                 let wire_id = tool_call.id.to_string();
                 let call_name = tool_call.function.name.to_string();
-                tool_id_map.insert(wire_id.clone(), wire_id.clone());
                 pending_tools.insert(wire_id.clone());
                 let display_info = parse_display_info(&call_name, &args);
                 let _ = channel.send(ChatEvent::ToolCall {
@@ -587,18 +585,16 @@ pub async fn run_chat(
             }
             Ok(MultiTurnStreamItem::ToolResult { tool_result }) => {
                 let wire_id = tool_result.call.to_string();
-                let event_id = tool_id_map.get(&wire_id).cloned().unwrap_or_else(|| wire_id.clone());
-                pending_tools.remove(&event_id);
                 pending_tools.remove(&wire_id);
-                let is_error = tool_result.is_error || tool_errors.is_error(&wire_id) || tool_errors.is_error(&event_id);
+                let is_error = tool_result.is_error || tool_errors.is_error(&wire_id);
                 let output = stringify_tool_result(&tool_result);
                 let _ = channel.send(ChatEvent::ToolResult {
-                    id: event_id.clone(),
+                    id: wire_id.clone(),
                     output: output.clone(),
                     is_error,
                 });
                 let payload = serde_json::json!({
-                    "id": event_id,
+                    "id": wire_id,
                     "output": output,
                     "isError": is_error,
                 })
@@ -936,13 +932,11 @@ pub async fn maybe_compact(
         return Ok(None);
     };
 
-    let transcript_budget = if model_info.context_window > 0 {
-        ((model_info.context_window as usize).saturating_sub(6_000) * 3)
-            .min(400_000)
-            .max(12_000)
-    } else {
-        100_000
-    };
+    let transcript_budget = (model_info.context_window as usize)
+        .saturating_sub(6_000)
+        .saturating_mul(3)
+        .min(400_000)
+        .max(12_000);
     let transcript = render_transcript(&input.summarize, transcript_budget);
     if transcript.trim().is_empty() {
         return Ok(None);
@@ -963,7 +957,8 @@ pub async fn maybe_compact(
         original_message_count, summary
     ));
     let new_context_tokens = estimate_messages_tokens(&[summary_msg])
-        + estimate_messages_tokens(&input.remaining);
+        + estimate_messages_tokens(&input.remaining)
+        + config::PREAMBLE_TOKEN_RESERVE as u64;
     let ts = memory
         .apply_compaction(
             session_id,
@@ -1004,7 +999,7 @@ fn estimate_message_tokens(message: &Message) -> u64 {
                 match part {
                     AssistantContent::Text(t) => chars += t.text.len(),
                     AssistantContent::ToolCall(tc) => {
-                        chars += tc.function.name.to_string().len()
+                        chars += tc.function.name.len()
                             + serde_json::to_string(&tc.function.arguments)
                                 .map(|s| s.len())
                                 .unwrap_or(0);

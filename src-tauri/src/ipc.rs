@@ -20,7 +20,6 @@ use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
 
-use rig::completion::Message;
 use rig::id::ConversationId;
 use rig::memory::ConversationMemory;
 
@@ -299,15 +298,7 @@ async fn preflight(state: &AppState, model: &str) -> Result<Preflight, String> {
         .current_user_id()
         .ok_or_else(|| "You are signed out. Sign in again to continue.".to_string())?;
 
-    let (budget, catalog) = tokio::join!(state.gateway.budget(), state.catalog());
-    let budget = budget.map_err(|error| error.to_string())?;
-    if !budget.allowed {
-        return Err(format!(
-            "Usage limit reached for this {}: {:.2} of {:.2} USD used",
-            budget.period, budget.cost_usd, budget.limit_usd
-        ));
-    }
-    let catalog = catalog.map_err(|error| error.to_string())?;
+    let catalog = state.catalog().await.map_err(|error| error.to_string())?;
     let model_info = catalog
         .resolve(model)
         .cloned()
@@ -367,8 +358,20 @@ pub async fn start_chat(
         }
     };
 
+    let built = build_user_message(
+        Some(&workspace),
+        &prompt,
+        &attachments,
+        model_info.supports_images(),
+    )
+    .await;
+    if !built.notes.is_empty() {
+        let _ = on_event.send(ChatEvent::Notice {
+            message: built.notes.join("\n"),
+        });
+    }
+
     let raw_prompt = durable_prompt_text(&prompt, &attachments);
-    let initial_user_message = Message::user(raw_prompt.clone());
     match state
         .memory
         .begin_chat_run(BeginRun {
@@ -376,7 +379,7 @@ pub async fn start_chat(
             conversation_id: &session_id,
             model: &model,
             raw_prompt: &raw_prompt,
-            initial_user_message: &initial_user_message,
+            initial_user_message: &built.message,
             workspace_path: &workspace_string,
             user_id: &user_id,
         })
@@ -408,26 +411,6 @@ pub async fn start_chat(
         }
         Ok(None) => {}
         Err(error) => eprintln!("[chat] pre-run compaction failed: {error}"),
-    }
-
-    let built = build_user_message(
-        Some(&workspace),
-        &prompt,
-        &attachments,
-        model_info.supports_images(),
-    )
-    .await;
-    if !built.notes.is_empty() {
-        let _ = on_event.send(ChatEvent::Notice {
-            message: built.notes.join("\n"),
-        });
-    }
-    if let Err(error) = state
-        .memory
-        .update_chat_run_user_message(&run_id, &built.message)
-        .await
-    {
-        return finish_accepted_chat_error(&app, &state, &session_id, &run_id, &on_event, error.to_string()).await;
     }
 
     let tool_context = ToolContext {
@@ -538,29 +521,6 @@ fn durable_prompt_text(prompt: &str, attachments: &[AttachmentRef]) -> String {
     }
 }
 
-async fn finish_accepted_chat_error(
-    app: &tauri::AppHandle,
-    state: &AppState,
-    session_id: &str,
-    run_id: &str,
-    on_event: &Channel<ChatEvent>,
-    message: String,
-) -> Result<(), String> {
-    let displayed_message = match state
-        .memory
-        .finalize_chat_run(run_id, "error", Some(&message))
-        .await
-    {
-        Ok(_) => message,
-        Err(error) => format!("{message} (saving the chat history also failed: {error})"),
-    };
-    state.finish_run(session_id, run_id);
-    let _ = app.emit("sessions-updated", ());
-    let _ = on_event.send(ChatEvent::Error {
-        message: displayed_message,
-    });
-    Ok(())
-}
 
 fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: &str, prompt: &str) {
     let gateway = state.gateway.clone();

@@ -209,11 +209,15 @@ function groupItems(items: MessageItem[]): Group[] {
       else groups.push({ kind: "tools", id: item.id, tools: [item] });
       continue;
     }
-    const last = groups[groups.length - 1];
-    if (last?.kind === "text") {
-      last.text += last.text.endsWith("\n") ? item.text : `\n${item.text}`;
-    } else {
-      groups.push({ kind: "text", id: item.id, text: item.text });
+    if (item.type === "text") {
+      if (!item.text || !item.text.trim()) continue;
+      const last = groups[groups.length - 1];
+      if (last?.kind === "text") {
+        last.text += last.text.endsWith("\n") ? item.text : `\n${item.text}`;
+      } else {
+        groups.push({ kind: "text", id: item.id, text: item.text });
+      }
+      continue;
     }
   }
   return groups;
@@ -266,6 +270,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
             </div>
           );
         }
+        if (!group.text.trim()) return null;
         return <Markdown key={group.id}>{group.text}</Markdown>;
       })}
       {message.notice && (

@@ -382,7 +382,7 @@ export const useChatStore = create(
 
       let textBuffer = "";
       let reasoningBuffer = "";
-      let flushTimer: ReturnType<typeof setInterval> | null = null;
+      let rafId: number | null = null;
 
       const flush = () => {
         const pendingText = textBuffer;
@@ -404,11 +404,21 @@ export const useChatStore = create(
         });
       };
 
-      const startFlushTimer = () => {
-        if (flushTimer === null) flushTimer = setInterval(flush, 40);
+      const scheduleFlush = () => {
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            flush();
+          });
+        }
       };
-      const stopFlushTimer = () => {
-        if (flushTimer !== null) { clearInterval(flushTimer); flushTimer = null; }
+
+      const syncFlush = () => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        flush();
       };
 
       const handleEvent = (event: ChatStreamEvent) => {
@@ -416,14 +426,14 @@ export const useChatStore = create(
         switch (event.type) {
           case "text":
             textBuffer += event.delta;
-            startFlushTimer();
+            scheduleFlush();
             break;
           case "reasoning":
             reasoningBuffer += event.delta;
-            startFlushTimer();
+            scheduleFlush();
             break;
           case "reasoningDone":
-            stopFlushTimer(); flush();
+            syncFlush();
             patch((m) => {
               for (let i = m.items.length - 1; i >= 0; i--) {
                 const item = m.items[i];
@@ -436,7 +446,7 @@ export const useChatStore = create(
             });
             break;
           case "toolCall":
-            stopFlushTimer(); flush();
+            syncFlush();
             patch((m) => {
               m.items.push({ type: "toolCall", id: event.id, name: event.name, args: event.args, displayInfo: event.displayInfo, status: "running" });
             });
@@ -463,14 +473,14 @@ export const useChatStore = create(
             });
             break;
           case "done":
-            stopFlushTimer(); flush(); settle();
+            syncFlush(); settle();
             void useChatStore.getState().refreshBudget();
             break;
           case "cancelled":
-            stopFlushTimer(); flush(); settle();
+            syncFlush(); settle();
             break;
           case "error":
-            stopFlushTimer(); flush();
+            syncFlush();
             patch((m) => { m.error = event.message; });
             settle();
             break;
@@ -479,11 +489,11 @@ export const useChatStore = create(
 
       try {
         await api.startChat(sessionId, selectedModel.key, text, attachments, handleEvent);
-        stopFlushTimer(); flush(); settle();
+        syncFlush(); settle();
         return true;
       } catch (e) {
         const message = api.errorMessage(e);
-        stopFlushTimer(); flush(); settle();
+        syncFlush(); settle();
         if (!receivedEvents) {
           set((s) => {
             s.messages = s.messages.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId);

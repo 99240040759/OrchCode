@@ -270,7 +270,7 @@ const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string
 });
 
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
-  if (!children) return null;
+  if (!children || !children.trim()) return null;
   if (children.length < 4000) {
     return (
       <div className="Markdown">

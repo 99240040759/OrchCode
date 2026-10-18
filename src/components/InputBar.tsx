@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   VscAdd,
   VscArrowUp,
@@ -10,9 +10,18 @@ import {
 } from "react-icons/vsc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
 import { useDebouncedCallback } from "use-debounce";
+import {
+  useEditor,
+  EditorContent,
+  ReactNodeViewRenderer,
+  NodeViewWrapper,
+  type Editor,
+  type ReactNodeViewProps,
+} from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import Mention from "@tiptap/extension-mention";
 import * as api from "../lib/api";
 import { useChatStore } from "../lib/store";
 import { useWorkspaceStore } from "../lib/workspace";
@@ -26,9 +35,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/DropdownMenu";
-
-const RING_CIRCUMFERENCE = 53.4;
-
 interface CommandItem {
   key: string;
   label: string;
@@ -41,143 +47,67 @@ const COMMANDS: CommandItem[] = [
 
 type Trigger = "@" | "/" | null;
 
-function activeToken(text: string, caret: number) {
-  const upto = text.slice(0, caret);
-  const at = /(^|\s)@([^\s]*)$/.exec(upto);
-  if (at) return { trigger: "@" as Trigger, query: at[2] };
-  const slash = /^\s*\/([^\s]*)$/.exec(upto);
-  if (slash) return { trigger: "/" as Trigger, query: slash[1] };
-  return { trigger: null as Trigger, query: "" };
+interface ActiveToken {
+  trigger: Trigger;
+  query: string;
+  from: number;
+  to: number;
 }
 
-const iconMarkupCache = new Map<string, string>();
+function MentionNodeView(props: ReactNodeViewProps) {
+  const path = (props.node.attrs.id as string) || "";
+  const name =
+    (props.node.attrs.label as string) || api.getBasename(path) || path;
+  const openFile = useArtifactsStore((s) => s.openFile);
 
-function mentionIconMarkup(filename: string): string {
-  const key = filename.toLowerCase();
-  const cached = iconMarkupCache.get(key);
-  if (cached !== undefined) return cached;
-  const host = document.createElement("span");
-  const root = createRoot(host);
-  flushSync(() => {
-    root.render(
+  return (
+    <NodeViewWrapper
+      as="span"
+      className="FileTag FileTag-clickable"
+      data-path={path}
+      title={path}
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (path) openFile(path);
+      }}
+    >
       <ExplorerIcon
         type="file"
-        name={filename}
+        name={name}
         className="FileTag-icon"
         width={14}
         height={14}
         aria-hidden="true"
       />
-    );
-  });
-  const markup = host.innerHTML;
-  root.unmount();
-  if (iconMarkupCache.size >= 200) iconMarkupCache.clear();
-  iconMarkupCache.set(key, markup);
-  return markup;
+      <span className="FileTag-name">{name}</span>
+    </NodeViewWrapper>
+  );
 }
 
-function createMentionNode(path: string): { node: HTMLSpanElement; space: Text } {
-  const filename = api.getBasename(path) || path;
-  const container = document.createElement("span");
-  container.className = "FileTag FileTag-clickable";
-  container.contentEditable = "false";
-  container.setAttribute("data-path", path);
-  container.title = path;
-  container.insertAdjacentHTML("beforeend", mentionIconMarkup(filename));
-  const name = document.createElement("span");
-  name.className = "FileTag-name";
-  name.textContent = filename;
-  container.append(name);
-  const space = document.createTextNode("\u00A0");
-  return { node: container, space };
-}
+const FileMention = Mention.extend({
+  name: "mention",
+  addNodeView() {
+    return ReactNodeViewRenderer(MentionNodeView);
+  },
+});
 
-function getTextFromEditor(el: HTMLElement): string {
+function extractPromptFromDoc(doc: any): string {
   let text = "";
-  for (const node of Array.from(el.childNodes)) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.nodeValue ?? "";
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      const element = node as HTMLElement;
-      if (element.hasAttribute("data-path")) {
-        const path = element.getAttribute("data-path") || "";
-        text += path.includes(" ") ? `@[${path}] ` : `@${path} `;
-      } else if (element.tagName === "BR") {
-        text += "\n";
-      } else if (element.tagName === "DIV" || element.tagName === "P") {
-        const inner = getTextFromEditor(element);
-        text += (text.length > 0 && !text.endsWith("\n") ? "\n" : "") + inner;
-      } else {
-        text += getTextFromEditor(element);
-      }
+  doc.descendants((node: any) => {
+    if (node.type.name === "mention") {
+      const path = node.attrs.id || "";
+      text += path.includes(" ") ? `@[${path}] ` : `@${path} `;
+      return false;
     }
-  }
+    if (node.isText) {
+      text += node.text;
+    } else if (node.type.name === "hardBreak") {
+      text += "\n";
+    } else if (node.isBlock && text.length > 0 && !text.endsWith("\n")) {
+      text += "\n";
+    }
+  });
   return text;
-}
-
-function insertTextAtCaret(text: string) {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  range.deleteContents();
-  const textNode = document.createTextNode(text);
-  range.insertNode(textNode);
-  range.setStartAfter(textNode);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-function insertMentionAtCaret(path: string) {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-
-  let node: Node = range.startContainer;
-  let offset = range.startOffset;
-
-  if (node.nodeType !== Node.TEXT_NODE && node.childNodes.length > 0 && offset > 0) {
-    const prev = node.childNodes[offset - 1];
-    if (prev && prev.nodeType === Node.TEXT_NODE) {
-      node = prev;
-      offset = (prev as Text).nodeValue?.length || 0;
-    }
-  }
-
-  const { node: mentionNode, space: spaceNode } = createMentionNode(path);
-
-  if (node.nodeType === Node.TEXT_NODE) {
-    const textNode = node as Text;
-    const str = textNode.nodeValue || "";
-    const before = str.slice(0, offset);
-    const after = str.slice(offset);
-    const atIndex = before.lastIndexOf("@");
-    if (atIndex !== -1) {
-      textNode.nodeValue = before.slice(0, atIndex);
-      const parent = textNode.parentNode;
-      if (parent) {
-        const next = textNode.nextSibling;
-        parent.insertBefore(mentionNode, next);
-        parent.insertBefore(spaceNode, next);
-        if (after) parent.insertBefore(document.createTextNode(after), next);
-        const newRange = document.createRange();
-        newRange.setStart(spaceNode, 1);
-        newRange.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(newRange);
-        return;
-      }
-    }
-  }
-
-  range.deleteContents();
-  range.insertNode(spaceNode);
-  range.insertNode(mentionNode);
-  range.setStartAfter(spaceNode);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
 }
 
 interface ModelSelectorProps {
@@ -187,23 +117,37 @@ interface ModelSelectorProps {
   align?: "start" | "end";
 }
 
-function ModelSelector({ models, selectedModel, setSelectedModel, align = "start" }: ModelSelectorProps) {
+function ModelSelector({
+  models,
+  selectedModel,
+  setSelectedModel,
+  align = "start",
+}: ModelSelectorProps) {
   return (
     <DropdownMenu>
       <Tooltip content="Select AI model" side="top">
         <DropdownMenuTrigger asChild>
           <Button className="Composer-model">
             <span>{selectedModel?.name ?? "Model"}</span>
-            {selectedModel?.badge && <span className="Composer-badge">{selectedModel.badge}</span>}
+            {selectedModel?.badge && (
+              <span className="Composer-badge">{selectedModel.badge}</span>
+            )}
           </Button>
         </DropdownMenuTrigger>
       </Tooltip>
       <DropdownMenuContent sideOffset={6} align={align}>
-        {models.length === 0 && <DropdownMenuItem disabled>No models available</DropdownMenuItem>}
+        {models.length === 0 && (
+          <DropdownMenuItem disabled>No models available</DropdownMenuItem>
+        )}
         {models.map((model) => (
-          <DropdownMenuItem key={model.key} onSelect={() => setSelectedModel(model.key)}>
+          <DropdownMenuItem
+            key={model.key}
+            onSelect={() => setSelectedModel(model.key)}
+          >
             <span className="ModelItem-name">{model.name}</span>
-            {model.badge && <span className="Composer-badge">{model.badge}</span>}
+            {model.badge && (
+              <span className="Composer-badge">{model.badge}</span>
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -218,7 +162,10 @@ interface WorkspaceDisplayProps {
 
 function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayProps) {
   return (
-    <Tooltip content={currentPath ? `Workspace: ${currentPath}` : "Current workspace"} side="top">
+    <Tooltip
+      content={currentPath ? `Workspace: ${currentPath}` : "Current workspace"}
+      side="top"
+    >
       <div className="Composer-repo">
         <VscFolderOpened />
         <span>{currentName ?? "Workspace"}</span>
@@ -227,20 +174,41 @@ function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayProps) {
   );
 }
 
+interface ContextBarProps {
+  maxContext: number;
+  contextTokens: number;
+  fillPct: number;
+}
+
+function ContextBar({ maxContext, contextTokens, fillPct }: ContextBarProps) {
+  const level = fillPct > 85 ? "danger" : fillPct > 60 ? "warn" : "normal";
+  return (
+    <Tooltip
+      content={`Context Window: ${contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
+      side="top"
+    >
+      <div className="ContextBar" data-level={level}>
+        <div className="ContextBar-track">
+          <div className="ContextBar-fill" style={{ width: `${fillPct}%` }} />
+        </div>
+        <span className="ContextBar-label">{fillPct}%</span>
+      </div>
+    </Tooltip>
+  );
+}
+
 export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
-  const send             = useChatStore((s) => s.send);
-  const cancel           = useChatStore((s) => s.cancel);
-  const streaming        = useChatStore((s) => s.streaming);
-  const models           = useChatStore((s) => s.models);
-  const selectedModel    = useChatStore((s) => s.selectedModel);
+  const send = useChatStore((s) => s.send);
+  const cancel = useChatStore((s) => s.cancel);
+  const streaming = useChatStore((s) => s.streaming);
+  const models = useChatStore((s) => s.models);
+  const selectedModel = useChatStore((s) => s.selectedModel);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
-  const newChat          = useChatStore((s) => s.newChat);
-  const sessionTokens    = useChatStore((s) => s.sessionTokens);
-  const openFile         = useArtifactsStore((s) => s.openFile);
+  const newChat = useChatStore((s) => s.newChat);
+  const sessionTokens = useChatStore((s) => s.sessionTokens);
 
   const currentWs = useWorkspaceStore((s) => s.current);
 
-  const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<api.AttachmentRef[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -249,17 +217,18 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const [fileHits, setFileHits] = useState<api.FileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [hasContent, setHasContent] = useState(false);
 
-  const editorRef = useRef<HTMLDivElement>(null);
-  const savedRangeRef = useRef<Range | null>(null);
   const searchSeqRef = useRef(0);
+  const tokenRangeRef = useRef<{ from: number; to: number } | null>(null);
 
-  const maxContext = selectedModel?.contextWindow ?? 0;
-  const fillPct =
-    maxContext > 0
-      ? Math.min(100, Math.max(0, Math.round((sessionTokens.contextTokens / maxContext) * 100)))
-      : 0;
-  const modelSupportsImages = selectedModel?.capabilities.includes("images") ?? false;
+  const maxContext = selectedModel?.contextWindow || 262144;
+  const fillPct = Math.min(
+    100,
+    Math.max(0, Math.round((sessionTokens.contextTokens / maxContext) * 100))
+  );
+  const modelSupportsImages =
+    selectedModel?.capabilities.includes("images") ?? false;
 
   const addAttachments = useCallback(
     (paths: string[]) => {
@@ -267,14 +236,20 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       const rejected = paths
         .filter((path) => api.isImagePath(path) && !modelSupportsImages)
         .map((path) => api.getBasename(path));
-      const accepted = paths.filter((path) => !(api.isImagePath(path) && !modelSupportsImages));
+      const accepted = paths.filter(
+        (path) => !(api.isImagePath(path) && !modelSupportsImages)
+      );
       setAttachments((previous) => {
         const known = new Set(previous.map((a) => a.path));
         const next = [...previous];
         for (const path of accepted) {
           if (known.has(path)) continue;
           known.add(path);
-          next.push({ path, name: api.getBasename(path), isImage: api.isImagePath(path) });
+          next.push({
+            path,
+            name: api.getBasename(path),
+            isImage: api.isImagePath(path),
+          });
         }
         return next;
       });
@@ -294,7 +269,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
         if (event.payload.type !== "drop") return;
         addAttachments(event.payload.paths ?? []);
       })
-      .then((fn) => { unlisten = fn; });
+      .then((fn) => {
+        unlisten = fn;
+      });
     return () => unlisten?.();
   }, [addAttachments]);
 
@@ -328,7 +305,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const commandHits = useMemo(() => {
     const lower = query.toLowerCase();
     return COMMANDS.filter(
-      (c) => c.key.toLowerCase().includes(lower) || c.label.toLowerCase().includes(lower)
+      (c) =>
+        c.key.toLowerCase().includes(lower) ||
+        c.label.toLowerCase().includes(lower)
     );
   }, [query]);
 
@@ -338,144 +317,253 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
     setFileHits([]);
     setLoadingFiles(false);
     setHighlighted(0);
+    tokenRangeRef.current = null;
   }, []);
 
-  const syncEditor = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const text = getTextFromEditor(editor);
-    if (!text.trim() && !editor.querySelector("[data-path]")) {
-      if (editor.innerHTML !== "") editor.innerHTML = "";
-    }
-    setValue(text);
+  const detectActiveToken = useCallback(
+    (ed: Editor): ActiveToken => {
+      const { state } = ed;
+      const { from } = state.selection;
+      const blockStart = state.selection.$from.start();
+      const textBefore = state.doc.textBetween(blockStart, from, "\n", "\0");
 
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editor.contains(sel.anchorNode)) {
-      setTrigger(null);
-      setQuery("");
-      return;
-    }
-    savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+      const atMatch = /(^|\s)@([^\s]*)$/.exec(textBefore);
+      if (atMatch) {
+        const queryStr = atMatch[2];
+        const matchLength = queryStr.length + 1; // +1 for '@'
+        return {
+          trigger: "@",
+          query: queryStr,
+          from: from - matchLength,
+          to: from,
+        };
+      }
 
-    try {
-      const range = sel.getRangeAt(0);
-      const preRange = range.cloneRange();
-      preRange.selectNodeContents(editor);
-      preRange.setEnd(range.endContainer, range.endOffset);
-      const preText = getTextFromEditor(preRange.cloneContents() as unknown as HTMLElement);
-      const token = activeToken(text, preText.length);
-      setTrigger(token.trigger);
-      setQuery(token.query);
-      setHighlighted(0);
-    } catch {
-      setTrigger(null);
-      setQuery("");
-    }
-  }, []);
+      const slashMatch = /^\s*\/([^\s]*)$/.exec(textBefore);
+      if (slashMatch) {
+        const queryStr = slashMatch[1];
+        const matchLength = queryStr.length + 1; // +1 for '/'
+        return {
+          trigger: "/",
+          query: queryStr,
+          from: from - matchLength,
+          to: from,
+        };
+      }
+
+      return { trigger: null, query: "", from: 0, to: 0 };
+    },
+    []
+  );
+
+  const popoverOpen = trigger !== null;
+  const hits: (api.FileEntry | CommandItem)[] =
+    trigger === "@" ? fileHits : commandHits;
+  const activeIndex =
+    hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
+
+  // References to keep event handlers fresh without re-binding Tiptap
+  const popoverOpenRef = useRef(popoverOpen);
+  popoverOpenRef.current = popoverOpen;
+  const hitsRef = useRef(hits);
+  hitsRef.current = hits;
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
+  const triggerRef = useRef(trigger);
+  triggerRef.current = trigger;
+  const closePopoverRef = useRef(closePopover);
+  closePopoverRef.current = closePopover;
 
   const insertMention = useCallback(
     (filePath: string) => {
-      const editor = editorRef.current;
       if (!editor) return;
-      insertMentionAtCaret(filePath);
+      const filename = api.getBasename(filePath) || filePath;
+      const range = tokenRangeRef.current;
+      if (range) {
+        editor
+          .chain()
+          .focus()
+          .deleteRange({ from: range.from, to: range.to })
+          .insertContent([
+            {
+              type: "mention",
+              attrs: { id: filePath, label: filename },
+            },
+            {
+              type: "text",
+              text: " ",
+            },
+          ])
+          .run();
+      } else {
+        editor
+          .chain()
+          .focus()
+          .insertContent([
+            {
+              type: "mention",
+              attrs: { id: filePath, label: filename },
+            },
+            {
+              type: "text",
+              text: " ",
+            },
+          ])
+          .run();
+      }
       closePopover();
-      syncEditor();
-      editor.focus();
     },
-    [closePopover, syncEditor]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [closePopover]
   );
+  const insertMentionRef = useRef(insertMention);
+  insertMentionRef.current = insertMention;
 
   const runCommand = useCallback(
     (command: CommandItem) => {
       if (command.key === "clear") {
         newChat();
-        if (editorRef.current) editorRef.current.innerHTML = "";
-        setValue("");
+        editor?.commands.clearContent();
         setAttachments([]);
         setNotice(null);
       }
       closePopover();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [newChat, closePopover]
   );
+  const runCommandRef = useRef(runCommand);
+  runCommandRef.current = runCommand;
 
   const doSend = useCallback(async () => {
-    const editor = editorRef.current;
-    const text = value.trim();
+    if (!editor) return;
+    const text = extractPromptFromDoc(editor.state.doc).trim();
     if (!text && attachments.length === 0) return;
+
     const pending = attachments;
-    if (editor) editor.innerHTML = "";
-    setValue("");
+    editor.commands.clearContent();
     setAttachments([]);
     setNotice(null);
     closePopover();
+
     const ok = await send(text, pending);
     if (!ok) {
-      if (editor) editor.innerText = text;
-      setValue(text);
+      editor.commands.setContent(text);
       setAttachments(pending);
     }
-  }, [value, attachments, send, closePopover]);
+  }, [attachments, send, closePopover]);
+  const doSendRef = useRef(doSend);
+  doSendRef.current = doSend;
 
-  const popoverOpen = trigger !== null;
-  const hits: (api.FileEntry | CommandItem)[] = trigger === "@" ? fileHits : commandHits;
-  const activeIndex = hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
+  const placeholderText = promptMode
+    ? "Write a message..."
+    : "Ask anything, @ to mention a file, / for actions";
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-    if (popoverOpen) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closePopover();
-        return;
-      }
-      if (trigger === "@" && loadingFiles && (event.key === "Enter" || event.key === "Tab")) {
-        event.preventDefault();
-        return;
-      }
-      if (hits.length > 0) {
-        if (event.key === "ArrowDown") {
-          event.preventDefault();
-          setHighlighted((h) => (Math.min(h, hits.length - 1) + 1) % hits.length);
-          return;
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        blockquote: false,
+        codeBlock: false,
+        horizontalRule: false,
+        dropcursor: false,
+        gapcursor: false,
+      }),
+      Placeholder.configure({
+        placeholder: placeholderText,
+        emptyEditorClass: "is-editor-empty",
+      }),
+      FileMention,
+    ],
+    editorProps: {
+      attributes: {
+        class: promptMode
+          ? "Composer-input Composer-input-prompt"
+          : "Composer-input",
+        "data-placeholder": placeholderText,
+      },
+      handleKeyDown: (_view, event) => {
+        if (event.isComposing || event.keyCode === 229)
+          return false;
+
+        if (popoverOpenRef.current) {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closePopoverRef.current();
+            return true;
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setHighlighted((h) => {
+              const count = hitsRef.current.length;
+              return count === 0 ? 0 : (h + 1) % count;
+            });
+            return true;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setHighlighted((h) => {
+              const count = hitsRef.current.length;
+              return count === 0 ? 0 : (h - 1 + count) % count;
+            });
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const currentHits = hitsRef.current;
+            if (currentHits.length > 0) {
+              event.preventDefault();
+              const hit =
+                currentHits[
+                  Math.min(activeIndexRef.current, currentHits.length - 1)
+                ];
+              if (triggerRef.current === "@") {
+                insertMentionRef.current((hit as api.FileEntry).path);
+              } else {
+                runCommandRef.current(hit as CommandItem);
+              }
+              return true;
+            }
+          }
         }
-        if (event.key === "ArrowUp") {
+
+        if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          setHighlighted((h) => (Math.min(h, hits.length - 1) - 1 + hits.length) % hits.length);
-          return;
+          void doSendRef.current();
+          return true;
         }
-        if (event.key === "Enter" || event.key === "Tab") {
-          event.preventDefault();
-          const hit = hits[activeIndex];
-          if (trigger === "@") insertMention((hit as api.FileEntry).path);
-          else runCommand(hit as CommandItem);
-          return;
-        }
+
+        return false;
+      },
+    },
+    onUpdate: ({ editor: ed }) => {
+      const prompt = extractPromptFromDoc(ed.state.doc);
+      setHasContent(prompt.trim().length > 0);
+
+      const token = detectActiveToken(ed);
+      if (token.trigger) {
+        setTrigger(token.trigger);
+        setQuery(token.query);
+        tokenRangeRef.current = { from: token.from, to: token.to };
+        setHighlighted(0);
+      } else {
+        setTrigger(null);
+        setQuery("");
+        tokenRangeRef.current = null;
       }
-    }
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void doSend();
-    }
-  };
-
-  const onEditorClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    const mentionEl = target.closest<HTMLElement>("[data-path]");
-    if (mentionEl) {
-      const path = mentionEl.getAttribute("data-path");
-      if (path) { openFile(path); return; }
-    }
-    syncEditor();
-  };
-
-  const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const text = event.clipboardData.getData("text/plain");
-    if (!text) return;
-    insertTextAtCaret(text);
-    syncEditor();
-  };
+    },
+    onSelectionUpdate: ({ editor: ed }) => {
+      const token = detectActiveToken(ed);
+      if (token.trigger) {
+        setTrigger(token.trigger);
+        setQuery(token.query);
+        tokenRangeRef.current = { from: token.from, to: token.to };
+      } else {
+        setTrigger(null);
+        setQuery("");
+        tokenRangeRef.current = null;
+      }
+    },
+  });
 
   const toggleDictation = useCallback(async () => {
     if (recording) {
@@ -493,25 +581,15 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       await api.startDictation((event) => {
         setRecording(false);
         if (event.type === "final") {
-          const editor = editorRef.current;
           if (event.text && editor) {
-            const sel = window.getSelection();
-            const saved = savedRangeRef.current;
-            editor.focus();
-            if (sel) {
-              sel.removeAllRanges();
-              if (saved && editor.contains(saved.startContainer)) {
-                sel.addRange(saved);
-              } else {
-                const range = document.createRange();
-                range.selectNodeContents(editor);
-                range.collapse(false);
-                sel.addRange(range);
-              }
-            }
-            const needsSpace = editor.textContent && !/\s$/.test(editor.textContent);
-            insertTextAtCaret(needsSpace ? ` ${event.text}` : event.text);
-            syncEditor();
+            const currentText = extractPromptFromDoc(editor.state.doc);
+            const needsSpace =
+              currentText.length > 0 && !/\s$/.test(currentText);
+            editor
+              .chain()
+              .focus()
+              .insertContent(needsSpace ? ` ${event.text}` : event.text)
+              .run();
           }
         } else {
           setNotice(event.message);
@@ -521,7 +599,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       setRecording(false);
       setNotice(api.errorMessage(e));
     }
-  }, [recording, syncEditor]);
+  }, [recording, editor]);
 
   const pickFiles = useCallback(
     async (imagesOnly: boolean) => {
@@ -540,21 +618,22 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const removeAttachment = (path: string) =>
     setAttachments((previous) => previous.filter((a) => a.path !== path));
 
-  const canSend = value.trim().length > 0 || attachments.length > 0;
+  const canSend = hasContent || attachments.length > 0;
 
   return (
-    <div
-      className="Composer"
-      data-recording={recording || undefined}
-    >
+    <div className="Composer" data-recording={recording || undefined}>
       {popoverOpen && (
         <div className="MentionPopover" role="listbox">
           {trigger === "@" ? (
             loadingFiles ? (
-              <div className="MentionItem MentionItem-empty">Searching workspace…</div>
+              <div className="MentionItem MentionItem-empty">
+                Searching workspace…
+              </div>
             ) : fileHits.length === 0 ? (
               <div className="MentionItem MentionItem-empty">
-                {query ? `No files matching "${query}"` : "No workspace files found"}
+                {query
+                  ? `No files matching "${query}"`
+                  : "No workspace files found"}
               </div>
             ) : (
               fileHits.map((file, index) => {
@@ -571,7 +650,13 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                     onMouseEnter={() => setHighlighted(index)}
                     onClick={() => insertMention(file.path)}
                   >
-                    <ExplorerIcon type="file" name={filename} className="MentionItem-icon" width={14} height={14} />
+                    <ExplorerIcon
+                      type="file"
+                      name={filename}
+                      className="MentionItem-icon"
+                      width={14}
+                      height={14}
+                    />
                     <span className="MentionItem-name">{filename}</span>
                     {dir && <span className="MentionItem-path">{dir}</span>}
                   </button>
@@ -579,7 +664,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               })
             )
           ) : commandHits.length === 0 ? (
-            <div className="MentionItem MentionItem-empty">No matching actions</div>
+            <div className="MentionItem MentionItem-empty">
+              No matching actions
+            </div>
           ) : (
             commandHits.map((command, index) => (
               <button
@@ -622,26 +709,29 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
           </div>
         )}
 
-        <div className={promptMode ? "Composer-inputArea Composer-inputArea-prompt" : "Composer-inputArea"}>
-          <div
-            ref={editorRef}
-            className={promptMode ? "Composer-input Composer-input-prompt" : "Composer-input"}
-            contentEditable
-            role="textbox"
-            aria-multiline="true"
-            data-placeholder={promptMode ? "Write a message..." : "Ask anything, @ to mention a file, / for actions"}
-            data-empty={value.length === 0 ? "true" : undefined}
-            onInput={syncEditor}
-            onKeyDown={onKeyDown}
-            onClick={onEditorClick}
-            onPaste={onPaste}
-          />
+        <div
+          className={
+            promptMode
+              ? "Composer-inputArea Composer-inputArea-prompt"
+              : "Composer-inputArea"
+          }
+        >
+          <EditorContent editor={editor} />
 
-          <div className={promptMode ? "Composer-row Composer-row-prompt" : "Composer-row"}>
+          <div
+            className={
+              promptMode
+                ? "Composer-row Composer-row-prompt"
+                : "Composer-row"
+            }
+          >
             <DropdownMenu>
               <Tooltip content="Add files or images" side="top">
                 <DropdownMenuTrigger asChild>
-                  <Button className="Composer-plus" aria-label="Add attachment">
+                  <Button
+                    className="Composer-plus"
+                    aria-label="Add attachment"
+                  >
                     <VscAdd />
                   </Button>
                 </DropdownMenuTrigger>
@@ -649,7 +739,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               <DropdownMenuContent sideOffset={6} align="start">
                 <DropdownMenuItem
                   disabled={!modelSupportsImages}
-                  onSelect={() => { if (modelSupportsImages) void pickFiles(true); }}
+                  onSelect={() => {
+                    if (modelSupportsImages) void pickFiles(true);
+                  }}
                 >
                   <VscFileMedia />
                   <span>Image</span>
@@ -671,27 +763,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
             <span className="Composer-rowspacer" />
 
-            {maxContext > 0 && (
-              <Tooltip
-                content={`Context Window: ${sessionTokens.contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
-                side="top"
-              >
-                <div className="TokenRing">
-                  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                    <circle cx="11" cy="11" r="8.5" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
-                    <circle
-                      cx="11" cy="11" r="8.5" fill="none"
-                      stroke={fillPct > 85 ? "#FC6B83" : fillPct > 60 ? "#F1B467" : "#CCCCCC"}
-                      strokeWidth="2.5"
-                      strokeDasharray={RING_CIRCUMFERENCE}
-                      strokeDashoffset={RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * fillPct) / 100}
-                      strokeLinecap="round"
-                      transform="rotate(-90 11 11)"
-                    />
-                  </svg>
-                  <span className="TokenRing-label">{fillPct}%</span>
-                </div>
-              </Tooltip>
+            {!promptMode && (
+              <ContextBar
+                maxContext={maxContext}
+                contextTokens={sessionTokens.contextTokens}
+                fillPct={fillPct}
+              />
             )}
 
             <Tooltip
@@ -707,7 +784,15 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               side="top"
             >
               <Button
-                className={`Composer-send${streaming ? " Composer-stop" : recording ? " Composer-mic-send" : !canSend ? " Composer-mic-idle" : ""}`}
+                className={`Composer-send${
+                  streaming
+                    ? " Composer-stop"
+                    : recording
+                    ? " Composer-mic-send"
+                    : !canSend
+                    ? " Composer-mic-idle"
+                    : ""
+                }`}
                 aria-label={
                   recording
                     ? "Stop dictation"
@@ -718,9 +803,18 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                     : "Start voice dictation"
                 }
                 onClick={() => {
-                  if (streaming) { cancel(); return; }
-                  if (recording) { void toggleDictation(); return; }
-                  if (canSend) { void doSend(); return; }
+                  if (streaming) {
+                    cancel();
+                    return;
+                  }
+                  if (recording) {
+                    void toggleDictation();
+                    return;
+                  }
+                  if (canSend) {
+                    void doSend();
+                    return;
+                  }
                   void toggleDictation();
                 }}
               >
@@ -728,7 +822,10 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                   <VscDebugStop />
                 ) : recording ? (
                   <span className="Composer-micWaves" aria-hidden="true">
-                    <span /><span /><span /><span />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
                   </span>
                 ) : canSend ? (
                   <VscArrowUp />
@@ -756,12 +853,19 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
             currentName={currentWs?.name}
             currentPath={currentWs?.path}
           />
-          <ModelSelector
-            models={models}
-            selectedModel={selectedModel}
-            setSelectedModel={setSelectedModel}
-            align="end"
-          />
+          <div className="Composer-footer-right">
+            <ModelSelector
+              models={models}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+              align="end"
+            />
+            <ContextBar
+              maxContext={maxContext}
+              contextTokens={sessionTokens.contextTokens}
+              fillPct={fillPct}
+            />
+          </div>
         </div>
       )}
     </div>

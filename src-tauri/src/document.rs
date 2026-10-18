@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
 
+use text_splitter::{ChunkConfig, TextSplitter};
+
 use crate::error::{AppError, AppResult};
 use crate::persistence::{DocumentRecord, PassageRecord, SqliteMemory};
 use crate::util::now_ms;
@@ -426,101 +428,39 @@ fn chunk_text_into_passages(
         return vec![];
     }
 
+    let config = ChunkConfig::new(PASSAGE_CHARS)
+        .with_overlap(PASSAGE_OVERLAP)
+        .unwrap_or_else(|_| ChunkConfig::new(PASSAGE_CHARS));
+    let splitter = TextSplitter::new(config);
+
     let mut passages = Vec::new();
-    let mut start = 0usize;
-    let mut previous_end = 0usize;
     let mut seq = 0i64;
 
-    while start < text.len() {
-        let end = find_chunk_end(text, start, previous_end, PASSAGE_CHARS);
-        let chunk = &text[start..end];
-
-        if !chunk.trim().is_empty() {
-            let page_number = page_boundaries
-                .iter()
-                .rev()
-                .find(|(offset, _)| *offset <= start)
-                .map(|(_, page)| *page as i64);
-
-            passages.push(PassageRecord {
-                id: stable_passage_id(document_id, seq),
-                document_id: document_id.to_string(),
-                seq,
-                text: chunk.to_string(),
-                page_number,
-                char_start: Some(start as i64),
-                char_end: Some(end as i64),
-            });
-            seq += 1;
+    for (start, chunk) in splitter.chunk_indices(text) {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() {
+            continue;
         }
+        let end = start + chunk.len();
+        let page_number = page_boundaries
+            .iter()
+            .rev()
+            .find(|(offset, _)| *offset <= start)
+            .map(|(_, page)| *page as i64);
 
-        if end >= text.len() {
-            break;
-        }
-
-        previous_end = end;
-        start = next_chunk_start(text, start, end);
+        passages.push(PassageRecord {
+            id: stable_passage_id(document_id, seq),
+            document_id: document_id.to_string(),
+            seq,
+            text: chunk.to_string(),
+            page_number,
+            char_start: Some(start as i64),
+            char_end: Some(end as i64),
+        });
+        seq += 1;
     }
 
     passages
-}
-
-fn next_chunk_start(text: &str, current_start: usize, end: usize) -> usize {
-    let mut start = floor_char_boundary(text, end.saturating_sub(PASSAGE_OVERLAP)).max(current_start);
-    while start < end {
-        let Some(ch) = text[start..].chars().next() else { break };
-        if ch.is_whitespace() {
-            break;
-        }
-        start += ch.len_utf8();
-    }
-    while start < end {
-        let Some(ch) = text[start..].chars().next() else { break };
-        if !ch.is_whitespace() {
-            break;
-        }
-        start += ch.len_utf8();
-    }
-    if start <= current_start || start >= end {
-        end
-    } else {
-        start
-    }
-}
-
-fn floor_char_boundary(text: &str, index: usize) -> usize {
-    crate::util::floor_char_boundary(text, index)
-}
-
-fn find_chunk_end(text: &str, start: usize, previous_end: usize, max_chars: usize) -> usize {
-    let hard_end = floor_char_boundary(text, start + max_chars);
-    if hard_end >= text.len() {
-        return text.len();
-    }
-    let search_from = previous_end.max(start);
-    if hard_end <= search_from {
-        let forward = floor_char_boundary(text, search_from + max_chars);
-        return if forward > search_from { forward } else { text.len() };
-    }
-    let window = &text[search_from..hard_end];
-    if let Some(pos) = window.rfind("\n\n") {
-        return search_from + pos + 2;
-    }
-    if let Some(pos) = window.rfind('\n') {
-        return search_from + pos + 1;
-    }
-    for delimiter in [". ", "! ", "? ", "; "] {
-        if let Some(pos) = window.rfind(delimiter) {
-            return search_from + pos + delimiter.len();
-        }
-    }
-    if let Some((pos, ch)) = window.char_indices().rev().find(|(_, ch)| ch.is_whitespace()) {
-        let candidate = search_from + pos + ch.len_utf8();
-        if candidate > search_from {
-            return candidate;
-        }
-    }
-    hard_end
 }
 
 fn count_words(text: &str) -> usize {
