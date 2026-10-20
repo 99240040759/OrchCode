@@ -27,6 +27,7 @@ function AppShell() {
         title="Orch"
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((open) => !open)}
+        view={view}
       />
       <div className="AppShell-body">
         {sidebarOpen && <Sidebar currentView={view} onViewChange={setView} />}

@@ -53,7 +53,7 @@
   --font-mono: "JetBrains Mono","Fira Code","Cascadia Code",Consolas,monospace;
 
   /* Layout */
-  --titlebar-h: 34px;
+  --titlebar-h: 36px;
   --sidebar-w:  256px;
   --chat-w:     640px;
 
@@ -147,7 +147,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── APP SHELL ──────────────────────────────────────────────────────────── */
 .AppShell { display:flex; flex-direction:column; height:100%; width:100%; background:var(--md-bg); overflow:hidden; }
 .AppShell-body { display:flex; flex:1; min-height:0; width:100%; overflow:hidden; }
-.Main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; border-top:1px solid var(--md-outline-var); }
+.Main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; border-top:none; }
 .Main-view { min-width:0; min-height:0; }
 .Workspace { flex:1; min-height:0; height:100%; width:100%; display:flex; overflow:hidden; }
 .WorkspacePanels { flex:1; height:100%; width:100%; min-height:0; min-width:0; overflow:hidden; }
@@ -166,14 +166,20 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .IconBtn[data-active='true'] { color:var(--md-primary); }
 
 /* ─── TITLEBAR ───────────────────────────────────────────────────────────── */
-.Titlebar { flex:0 0 auto; height:var(--titlebar-h); display:flex; align-items:center; background:var(--md-s0); position:relative; }
-.Titlebar-left { display:flex; align-items:center; gap:3px; padding:0 4px 0 8px; flex:0 0 auto; height:100%; }
-.Titlebar-mac .Titlebar-left { padding:0 4px 0 0; gap:2px; }
+.Titlebar { flex:0 0 auto; height:var(--titlebar-h); display:flex; align-items:center; background:var(--md-bg); position:relative; border-bottom:none; }
+.Titlebar-sidebar { width:var(--sidebar-w); flex:0 0 var(--sidebar-w); height:100%; display:flex; align-items:center; background:var(--md-s0); border-right:1px solid var(--md-outline-var); padding:0 8px; gap:3px; box-sizing:border-box; }
+.Titlebar-mac .Titlebar-sidebar { padding:0 8px 0 0; gap:2px; }
+.Titlebar-main { flex:1; min-width:0; height:100%; display:flex; align-items:center; background:var(--md-bg); }
+.Titlebar-left { display:flex; align-items:center; gap:3px; padding:0 4px 0 10px; flex:0 0 auto; height:100%; }
+.Titlebar-left-mac { padding:0 4px 0 0; gap:2px; }
 .Titlebar-drag { flex:1; height:100%; min-width:0; -webkit-app-region:drag; }
 .Titlebar-title { font-size:12.5px; font-weight:500; color:var(--md-on); max-width:320px; padding:0 2px; pointer-events:none; }
 .Titlebar-iconBtn { flex:0 0 auto; width:24px; height:24px; }
-.Titlebar-right { display:flex; align-items:center; gap:8px; flex:0 0 auto; height:100%; }
+.Titlebar-right { display:flex; align-items:center; gap:8px; flex:0 0 auto; height:100%; margin-left:auto; }
 .Titlebar-mac .Titlebar-right { padding-right:12px; }
+
+.Titlebar-artifact-cap { width:var(--artifact-panel-w); flex:0 0 var(--artifact-panel-w); height:100%; display:flex; align-items:center; gap:8px; background:var(--md-s0); border-left:1px solid var(--md-outline-var); box-sizing:border-box; padding:0 8px; }
+.Titlebar-mac .Titlebar-artifact-cap { padding-right:12px; }
 
 .MacTrafficLightSpacer { width:74px; height:100%; flex:0 0 auto; }
 
@@ -468,7 +474,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .WsMenuItem-confirmNo:hover { background:var(--md-hover); color:var(--md-on); }
 
 /* ─── ARTIFACT PANEL ─────────────────────────────────────────────────────── */
-.ArtifactPanel-header { flex:0 0 auto; height:36px; display:flex; align-items:center; justify-content:space-between; gap:4px; padding:0 4px 0 8px; background:var(--md-s0); border-bottom:1px solid var(--md-outline); min-width:0; }
+.ArtifactPanel-header { flex:0 0 auto; height:var(--titlebar-h); display:flex; align-items:center; justify-content:space-between; gap:4px; padding:0 4px 0 8px; background:var(--md-s0); border-bottom:1px solid var(--md-outline); min-width:0; }
 .ArtifactPanel { width:100%; height:100%; min-height:0; display:flex; flex-direction:column; background:var(--md-bg); overflow:hidden; }
 .ArtifactPanel-body { flex:1; min-height:0; position:relative; display:flex; flex-direction:column; overflow:hidden; }
 .ArtifactPanel-actions { display:flex; align-items:center; gap:2px; flex:0 0 auto; }
@@ -556,6 +562,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── TERMINAL ───────────────────────────────────────────────────────────── */
 .TerminalView { height:100%; width:100%; padding:6px 4px 6px 8px; background:var(--md-bg); }
 .TerminalView .xterm { height:100%; }
+.TerminalView .xterm-viewport { background-color: var(--md-bg) !important; }
 
 /* ─── BROWSER VIEW ───────────────────────────────────────────────────────── */
 .BrowserView { display:flex; flex-direction:column; height:100%; min-height:0; }

@@ -24,11 +24,11 @@
         "hiddenTitle": true,
         "trafficLightPosition": {
           "x": 12,
-          "y": 10
+          "y": 11
         },
         "shadow": true,
         "visible": false,
-        "backgroundColor": "#121212",
+        "backgroundColor": "#0f0f0f",
         "theme": "Dark"
       }
     ],

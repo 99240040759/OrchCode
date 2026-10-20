@@ -26,11 +26,35 @@ export function ChatPanel() {
 
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const initialChatSize = useRef(chatSizeFor(panelOpen, maximized)).current;
+  const artifactPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const chat = chatSizeFor(panelOpen, maximized);
     groupRef.current?.setLayout([chat, 100 - chat]);
   }, [panelOpen, maximized]);
+
+  useEffect(() => {
+    if (!panelOpen) {
+      document.documentElement.style.removeProperty("--artifact-panel-w");
+      return;
+    }
+    const el = artifactPanelRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.round(entry.contentRect.width);
+        if (w > 0) {
+          document.documentElement.style.setProperty("--artifact-panel-w", `${w}px`);
+        }
+      }
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty("--artifact-panel-w");
+    };
+  }, [panelOpen]);
 
   const onArtifactsCollapse = () => {
     if (useArtifactsStore.getState().panelOpen) useArtifactsStore.getState().setPanelOpen(false);
@@ -91,7 +115,9 @@ export function ChatPanel() {
           minSize={0}
           onCollapse={onArtifactsCollapse}
         >
-          <ArtifactPanel />
+          <div ref={artifactPanelRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+            <ArtifactPanel />
+          </div>
         </Panel>
       </PanelGroup>
     </div>

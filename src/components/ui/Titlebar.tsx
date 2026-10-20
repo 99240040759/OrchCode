@@ -17,8 +17,9 @@ import { useChatStore } from "../../lib/store";
 import { cn } from "../../lib/utils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
+import type { AppView } from "../../App";
 
-const IS_MAC =
+export const IS_MAC =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 function UpdateBadge() {
@@ -66,7 +67,7 @@ function UpdateBadge() {
   return null;
 }
 
-function WindowControls() {
+export function WindowControls() {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -115,6 +116,7 @@ interface TitlebarProps {
   className?: string;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  view?: AppView;
 }
 
 function SessionTitle({ fallback }: { fallback?: string }) {
@@ -149,40 +151,88 @@ function ArtifactPanelToggle() {
   );
 }
 
-export function Titlebar({ title, className, sidebarOpen, onToggleSidebar }: TitlebarProps) {
+export function Titlebar({ title, className, sidebarOpen, onToggleSidebar, view }: TitlebarProps) {
   const inShell = Boolean(onToggleSidebar);
+  const showSidebarSegment = inShell && Boolean(sidebarOpen);
+  const panelOpen = useArtifactsStore((s) => s.panelOpen);
+  const maximized = useArtifactsStore((s) => s.maximized);
+  const showArtifactSegment = inShell && panelOpen && (view === undefined || view === "chat");
 
   return (
-    <div className={cn("Titlebar", IS_MAC && "Titlebar-mac", className)} data-tauri-drag-region>
-      {IS_MAC && <div className="MacTrafficLightSpacer" data-tauri-drag-region />}
-
-      <div className="Titlebar-left">
-        {onToggleSidebar && (
-          <Tooltip content={sidebarOpen ? "Hide sidebar" : "Show sidebar"} side="bottom">
+    <div
+      className={cn(
+        "Titlebar",
+        IS_MAC && "Titlebar-mac",
+        showSidebarSegment && "Titlebar--with-sidebar",
+        showArtifactSegment && "Titlebar--with-artifacts",
+        className
+      )}
+      data-tauri-drag-region
+    >
+      {showSidebarSegment && (
+        <div className="Titlebar-sidebar" data-tauri-drag-region>
+          {IS_MAC && <div className="MacTrafficLightSpacer" data-tauri-drag-region />}
+          <Tooltip content="Hide sidebar" side="bottom">
             <Button
               className="IconBtn Titlebar-iconBtn"
-              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-              data-active={sidebarOpen}
+              aria-label="Hide sidebar"
+              data-active={true}
               onClick={onToggleSidebar}
             >
-              {sidebarOpen ? <VscLayoutSidebarLeftOff /> : <VscLayoutSidebarLeft />}
+              <VscLayoutSidebarLeftOff />
             </Button>
           </Tooltip>
-        )}
-        {inShell ? <SessionTitle fallback={title} /> : title && (
-          <span className="Titlebar-title" data-tauri-drag-region>
-            {title}
-          </span>
-        )}
+          <div className="Titlebar-drag" data-tauri-drag-region />
+        </div>
+      )}
+
+      <div className="Titlebar-main" data-tauri-drag-region>
+        <div
+          className={cn(
+            "Titlebar-left",
+            !showSidebarSegment && IS_MAC && "Titlebar-left-mac"
+          )}
+        >
+          {!showSidebarSegment && IS_MAC && (
+            <div className="MacTrafficLightSpacer" data-tauri-drag-region />
+          )}
+          {!showSidebarSegment && onToggleSidebar && (
+            <Tooltip content="Show sidebar" side="bottom">
+              <Button
+                className="IconBtn Titlebar-iconBtn"
+                aria-label="Show sidebar"
+                data-active={false}
+                onClick={onToggleSidebar}
+              >
+                <VscLayoutSidebarLeft />
+              </Button>
+            </Tooltip>
+          )}
+          {inShell ? <SessionTitle fallback={title} /> : title && (
+            <span className="Titlebar-title" data-tauri-drag-region>
+              {title}
+            </span>
+          )}
+        </div>
+
+        <div className="Titlebar-drag" data-tauri-drag-region />
+
+        <div className="Titlebar-right">
+          <UpdateBadge />
+          {!showArtifactSegment && inShell && (view === undefined || view === "chat") && (
+            <ArtifactPanelToggle />
+          )}
+          {!showArtifactSegment && !IS_MAC && <WindowControls />}
+        </div>
       </div>
 
-      <div className="Titlebar-drag" data-tauri-drag-region />
-
-      <div className="Titlebar-right">
-        <UpdateBadge />
-        {inShell && <ArtifactPanelToggle />}
-        {!IS_MAC && <WindowControls />}
-      </div>
+      {showArtifactSegment && (
+        <div className="Titlebar-artifact-cap" data-tauri-drag-region>
+          <div className="Titlebar-drag" data-tauri-drag-region />
+          <ArtifactPanelToggle />
+          {!IS_MAC && <WindowControls />}
+        </div>
+      )}
     </div>
   );
 }

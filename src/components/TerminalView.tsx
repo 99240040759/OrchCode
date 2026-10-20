@@ -14,33 +14,37 @@ export function TerminalView({ id }: { id: string }) {
     const sessionId = `${id}:${api.newId()}`;
     let disposed = false;
 
+    const styles = getComputedStyle(document.documentElement);
+    const bg = styles.getPropertyValue("--md-bg").trim() || "#0f0f0f";
+    const fg = styles.getPropertyValue("--md-on").trim() || "#e8e8e8";
+
     const term = new XTerm({
       fontSize: 12,
       fontFamily: '"SF Mono", "SF Pro Mono", Menlo, Monaco, monospace',
       cursorBlink: true,
       scrollback: 5000,
       theme: {
-        background: "#141414",
-        foreground: "#F0F0F0",
-        cursor: "#F0F0F0",
-        cursorAccent: "#141414",
-        selectionBackground: "rgba(240, 240, 240, 0.12)",
-        black: "#242424",
-        red: "#FC6B83",
-        green: "#3FA266",
-        yellow: "#D2943E",
-        blue: "#CCCCCC",
-        magenta: "#B48EAD",
-        cyan: "#AAAAAA",
-        white: "#F0F0F0",
-        brightBlack: "#F0F0F099",
-        brightRed: "#FC6B83",
-        brightGreen: "#70B489",
-        brightYellow: "#F1B467",
-        brightBlue: "#E0E0E0",
-        brightMagenta: "#B48EAD",
-        brightCyan: "#D4D4D4",
-        brightWhite: "#FFFFFF",
+        background: bg,
+        foreground: fg,
+        cursor: fg,
+        cursorAccent: bg,
+        selectionBackground: "rgba(255, 255, 255, 0.14)",
+        black: "#1a1a1a",
+        red: "#fc6b83",
+        green: "#70b489",
+        yellow: "#f1b467",
+        blue: "#c8c8c8",
+        magenta: "#b48ead",
+        cyan: "#a0a0a0",
+        white: "#e8e8e8",
+        brightBlack: "rgba(232, 232, 232, 0.4)",
+        brightRed: "#fc6b83",
+        brightGreen: "#70b489",
+        brightYellow: "#f1b467",
+        brightBlue: "#e8e8e8",
+        brightMagenta: "#b48ead",
+        brightCyan: "#d4d4d4",
+        brightWhite: "#ffffff",
       },
     });
     const fit = new FitAddon();

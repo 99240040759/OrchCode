@@ -73,7 +73,7 @@ function useFileWrittenListener() {
   }, [fileWritten]);
 }
 
-function ArtifactPanelHeader() {
+export function ArtifactPanelHeader() {
   const tabs          = useArtifactsStore((s) => s.tabs);
   const active        = useArtifactsStore(activeTabId);
   const maximized     = useArtifactsStore((s) => s.maximized);
@@ -83,10 +83,11 @@ function ArtifactPanelHeader() {
   const closeTab      = useArtifactsStore((s) => s.closeTab);
   const setActive     = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
+  const setPanelOpen  = useArtifactsStore((s) => s.setPanelOpen);
 
   return (
-    <div className="ArtifactPanel-header">
-      <div className="ArtifactTabs">
+    <div className="ArtifactPanel-header" data-tauri-drag-region>
+      <div className="ArtifactTabs" data-tauri-drag-region>
         {tabs.map((tab) => {
           const tabName =
             tab.kind === "file"
