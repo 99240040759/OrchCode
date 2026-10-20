@@ -38,6 +38,7 @@
     "react-error-boundary": "^5.0.0",
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
+    "react-pdf": "^11.0.0",
     "react-resizable-panels": "^2.1.9",
     "remark-gfm": "^4.0.1",
     "use-debounce": "^10.0.4",

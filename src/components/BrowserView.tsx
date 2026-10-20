@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VscArrowLeft, VscArrowRight, VscLinkExternal, VscRefresh } from "react-icons/vsc";
+import {
+  VscArrowLeft,
+  VscArrowRight,
+  VscLinkExternal,
+  VscRefresh,
+  VscClose,
+} from "react-icons/vsc";
 import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -29,14 +35,18 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const [input, setInput] = useState(startUrl);
   const [committedUrl, setCommittedUrl] = useState(startUrl);
   const [ready, setReady] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inputFocused, setInputFocused] = useState(false);
 
   const hostRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const overlayOpen = useOverlayStore((s) => s.count > 0);
   const overlayRef = useRef(overlayOpen);
   const syncRef = useRef<() => void>(() => {});
   const initialUrlRef = useRef(startUrl);
   const lastPropUrl = useRef(startUrl);
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -65,6 +75,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
         return;
       }
       setReady(true);
+      setLoading(false);
       syncPosition();
     });
     void webview.once("tauri://error", (event) => {
@@ -122,7 +133,6 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));
     };
-
   }, []);
 
   useEffect(() => {
@@ -133,6 +143,10 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const navigate = useCallback((next: string) => {
     setInput(next);
     setCommittedUrl(next);
+    setError(null);
+    setLoading(true);
+    if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    loadTimerRef.current = setTimeout(() => setLoading(false), 3000);
   }, []);
 
   useEffect(() => {
@@ -144,54 +158,102 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
 
   useEffect(() => {
     if (!ready || !label) return;
-    api.webviewNavigate(label, committedUrl).catch((e) => setError(api.errorMessage(e)));
+    api.webviewNavigate(label, committedUrl).catch((e) => {
+      setError(api.errorMessage(e));
+      setLoading(false);
+    });
   }, [committedUrl, ready, label]);
 
   const runHistory = (action: api.HistoryAction) => {
     if (!ready) return;
-    api.webviewHistory(label, action).catch((e) => setError(api.errorMessage(e)));
+    setLoading(true);
+    if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    loadTimerRef.current = setTimeout(() => setLoading(false), 3000);
+    api.webviewHistory(label, action).catch((e) => {
+      setError(api.errorMessage(e));
+      setLoading(false);
+    });
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      navigate(normalizeUrl(input));
+      inputRef.current?.blur();
+    }
+    if (e.key === "Escape") {
+      setInput(committedUrl);
+      inputRef.current?.blur();
+    }
+  };
+
+  const handleInputFocus = () => {
+    setInputFocused(true);
+    setTimeout(() => inputRef.current?.select(), 0);
   };
 
   return (
     <div className="BrowserView">
       <div className="BrowserBar">
-        <Tooltip content="Back" side="bottom">
-          <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
-            <VscArrowLeft />
-          </Button>
-        </Tooltip>
-        <Tooltip content="Forward" side="bottom">
-          <Button
-            className="IconBtn"
-            aria-label="Forward"
-            onClick={() => runHistory("forward")}
-            disabled={!ready}
-          >
-            <VscArrowRight />
-          </Button>
-        </Tooltip>
-        <Tooltip content="Reload" side="bottom">
-          <Button
-            className="IconBtn"
-            aria-label="Reload"
-            onClick={() => runHistory("reload")}
-            disabled={!ready}
-          >
-            <VscRefresh />
-          </Button>
-        </Tooltip>
-        <input
-          className="BrowserBar-url"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") navigate(normalizeUrl(input));
-          }}
-          placeholder="Search or enter address"
-          aria-label="Address bar"
-          spellCheck={false}
-        />
-        <Tooltip content="Open in browser" side="bottom">
+        <div className="BrowserBar-navGroup">
+          <Tooltip content="Back" side="bottom">
+            <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
+              <VscArrowLeft />
+            </Button>
+          </Tooltip>
+          <Tooltip content="Forward" side="bottom">
+            <Button
+              className="IconBtn"
+              aria-label="Forward"
+              onClick={() => runHistory("forward")}
+              disabled={!ready}
+            >
+              <VscArrowRight />
+            </Button>
+          </Tooltip>
+          <Tooltip content={loading ? "Stop loading" : "Reload"} side="bottom">
+            <Button
+              className="IconBtn"
+              aria-label={loading ? "Stop loading" : "Reload"}
+              onClick={() => {
+                if (loading) {
+                  setLoading(false);
+                } else {
+                  runHistory("reload");
+                }
+              }}
+              disabled={!ready}
+            >
+              {loading ? <VscClose /> : <VscRefresh className={loading ? "BrowserBar-spin" : ""} />}
+            </Button>
+          </Tooltip>
+        </div>
+
+        <div className={`BrowserBar-urlWrap${inputFocused ? " focused" : ""}`}>
+          {!inputFocused && (
+            <span className="BrowserBar-favicon" aria-hidden="true">
+              🌐
+            </span>
+          )}
+          {loading && !inputFocused && (
+            <span className="BrowserBar-loadBar" aria-hidden="true" />
+          )}
+          <input
+            ref={inputRef}
+            className="BrowserBar-url"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onFocus={handleInputFocus}
+            onBlur={() => setInputFocused(false)}
+            onKeyDown={handleInputKeyDown}
+            placeholder="Search or enter address"
+            aria-label="Address bar"
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+          />
+        </div>
+
+        <Tooltip content="Open in system browser" side="bottom">
           <Button
             className="IconBtn"
             aria-label="Open in system browser"
@@ -201,6 +263,9 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
           </Button>
         </Tooltip>
       </div>
+
+      {loading && <div className="BrowserBar-progress" aria-hidden="true" />}
+
       {error && (
         <div className="BrowserView-error" role="alert">
           {error}

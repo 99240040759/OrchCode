@@ -86,7 +86,7 @@
 ::selection { background:rgba(255,255,255,.18); color:inherit; }
 
 input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .Composer-input * { -webkit-user-select:text; user-select:text; }
-input, textarea, [contenteditable], [contenteditable='true'], .Composer-input { cursor:text; }
+input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .DocViewer-pageInput { cursor:text; }
 
 img, a { -webkit-user-drag:none; }
 img { image-rendering:-webkit-optimize-contrast; }
@@ -103,37 +103,38 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 @keyframes greetAvatar { to{opacity:1;transform:scale(1)} }
 @keyframes greetText   { to{opacity:1;transform:translateY(0)} }
 @keyframes micWave     { 0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(1)} }
-@keyframes streamIn    { from{opacity:0;transform:translateY(2px)} to{opacity:1;transform:translateY(0)} }
+@keyframes streamFadeIn { from{opacity:.65;transform:translateY(1px)} to{opacity:1;transform:translateY(0)} }
+@keyframes browserLoad { 0%{width:0;opacity:1} 85%{width:85%;opacity:1} 100%{width:100%;opacity:0} }
 
 /* ─── SHARED BASE RESETS & UTILITIES ─────────────────────────────────────── */
 /* 1. All Button Resets */
-button, [role="button"], [role="menuitem"], a, select, summary, .Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .LibraryView-pagination button, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .XlsxViewer-tab, .PptxViewer-nav-btn, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
+button, [role="button"], [role="menuitem"], a, select, summary, .Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .LibraryView-pagination button, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .DocViewer-pageBtn, .DocViewer-pageCurrent, .XlsxViewer-tab, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
 
 /* 2. Common Transitions */
-.IconBtn, .WinBtn, .Sidebar-viewbtn, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .AttachmentCard, .AttachmentCard-remove, .DropdownMenuItem, .FilePicker-item, .DocViewer-zoom-btn, .DocViewer-zoom-pct { transition:background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.IconBtn, .WinBtn, .Sidebar-viewbtn, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .AttachmentCard, .AttachmentCard-remove, .DropdownMenuItem, .FilePicker-item, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .DocViewer-pageBtn, .DocViewer-pageCurrent { transition:background var(--dur) var(--ease), color var(--dur) var(--ease); }
 
 .Sidebar-newchat, .Sidebar-wsBtn, .ArtifactCard, .ArtifactTab, .ConnectorsView-filterTab, .ConnectorCard, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .WorkspacePicker-card { transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
 
 /* 3. Common Hover & Selection States */
-.IconBtn:hover:not(:disabled), .WinBtn:hover, .Sidebar-viewbtn:hover, .Sidebar-wsBtn:hover, .ThreadItem:hover, .DropdownMenuItem[data-highlighted], .WsMenuItem:hover, .ArtifactCard:hover, .ArtifactTab:hover, .CodeBlock-copy:hover:not(:disabled), .FilePicker-item:hover, .ConnectorsView-filterTab:hover, .LibraryView-pagination button:hover:not(:disabled), .LibraryRow:hover, .DocViewer-zoom-btn:hover:not(:disabled), .DocViewer-zoom-pct:hover, .XlsxViewer-tab:hover, .PptxViewer-nav-btn:hover:not(:disabled), .WorkspacePicker-card:hover:not(:disabled) { background:var(--md-hover); }
+.IconBtn:hover:not(:disabled), .WinBtn:hover, .Sidebar-viewbtn:hover, .Sidebar-wsBtn:hover, .ThreadItem:hover, .DropdownMenuItem[data-highlighted], .WsMenuItem:hover, .ArtifactCard:hover, .ArtifactTab:hover, .CodeBlock-copy:hover:not(:disabled), .FilePicker-item:hover, .ConnectorsView-filterTab:hover, .LibraryView-pagination button:hover:not(:disabled), .LibraryRow:hover, .DocViewer-zoom-btn:hover:not(:disabled), .DocViewer-zoom-pct:hover, .DocViewer-pageBtn:hover:not(:disabled), .DocViewer-pageCurrent:hover, .XlsxViewer-tab:hover, .WorkspacePicker-card:hover:not(:disabled) { background:var(--md-hover); }
 
 .Sidebar-viewbtn[data-active="true"], .ThreadItem[data-active='true'], .ArtifactTab[data-active='true'], .ConnectorsView-filterTab[data-active="true"], .ConnectorCard-actionBtn--connect:hover:not(:disabled), .LibraryView-addBtn:hover:not(:disabled) { background:var(--md-selected); color:var(--md-on); }
 
 /* 4. Common Disabled States */
-button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-disabled], [disabled], .IconBtn:disabled, .ThreadItem-btn:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .ConnectorCard-actionBtn:disabled, .LibraryView-addBtn:disabled, .LibraryView-pagination button:disabled, .DocViewer-zoom-btn:disabled, .PptxViewer-nav-btn:disabled { opacity:.38; cursor:default; }
+button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-disabled], [disabled], .IconBtn:disabled, .ThreadItem-btn:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .ConnectorCard-actionBtn:disabled, .LibraryView-addBtn:disabled, .LibraryView-pagination button:disabled, .DocViewer-zoom-btn:disabled, .DocViewer-pageBtn:disabled { opacity:.38; cursor:default; }
 
 /* 5. Common Text Ellipsis */
-.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .LibraryRow-title, .LibraryRow-path, .LibraryRow-time, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .ThreadItem-time, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .LibraryRow-title, .LibraryRow-path, .LibraryRow-time, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* 6. Common Text / Search Inputs */
-.BrowserBar-url, .FilePicker-input, .LibraryView-searchInput { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
-.BrowserBar-url:focus, .FilePicker-input:focus, .LibraryView-searchInput:focus { border-color:var(--md-outline-hi); }
+.FilePicker-input, .LibraryView-searchInput, .DocViewer-pageInput { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.FilePicker-input:focus, .LibraryView-searchInput:focus, .DocViewer-pageInput:focus { border-color:var(--md-outline-hi); }
 
 /* 7. Common Alert & Notification Banners */
 .ChatPane-error, .Msg-error, .BrowserView-error, .ConnectorsView-error, .WorkspacePicker-error { display:flex; align-items:center; background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.25); border-radius:var(--r-md); color:var(--md-error-c); }
 
 /* 8. Common Scroll Containers (Disable Elastic Bounce / Rubber-Banding) */
-.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
+.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer, .PdfViewer-scroll { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
 
 .Msg-notice, .Composer-notice, .FileContent-trunc { background:rgba(241,180,103,.09); color:var(--md-warn); }
 
@@ -205,7 +206,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Sidebar-viewbtn svg { width:14px; height:14px; flex-shrink:0; }
 .Sidebar-viewbtn:hover { color:var(--md-on-var); }
 
-.Sidebar-threads { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:1px; padding:4px var(--sp-1); will-change:scroll-position; }
+.Sidebar-threads { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:1px; padding:4px var(--sp-1); will-change:scroll-position; }
 .Sidebar-empty { margin:16px 8px; font-size:12px; line-height:1.5; }
 
 .Sidebar-wsBtn { display:flex; align-items:center; gap:var(--sp-2); width:100%; padding:var(--sp-2); border:1px solid transparent; border-radius:var(--r-sm); color:var(--md-on-var); font-size:12px; font-weight:500; min-width:0; }
@@ -215,11 +216,11 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Sidebar-wsChevron { font-size:11px; flex-shrink:0; opacity:.5; }
 
 /* ─── THREAD ITEMS ───────────────────────────────────────────────────────── */
-.ThreadItem { display:flex; align-items:center; border-radius:var(--r-md); transition:background var(--dur) var(--ease); }
+.ThreadItem { display:flex; align-items:center; width:100%; min-width:0; max-width:100%; border-radius:var(--r-md); transition:background var(--dur) var(--ease); }
 
-.ThreadItem-btn { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; padding:7px var(--sp-2); color:inherit; text-align:left; }
-.ThreadItem-title { font-size:12.5px; font-weight:500; color:var(--md-on); line-height:1.35; }
-.ThreadItem-time { font-size:10.5px; color:var(--md-on-dim); line-height:1.2; }
+.ThreadItem-btn { display:flex; flex-direction:column; gap:2px; flex:1 1 0%; min-width:0; max-width:100%; overflow:hidden; padding:7px var(--sp-2); color:inherit; text-align:left; }
+.ThreadItem-title { display:block; width:100%; min-width:0; max-width:100%; font-size:12.5px; font-weight:500; color:var(--md-on); line-height:1.35; }
+.ThreadItem-time { display:block; width:100%; min-width:0; max-width:100%; font-size:10.5px; color:var(--md-on-dim); line-height:1.2; }
 
 .ThreadItem-del, .WsMenuItem-del { opacity:0; flex:0 0 auto; width:22px; height:22px; border-radius:var(--r-sm); color:var(--md-on-dim); display:inline-flex; align-items:center; justify-content:center; transition:opacity var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease); }
 .ThreadItem-del { margin-right:6px; }
@@ -271,7 +272,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── MESSAGE LIST ───────────────────────────────────────────────────────── */
 .MessageListWrap { position:relative; flex:1; min-height:0; display:flex; width:100%; }
 .MessageList { flex:1; min-height:0; width:100%; overflow-y:auto; overflow-x:hidden; overflow-anchor:none; display:flex; flex-direction:column; align-items:center; contain:content; will-change:scroll-position; }
-.MessageList-inner { max-width:var(--chat-w); width:100%; padding:8px 8px 8px 16px; display:flex; flex-direction:column; gap:var(--sp-3); }
+.MessageList-inner { max-width:var(--chat-w); width:100%; padding:8px 13px 8px 15px; display:flex; flex-direction:column; gap:var(--sp-3); }
 .MessageList-bottomSpacer { height:100px; flex-shrink:0; width:100%; }
 
 .MessageList-jump { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:var(--r-full); background:var(--md-s1); border:1px solid var(--md-outline); color:var(--md-on); box-shadow:var(--shadow); transition:background var(--dur) var(--ease), transform var(--dur) var(--ease); z-index:20; will-change:transform; }
@@ -284,7 +285,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── MESSAGES ───────────────────────────────────────────────────────────── */
 .Msg { display:flex; flex-direction:column; width:100%; }
 .Msg-user { align-items:flex-end; }
-.Msg-user .Msg-bubble { max-width:82%; padding:9px 13px; border-radius:var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background:rgba(255,255,255,.10); border:1px solid var(--md-outline); color:var(--md-on); font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+.Msg-user .Msg-bubble { padding:9px 13px; border-radius:var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background:rgba(255,255,255,.10); border:1px solid var(--md-outline); color:var(--md-on); font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .Msg-assistant { align-items:stretch; }
 .Msg-assistant > * + * { margin-top:8px; }
 .Msg-assistant > .Reasoning + .Reasoning,
@@ -293,8 +294,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Msg-assistant > .ToolList + .ToolList,
 .Msg-assistant > .ToolList + .ThinkingShimmer,
 .Msg-assistant > .Reasoning + .ThinkingShimmer { margin-top:4px; }
-.Msg-assistant[data-streaming='true'] > .Markdown:last-child { animation:streamIn 80ms ease-out both; }
-.Msg-assistant[data-streaming='true'] > .Reasoning:last-child .Reasoning-body { animation:streamIn 80ms ease-out both; }
+
 .Msg-attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end; }
 
 .Msg-error { gap:8px; padding:8px 12px; font-size:13px; }
@@ -307,6 +307,9 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .ThinkingShimmer { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:0; }
 .ThinkingShimmer-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, var(--md-on-dim) 0%, var(--md-on) 35%, #ffffff 50%, var(--md-on) 65%, var(--md-on-dim) 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
+.Msg-streamingText { animation:streamFadeIn .18s var(--ease); }
+.Msg-streamingText > .Markdown > *:last-child { background:linear-gradient(90deg, var(--md-on) 0%, var(--md-on) 65%, #ffffff 82%, var(--md-on-dim) 92%, var(--md-on) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.4s linear infinite; will-change:background-position; }
+
 /* ─── REASONING ──────────────────────────────────────────────────────────── */
 .Reasoning { display:flex; flex-direction:column; gap:4px; }
 .Reasoning-toggle { display:inline-flex; align-items:center; gap:6px; height:22px; min-height:22px; color:var(--md-on-var); font-size:13px; width:fit-content; }
@@ -314,7 +317,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Reasoning-label { font-size:13px; line-height:22px; }
 .Reasoning-chevron { width:13px; height:13px; transition:transform var(--dur) var(--ease); opacity:.7; }
 .Reasoning-toggle[data-open='true'] .Reasoning-chevron { transform:rotate(90deg); }
-.Reasoning-body { padding:4px 0 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
+.Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
 
 /* ─── TOOL ROWS ──────────────────────────────────────────────────────────── */
 .ToolList { display:flex; flex-direction:column; gap:4px; }
@@ -556,10 +559,19 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 
 /* ─── BROWSER VIEW ───────────────────────────────────────────────────────── */
 .BrowserView { display:flex; flex-direction:column; height:100%; min-height:0; }
-.BrowserBar { flex:0 0 auto; display:flex; align-items:center; gap:3px; padding:5px 8px; border-bottom:1px solid var(--md-outline); }
-.BrowserBar-url { flex:1; min-width:0; height:26px; padding:0 10px; font-size:12px; }
+.BrowserBar { flex:0 0 auto; display:flex; align-items:center; gap:3px; padding:5px 8px; border-bottom:1px solid var(--md-outline); background:var(--md-s0); }
+.BrowserBar-navGroup { display:flex; align-items:center; gap:1px; flex-shrink:0; }
+.BrowserBar-urlWrap { flex:1; min-width:0; position:relative; display:flex; align-items:center; height:28px; background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); overflow:hidden; transition:border-color var(--dur) var(--ease); }
+.BrowserBar-urlWrap.focused { border-color:var(--md-outline-hi); background:rgba(255,255,255,.06); }
+.BrowserBar-favicon { position:absolute; left:8px; font-size:12px; line-height:1; pointer-events:none; z-index:1; user-select:none; }
+.BrowserBar-url { flex:1; height:100%; padding:0 10px 0 28px; font-size:12px; background:transparent; border:none; outline:none; color:var(--md-on); font-family:inherit; }
+.BrowserBar-urlWrap.focused .BrowserBar-url { padding-left:10px; }
+.BrowserBar-url::placeholder { color:var(--md-on-dim); }
+.BrowserBar-loadBar { position:absolute; inset:0; background:linear-gradient(90deg, transparent, rgba(200,200,200,.06), transparent); background-size:200% 100%; animation:shimmer 1.5s linear infinite; pointer-events:none; }
+.BrowserBar-progress { flex:0 0 auto; height:2px; background:linear-gradient(90deg, var(--md-on-var), var(--md-primary)); animation:browserLoad 3s ease-out forwards; will-change:width; transform-origin:left; }
 .BrowserView-error { padding:5px 10px; font-size:11.5px; border-radius:0; border-top:none; border-left:none; border-right:none; }
 .BrowserHost { flex:1; min-height:0; width:100%; background:var(--md-bg); }
+.BrowserBar-spin { animation:spin .7s linear infinite; }
 
 /* ─── FILE VIEWER ────────────────────────────────────────────────────────── */
 .FileViewerFull { display:flex; flex-direction:column; height:100%; width:100%; min-height:0; background:var(--md-bg); overflow:hidden; }
@@ -719,15 +731,28 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .DocViewer-error { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; height:100%; color:var(--md-error); padding:32px; text-align:center; }
 .DocViewer-error-icon { font-size:28px; }
 .DocViewer-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; height:100%; font-size:13px; padding:32px; }
-.DocViewer-header { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--md-outline); background:var(--md-bg); flex-shrink:0; }
-.DocViewer-title { font-size:13px; font-weight:600; color:var(--md-on); flex:1; min-width:0; }
-.DocViewer-meta { font-size:11px; color:var(--md-on-dim); }
-.DocViewer-zoom { display:flex; align-items:center; gap:2px; margin-left:auto; flex-shrink:0; }
-.DocViewer-zoom-btn { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border:1px solid var(--md-outline); border-radius:var(--r-sm); color:var(--md-on-var); font-size:15px; line-height:1; }
-.DocViewer-zoom-pct { display:inline-flex; align-items:center; justify-content:center; min-width:44px; height:22px; padding:0 4px; border:1px solid var(--md-outline); border-radius:var(--r-sm); color:var(--md-on-var); font-size:11px; font-family:var(--font-mono); }
+
+.DocViewer-header { display:flex; align-items:center; gap:8px; padding:0 12px; height:38px; border-bottom:1px solid var(--md-outline); background:var(--md-s0); flex-shrink:0; }
+.DocViewer-title { font-size:13px; font-weight:600; color:var(--md-on); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.DocViewer-meta { font-size:11px; color:var(--md-on-dim); flex-shrink:0; white-space:nowrap; }
+.DocViewer-controls { display:flex; align-items:center; gap:6px; margin-left:auto; flex-shrink:0; }
+
+.DocViewer-zoom { display:flex; align-items:center; gap:2px; }
+.DocViewer-zoom-btn { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border:1px solid var(--md-outline); border-radius:var(--r-sm); color:var(--md-on-var); font-size:15px; line-height:1; }
+.DocViewer-zoom-pct { display:inline-flex; align-items:center; justify-content:center; min-width:46px; height:24px; padding:0 4px; border:1px solid var(--md-outline); border-radius:var(--r-sm); color:var(--md-on-var); font-size:11px; font-family:var(--font-mono); }
+
+.DocViewer-pageNav { display:flex; align-items:center; gap:2px; border:1px solid var(--md-outline); border-radius:var(--r-sm); overflow:hidden; }
+.DocViewer-pageBtn { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; color:var(--md-on-var); flex-shrink:0; }
+.DocViewer-pageBtn svg { width:14px; height:14px; }
+.DocViewer-pageIndicator { display:inline-flex; align-items:center; gap:4px; padding:0 4px; border-left:1px solid var(--md-outline); border-right:1px solid var(--md-outline); }
+.DocViewer-pageCurrent { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:22px; font-size:11px; font-family:var(--font-mono); color:var(--md-on); border-radius:var(--r-xs); padding:0 3px; }
+.DocViewer-pageCurrent:hover { background:var(--md-hover); }
+.DocViewer-pageTotal { font-size:11px; color:var(--md-on-dim); font-family:var(--font-mono); white-space:nowrap; }
+.DocViewer-pageInput { width:42px; height:22px; font-size:11px; font-family:var(--font-mono); text-align:center; padding:0 4px; border-radius:var(--r-xs); -webkit-user-select:text; user-select:text; cursor:text; }
 
 .PdfViewer { display:flex; flex-direction:column; height:100%; background:var(--md-bg); }
-.PdfViewer-embed { flex:1; width:100%; height:100%; border:none; background:var(--md-s0); }
+.PdfViewer-scroll { flex:1; overflow:auto; display:flex; flex-direction:column; align-items:center; padding:16px; background:var(--md-s1); overscroll-behavior:none; }
+.PdfViewer-canvas { display:block; max-width:100%; box-shadow:0 4px 24px rgba(0,0,0,.5); border-radius:2px; }
 
 .DocxViewer { display:flex; flex-direction:column; height:100%; background:var(--md-s1); overflow:hidden; }
 .DocxViewer-scroll { flex:1; overflow-y:auto; overflow-x:auto; background:#e8e8e8; padding:24px; }
@@ -740,18 +765,16 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .XlsxViewer-tab { padding:5px 14px; font-size:12px; border-radius:var(--r-sm) var(--r-sm) 0 0; border:1px solid transparent; border-bottom:none; color:var(--md-on-var); white-space:nowrap; }
 .XlsxViewer-tab.active { background:var(--md-s1); border-color:var(--md-outline); border-bottom-color:var(--md-s1); color:var(--md-on); font-weight:500; }
 .XlsxViewer-scroll { flex:1; overflow:auto; padding:12px; }
-.XlsxViewer-table { border-collapse:collapse; font-size:12px; white-space:nowrap; width:max-content; }
-.XlsxViewer-row-num { padding:3px 8px 3px 4px; color:var(--md-on-dim); font-size:11px; border-right:1px solid var(--md-outline); text-align:right; background:var(--md-bg); position:sticky; left:0; }
-.XlsxViewer-cell { padding:4px 12px; border:1px solid var(--md-outline-var); color:var(--md-on); max-width:320px; }
+.XlsxViewer-table { border-collapse:collapse; white-space:nowrap; width:max-content; }
+.XlsxViewer-row-num { padding:3px 8px 3px 4px; color:var(--md-on-dim); border-right:1px solid var(--md-outline); text-align:right; background:var(--md-bg); position:sticky; left:0; }
+.XlsxViewer-cell { padding:4px 12px; border:1px solid var(--md-outline-var); color:var(--md-on); max-width:320px; overflow:hidden; text-overflow:ellipsis; }
+.XlsxViewer-trunc { padding:6px 12px; margin:0 0 8px; }
 
 .PptxViewer { display:flex; flex-direction:column; height:100%; background:var(--md-bg); overflow:hidden; }
-.PptxViewer-stage { flex:1; display:flex; align-items:center; justify-content:center; overflow:auto; background:var(--md-s1); padding:16px; position:relative; }
+.PptxViewer-stage { flex:1; display:flex; align-items:center; justify-content:center; overflow:auto; background:var(--md-s1); padding:16px; position:relative; overscroll-behavior:none; }
 .PptxViewer-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--md-on-var); font-size:13px; background:var(--md-s1); z-index:2; }
 .PptxViewer-overlay--error { color:var(--md-error); }
 .PptxViewer-canvas { display:block; max-width:100%; box-shadow:0 4px 24px rgba(0,0,0,.5); border-radius:2px; }
-.PptxViewer-nav { display:flex; align-items:center; justify-content:center; gap:16px; padding:8px; background:var(--md-bg); border-top:1px solid var(--md-outline); flex-shrink:0; }
-.PptxViewer-nav-btn { padding:4px 16px; font-size:12px; border-radius:var(--r-sm); border:1px solid var(--md-outline); color:var(--md-on-var); }
-.PptxViewer-nav-label { font-size:12px; color:var(--md-on-dim); min-width:60px; text-align:center; }
 
 /* ─── MEDIA VIEWER ───────────────────────────────────────────────────────── */
 .NativeMediaViewer { flex:1; display:flex; align-items:center; justify-content:center; height:100%; width:100%; overflow:auto; background:var(--md-bg); padding:16px; box-sizing:border-box; }
@@ -790,7 +813,9 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── REDUCED MOTION ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .Greeting .Avatar, .Greeting-title, .Greeting-sub,
-  .ThinkingShimmer-text, .TooltipContent {
+  .ThinkingShimmer-text, .TooltipContent,
+  .Msg-streamingText, .Msg-streamingText > .Markdown > *:last-child,
+  .BrowserBar-progress, .BrowserBar-loadBar {
     animation:none; opacity:1; transform:none;
   }
 }

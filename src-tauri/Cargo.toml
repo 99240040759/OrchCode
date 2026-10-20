@@ -26,14 +26,14 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-rig = { version = "0.44.0", default-features = false, features = ["agent", "derive", "reqwest", "native-tls"] }
+rig = { version = "0.44.0", default-features = false, features = ["agent", "derive", "reqwest", "rustls"] }
 schemars = "0.8"
 
 tokio = { version = "1.53.0", features = ["full"] }
 tokio-util = "0.7"
 futures = "0.3"
 
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "multipart", "form"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "multipart", "form"] }
 
 cpal = "0.15"
 hound = "3"
@@ -57,7 +57,7 @@ portable-pty = "0.8"
 ignore = "0.4"
 regex = "1.11"
 urlencoding = "2.1"
-sentry = { version = "0.36", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
+sentry = { version = "0.36", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 nucleo-matcher = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 include_dir = { version = "0.7", features = ["glob"] }

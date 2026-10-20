@@ -936,12 +936,14 @@ impl ConversationMemory for SqliteMemory {
 }
 
 pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
-    conn.pragma_update(None, "foreign_keys", true)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
-    conn.pragma_update(None, "cache_size", -65536_i64)?;
-    conn.pragma_update(None, "mmap_size", 134_217_728_i64)?;
-    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.execute_batch("
+        PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA temp_store = MEMORY;
+        PRAGMA mmap_size = 30000000000;
+        PRAGMA cache_size = -65536;
+    ")?;
     conn.busy_timeout(std::time::Duration::from_secs(10))?;
     Ok(())
 }

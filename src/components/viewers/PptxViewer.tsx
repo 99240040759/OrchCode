@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PPTXViewer } from "pptxviewjs";
 import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
-import { ZoomControls, useZoom } from "./ViewerChrome";
+import { ViewerError, ViewerLoading, ZoomControls, PageControls, useZoom } from "./ViewerChrome";
 
 const BASE_SLIDE_WIDTH = 960;
 const SLIDE_ASPECT = 9 / 16;
@@ -85,13 +85,33 @@ export function PptxViewer({ path }: { path: string }) {
     });
   }, [zoomValue, enqueue]);
 
-  const goTo = (index: number) => {
+  const goTo = useCallback((index: number) => {
     enqueue(async (viewer, canvas) => {
       applyCanvasSize(canvas, zoomValue);
       await viewer.goToSlide(index, canvas);
       setSlideIndex(viewer.getCurrentSlideIndex());
     });
-  };
+  }, [enqueue, zoomValue]);
+
+  const goToPrev = useCallback(() => {
+    if (slideIndex > 0) goTo(slideIndex - 1);
+  }, [slideIndex, goTo]);
+
+  const goToNext = useCallback(() => {
+    if (slideIndex < slideCount - 1) goTo(slideIndex + 1);
+  }, [slideIndex, slideCount, goTo]);
+
+  useEffect(() => {
+    if (!readyRef.current) return;
+    const handleKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); goToPrev(); }
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); goToNext(); }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [goToPrev, goToNext]);
 
   const ready = !loading && !error;
 
@@ -103,7 +123,20 @@ export function PptxViewer({ path }: { path: string }) {
         {slideCount > 0 && (
           <span className="DocViewer-meta">{slideCount} slide{slideCount !== 1 ? "s" : ""}</span>
         )}
-        {ready && <ZoomControls {...zoom} />}
+        {ready && (
+          <div className="DocViewer-controls">
+            {slideCount > 1 && (
+              <PageControls
+                page={slideIndex + 1}
+                total={slideCount}
+                onPrev={goToPrev}
+                onNext={goToNext}
+                onGoto={(n) => goTo(n - 1)}
+              />
+            )}
+            <ZoomControls {...zoom} />
+          </div>
+        )}
       </div>
 
       <div className="PptxViewer-stage">
@@ -123,16 +156,10 @@ export function PptxViewer({ path }: { path: string }) {
           ref={canvasRef}
           className="PptxViewer-canvas"
           style={{ visibility: ready ? "visible" : "hidden" }}
+          aria-label={`Slide ${slideIndex + 1} of ${slideCount}`}
+          tabIndex={-1}
         />
       </div>
-
-      {slideCount > 1 && ready && (
-        <div className="PptxViewer-nav">
-          <button type="button" className="PptxViewer-nav-btn" disabled={slideIndex === 0} onClick={() => goTo(slideIndex - 1)}>‹ Prev</button>
-          <span className="PptxViewer-nav-label">{slideIndex + 1} / {slideCount}</span>
-          <button type="button" className="PptxViewer-nav-btn" disabled={slideIndex === slideCount - 1} onClick={() => goTo(slideIndex + 1)}>Next ›</button>
-        </div>
-      )}
     </div>
   );
 }

@@ -65,7 +65,7 @@ const SessionItem = React.memo(function SessionItem({
           disabled={streaming && !isActive}
           onClick={() => onSelect(session.id)}
         >
-          <span className="ThreadItem-title">{session.title || "New chat"}</span>
+          <span className="ThreadItem-title" title={session.title || "New chat"}>{session.title || "New chat"}</span>
           <span className="ThreadItem-time">{formatRelativeTime(session.updatedAt)}</span>
         </button>
       </Tooltip>

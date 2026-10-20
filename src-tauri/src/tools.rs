@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use circular_buffer::CircularBuffer;
 use command_group::AsyncCommandGroup;
 use ignore::WalkBuilder;

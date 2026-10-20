@@ -34,6 +34,10 @@ export default defineConfig({
             return "monaco";
           }
           if (normalized.includes("node_modules/@monaco-editor/")) return "monaco-react";
+          if (normalized.includes("node_modules/react-pdf/") || normalized.includes("node_modules/pdfjs-dist/")) {
+            if (normalized.includes("worker")) return undefined;
+            return "pdf";
+          }
           return undefined;
         },
       },

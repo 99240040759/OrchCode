@@ -170,7 +170,7 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
       : "Thought process";
 
   return (
-    <div className="Reasoning">
+    <div className="Reasoning" data-active={item.active || undefined}>
       <button
         type="button"
         className="Reasoning-toggle"
@@ -254,10 +254,11 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
   }
 
   const groups = groupItems(message.items);
+  const isStreaming = Boolean(message.streaming);
 
   return (
-    <div className="Msg Msg-assistant" data-streaming={message.streaming || undefined}>
-      {groups.map((group) => {
+    <div className="Msg Msg-assistant" data-streaming={isStreaming || undefined}>
+      {groups.map((group, idx) => {
         if (group.kind === "reasoning") {
           return <ThinkingBlock key={group.item.id} item={group.item} />;
         }
@@ -271,7 +272,13 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
           );
         }
         if (!group.text.trim()) return null;
-        return <Markdown key={group.id}>{group.text}</Markdown>;
+        const isLast = idx === groups.length - 1;
+        const isStreamingText = isStreaming && isLast;
+        return (
+          <div key={group.id} className={isStreamingText ? "Msg-streamingText" : undefined}>
+            <Markdown>{group.text}</Markdown>
+          </div>
+        );
       })}
       {message.notice && (
         <div className="Msg-notice" role="status">
@@ -279,7 +286,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
           <span>{message.notice}</span>
         </div>
       )}
-      {message.streaming && message.items.length === 0 && <ThinkingShimmer />}
+      {isStreaming && message.items.length === 0 && <ThinkingShimmer />}
       {message.error && (
         <div className="Msg-error" role="alert">
           <VscWarning aria-hidden="true" />

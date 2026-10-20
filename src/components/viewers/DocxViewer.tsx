@@ -51,7 +51,11 @@ export function DocxViewer({ path }: { path: string }) {
       <div className="DocViewer-header">
         <ExplorerIcon type="file" name={fileName} width={18} height={18} />
         <span className="DocViewer-title">{fileName}</span>
-        {ready && <ZoomControls {...zoom} />}
+        {ready && (
+          <div className="DocViewer-controls">
+            <ZoomControls {...zoom} />
+          </div>
+        )}
       </div>
       {loading && <ViewerLoading label="Loading document…" />}
       {error && <ViewerError message={error} />}
