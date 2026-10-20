@@ -76,6 +76,7 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
         }
       });
       set({ status: "readyToRestart" });
+      updateStarted = false;
     } catch (e) {
       pendingUpdate = null;
       updateStarted = false;

@@ -406,16 +406,16 @@ export const useChatStore = create(
 
       const scheduleFlush = () => {
         if (rafId === null) {
-          rafId = requestAnimationFrame(() => {
+          rafId = setTimeout(() => {
             rafId = null;
             flush();
-          });
+          }, 0) as unknown as number;
         }
       };
 
       const syncFlush = () => {
         if (rafId !== null) {
-          cancelAnimationFrame(rafId);
+          clearTimeout(rafId);
           rafId = null;
         }
         flush();
@@ -466,12 +466,25 @@ export const useChatStore = create(
           case "notice":
             patch((m) => { m.notice = event.message; });
             break;
-          case "compacted":
+          case "compacted": {
             set((s) => {
               if (s.currentSessionId !== sessionId) return;
-              s.messages.push({ id: newId(), role: "system", items: [{ type: "compactionNotice", id: newId(), originalMessageCount: event.originalMessageCount, ts: event.ts }], attachments: [], streaming: false });
+              const notice: ChatMessage = {
+                id: newId(),
+                role: "system",
+                items: [{ type: "compactionNotice", id: newId(), originalMessageCount: event.originalMessageCount, ts: event.ts }],
+                attachments: [],
+                streaming: false,
+              };
+              const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
+              if (streamingIdx >= 0) {
+                s.messages.splice(streamingIdx, 0, notice);
+              } else {
+                s.messages.push(notice);
+              }
             });
             break;
+          }
           case "done":
             syncFlush(); settle();
             void useChatStore.getState().refreshBudget();

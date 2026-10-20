@@ -254,7 +254,7 @@ impl AppState {
     fn token_is_fresh(token: &str) -> bool {
         match auth::jwt_expiry(token) {
             Some(exp) => exp - crate::util::now_secs() > config::TOKEN_REFRESH_SKEW_SECS,
-            None => false,
+            None => !token.trim().is_empty(),
         }
     }
 

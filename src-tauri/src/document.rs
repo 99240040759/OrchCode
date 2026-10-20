@@ -147,17 +147,21 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     let mut page_boundaries = Vec::new();
 
     for (page_num, _page_id) in &pages {
-        let page_offset = full_text.len();
-        page_boundaries.push((page_offset, *page_num as usize));
         match doc.extract_text(&[*page_num]) {
             Ok(text) => {
                 let cleaned = clean_pdf_text(&text);
+                let page_offset = full_text.len();
+                page_boundaries.push((page_offset, *page_num as usize));
                 if !cleaned.trim().is_empty() {
                     full_text.push_str(&cleaned);
                     full_text.push('\n');
+                } else {
+                    full_text.push_str(&format!("[Page {page_num}]\n"));
                 }
             }
             Err(_) => {
+                let page_offset = full_text.len();
+                page_boundaries.push((page_offset, *page_num as usize));
                 full_text.push_str(&format!("[Page {page_num}: image content — OCR not available]\n"));
             }
         }
@@ -278,7 +282,7 @@ fn extract_office_text(xml: &str) -> AppResult<String> {
                 let local = e.local_name();
                 let lb = local.as_ref();
                 match lb {
-                    b"t" | b"delText" | b"instrText" => in_text = true,
+                    b"t" => in_text = true,
                     b"p" => {
                         if !text.is_empty() && !text.ends_with('\n') {
                             text.push('\n');
@@ -299,7 +303,7 @@ fn extract_office_text(xml: &str) -> AppResult<String> {
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
                 let lb = local.as_ref();
-                if matches!(lb, b"t" | b"delText" | b"instrText") {
+                if lb == b"t" {
                     in_text = false;
                 }
             }
@@ -343,11 +347,20 @@ fn extract_xml_element(xml: &str, tag: &str) -> AppResult<String> {
                     in_target = true;
                 }
             }
+            Ok(Event::End(ref e)) => {
+                if e.local_name().as_ref() == tag_local {
+                    in_target = false;
+                }
+            }
             Ok(Event::Text(e)) if in_target => {
                 if let Ok(t) = e.unescape() {
                     result.push_str(&t);
                 }
-                in_target = false;
+            }
+            Ok(Event::CData(e)) if in_target => {
+                if let Ok(t) = std::str::from_utf8(e.as_ref()) {
+                    result.push_str(t);
+                }
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -514,15 +527,11 @@ pub fn is_parseable_document(path: &Path) -> bool {
 }
 
 pub fn parse_document_bytes(bytes: &[u8], extension: &str) -> AppResult<ParsedDocumentDto> {
-    use std::io::Write;
-    let mut file = tempfile::Builder::new()
-        .suffix(&format!(".{}", extension.trim_start_matches('.')))
-        .tempfile()
-        .map_err(AppError::Io)?;
-    file.write_all(bytes).map_err(AppError::Io)?;
-    file.flush().map_err(AppError::Io)?;
-    let file_type = detect_file_type(file.path())?;
-    let parsed = parse_document(file.path(), &file_type)?;
+    let dir = tempfile::tempdir().map_err(AppError::Io)?;
+    let file_path = dir.path().join(format!("doc.{}", extension.trim_start_matches('.')));
+    std::fs::write(&file_path, bytes).map_err(AppError::Io)?;
+    let file_type = detect_file_type(&file_path)?;
+    let parsed = parse_document(&file_path, &file_type)?;
     Ok(ParsedDocumentDto {
         title: parsed.title,
         file_type,

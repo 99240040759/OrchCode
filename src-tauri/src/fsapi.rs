@@ -127,8 +127,10 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
     let cut = if truncated {
-        let text_len = std::str::from_utf8(&buf).map(|s| s.len()).unwrap_or_else(|e| e.valid_up_to());
-        text_len.max(buf.len().saturating_sub(3))
+        match std::str::from_utf8(&buf) {
+            Ok(s) => s.len(),
+            Err(e) => e.valid_up_to(),
+        }
     } else {
         buf.len()
     };

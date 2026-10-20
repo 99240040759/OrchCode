@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use circular_buffer::CircularBuffer;
 use command_group::AsyncCommandGroup;
 use ignore::WalkBuilder;
@@ -745,7 +746,7 @@ impl Tool for ReadFile {
         "Read the contents of a file in the workspace. \
 Returns text content for source code, config, markdown, JSON, SVG, PDF, Word, Excel and PowerPoint files. \
 Output is limited to about 2000 lines per call; pass start_line and end_line (1-based, inclusive) to read other sections. \
-Raster images return their dimensions only. ALWAYS call this before editing any file."
+Raster images return a data URL. ALWAYS call this before editing any file."
             .to_string()
     }
 
@@ -783,21 +784,26 @@ Raster images return their dimensions only. ALWAYS call this before editing any 
         }
 
         if crate::media::is_raster_extension(&ext) {
-            let size = fs_util::check_file_size(&path)?;
             let bytes = tokio::fs::read(&path)
                 .await
                 .map_err(|e| ToolError::msg(format!("cannot read image {rel}: {e}")))?;
-            let dims = tokio::task::spawn_blocking(move || crate::media::image_dimensions(&bytes))
-                .await
-                .ok()
-                .flatten();
-            let dimension_text = dims
-                .map(|(w, h)| format!("{w}x{h} px, "))
-                .unwrap_or_default();
-            return Ok(format!(
-                "Image file {rel} ({dimension_text}{size} bytes, {}). Image pixels cannot be returned through tools; if visual inspection is needed, ask the user to attach the image to a chat message.",
-                raster_mime(&ext)
-            ));
+            let mime = raster_mime(&ext);
+            let b64 = tokio::task::spawn_blocking(move || {
+                crate::media::encode_for_model(
+                    &bytes,
+                    &ext,
+                    config::MAX_MODEL_IMAGE_DIMENSION,
+                    config::MAX_MODEL_IMAGE_BYTES,
+                )
+                .map(|(encoded, _)| encoded)
+            })
+            .await
+            .ok()
+            .and_then(Result::ok);
+
+            if let Some(b64) = b64 {
+                return Ok(format!("data:{mime};base64,{b64}"));
+            }
         }
 
         let meta = tokio::fs::metadata(&path)
@@ -971,10 +977,10 @@ Each old_string must match exactly one location. Line endings are normalized aut
                     i + 1
                 )));
             }
-            let (old, new) = if uses_crlf && !r.old_string.contains('\r') {
+            let (old, new) = if uses_crlf {
                 (to_crlf(&r.old_string), to_crlf(&r.new_string))
             } else {
-                (r.old_string.clone(), r.new_string.clone())
+                (r.old_string.replace("\r\n", "\n"), r.new_string.replace("\r\n", "\n"))
             };
             let count = content.matches(old.as_str()).count();
             if count == 0 {

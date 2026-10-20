@@ -10,6 +10,7 @@
 
 /* ─── MATERIAL DARK DESIGN TOKENS ────────────────────────────────────────── */
 :root {
+  color-scheme: dark;
   /* Surface hierarchy — MD3 dark baseline */
   --md-bg:          #0f0f0f;   /* app background / scrim   */
   --md-s0:          #141414;   /* surface level 0          */
@@ -80,10 +81,7 @@
 /* ─── RESET & BASE ───────────────────────────────────────────────────────── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; -webkit-user-select:none; user-select:none; -webkit-user-drag:none; }
 
-* { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.1) transparent; cursor:default; overscroll-behavior:none; }
-*::-webkit-scrollbar { width:4px; height:4px; }
-*::-webkit-scrollbar-thumb { background:rgba(255,255,255,.1); border-radius:var(--r-full); }
-*::-webkit-scrollbar-track { background:transparent; }
+* { overscroll-behavior:none; scrollbar-width:thin; }
 
 ::selection { background:rgba(255,255,255,.18); color:inherit; }
 
@@ -93,8 +91,8 @@ input, textarea, [contenteditable], [contenteditable='true'], .Composer-input { 
 img, a { -webkit-user-drag:none; }
 img { image-rendering:-webkit-optimize-contrast; }
 
-html, body { height:100%; overflow:hidden; overscroll-behavior:none; touch-action:none; background:var(--md-bg); color:var(--md-on); font-family:var(--font); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:geometricPrecision; -webkit-user-select:none; user-select:none; }
-#root { height:100%; -webkit-user-select:none; user-select:none; }
+html, body { height:100%; overflow:hidden; touch-action:none; background:var(--md-bg); color:var(--md-on); font-family:var(--font); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:geometricPrecision; color-scheme:dark; cursor:default; }
+#root { height:100%; }
 
 svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events:none; }
 
@@ -105,10 +103,11 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 @keyframes greetAvatar { to{opacity:1;transform:scale(1)} }
 @keyframes greetText   { to{opacity:1;transform:translateY(0)} }
 @keyframes micWave     { 0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(1)} }
+@keyframes streamIn    { from{opacity:0;transform:translateY(2px)} to{opacity:1;transform:translateY(0)} }
 
 /* ─── SHARED BASE RESETS & UTILITIES ─────────────────────────────────────── */
 /* 1. All Button Resets */
-.Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .LibraryView-pagination button, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .XlsxViewer-tab, .PptxViewer-nav-btn, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
+button, [role="button"], [role="menuitem"], a, select, summary, .Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .LibraryView-pagination button, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .XlsxViewer-tab, .PptxViewer-nav-btn, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
 
 /* 2. Common Transitions */
 .IconBtn, .WinBtn, .Sidebar-viewbtn, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .AttachmentCard, .AttachmentCard-remove, .DropdownMenuItem, .FilePicker-item, .DocViewer-zoom-btn, .DocViewer-zoom-pct { transition:background var(--dur) var(--ease), color var(--dur) var(--ease); }
@@ -121,20 +120,20 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .Sidebar-viewbtn[data-active="true"], .ThreadItem[data-active='true'], .ArtifactTab[data-active='true'], .ConnectorsView-filterTab[data-active="true"], .ConnectorCard-actionBtn--connect:hover:not(:disabled), .LibraryView-addBtn:hover:not(:disabled) { background:var(--md-selected); color:var(--md-on); }
 
 /* 4. Common Disabled States */
-.IconBtn:disabled, .Sidebar-newchat:disabled, .ThreadItem-btn:disabled, .Composer-send:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .GoogleBtn:disabled, .ConnectorCard-actionBtn:disabled, .LibraryView-addBtn:disabled, .LibraryView-pagination button:disabled, .DocViewer-zoom-btn:disabled, .PptxViewer-nav-btn:disabled { opacity:.38; cursor:default; }
+button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-disabled], [disabled], .IconBtn:disabled, .ThreadItem-btn:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .ConnectorCard-actionBtn:disabled, .LibraryView-addBtn:disabled, .LibraryView-pagination button:disabled, .DocViewer-zoom-btn:disabled, .PptxViewer-nav-btn:disabled { opacity:.38; cursor:default; }
 
 /* 5. Common Text Ellipsis */
-.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .Composer-footer .Composer-model > span:first-child, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .LibraryRow-title, .LibraryRow-path, .LibraryRow-time, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .LibraryRow-title, .LibraryRow-path, .LibraryRow-time, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* 6. Common Text / Search Inputs */
-.BrowserBar-url, .FilePicker-input, .LibraryView-searchInput, .Onboarding-input { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
-.BrowserBar-url:focus, .FilePicker-input:focus, .LibraryView-searchInput:focus, .Onboarding-input:focus { border-color:var(--md-outline-hi); }
+.BrowserBar-url, .FilePicker-input, .LibraryView-searchInput { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.BrowserBar-url:focus, .FilePicker-input:focus, .LibraryView-searchInput:focus { border-color:var(--md-outline-hi); }
 
 /* 7. Common Alert & Notification Banners */
-.ChatPane-error, .Msg-error, .BrowserView-error, .ConnectorsView-error, .LibraryView-error, .WorkspacePicker-error { display:flex; align-items:center; background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.25); border-radius:var(--r-md); color:var(--md-error-c); }
+.ChatPane-error, .Msg-error, .BrowserView-error, .ConnectorsView-error, .WorkspacePicker-error { display:flex; align-items:center; background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.25); border-radius:var(--r-md); color:var(--md-error-c); }
 
 /* 8. Common Scroll Containers (Disable Elastic Bounce / Rubber-Banding) */
-.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer, .CodeBlock .CodeBlock-pre, .CodeBlock-pre { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
+.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
 
 .Msg-notice, .Composer-notice, .FileContent-trunc { background:rgba(241,180,103,.09); color:var(--md-warn); }
 
@@ -271,7 +270,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 
 /* ─── MESSAGE LIST ───────────────────────────────────────────────────────── */
 .MessageListWrap { position:relative; flex:1; min-height:0; display:flex; width:100%; }
-.MessageList { flex:1; min-height:0; width:100%; overflow-y:auto; overflow-x:hidden; overscroll-behavior:none; overflow-anchor:none; display:flex; flex-direction:column; align-items:center; contain:content; will-change:scroll-position; }
+.MessageList { flex:1; min-height:0; width:100%; overflow-y:auto; overflow-x:hidden; overflow-anchor:none; display:flex; flex-direction:column; align-items:center; contain:content; will-change:scroll-position; }
 .MessageList-inner { max-width:var(--chat-w); width:100%; padding:8px 8px 8px 16px; display:flex; flex-direction:column; gap:var(--sp-3); }
 .MessageList-bottomSpacer { height:100px; flex-shrink:0; width:100%; }
 
@@ -294,6 +293,8 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .Msg-assistant > .ToolList + .ToolList,
 .Msg-assistant > .ToolList + .ThinkingShimmer,
 .Msg-assistant > .Reasoning + .ThinkingShimmer { margin-top:4px; }
+.Msg-assistant[data-streaming='true'] > .Markdown:last-child { animation:streamIn 80ms ease-out both; }
+.Msg-assistant[data-streaming='true'] > .Reasoning:last-child .Reasoning-body { animation:streamIn 80ms ease-out both; }
 .Msg-attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end; }
 
 .Msg-error { gap:8px; padding:8px 12px; font-size:13px; }
@@ -308,7 +309,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 
 /* ─── REASONING ──────────────────────────────────────────────────────────── */
 .Reasoning { display:flex; flex-direction:column; gap:4px; }
-.Reasoning-toggle { display:inline-flex; align-items:center; gap:6px; padding:0; height:22px; min-height:22px; color:var(--md-on-var); font-size:13px; width:fit-content; }
+.Reasoning-toggle { display:inline-flex; align-items:center; gap:6px; height:22px; min-height:22px; color:var(--md-on-var); font-size:13px; width:fit-content; }
 .Reasoning-toggle:hover { color:var(--md-on); }
 .Reasoning-label { font-size:13px; line-height:22px; }
 .Reasoning-chevron { width:13px; height:13px; transition:transform var(--dur) var(--ease); opacity:.7; }
@@ -357,7 +358,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .Composer-inputArea { position:relative; min-width:0; }
 .Composer-inputArea-prompt { min-height:48px; }
 
-.Composer-input { display:block; width:100%; min-height:44px; max-height:200px; overflow-y:auto; outline:none; background:transparent; color:var(--md-on); font-family:inherit; font-size:13.5px; line-height:1.75; padding:10px 10px 6px; word-break:break-word; white-space:pre-wrap; cursor:text; text-align:left; }
+.Composer-input { display:block; width:100%; min-height:44px; max-height:200px; overflow-y:auto; outline:none; background:transparent; color:var(--md-on); font-family:inherit; font-size:13.5px; line-height:1.75; padding:10px 10px 6px; word-break:break-word; white-space:pre-wrap; text-align:left; }
 .Composer-input:focus, .Composer-input.ProseMirror-focused, .Composer-input .ProseMirror:focus { outline:none; }
 .Composer-input.Composer-input-prompt { min-height:48px; padding:13.5px 52px 13.5px 44px; line-height:1.5; }
 .Composer-input p { margin:0; text-align:left; }
@@ -412,7 +413,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .Composer-mic-send { background:rgba(252,107,131,.18); color:var(--md-error-c); box-shadow:0 0 10px rgba(252,107,131,.22); }
 .Composer-mic-send:hover:not(:disabled) { background:rgba(252,107,131,.28); }
 
-.ContextBar { display:inline-flex; align-items:center; gap:6px; padding:0 4px; height:20px; user-select:none; }
+.ContextBar { display:inline-flex; align-items:center; gap:6px; padding:0 4px; height:20px; user-select:none; cursor:pointer; }
 .ContextBar:hover .ContextBar-label { color:var(--md-on); }
 .ContextBar-track { width:60px; height:4px; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; flex-shrink:0; }
 .ContextBar-fill { height:100%; border-radius:2px; background:var(--md-on-var); transition:width .2s ease; }
@@ -449,7 +450,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .DropdownMenuItem { display:flex; align-items:center; gap:7px; height:26px; padding:0 8px; border-radius:var(--r-sm); font-size:12px; color:var(--md-on); }
 .DropdownMenuItem svg { width:14px; height:14px; color:var(--md-on-var); flex:0 0 auto; }
 .DropdownMenuItem[data-selected='true'] { color:var(--md-primary); font-weight:500; }
-.ModelItem-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ModelItem-name { flex:1; }
 .DropdownMenu-separator { height:1px; background:var(--md-outline); margin:var(--sp-1) 0; }
 
 /* ─── WORKSPACE MENU ITEMS ───────────────────────────────────────────────── */
@@ -514,30 +515,28 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .Markdown a { color:var(--md-primary); text-decoration:none; cursor:pointer; }
 .Markdown hr { display:none; }
 .Markdown blockquote { margin:0 0 10px; padding:2px 12px; border-left:3px solid var(--md-outline); color:var(--md-on-var); }
-.Markdown code:not(.CodeBlock code) { font-family:var(--font-mono); font-size:12.5px; padding:2px 6px; border-radius:var(--r-xs); background:rgba(255,255,255,.09); color:var(--md-on); }
-.Markdown table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; text-align:left; margin:10px 0; background:var(--md-s1); border:1px solid var(--md-outline-hi); border-radius:var(--r-md); overflow:hidden; }
-.Markdown th { background:rgba(255,255,255,.07); color:var(--md-on); font-weight:600; padding:9px 13px; border-bottom:1px solid var(--md-outline-hi); border-right:1px solid var(--md-outline-in); }
-.Markdown th:last-child { border-right:none; }
-.Markdown td { padding:7px 13px; border-bottom:1px solid var(--md-outline-in); border-right:1px solid var(--md-outline-var); color:var(--md-on); }
-.Markdown td:last-child { border-right:none; }
-.Markdown tr:last-child td { border-bottom:none; }
-.Markdown tr:nth-child(even) { background:rgba(255,255,255,.025); }
+.Markdown code:not(.CodeBlock code) { font-family:var(--font-mono); font-size:12.5px; padding:2px 5px; border-radius:var(--r-xs); background:rgba(255,255,255,.07); color:var(--md-on); }
+.Markdown-tableWrap { width:100%; overflow-x:auto; margin:12px 0; }
+.Markdown table { width:100%; border-collapse:collapse; border-spacing:0; font-size:13px; text-align:left; }
+.Markdown th, .Markdown td { padding:6px 12px; border:1px solid var(--md-outline); }
+.Markdown th { font-weight:600; color:var(--md-on); background:rgba(255,255,255,.04); }
+.Markdown td { color:var(--md-on); }
+.Markdown tr:nth-child(2n) { background:rgba(255,255,255,.02); }
 .Markdown-imgCard { display:inline-flex; flex-direction:column; gap:6px; margin:8px 0; padding:6px; border:1px solid var(--md-outline); border-radius:var(--r-lg); background:rgba(255,255,255,.02); max-width:340px; vertical-align:middle; }
 .Markdown-imgThumb { max-width:100%; max-height:260px; border-radius:var(--r-sm); object-fit:contain; background:var(--md-s2); border:1px solid rgba(255,255,255,.08); display:block; }
 .Markdown-imgCaption { font-size:11.5px; color:var(--md-on-var); padding:2px 4px; word-break:break-word; }
 .Markdown-remoteImg { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:var(--r-md); border:1px dashed rgba(255,255,255,.18); color:inherit; cursor:pointer; font-size:12px; }
 
 /* ─── CODE BLOCK ─────────────────────────────────────────────────────────── */
-.CodeBlock { margin:10px 0; border:1px solid var(--md-outline-var); border-radius:var(--r-md); overflow:hidden; background:var(--md-s1); }
-.CodeBlock .CodeBlock-pre { max-height:400px; overflow:auto; }
-.CodeBlock-header { display:flex; align-items:center; justify-content:space-between; height:26px; padding:0 10px; background:#1e1e1e; border-bottom:1px solid var(--md-outline-var); }
-.CodeBlock-lang { font-family:var(--font-mono); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--md-on-var); }
-.CodeBlock-copy { display:inline-flex; align-items:center; gap:4px; color:var(--md-on-var); font-size:11px; padding:2px 5px; border-radius:var(--r-xs); transition:background var(--dur) var(--ease), color var(--dur) var(--ease); }
-.CodeBlock-copy:hover:not(:disabled) { color:var(--md-on); }
-.CodeBlock-copy svg { width:12px; height:12px; }
-.CodeBlock-copyIconDone { color:var(--md-secondary); }
-.CodeBlock-pre { margin:0; padding:12px 16px; font-family:var(--font-mono); font-size:13px; line-height:1.6; color:var(--md-on); background:transparent; white-space:pre; word-break:normal; overflow-x:auto; }
-.CodeBlock-pre code { font-family:inherit; font-size:inherit; background:transparent; }
+.CodeBlock { margin:12px 0; border:1px solid rgba(255,255,255,.08); border-radius:var(--r-md); overflow:hidden; background:#181818; }
+.CodeBlock-header { display:flex; align-items:center; justify-content:space-between; height:28px; padding:0 10px 0 12px; background:rgba(255,255,255,.02); border-bottom:1px solid rgba(255,255,255,.06); }
+.CodeBlock-lang { font-family:var(--font-mono); font-size:11.5px; font-weight:400; color:var(--md-on-dim); }
+.CodeBlock-copy { display:inline-flex; align-items:center; gap:4px; color:var(--md-on-dim); font-size:11.5px; padding:2px 6px; border-radius:var(--r-xs); transition:color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.CodeBlock-copy:hover:not(:disabled) { color:var(--md-on); background:var(--md-hover); }
+.CodeBlock-copy svg { width:13px; height:13px; }
+.CodeBlock-copyIconDone { color:var(--md-success); }
+.CodeBlock-pre { margin:0; padding:12px 14px; font-family:var(--font-mono); font-size:13px; line-height:1.55; color:#f0f0f0; background:#181818; white-space:pre-wrap; word-break:break-word; tab-size:2; }
+.CodeBlock-pre code { font-family:inherit; font-size:inherit; color:inherit; background:transparent; }
 
 /* ─── SYNTAX HIGHLIGHT (VS Code dark) ───────────────────────────────────── */
 .token.comment,.token.prolog,.token.doctype,.token.cdata { color:#6a9955; font-style:italic; }
@@ -666,17 +665,17 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .LibraryView-header { flex:0 0 auto; padding:28px 40px 0; }
 .LibraryView-title-row { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
 .LibraryView-title { font-size:22px; font-weight:700; color:var(--md-on); margin:0; }
-.LibraryView-count { font-size:12px; font-weight:500; color:var(--md-on-dim); background:var(--md-hover); padding:2px 8px; }
+.LibraryView-count { font-size:12px; color:var(--md-on-dim); background:var(--md-hover); padding:2px 8px; }
 .LibraryView-subtitle { font-size:13px; color:var(--md-on-dim); margin:0 0 20px; }
 .LibraryView-toolbar { flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:0 40px 16px; border-bottom:1px solid var(--md-outline); }
 .LibraryView-search { flex:1; }
-.LibraryView-searchInput { width:100%; height:34px; padding:0 12px; border-radius:var(--r-md); border-color:var(--md-outline-in); font-size:13px; }
-.LibraryView-searchInput:focus { border-color:var(--md-outline-hi); background:var(--md-hover); }
+.LibraryView-searchInput { width:100%; height:34px; padding:0 12px; border-color:var(--md-outline-in); font-size:13px; }
+.LibraryView-searchInput:focus { background:var(--md-hover); }
 .LibraryView-searchInput::placeholder { color:var(--md-on-dim); }
 .LibraryView-addBtn { flex:0 0 auto; height:34px; padding:0 14px; border-radius:var(--r-md); border:1px solid var(--md-outline-hi); background:var(--md-hover); color:var(--md-on); font-size:13px; font-weight:500; white-space:nowrap; }
 .LibraryView-addBtn:hover:not(:disabled) { border-color:var(--md-on); }
 .LibraryView-error, .LibraryView-success { flex:0 0 auto; display:flex; align-items:center; gap:10px; margin:0 40px; padding:10px 14px; border-radius:var(--r-md); font-size:13px; }
-.LibraryView-error { border:1px solid rgba(227,70,113,.24); color:var(--md-error); }
+.LibraryView-error { background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.24); color:var(--md-error); }
 .LibraryView-success { background:rgba(112,180,137,.11); border:1px solid rgba(112,180,137,.24); color:var(--md-success); }
 .LibraryView-content { flex:1; min-height:0; overflow-y:auto; padding:12px 40px 32px; }
 .LibraryView-loading, .LibraryView-noResults { color:var(--md-on-dim); font-size:13px; padding:24px 0; }
@@ -781,7 +780,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 .WorkspacePicker-card-icon { font-size:28px; color:var(--md-primary); flex-shrink:0; }
 .WorkspacePicker-card-label { font-size:13px; font-weight:600; color:var(--md-on); }
 .WorkspacePicker-card-hint { font-size:11px; color:var(--md-on-dim); text-align:center; line-height:1.4; }
-.WorkspacePicker-error { gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border:1px solid rgba(227,70,113,.24); font-size:12px; margin-top:var(--sp-3); max-width:360px; text-align:left; }
+.WorkspacePicker-error { gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); font-size:12px; margin-top:var(--sp-3); max-width:360px; text-align:left; }
 .WorkspacePicker-error-dismiss { display:inline-flex; align-items:center; margin-left:auto; color:inherit; font-size:16px; opacity:.6; flex-shrink:0; }
 .WorkspacePicker-error-dismiss:hover { opacity:1; }
 

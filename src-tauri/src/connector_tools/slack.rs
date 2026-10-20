@@ -144,22 +144,23 @@ impl Tool for SlackListChannels {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
 
-        if channels.is_empty() {
+        let active_channels: Vec<_> = channels
+            .iter()
+            .filter(|ch| !ch["is_archived"].as_bool().unwrap_or(false))
+            .collect();
+
+        if active_channels.is_empty() {
             return Ok("No channels found.".to_string());
         }
 
-        let mut out = format!("Found {} channel(s):\n\n", channels.len());
-        for ch in &channels {
+        let mut out = format!("Found {} channel(s):\n\n", active_channels.len());
+        for ch in active_channels {
             let name = ch["name"].as_str().unwrap_or("(unnamed)");
             let id = ch["id"].as_str().unwrap_or("");
             let purpose = ch["purpose"]["value"].as_str().unwrap_or("");
             let topic = ch["topic"]["value"].as_str().unwrap_or("");
             let members = ch["num_members"].as_u64().unwrap_or(0);
             let private = ch["is_private"].as_bool().unwrap_or(false);
-            let archived = ch["is_archived"].as_bool().unwrap_or(false);
-            if archived {
-                continue;
-            }
             let mut desc = format!(
                 "• #{name} [ID: {id}] {}\n  Members: {members}\n",
                 if private { "(private)" } else { "(public)" }

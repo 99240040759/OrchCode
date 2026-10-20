@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { create } from "zustand";
-import { cn } from "../../lib/api";
+import { cn } from "../../lib/utils";
 
 export const useOverlayStore = create<{ count: number; change: (delta: number) => void }>((set) => ({
   count: 0,

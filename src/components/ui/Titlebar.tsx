@@ -14,7 +14,7 @@ import {
 import { useArtifactsStore } from "../../lib/artifacts";
 import { useUpdaterStore } from "../../lib/updater";
 import { useChatStore } from "../../lib/store";
-import { cn } from "../../lib/api";
+import { cn } from "../../lib/utils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 

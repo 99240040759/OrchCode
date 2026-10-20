@@ -13,19 +13,22 @@ export function splitPathParts(pathStr: string): string[] {
 
 export function getBasename(pathStr: string): string {
   if (!pathStr) return "";
-  const parts = normalizePath(pathStr).split("/");
-  return parts[parts.length - 1] || pathStr;
+  const parts = splitPathParts(pathStr);
+  return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
 export function getDirname(pathStr: string): string {
   if (!pathStr) return "";
-  const parts = normalizePath(pathStr).split("/");
+  const normalized = normalizePath(pathStr);
+  const isAbs = normalized.startsWith("/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 1) return isAbs ? "/" : "";
   parts.pop();
-  return parts.join("/");
+  return (isAbs ? "/" : "") + parts.join("/");
 }
 
 export function getExt(pathStr: string): string {
-  const base = normalizePath(pathStr).split("/").pop() ?? "";
+  const base = getBasename(pathStr);
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return "";
   return base.slice(dot + 1).toLowerCase();

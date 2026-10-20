@@ -187,7 +187,7 @@ impl AgentHook for ContextGuard {
                 }
             }
             let rendered = res.output().render();
-            if rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
+            if !rendered.starts_with("data:image/") && rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
                 return OutcomeAction::rewrite_tool_result(&event, clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS));
             }
         }
@@ -307,7 +307,7 @@ If you have enough information to act, act. If you need information, get it with
 
 - **list_dir** lists folder entries.
 - **read_file** returns file text (about 2000 lines per call; use start_line/end_line for more). \
-  PDF, Word, Excel and PowerPoint files are returned as extracted text. Raster images return only their dimensions.
+  PDF, Word, Excel and PowerPoint files are returned as extracted text. Raster images return a data URL.
 - **read_skill** returns procedural instructions for engineering workflows.
 - **write_file / multi_replace_file_content** return a confirmation or an error. \
   If multi_replace fails with \"not found\", the file content differs — read it again and retry with exact text.
@@ -1129,6 +1129,19 @@ Conversation excerpt:\n---\n{transcript}\n---"
 }
 
 pub fn humanize_llm_error(raw: &str) -> String {
+    let lower = raw.to_lowercase();
+    if lower.contains("error decoding response")
+        || lower.contains("response body was not valid")
+        || lower.contains("unexpected end of input")
+        || lower.contains("failed to parse response")
+        || (lower.contains("status: 400") && lower.contains("token"))
+    {
+        return "The model's context window overflowed mid-run. \
+            Your message will trigger compaction on the next send. \
+            If this keeps happening, try starting a new chat."
+            .to_string();
+    }
+
     if let Some(start) = raw.find('{') {
         if let Some(end) = raw.rfind('}') {
             if end > start {

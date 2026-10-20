@@ -134,7 +134,7 @@ const CodeBlock = React.memo(function CodeBlock({ lang, code }: { lang: string; 
   return (
     <div className="CodeBlock">
       <div className="CodeBlock-header">
-        <span className="CodeBlock-lang">{lang || "text"}</span>
+        <span className="CodeBlock-lang">{lang ? lang.toLowerCase() : ""}</span>
         <Tooltip content={copied ? "Copied" : "Copy code"} side="top">
           <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
             {copied ? (
@@ -178,6 +178,13 @@ function WorkspaceImage({ src, alt }: { src: string; alt?: string }) {
 }
 
 const MARKDOWN_COMPONENTS: Components = {
+  table({ children, ...props }) {
+    return (
+      <div className="Markdown-tableWrap">
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
   pre({ children }) {
     const child = React.Children.toArray(children)[0];
     const className = React.isValidElement<{ className?: string }>(child) ? child.props.className ?? "" : "";

@@ -219,6 +219,7 @@ export const useWorkspaceStore = create(
             s.current = active;
             s.status = "ready";
           });
+          notifyWorkspaceActivated();
         } catch (e) {
           set((s) => {
             s.status = "needs_pick";
@@ -275,6 +276,9 @@ export const useWorkspaceStore = create(
           const next = get().all.filter((w) => w.id !== id);
           await saveAll(next);
           const wasCurrent = get().current?.id === id;
+          if (wasCurrent) {
+            await setUserPref(PREF_LAST_WORKSPACE, "", true).catch(() => undefined);
+          }
           set((s) => {
             s.all = next;
             s.error = null;

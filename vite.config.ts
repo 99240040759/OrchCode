@@ -19,20 +19,21 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("node_modules/react/") || id.includes("node_modules/react-dom/")) {
+          const normalized = id.replace(/\\/g, "/");
+          if (!normalized.includes("node_modules")) return undefined;
+          if (normalized.includes("node_modules/react/") || normalized.includes("node_modules/react-dom/")) {
             return "react";
           }
-          if (id.includes("node_modules/@radix-ui/")) return "radix";
-          if (id.includes("node_modules/@xterm/")) return "xterm";
-          if (id.includes("node_modules/@react-symbols/")) return "symbols";
-          if (id.includes("node_modules/react-icons/")) return "icons";
-          if (id.includes("node_modules/prismjs/")) return "prism";
-          if (id.includes("node_modules/monaco-editor/")) {
-            if (id.includes("worker")) return undefined;
+          if (normalized.includes("node_modules/@radix-ui/")) return "radix";
+          if (normalized.includes("node_modules/@xterm/")) return "xterm";
+          if (normalized.includes("node_modules/@react-symbols/")) return "symbols";
+          if (normalized.includes("node_modules/react-icons/")) return "icons";
+          if (normalized.includes("node_modules/prismjs/")) return "prism";
+          if (normalized.includes("node_modules/monaco-editor/")) {
+            if (normalized.includes("worker")) return undefined;
             return "monaco";
           }
-          if (id.includes("node_modules/@monaco-editor/")) return "monaco-react";
+          if (normalized.includes("node_modules/@monaco-editor/")) return "monaco-react";
           return undefined;
         },
       },

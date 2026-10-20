@@ -530,17 +530,14 @@ fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: 
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        let fallback = || {
-            let first_line = prompt.trim().lines().next().unwrap_or("").trim().to_string();
-            crate::util::truncate_chars(&first_line, 80).to_string()
+        let Ok(title) = gateway.generate_title(&prompt).await else {
+            return;
         };
-        let title = match gateway.generate_title(&prompt).await {
-            Ok(t) if !t.trim().is_empty() => crate::util::truncate_chars(t.trim(), 120).to_string(),
-            _ => fallback(),
-        };
+        let title = title.trim();
         if title.is_empty() {
             return;
         }
+        let title = crate::util::truncate_chars(title, 120).to_string();
         if let Ok(true) = memory.set_session_title(&session_id, &title).await {
             let _ = app.emit("sessions-updated", ());
         }

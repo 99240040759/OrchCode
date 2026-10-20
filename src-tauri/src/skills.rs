@@ -115,10 +115,12 @@ struct SkillFrontmatter {
 }
 
 fn parse_skill_markdown(raw: &str, file_path: &Path) -> Option<Skill> {
-    let fallback_name = file_path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|s| s.to_string_lossy().to_string())?;
+    let fallback_name = if file_path.file_name().and_then(|s| s.to_str()) == Some("SKILL.md") {
+        file_path.parent().and_then(|p| p.file_name())
+    } else {
+        file_path.file_stem()
+    }
+    .map(|s| s.to_string_lossy().to_string())?;
     let normalized_path = file_path.to_string_lossy().replace('\\', "/");
 
     let matter = Matter::<YAML>::new();

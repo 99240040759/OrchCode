@@ -54,16 +54,21 @@ const SessionItem = React.memo(function SessionItem({
       className="ThreadItem"
       data-active={isActive}
     >
-      <button
-        type="button"
-        className="ThreadItem-btn"
-        aria-current={isActive ? "page" : undefined}
-        disabled={streaming}
-        onClick={() => onSelect(session.id)}
+      <Tooltip
+        content={streaming && !isActive ? "Stop the agent to switch chats" : undefined}
+        side="right"
       >
-        <span className="ThreadItem-title">{session.title || "New chat"}</span>
-        <span className="ThreadItem-time">{formatRelativeTime(session.updatedAt)}</span>
-      </button>
+        <button
+          type="button"
+          className="ThreadItem-btn"
+          aria-current={isActive ? "page" : undefined}
+          disabled={streaming && !isActive}
+          onClick={() => onSelect(session.id)}
+        >
+          <span className="ThreadItem-title">{session.title || "New chat"}</span>
+          <span className="ThreadItem-time">{formatRelativeTime(session.updatedAt)}</span>
+        </button>
+      </Tooltip>
 
       {confirming ? (
         <div className="ThreadItem-confirm">

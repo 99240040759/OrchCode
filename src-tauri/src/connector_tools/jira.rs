@@ -299,7 +299,13 @@ impl Tool for JiraGetIssue {
         let total_comments = fields["comment"]["total"].as_u64().unwrap_or(comments.len() as u64);
 
         if !comments.is_empty() {
-            out.push_str(&format!("\n## Comments ({total_comments} total — showing last {}):\n\n", comments.len().min(10)));
+            let count = comments.len().min(10);
+            let label = if (comments.len() as u64) < total_comments {
+                format!("showing {count}")
+            } else {
+                format!("showing last {count}")
+            };
+            out.push_str(&format!("\n## Comments ({total_comments} total — {label}):\n\n"));
             for c in comments.iter().rev().take(10).collect::<Vec<_>>().iter().rev() {
                 let author = c["author"]["displayName"].as_str().unwrap_or("—");
                 let created = c["created"].as_str().unwrap_or("—");

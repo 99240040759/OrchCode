@@ -13,8 +13,25 @@ pub fn is_raster_extension(ext: &str) -> bool {
     RASTER_EXTENSIONS.contains(&ext)
 }
 
+fn flatten_to_rgb(image: &DynamicImage) -> DynamicImage {
+    if !image.color().has_alpha() {
+        return DynamicImage::ImageRgb8(image.to_rgb8());
+    }
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut rgb = image::RgbImage::new(width, height);
+    for (x, y, pixel) in rgba.enumerate_pixels() {
+        let alpha = pixel[3] as f32 / 255.0;
+        let r = ((1.0 - alpha) * 255.0 + alpha * (pixel[0] as f32)).round() as u8;
+        let g = ((1.0 - alpha) * 255.0 + alpha * (pixel[1] as f32)).round() as u8;
+        let b = ((1.0 - alpha) * 255.0 + alpha * (pixel[2] as f32)).round() as u8;
+        rgb.put_pixel(x, y, image::Rgb([r, g, b]));
+    }
+    DynamicImage::ImageRgb8(rgb)
+}
+
 fn encode_jpeg(image: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
-    let rgb = DynamicImage::ImageRgb8(image.to_rgb8());
+    let rgb = flatten_to_rgb(image);
     let mut cursor = Cursor::new(Vec::new());
     rgb.write_with_encoder(JpegEncoder::new_with_quality(&mut cursor, quality))
         .map_err(|e| AppError::other(format!("image encode failed: {e}")))?;
@@ -40,31 +57,24 @@ fn media_for_extension(ext: &str) -> Option<ImageMediaType> {
 }
 
 pub fn encode_for_model(bytes: &[u8], ext: &str, max_dimension: u32, max_bytes: usize) -> AppResult<(String, ImageMediaType)> {
-    let image = image::load_from_memory(bytes)
-        .map_err(|e| AppError::other(format!("cannot decode image: {e}")))?;
-    let (width, height) = image.dimensions();
-    let within_bounds = width <= max_dimension && height <= max_dimension && bytes.len() <= max_bytes;
-    if within_bounds {
-        if let Some(media) = media_for_extension(ext) {
+    if let Some(media) = media_for_extension(ext) {
+        if bytes.len() <= max_bytes {
             return Ok((base64::engine::general_purpose::STANDARD.encode(bytes), media));
         }
     }
+    let image = image::load_from_memory(bytes)
+        .map_err(|e| AppError::other(format!("cannot decode image: {e}")))?;
+    let (width, height) = image.dimensions();
     let resized = if width > max_dimension || height > max_dimension {
         image.thumbnail(max_dimension, max_dimension)
     } else {
         image
     };
-    let (encoded, media) = if resized.color().has_alpha() {
-        let png = encode_png(&resized)?;
-        if png.len() <= max_bytes {
-            (png, ImageMediaType::PNG)
-        } else {
-            (encode_jpeg(&resized, 85)?, ImageMediaType::JPEG)
-        }
-    } else {
-        (encode_jpeg(&resized, 85)?, ImageMediaType::JPEG)
-    };
-    Ok((base64::engine::general_purpose::STANDARD.encode(encoded), media))
+    let mut cursor = Cursor::new(Vec::new());
+    resized
+        .write_to(&mut cursor, ImageFormat::Png)
+        .map_err(|e| AppError::other(format!("image encode failed: {e}")))?;
+    Ok((base64::engine::general_purpose::STANDARD.encode(cursor.into_inner()), ImageMediaType::PNG))
 }
 
 pub fn preview_data_url(bytes: &[u8], mime: &str, max_dimension: u32) -> AppResult<String> {

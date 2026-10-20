@@ -256,7 +256,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
   const groups = groupItems(message.items);
 
   return (
-    <div className="Msg Msg-assistant">
+    <div className="Msg Msg-assistant" data-streaming={message.streaming || undefined}>
       {groups.map((group) => {
         if (group.kind === "reasoning") {
           return <ThinkingBlock key={group.item.id} item={group.item} />;

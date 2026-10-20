@@ -33,6 +33,7 @@ pub fn streaming_http_client() -> reqwest::Client {
             reqwest::Client::builder()
                 .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
                 .connect_timeout(Duration::from_secs(15))
+                .tcp_nodelay(true)
                 .build()
                 .expect("failed to build streaming http client")
         })

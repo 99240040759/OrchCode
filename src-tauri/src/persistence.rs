@@ -326,16 +326,11 @@ impl SqliteMemory {
         let uid = user_id.to_string();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE sessions SET user_id = ?1 WHERE user_id IS NULL",
-                params![uid],
-            )
-            .map_err(sql_err)?;
             let mut stmt = c
                 .prepare(
                     "SELECT id, title, workspace_path, updated_at, last_context_tokens
                      FROM sessions
-                     WHERE workspace_path = ?1 AND user_id = ?2
+                     WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)
                        AND (EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = sessions.id)
                             OR EXISTS (SELECT 1 FROM chat_runs r WHERE r.conversation_id = sessions.id))
                      ORDER BY updated_at DESC",
@@ -841,36 +836,6 @@ fn compaction_view(cid: &str, record: &CompactionRecord) -> MessageView {
     }
 }
 
-fn elide_old_images(messages: &mut [Message]) {
-    let user_turns: Vec<usize> = messages
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| is_user_turn(m))
-        .map(|(i, _)| i)
-        .collect();
-    if user_turns.len() <= 2 {
-        return;
-    }
-    let keep_from = user_turns[user_turns.len() - 2];
-    for message in messages.iter_mut().take(keep_from) {
-        if let Message::User { content } = message {
-            if !content.iter().any(|c| matches!(c, UserContent::Image(_))) {
-                continue;
-            }
-            let replaced: Vec<UserContent> = content
-                .iter()
-                .map(|c| match c {
-                    UserContent::Image(_) => {
-                        UserContent::text("[An image attached to this earlier message is omitted from context.]")
-                    }
-                    other => other.clone(),
-                })
-                .collect();
-            *content = replaced;
-        }
-    }
-}
-
 impl ConversationMemory for SqliteMemory {
     fn load<'a>(
         &'a self,
@@ -896,7 +861,6 @@ impl ConversationMemory for SqliteMemory {
                     let msg: Message = serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
                     out.push(msg);
                 }
-                elide_old_images(&mut out);
                 Ok(out)
             })
             .await

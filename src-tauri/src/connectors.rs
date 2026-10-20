@@ -638,15 +638,18 @@ impl ConnectorManager {
         };
 
         let (token, expires_at) = read_state();
-        let Some(_) = token.as_ref() else {
+        let Some(tok) = token else {
             return Err(AppError::ConnectorAuthError(format!(
                 "{connector_id} is not connected; connect it in Integrations"
             )));
         };
-        if let Some(tok) = token.clone() {
-            if expires_at.map(|e| e > threshold).unwrap_or(true) {
+        let has_refresh = load_connector_refresh_token(connector_id)?.is_some();
+        if let Some(exp) = expires_at {
+            if exp > threshold {
                 return Ok(tok);
             }
+        } else if !has_refresh {
+            return Ok(tok);
         }
 
         let lock = self
@@ -658,7 +661,11 @@ impl ConnectorManager {
 
         let (token2, expires_at2) = read_state();
         if let Some(tok) = token2 {
-            if expires_at2.map(|e| e > threshold).unwrap_or(true) {
+            if let Some(exp) = expires_at2 {
+                if exp > threshold {
+                    return Ok(tok);
+                }
+            } else if !has_refresh {
                 return Ok(tok);
             }
         }
