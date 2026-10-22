@@ -75,9 +75,9 @@ fn default_allowed() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
-    #[serde(default, alias = "costUsd", alias = "cost")]
+    #[serde(default, alias = "cost_usd", alias = "costUsd", alias = "cost")]
     pub cost_usd: f64,
-    #[serde(default, alias = "limitUsd", alias = "limit")]
+    #[serde(default, alias = "limit_usd", alias = "limitUsd", alias = "limit")]
     pub limit_usd: f64,
     #[serde(default)]
     pub remaining: f64,
