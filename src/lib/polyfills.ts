@@ -1,9 +1,57 @@
 /**
- * Polyfills and standard environment helpers.
- * Targets ES2024+ environments.
+ * Environment polyfills targeting ES2024+ and TC39 Stage 3 standards.
+ * Required by pdfjs-dist v6+ and modern web standards on WebKit/JavaScriptCore.
  */
 
-// Ensure Promise.withResolvers is available if runtime does not support it natively
+declare global {
+  interface Map<K, V> {
+    getOrInsertComputed(key: K, callbackfn: (key: K) => V): V;
+    getOrInsert(key: K, defaultValue: V): V;
+  }
+  interface PromiseConstructor {
+    withResolvers<T>(): {
+      promise: Promise<T>;
+      resolve: (value: T | PromiseLike<T>) => void;
+      reject: (reason?: unknown) => void;
+    };
+  }
+}
+
+// TC39 Stage 3 proposal: Map.prototype.getOrInsertComputed (used by pdfjs-dist v6+)
+if (typeof (Map.prototype as any).getOrInsertComputed !== "function") {
+  Object.defineProperty(Map.prototype, "getOrInsertComputed", {
+    value: function <K, V>(this: Map<K, V>, key: K, callbackfn: (key: K) => V): V {
+      if (this.has(key)) {
+        return this.get(key)!;
+      }
+      if (typeof callbackfn !== "function") {
+        throw new TypeError("callbackfn is not a function");
+      }
+      const value = callbackfn(key);
+      this.set(key, value);
+      return value;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+// TC39 Stage 3 proposal: Map.prototype.getOrInsert
+if (typeof (Map.prototype as any).getOrInsert !== "function") {
+  Object.defineProperty(Map.prototype, "getOrInsert", {
+    value: function <K, V>(this: Map<K, V>, key: K, defaultValue: V): V {
+      if (this.has(key)) {
+        return this.get(key)!;
+      }
+      this.set(key, defaultValue);
+      return defaultValue;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+// ECMAScript 2024: Promise.withResolvers
 if (typeof Promise.withResolvers !== "function") {
   Object.defineProperty(Promise, "withResolvers", {
     value: function <T>() {
@@ -20,8 +68,8 @@ if (typeof Promise.withResolvers !== "function") {
   });
 }
 
-// Ensure Object.groupBy is available if runtime does not support it natively
-if (typeof Object.groupBy !== "function") {
+// ECMAScript 2024: Object.groupBy
+if (typeof (Object as any).groupBy !== "function") {
   Object.defineProperty(Object, "groupBy", {
     value: function <K extends PropertyKey, T>(
       items: Iterable<T>,
@@ -35,6 +83,30 @@ if (typeof Object.groupBy !== "function") {
           result[key].push(item);
         } else {
           result[key] = [item];
+        }
+      }
+      return result;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+// ECMAScript 2024: Map.groupBy
+if (typeof (Map as any).groupBy !== "function") {
+  Object.defineProperty(Map, "groupBy", {
+    value: function <K, T>(
+      items: Iterable<T>,
+      callbackfn: (item: T, index: number) => K
+    ): Map<K, T[]> {
+      const result = new Map<K, T[]>();
+      let i = 0;
+      for (const item of items) {
+        const key = callbackfn(item, i++);
+        if (result.has(key)) {
+          result.get(key)!.push(item);
+        } else {
+          result.set(key, [item]);
         }
       }
       return result;

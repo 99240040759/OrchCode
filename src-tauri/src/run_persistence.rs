@@ -452,7 +452,7 @@ fn finalize_chat_run_sync(
         )
         .optional()
         .map_err(sql_err)?;
-    let Some((conversation_id, raw_prompt, user_message, commit_kind)) = stored else {
+    let Some((conversation_id, _raw_prompt, user_message, commit_kind)) = stored else {
         return Err(AppError::other("durable chat run not found"));
     };
 
@@ -588,7 +588,7 @@ impl TurnBuilder {
                     ));
                     tool_results.push(UserContent::ToolResult(ToolResult {
                         call: call_id,
-                        tool_name,
+                        name: tool_name,
                         content: vec![ToolResultContent::text(content)],
                         is_error,
                     }));

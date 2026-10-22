@@ -80,7 +80,7 @@ pub fn open(
         })
         .map_err(|e| AppError::other(format!("failed to open pty: {e}")))?;
 
-    let mut child = pair
+    let child = pair
         .slave
         .spawn_command(shell_command(cwd))
         .map_err(|e| AppError::other(format!("failed to spawn shell: {e}")))?;
@@ -109,7 +109,7 @@ pub fn open(
 
     {
         let channel = channel.clone();
-        let killer_for_wait = child.clone_killer();
+        let mut killer_for_wait = child.clone_killer();
         let mut child = child;
         std::thread::spawn(move || {
             let mut reader = reader;

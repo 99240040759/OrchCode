@@ -111,5 +111,9 @@ pub fn thumbnail_data_url_from_base64(b64: &str, mime: &str, max_dimension: u32)
 }
 
 pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    image::image_dimensions(&mut Cursor::new(bytes)).ok()
+    image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|r| r.into_dimensions().ok())
+        .or_else(|| image::load_from_memory(bytes).ok().map(|img| (img.width(), img.height())))
 }

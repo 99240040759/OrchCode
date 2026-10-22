@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zip::ZipArchive;
 
@@ -696,7 +695,7 @@ pub struct SpreadsheetSheet {
 }
 
 pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppResult<Vec<SpreadsheetSheet>> {
-    use calamine::{open_workbook_auto, Data, Reader};
+    use calamine::{open_workbook_auto, Reader};
 
     let mut workbook = open_workbook_auto(path)
         .map_err(|e| AppError::DocumentParseError(format!("spreadsheet open failed: {e}")))?;

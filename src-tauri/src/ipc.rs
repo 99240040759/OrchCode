@@ -224,7 +224,7 @@ pub async fn forget_workspace(
             .await
             .map_err(|e| e.to_string())?;
 
-        if state.workspace().as_deref() == Some(canonical.as_path()) {
+        if state.workspace().as_deref() == Some(workspace.as_path()) {
             state.close_all_terminals();
         }
 
@@ -457,7 +457,7 @@ pub async fn start_chat(
 
         match result.outcome {
             RunOutcome::NeedsCompaction => {
-                let commit_kind = match state
+                let _commit_kind = match state
                     .memory
                     .finalize_chat_run(&current_run_id, "compacted", None)
                     .await

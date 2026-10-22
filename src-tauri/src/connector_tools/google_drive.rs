@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use rig::tool::Tool;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::connectors::ConnectorManager;

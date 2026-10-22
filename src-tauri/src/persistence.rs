@@ -7,7 +7,6 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use rig::completion::Message;
 use rig::id::ConversationId;
@@ -947,7 +946,6 @@ fn build_session_views(
         views.push(compaction_view(cid, record));
     }
     Ok(views)
-}
 }
 
 fn compaction_view(cid: &str, record: &CompactionRecord) -> MessageView {

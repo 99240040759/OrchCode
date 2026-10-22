@@ -8,6 +8,10 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
 
+    optimizeDeps: {
+      include: ["monaco-editor"],
+    },
+
     worker: {
       format: "es",
     },
