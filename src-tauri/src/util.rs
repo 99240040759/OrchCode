@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -40,18 +41,42 @@ pub fn streaming_http_client() -> reqwest::Client {
         .clone()
 }
 
-pub fn floor_char_boundary(text: &str, index: usize) -> usize {
-    let mut boundary = index.min(text.len());
-    while boundary > 0 && !text.is_char_boundary(boundary) {
-        boundary -= 1;
+pub fn basename(path: &str) -> String {
+    path.replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .to_string()
+}
+
+pub fn display_relative(root: &Path, path: &Path) -> String {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    match path.strip_prefix(&canonical_root) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => path.to_string_lossy().replace('\\', "/"),
     }
-    boundary
+}
+
+pub fn display_path(root: Option<&Path>, path: &Path) -> String {
+    match root {
+        Some(r) => display_relative(r, path),
+        None => path.to_string_lossy().replace('\\', "/"),
+    }
 }
 
 pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
     match text.char_indices().nth(max_chars) {
         Some((end, _)) => &text[..end],
         None => text,
+    }
+}
+
+pub fn truncate_text(text: &str, limit: usize, suffix: &str) -> String {
+    let truncated = truncate_chars(text, limit);
+    if truncated.len() < text.len() {
+        format!("{truncated}{suffix}")
+    } else {
+        text.to_string()
     }
 }
 

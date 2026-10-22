@@ -9,6 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::events::TerminalEvent;
 
 pub struct TerminalSession {
+    instance_id: uuid::Uuid,
     master: Box<dyn MasterPty + Send>,
     input: Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
@@ -16,6 +17,10 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
+    pub fn instance_id(&self) -> uuid::Uuid {
+        self.instance_id
+    }
+
     pub fn write(&self, data: &str) -> bool {
         self.input.send(data.as_bytes().to_vec()).is_ok()
     }
@@ -62,7 +67,8 @@ pub fn open(
     cols: u16,
     rows: u16,
     channel: Channel<TerminalEvent>,
-    on_exit: Box<dyn FnOnce() + Send + 'static>,
+    instance_id: uuid::Uuid,
+    on_exit: Box<dyn FnOnce(uuid::Uuid) + Send + 'static>,
 ) -> AppResult<TerminalSession> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -129,7 +135,7 @@ pub fn open(
                 let _ = channel.send(TerminalEvent::Data { data: tail });
             }
             let _ = channel.send(TerminalEvent::Exit);
-            on_exit();
+            on_exit(instance_id);
         });
     }
 
@@ -138,6 +144,7 @@ pub fn open(
     });
 
     Ok(TerminalSession {
+        instance_id,
         master: pair.master,
         input,
         killer,

@@ -98,29 +98,37 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
 }
 
 fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option<String>) {
-    let (connector_id, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let connector_id = connector_id.trim_end_matches('/');
+    let normalized = format!("http://localhost/{}", rest.trim_start_matches('/'));
+    let Ok(url) = reqwest::Url::parse(&normalized) else {
+        let (connector_id, _) = rest.split_once('?').unwrap_or((rest, ""));
+        return (
+            connector_id.trim_end_matches('/').to_string(),
+            String::new(),
+            String::new(),
+            None,
+        );
+    };
+
+    let connector_id = url
+        .path()
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .to_string();
     let mut code = String::new();
     let mut state = String::new();
     let mut error = None;
 
-    for part in query.split('&') {
-        let Some((key, value)) = part.split_once('=') else {
-            continue;
-        };
-        let value = urlencoding::decode(&value.replace('+', " "))
-            .map(|decoded| decoded.into_owned())
-            .unwrap_or_else(|_| value.to_string());
-        match key {
-            "code" => code = value,
-            "state" => state = value,
-            "error_description" => error = Some(value),
-            "error" if error.is_none() => error = Some(value),
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = value.into_owned(),
+            "state" => state = value.into_owned(),
+            "error_description" => error = Some(value.into_owned()),
+            "error" if error.is_none() => error = Some(value.into_owned()),
             _ => {}
         }
     }
 
-    (connector_id.to_string(), code, state, error)
+    (connector_id, code, state, error)
 }
 
 pub fn run() {
@@ -170,7 +178,17 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
-                app.deep_link().register_all()?;
+                {
+                    app.deep_link().register_all()?;
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        for arg in std::env::args().skip(1) {
+                            if util::strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
+                                handle_deep_link_url(&handle, &arg).await;
+                            }
+                        }
+                    });
+                }
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
@@ -198,7 +216,6 @@ pub fn run() {
             fsapi::read_image_data_url,
             fsapi::read_binary_file,
             fsapi::read_document_metadata,
-            fsapi::read_parsed_document,
             fsapi::read_spreadsheet,
             ipc::get_auth_user,
             ipc::get_oauth_url,
@@ -226,7 +243,6 @@ pub fn run() {
             ipc::disconnect_connector,
             ipc::ipc_ingest_document,
             ipc::ipc_list_documents,
-            ipc::ipc_get_document,
             ipc::ipc_delete_document,
             ipc::ipc_search_documents,
             ipc::ipc_count_documents,

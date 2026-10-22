@@ -375,9 +375,15 @@ pub struct RunRequest {
     pub user_message: Message,
 }
 
+struct CheckpointWrite {
+    seq: u64,
+    kind: String,
+    payload: String,
+}
+
 struct Checkpointer {
-    memory: SqliteMemory,
-    run_id: String,
+    tx: tokio::sync::mpsc::UnboundedSender<CheckpointWrite>,
+    drain: tauri::async_runtime::JoinHandle<()>,
     seq: u64,
     pending_kind: Option<&'static str>,
     pending: String,
@@ -386,9 +392,22 @@ struct Checkpointer {
 
 impl Checkpointer {
     fn new(memory: SqliteMemory, run_id: String) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<CheckpointWrite>();
+
+        let drain = tauri::async_runtime::spawn(async move {
+            while let Some(CheckpointWrite { seq, kind, payload }) = rx.recv().await {
+                if let Err(e) = memory
+                    .append_chat_run_event(&run_id, seq, &kind, &payload)
+                    .await
+                {
+                    eprintln!("[checkpoint] write error (seq={seq}): {e}");
+                }
+            }
+        });
+
         Self {
-            memory,
-            run_id,
+            tx,
+            drain,
             seq: 0,
             pending_kind: None,
             pending: String::new(),
@@ -396,44 +415,42 @@ impl Checkpointer {
         }
     }
 
-    async fn write(&mut self, kind: &str, payload: &str) -> Result<(), String> {
-        self.memory
-            .append_chat_run_event(&self.run_id, self.seq, kind, payload)
-            .await
-            .map_err(|error| format!("failed to checkpoint agent stream: {error}"))?;
-        self.seq = self.seq.saturating_add(1);
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> Result<(), String> {
-        self.last_flush = Instant::now();
-        let Some(kind) = self.pending_kind.take() else {
-            return Ok(());
-        };
-        if self.pending.is_empty() {
-            return Ok(());
-        }
-        let payload = std::mem::take(&mut self.pending);
-        self.write(kind, &payload).await
-    }
-
-    async fn delta(&mut self, kind: &'static str, text: &str) -> Result<(), String> {
-        if self.pending_kind.is_some_and(|current| current != kind) {
-            self.flush().await?;
+    fn delta(&mut self, kind: &'static str, text: &str) {
+        if self.pending_kind.is_some_and(|cur| cur != kind) {
+            self.flush_pending();
         }
         self.pending_kind = Some(kind);
         self.pending.push_str(text);
         if self.pending.len() >= config::CHECKPOINT_FLUSH_BYTES
             || self.last_flush.elapsed() >= Duration::from_millis(config::CHECKPOINT_FLUSH_MS)
         {
-            self.flush().await?;
+            self.flush_pending();
         }
-        Ok(())
     }
 
-    async fn event(&mut self, kind: &str, payload: &str) -> Result<(), String> {
-        self.flush().await?;
-        self.write(kind, payload).await
+    fn event(&mut self, kind: &str, payload: &str) {
+        self.flush_pending();
+        self.enqueue(kind, payload.to_string());
+    }
+
+    fn enqueue(&mut self, kind: &str, payload: String) {
+        let seq = self.seq;
+        self.seq = self.seq.saturating_add(1);
+        let _ = self.tx.send(CheckpointWrite { seq, kind: kind.to_string(), payload });
+    }
+
+    fn flush_pending(&mut self) {
+        self.last_flush = Instant::now();
+        let Some(kind) = self.pending_kind.take() else { return };
+        if self.pending.is_empty() { return }
+        let payload = std::mem::take(&mut self.pending);
+        self.enqueue(kind, payload);
+    }
+
+    async fn finish(mut self) {
+        self.flush_pending();
+        drop(self.tx);
+        let _ = self.drain.await;
     }
 }
 
@@ -443,16 +460,14 @@ struct ReasoningClock {
 }
 
 impl ReasoningClock {
-    async fn close(&mut self, channel: &Channel<ChatEvent>, checkpoints: &mut Checkpointer) -> Result<(), String> {
+    fn close(&mut self, channel: &Channel<ChatEvent>, checkpoints: &mut Checkpointer) {
         let Some(start) = self.started.take() else {
-            return Ok(());
+            return;
         };
         let duration_seconds = start.elapsed().as_secs().max(1);
         self.durations.push(duration_seconds);
         let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
-        checkpoints
-            .event("reasoning_done", &duration_seconds.to_string())
-            .await
+        checkpoints.event("reasoning_done", &duration_seconds.to_string());
     }
 }
 
@@ -486,28 +501,14 @@ pub async fn run_chat(
     macro_rules! finish {
         ($outcome:expr) => {{
             let outcome = $outcome;
-            let flushed = match reasoning.close(&channel, &mut checkpoints).await {
-                Ok(()) => checkpoints.flush().await,
-                Err(error) => Err(error),
-            };
-            let outcome = match (outcome, flushed) {
-                (RunOutcome::Completed, Err(error)) => RunOutcome::Failed(error),
-                (other, _) => other,
-            };
+            reasoning.close(&channel, &mut checkpoints);
+            checkpoints.finish().await;
             return RunResult {
                 reasoning_durations: std::mem::take(&mut reasoning.durations),
                 outcome,
                 last_turn_input_tokens: last_turn_input,
             };
         }};
-    }
-
-    macro_rules! check {
-        ($result:expr) => {
-            if let Err(message) = $result {
-                finish!(RunOutcome::Failed(message));
-            }
-        };
     }
 
     loop {
@@ -543,25 +544,25 @@ pub async fn run_chat(
                 if let rig::streaming::Item::Event(event) = item {
                     match event {
                         rig::streaming::StreamEvent::Text { text, .. } => {
-                            check!(reasoning.close(&channel, &mut checkpoints).await);
+                            reasoning.close(&channel, &mut checkpoints);
                             let _ = channel.send(ChatEvent::Text {
                                 delta: text.clone(),
                             });
-                            check!(checkpoints.delta("text", &text).await);
+                            checkpoints.delta("text", &text);
                         }
                         rig::streaming::StreamEvent::Reasoning { text, .. } => {
                             if reasoning.started.is_none() {
                                 reasoning.started = Some(Instant::now());
                             }
                             let _ = channel.send(ChatEvent::Reasoning { delta: text.clone() });
-                            check!(checkpoints.delta("reasoning", &text).await);
+                            checkpoints.delta("reasoning", &text);
                         }
                         _ => {}
                     }
                 }
             }
             Ok(MultiTurnStreamItem::ToolCall { tool_call }) => {
-                check!(reasoning.close(&channel, &mut checkpoints).await);
+                reasoning.close(&channel, &mut checkpoints);
                 let args_value = serde_json::Value::Object(tool_call.function.arguments.clone());
                 let args = args_value.to_string();
                 let wire_id = tool_call.id.to_string();
@@ -581,7 +582,7 @@ pub async fn run_chat(
                     "args": args,
                 })
                 .to_string();
-                check!(checkpoints.event("tool_call", &payload).await);
+                checkpoints.event("tool_call", &payload);
             }
             Ok(MultiTurnStreamItem::ToolResult { tool_result }) => {
                 let wire_id = tool_result.call.to_string();
@@ -599,7 +600,7 @@ pub async fn run_chat(
                     "isError": is_error,
                 })
                 .to_string();
-                check!(checkpoints.event("tool_result", &payload).await);
+                checkpoints.event("tool_result", &payload);
             }
             Ok(MultiTurnStreamItem::CompletionCall(call)) => {
                 let turn = call.usage;
@@ -624,10 +625,10 @@ pub async fn run_chat(
                 });
             }
             Ok(MultiTurnStreamItem::ModelTurnRetried { turn }) => {
-                check!(checkpoints.event("model_turn_retried", &format!("turn {turn}")).await);
+                checkpoints.event("model_turn_retried", &format!("turn {turn}"));
             }
             Ok(MultiTurnStreamItem::FinalResponse(response)) => {
-                check!(reasoning.close(&channel, &mut checkpoints).await);
+                reasoning.close(&channel, &mut checkpoints);
                 let terminal_last_input = response
                     .completion_calls()
                     .last()
@@ -733,14 +734,7 @@ fn resolve_attachment(workspace: Option<&Path>, path: &str) -> Result<PathBuf, S
 }
 
 fn display_label(path: &Path, workspace: Option<&Path>) -> String {
-    workspace
-        .and_then(|ws| path.strip_prefix(ws).ok())
-        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|| {
-            path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string_lossy().to_string())
-        })
+    crate::util::display_path(workspace, path)
 }
 
 pub struct BuiltUserMessage {
@@ -935,7 +929,7 @@ pub async fn maybe_compact(
     let transcript_budget = (model_info.context_window as usize)
         .saturating_sub(6_000)
         .saturating_mul(3)
-        .min(400_000)
+        .min(80_000)
         .max(12_000);
     let transcript = render_transcript(&input.summarize, transcript_budget);
     if transcript.trim().is_empty() {

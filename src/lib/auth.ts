@@ -19,6 +19,7 @@ interface AuthState {
   error: string | null;
   justSignedIn: boolean;
   initialized: boolean;
+  signInTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 interface AuthActions {
@@ -36,15 +37,6 @@ interface AuthChangedPayload {
   error: string | null;
 }
 
-let signInTimeout: ReturnType<typeof setTimeout> | null = null;
-
-function clearSignInTimeout() {
-  if (signInTimeout !== null) {
-    clearTimeout(signInTimeout);
-    signInTimeout = null;
-  }
-}
-
 function clearWorkspaceState() {
   useChatStore.getState().reset();
   useArtifactsStore.getState().reset();
@@ -55,6 +47,10 @@ function applySignedOut(
   s: AuthState,
   error: string | null
 ) {
+  if (s.signInTimeoutId !== null) {
+    clearTimeout(s.signInTimeoutId);
+    s.signInTimeoutId = null;
+  }
   s.status = "signedOut";
   s.user = null;
   s.signingIn = false;
@@ -63,113 +59,128 @@ function applySignedOut(
 }
 
 export const useAuthStore = create(
-  immer<AuthStore>((set, get) => ({
-    status: "loading",
-    user: null,
-    signingIn: false,
-    error: null,
-    justSignedIn: false,
-    initialized: false,
+  immer<AuthStore>((set, get) => {
+    const cancelTimeout = () => {
+      const current = get().signInTimeoutId;
+      if (current !== null) {
+        clearTimeout(current);
+        set((s) => {
+          s.signInTimeoutId = null;
+        });
+      }
+    };
 
-    initialize: async () => {
-      if (get().initialized) return;
-      set((s) => {
-        s.initialized = true;
-      });
+    return {
+      status: "loading",
+      user: null,
+      signingIn: false,
+      error: null,
+      justSignedIn: false,
+      initialized: false,
+      signInTimeoutId: null,
 
-      await listen<AuthChangedPayload>("auth-changed", (event) => {
-        clearSignInTimeout();
-        const { user, error } = event.payload;
-        if (user) {
+      initialize: async () => {
+        if (get().initialized) return;
+        set((s) => {
+          s.initialized = true;
+        });
+
+        await listen<AuthChangedPayload>("auth-changed", (event) => {
+          cancelTimeout();
+          const { user, error } = event.payload;
+          if (user) {
+            set((s) => {
+              s.status = "signedIn";
+              s.user = user;
+              s.error = null;
+              s.justSignedIn = true;
+              s.signingIn = false;
+            });
+            return;
+          }
+          clearWorkspaceState();
+          set((s) => applySignedOut(s, error));
+        });
+
+        await listen<{ error: string }>("auth-error", (event) => {
+          cancelTimeout();
           set((s) => {
-            s.status = "signedIn";
-            s.user = user;
-            s.error = null;
-            s.justSignedIn = true;
             s.signingIn = false;
+            s.error = event.payload.error;
+          });
+        });
+
+        try {
+          const user = await api.getAuthUser();
+          set((s) => {
+            s.status = user ? "signedIn" : "signedOut";
+            s.user = user;
+          });
+        } catch (e) {
+          set((s) => {
+            s.status = "signedOut";
+            s.user = null;
+            s.error = api.errorMessage(e);
+          });
+        }
+      },
+
+      signInWithGoogle: async () => {
+        if (get().signingIn) return;
+        cancelTimeout();
+
+        const timeoutId = setTimeout(() => {
+          set((s) => {
+            s.signInTimeoutId = null;
+            if (!s.signingIn) return;
+            s.signingIn = false;
+            s.error = "Sign-in timed out. Please try again.";
+          });
+        }, SIGN_IN_TIMEOUT_MS);
+
+        set((s) => {
+          s.signingIn = true;
+          s.error = null;
+          s.signInTimeoutId = timeoutId;
+        });
+
+        try {
+          const url = await api.getOAuthUrl("https://orch.live/auth-callback");
+          await openUrl(url);
+        } catch (e) {
+          cancelTimeout();
+          set((s) => {
+            s.signingIn = false;
+            s.error = api.errorMessage(e);
+          });
+        }
+      },
+
+      signOut: async () => {
+        cancelTimeout();
+        try {
+          await api.signOutAuth();
+        } catch (e) {
+          set((s) => {
+            s.error = api.errorMessage(e);
           });
           return;
         }
         clearWorkspaceState();
-        set((s) => applySignedOut(s, error));
-      });
+        set((s) => applySignedOut(s, null));
+      },
 
-      await listen<{ error: string }>("auth-error", (event) => {
-        clearSignInTimeout();
+      dismissGreeting: () => {
         set((s) => {
-          s.signingIn = false;
-          s.error = event.payload.error;
+          s.justSignedIn = false;
         });
-      });
+      },
 
-      try {
-        const user = await api.getAuthUser();
+      dismissError: () => {
         set((s) => {
-          s.status = user ? "signedIn" : "signedOut";
-          s.user = user;
+          s.error = null;
         });
-      } catch (e) {
-        set((s) => {
-          s.status = "signedOut";
-          s.user = null;
-          s.error = api.errorMessage(e);
-        });
-      }
-    },
-
-    signInWithGoogle: async () => {
-      if (get().signingIn) return;
-      set((s) => {
-        s.signingIn = true;
-        s.error = null;
-      });
-
-      clearSignInTimeout();
-      signInTimeout = setTimeout(() => {
-        signInTimeout = null;
-        set((s) => {
-          if (!s.signingIn) return;
-          s.signingIn = false;
-          s.error = "Sign-in timed out. Please try again.";
-        });
-      }, SIGN_IN_TIMEOUT_MS);
-
-      try {
-        const url = await api.getOAuthUrl("https://orch.live/auth-callback");
-        await openUrl(url);
-      } catch (e) {
-        clearSignInTimeout();
-        set((s) => {
-          s.signingIn = false;
-          s.error = api.errorMessage(e);
-        });
-      }
-    },
-
-    signOut: async () => {
-      clearSignInTimeout();
-      try {
-        await api.signOutAuth();
-      } catch (e) {
-        set((s) => {
-          s.error = api.errorMessage(e);
-        });
-        return;
-      }
-      clearWorkspaceState();
-      set((s) => applySignedOut(s, null));
-    },
-
-    dismissGreeting: () => {
-      set((s) => {
-        s.justSignedIn = false;
-      });
-    },
-
-    dismissError: () => {
-      set((s) => {
-        s.error = null;
-      });
-    },
-  }))
+      },
+    };
+  })
 );

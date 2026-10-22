@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use gray_matter::engine::YAML;
 use gray_matter::Matter;
@@ -46,8 +47,15 @@ pub fn seed_bundled_skills(data_dir: &Path) {
     let _ = std::fs::write(&version_file, BUNDLED_VERSION);
 }
 
-fn skills_cache() -> &'static Mutex<HashMap<PathBuf, Vec<Skill>>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Vec<Skill>>>> = OnceLock::new();
+struct CachedSkills {
+    cached_at: Instant,
+    skills: Vec<Skill>,
+}
+
+const SKILLS_CACHE_TTL: Duration = Duration::from_secs(10);
+
+fn skills_cache() -> &'static Mutex<HashMap<PathBuf, CachedSkills>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSkills>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -57,7 +65,9 @@ pub fn load_all_skills(data_dir: &Path) -> Vec<Skill> {
     {
         let cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(&skills_dir) {
-            return cached.clone();
+            if cached.cached_at.elapsed() < SKILLS_CACHE_TTL {
+                return cached.skills.clone();
+            }
         }
     }
 
@@ -69,7 +79,13 @@ pub fn load_all_skills(data_dir: &Path) -> Vec<Skill> {
     skills.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
-    cache.insert(skills_dir, skills.clone());
+    cache.insert(
+        skills_dir,
+        CachedSkills {
+            cached_at: Instant::now(),
+            skills: skills.clone(),
+        },
+    );
 
     skills
 }

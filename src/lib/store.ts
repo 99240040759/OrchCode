@@ -406,16 +406,16 @@ export const useChatStore = create(
 
       const scheduleFlush = () => {
         if (rafId === null) {
-          rafId = setTimeout(() => {
+          rafId = requestAnimationFrame(() => {
             rafId = null;
             flush();
-          }, 0) as unknown as number;
+          });
         }
       };
 
       const syncFlush = () => {
         if (rafId !== null) {
-          clearTimeout(rafId);
+          cancelAnimationFrame(rafId);
           rafId = null;
         }
         flush();

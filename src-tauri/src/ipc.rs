@@ -652,15 +652,21 @@ pub async fn terminal_open(
     });
     let terminals = state.terminals.clone();
     let id_cleanup = id.clone();
+    let instance_id = uuid::Uuid::new_v4();
     let session = tokio::task::spawn_blocking(move || {
         terminal::open(
             Path::new(&workspace),
             cols.max(1),
             rows.max(1),
             on_event,
-            Box::new(move || {
+            instance_id,
+            Box::new(move |exited_id| {
                 let mut guard = terminals.lock().unwrap_or_else(|e| e.into_inner());
-                guard.remove(&id_cleanup);
+                if let Some(entry) = guard.get(&id_cleanup) {
+                    if entry.instance_id() == exited_id {
+                        guard.remove(&id_cleanup);
+                    }
+                }
             }),
         )
     })
@@ -866,15 +872,6 @@ pub async fn ipc_list_documents(
     state
         .memory
         .list_documents(source, file_type, limit.unwrap_or(50).clamp(1, 500), offset.unwrap_or(0))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn ipc_get_document(state: State<'_, AppState>, document_id: String) -> Result<Option<DocumentRecord>, String> {
-    state
-        .memory
-        .get_document(&document_id)
         .await
         .map_err(|e| e.to_string())
 }

@@ -696,7 +696,7 @@ impl SqliteMemory {
                                     if is_payload_part(&t.text) {
                                         if let Some(label) = payload_part_label(&t.text) {
                                             attachments.push(AttachmentView {
-                                                name: basename(&label),
+                                                name: crate::util::basename(&label),
                                                 is_image: false,
                                                 data_url: None,
                                             });
@@ -844,11 +844,11 @@ impl ConversationMemory for SqliteMemory {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
-            run_mem_task(move || {
-                let c = pool.get().map_err(mem_pool)?;
-                let latest = latest_compaction(&c, &cid).map_err(mem_sql)?;
+            run_db_task(move || {
+                let c = pool.get().map_err(pool_err)?;
+                let latest = latest_compaction(&c, &cid).map_err(sql_err)?;
                 let after = latest.as_ref().map(|r| r.upto_seq).unwrap_or(-1);
-                let rows = load_after(&c, &cid, after).map_err(mem_sql)?;
+                let rows = load_after(&c, &cid, after).map_err(sql_err)?;
 
                 let mut out = Vec::with_capacity(rows.len() + 1);
                 if let Some(record) = latest {
@@ -858,12 +858,14 @@ impl ConversationMemory for SqliteMemory {
                     )));
                 }
                 for row in &rows {
-                    let msg: Message = serde_json::from_str(&row.data).map_err(MemoryError::backend)?;
+                    let msg: Message = serde_json::from_str(&row.data)
+                        .map_err(|e| AppError::other(format!("deserialize message: {e}")))?;
                     out.push(msg);
                 }
                 Ok(out)
             })
             .await
+            .map_err(|e| MemoryError::Internal(e.to_string()))
         })
     }
 
@@ -875,10 +877,10 @@ impl ConversationMemory for SqliteMemory {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
-            run_mem_task(move || {
+            run_db_task(move || {
                 let now = now_ms();
-                let mut c = pool.get().map_err(mem_pool)?;
-                let tx = c.transaction().map_err(mem_sql)?;
+                let mut c = pool.get().map_err(pool_err)?;
+                let tx = c.transaction().map_err(sql_err)?;
 
                 let start_seq: i64 = tx
                     .query_row(
@@ -886,15 +888,16 @@ impl ConversationMemory for SqliteMemory {
                         params![cid],
                         |row| row.get(0),
                     )
-                    .map_err(mem_sql)?;
+                    .map_err(sql_err)?;
 
                 for (i, msg) in messages.iter().enumerate() {
-                    let data = serde_json::to_string(msg).map_err(MemoryError::backend)?;
+                    let data = serde_json::to_string(msg)
+                        .map_err(|e| AppError::other(format!("serialize message: {e}")))?;
                     tx.execute(
                         "INSERT INTO messages (conversation_id, seq, ts, data, kind) VALUES (?1, ?2, ?3, ?4, 'message')",
                         params![cid, start_seq + i as i64, now, data],
                     )
-                    .map_err(mem_sql)?;
+                    .map_err(sql_err)?;
                 }
 
                 tx.execute(
@@ -902,12 +905,13 @@ impl ConversationMemory for SqliteMemory {
                      ON CONFLICT(id) DO UPDATE SET updated_at = ?2",
                     params![cid, now],
                 )
-                .map_err(mem_sql)?;
+                .map_err(sql_err)?;
 
-                tx.commit().map_err(mem_sql)?;
+                tx.commit().map_err(sql_err)?;
                 Ok(())
             })
             .await
+            .map_err(|e| MemoryError::Internal(e.to_string()))
         })
     }
 
@@ -915,22 +919,23 @@ impl ConversationMemory for SqliteMemory {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         Box::pin(async move {
-            run_mem_task(move || {
-                let mut c = pool.get().map_err(mem_pool)?;
-                let tx = c.transaction().map_err(mem_sql)?;
+            run_db_task(move || {
+                let mut c = pool.get().map_err(pool_err)?;
+                let tx = c.transaction().map_err(sql_err)?;
                 for table in ["messages", "reasoning_durations", "compactions"] {
                     tx.execute(
                         &format!("DELETE FROM {table} WHERE conversation_id = ?1"),
                         params![cid],
                     )
-                    .map_err(mem_sql)?;
+                    .map_err(sql_err)?;
                 }
                 tx.execute("DELETE FROM sessions WHERE id = ?1", params![cid])
-                    .map_err(mem_sql)?;
-                tx.commit().map_err(mem_sql)?;
+                    .map_err(sql_err)?;
+                tx.commit().map_err(sql_err)?;
                 Ok(())
             })
             .await
+            .map_err(|e| MemoryError::Internal(e.to_string()))
         })
     }
 }
@@ -938,6 +943,7 @@ impl ConversationMemory for SqliteMemory {
 pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.execute_batch("
         PRAGMA foreign_keys = ON;
+        PRAGMA recursive_triggers = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
         PRAGMA temp_store = MEMORY;
@@ -1013,15 +1019,6 @@ pub(crate) fn is_user_turn(msg: &Message) -> bool {
     }
 }
 
-fn basename(label: &str) -> String {
-    label
-        .replace('\\', "/")
-        .rsplit('/')
-        .next()
-        .unwrap_or(label)
-        .to_string()
-}
-
 fn fts5_query(raw: &str, joiner: &str) -> String {
     raw.split_whitespace()
         .filter(|t| !t.is_empty())
@@ -1049,30 +1046,12 @@ where
         .map_err(|e| AppError::other(format!("db task failed: {e}")))?
 }
 
-async fn run_mem_task<T, F>(f: F) -> Result<T, MemoryError>
-where
-    T: Send + 'static,
-    F: FnOnce() -> Result<T, MemoryError> + Send + 'static,
-{
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| MemoryError::Internal(e.to_string()))?
-}
-
 fn sql_err(e: rusqlite::Error) -> AppError {
     AppError::other(format!("sqlite error: {e}"))
 }
 
 fn pool_err(e: r2d2::Error) -> AppError {
     AppError::other(format!("db pool error: {e}"))
-}
-
-fn mem_pool(e: r2d2::Error) -> MemoryError {
-    MemoryError::Internal(format!("db pool error: {e}"))
-}
-
-fn mem_sql(e: rusqlite::Error) -> MemoryError {
-    MemoryError::backend(e)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

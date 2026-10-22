@@ -26,8 +26,9 @@ fn document_extension(mime: &str, name: &str) -> Option<&'static str> {
     };
     by_mime.or_else(|| {
         let lower = name.to_lowercase();
-        ["pdf", "docx", "xlsx", "xls", "ods", "pptx"]
-            .into_iter()
+        crate::document::SUPPORTED_DOCUMENT_EXTENSIONS
+            .iter()
+            .copied()
             .find(|ext| lower.ends_with(&format!(".{ext}")))
     })
 }

@@ -31,9 +31,6 @@ CREATE TABLE IF NOT EXISTS chat_runs (
     prior_input_tokens       INTEGER NOT NULL DEFAULT 0,
     prior_output_tokens      INTEGER NOT NULL DEFAULT 0,
     prior_total_tokens       INTEGER NOT NULL DEFAULT 0,
-    usage_input_tokens       INTEGER NOT NULL DEFAULT 0,
-    usage_output_tokens      INTEGER NOT NULL DEFAULT 0,
-    usage_total_tokens       INTEGER NOT NULL DEFAULT 0,
     last_turn_input_tokens   INTEGER NOT NULL DEFAULT 0,
     usage_complete           INTEGER NOT NULL DEFAULT 0,
     created_at               INTEGER NOT NULL,
@@ -62,13 +59,6 @@ CREATE TABLE IF NOT EXISTS chat_run_usage (
     PRIMARY KEY (run_id, call_index)
 );
 "#;
-
-#[derive(Debug, Clone, Copy)]
-pub struct RunTokenBaseline {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct DurableRunUsage {
@@ -107,7 +97,7 @@ impl SqliteMemory {
         }
     }
 
-    pub async fn begin_chat_run(&self, begin: BeginRun<'_>) -> AppResult<RunTokenBaseline> {
+    pub async fn begin_chat_run(&self, begin: BeginRun<'_>) -> AppResult<()> {
         let pool = self.pool.clone();
         let run_id = begin.run_id.to_string();
         let conversation_id = begin.conversation_id.to_string();
@@ -166,37 +156,6 @@ impl SqliteMemory {
                 .map_err(sql_err)?;
 
             transaction.commit().map_err(sql_err)?;
-            Ok(RunTokenBaseline {
-                input_tokens: from_db_token(prior_input),
-                output_tokens: from_db_token(prior_output),
-                total_tokens: from_db_token(prior_total),
-            })
-        })
-        .await
-    }
-
-    pub async fn update_chat_run_user_message(
-        &self,
-        run_id: &str,
-        user_message: &Message,
-    ) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let run_id = run_id.to_string();
-        let user_message = serde_json::to_string(user_message)
-            .map_err(|error| AppError::other(format!("serialize durable user message: {error}")))?;
-        run_db_task(move || {
-            let connection = pool.get().map_err(pool_err)?;
-            let changed = connection
-                .execute(
-                    "UPDATE chat_runs
-                     SET user_message = ?1, updated_at = ?2
-                     WHERE run_id = ?3 AND commit_kind IS NULL",
-                    params![user_message, now_ms(), run_id],
-                )
-                .map_err(sql_err)?;
-            if changed != 1 {
-                return Err(AppError::other("chat run is missing or already finalized"));
-            }
             Ok(())
         })
         .await

@@ -6,14 +6,10 @@ import {
   type DocumentArtifactKind,
 } from "./api";
 import { useWorkspaceStore } from "./workspace";
+import { toRelativeWorkspacePath } from "./utils";
 
 function normalizeWorkspacePath(path: string): string {
-  const clean = path.replace(/\\/g, "/");
-  const root = useWorkspaceStore.getState().current?.path?.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (root && clean.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
-    return clean.slice(root.length + 1);
-  }
-  return clean;
+  return toRelativeWorkspacePath(path, useWorkspaceStore.getState().current?.path);
 }
 
 export type ArtifactKind = "file" | "browser" | "terminal" | DocumentArtifactKind;

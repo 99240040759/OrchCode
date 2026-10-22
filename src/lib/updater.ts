@@ -17,6 +17,7 @@ interface UpdaterState {
   version: string;
   percent: number;
   error: string | null;
+  pendingUpdate: Update | null;
 }
 
 interface UpdaterActions {
@@ -26,37 +27,34 @@ interface UpdaterActions {
 
 export type UpdaterStore = UpdaterState & UpdaterActions;
 
-let pendingUpdate: Update | null = null;
-let updateStarted = false;
-
 export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   status: "idle",
   version: "",
   percent: 0,
   error: null,
+  pendingUpdate: null,
 
   start: async () => {
-    if (updateStarted) return;
-    updateStarted = true;
+    const currentStatus = get().status;
+    if (currentStatus === "checking" || currentStatus === "downloading" || currentStatus === "installing") {
+      return;
+    }
     set({ status: "checking", error: null });
 
     let update: Update | null = null;
     try {
       update = await check();
     } catch (e) {
-      updateStarted = false;
-      set({ status: "failed", error: api.errorMessage(e) });
+      set({ status: "failed", error: api.errorMessage(e), pendingUpdate: null });
       return;
     }
 
     if (!update?.available) {
-      updateStarted = false;
-      set({ status: "none" });
+      set({ status: "none", pendingUpdate: null });
       return;
     }
 
-    pendingUpdate = update;
-    set({ status: "downloading", version: update.version, percent: 0 });
+    set({ status: "downloading", version: update.version, percent: 0, pendingUpdate: update });
 
     let contentLength = 0;
     let received = 0;
@@ -76,16 +74,14 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
         }
       });
       set({ status: "readyToRestart" });
-      updateStarted = false;
     } catch (e) {
-      pendingUpdate = null;
-      updateStarted = false;
-      set({ status: "failed", error: api.errorMessage(e) });
+      set({ status: "failed", error: api.errorMessage(e), pendingUpdate: null });
     }
   },
 
   apply: async () => {
-    if (get().status !== "readyToRestart" || !pendingUpdate) return;
+    const { status, pendingUpdate } = get();
+    if (status !== "readyToRestart" || !pendingUpdate) return;
     set({ status: "installing", error: null });
     try {
       await pendingUpdate.install();

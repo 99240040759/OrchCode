@@ -175,22 +175,25 @@ impl Tool for NotionReadPage {
             .await
             .map_err(|e| ToolError::msg(format!("Notion auth: {e}")))?;
 
-        let clean_id: String = args
-            .page_id
-            .trim()
-            .rsplit('/')
-            .next()
-            .unwrap_or("")
+        let raw = args.page_id.trim();
+        let path_part = raw.split(['?', '#']).next().unwrap_or("").trim_end_matches('/');
+        let last_segment = path_part.rsplit('/').next().unwrap_or(path_part);
+        let candidate: String = last_segment
             .rsplit('-')
             .next()
-            .unwrap_or("")
+            .unwrap_or(last_segment)
             .chars()
             .filter(|c| c.is_ascii_hexdigit())
             .collect();
-        let clean_id = if clean_id.len() == 32 {
-            clean_id
+        let clean_id = if candidate.len() == 32 {
+            candidate
         } else {
-            args.page_id.replace('-', "").chars().filter(|c| c.is_ascii_hexdigit()).collect()
+            let all_hex: String = last_segment.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+            if all_hex.len() >= 32 {
+                all_hex[all_hex.len() - 32..].to_string()
+            } else {
+                all_hex
+            }
         };
         if clean_id.is_empty() {
             return Err(ToolError::msg(format!("invalid Notion page id: {}", args.page_id)));

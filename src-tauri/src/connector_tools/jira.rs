@@ -350,6 +350,14 @@ fn extract_adf_text(node: &Value) -> String {
     out.trim().to_string()
 }
 
+fn for_each_child(node: &Value, out: &mut String, depth: usize) {
+    if let Some(content) = node["content"].as_array() {
+        for child in content {
+            extract_adf_node(child, out, depth);
+        }
+    }
+}
+
 fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
     let node_type = node["type"].as_str().unwrap_or("");
 
@@ -363,11 +371,7 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
             out.push('\n');
         }
         "paragraph" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push_str("\n\n");
         }
         "heading" => {
@@ -375,11 +379,7 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
             let hashes = "#".repeat(level as usize);
             out.push_str(&hashes);
             out.push(' ');
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push_str("\n\n");
         }
         "bulletList" => {
@@ -401,22 +401,14 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
             }
         }
         "listItem" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             if !out.ends_with('\n') {
                 out.push('\n');
             }
         }
         "blockquote" => {
             let mut inner = String::new();
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, &mut inner, depth);
-                }
-            }
+            for_each_child(node, &mut inner, depth);
             for line in inner.lines() {
                 out.push_str(&format!("> {line}\n"));
             }
@@ -425,28 +417,16 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
         "codeBlock" => {
             let lang = node["attrs"]["language"].as_str().unwrap_or("");
             out.push_str(&format!("```{lang}\n"));
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push_str("```\n\n");
         }
         "panel" => {
             let panel_type = node["attrs"]["panelType"].as_str().unwrap_or("info");
             out.push_str(&format!("[{panel_type}] "));
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
         }
         "table" => {
-            if let Some(content) = node["content"].as_array() {
-                for row in content {
-                    extract_adf_node(row, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push('\n');
         }
         "tableRow" => {
@@ -454,29 +434,11 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
             if let Some(content) = node["content"].as_array() {
                 for cell in content {
                     let mut cell_text = String::new();
-                    if let Some(cell_content) = cell["content"].as_array() {
-                        for child in cell_content {
-                            extract_adf_node(child, &mut cell_text, depth);
-                        }
-                    }
+                    for_each_child(cell, &mut cell_text, depth);
                     out.push_str(&format!(" {} |", cell_text.trim()));
                 }
             }
             out.push('\n');
-        }
-        "tableHeader" | "tableCell" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
-        }
-        "mediaSingle" | "mediaGroup" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
         }
         "media" => {
             let alt = node["attrs"]["alt"].as_str().unwrap_or("attachment");
@@ -493,8 +455,7 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
             out.push_str(name);
         }
         "emoji" => {
-            let text = node["attrs"]["text"].as_str().unwrap_or("");
-            out.push_str(text);
+            out.push_str(node["attrs"]["text"].as_str().unwrap_or(""));
         }
         "date" => {
             let ts = node["attrs"]["timestamp"].as_str().unwrap_or("");
@@ -507,45 +468,22 @@ fn extract_adf_node(node: &Value, out: &mut String, depth: usize) {
         "expand" | "nestedExpand" => {
             let title = node["attrs"]["title"].as_str().unwrap_or("Details");
             out.push_str(&format!("[Expand: {title}]\n"));
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
-        }
-        "taskList" | "decisionList" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
         }
         "taskItem" => {
             let state = node["attrs"]["state"].as_str().unwrap_or("TODO");
             let mark = if state == "DONE" { "[x]" } else { "[ ]" };
             out.push_str(&format!("{mark} "));
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push('\n');
         }
         "decisionItem" => {
             out.push_str("→ ");
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+            for_each_child(node, out, depth);
             out.push('\n');
         }
-        "doc" => {
-            if let Some(content) = node["content"].as_array() {
-                for child in content {
-                    extract_adf_node(child, out, depth);
-                }
-            }
+        "tableHeader" | "tableCell" | "mediaSingle" | "mediaGroup" | "taskList" | "decisionList" | "doc" => {
+            for_each_child(node, out, depth);
         }
         _ => {
             if let Some(content) = node["content"].as_array() {

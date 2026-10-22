@@ -115,12 +115,7 @@ pub async fn request_bytes(request: RequestBuilder, provider: &str) -> Result<Ve
     Ok(bytes.to_vec())
 }
 
-pub fn truncate_text(text: &str, limit: usize, suffix: &str) -> String {
-    let Some((end, _)) = text.char_indices().nth(limit) else {
-        return text.to_string();
-    };
-    format!("{}{}", &text[..end], suffix)
-}
+pub use crate::util::truncate_text;
 
 #[derive(Clone)]
 pub struct ConnectorSearch {

@@ -109,7 +109,3 @@ pub fn thumbnail_data_url_from_base64(b64: &str, mime: &str, max_dimension: u32)
         base64::engine::general_purpose::STANDARD.encode(encoded)
     ))
 }
-
-pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    image::load_from_memory(bytes).ok().map(|img| img.dimensions())
-}

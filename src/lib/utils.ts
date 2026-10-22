@@ -3,8 +3,18 @@ import { clsx } from "clsx";
 
 export { clsx as cn };
 
-function normalizePath(pathStr: string): string {
+export function normalizePath(pathStr: string): string {
   return pathStr.replace(/\\/g, "/");
+}
+
+export function toRelativeWorkspacePath(path: string, workspaceRoot?: string | null): string {
+  const clean = normalizePath(path);
+  if (!workspaceRoot) return clean;
+  const root = normalizePath(workspaceRoot).replace(/\/+$/, "");
+  if (clean.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+    return clean.slice(root.length + 1);
+  }
+  return clean;
 }
 
 export function splitPathParts(pathStr: string): string[] {

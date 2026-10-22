@@ -38,12 +38,7 @@ fn resolve_readable_file(workspace: Option<&Path>, path: &str) -> Result<PathBuf
     fs_util::resolve_existing_file(root, path).map_err(|e| e.to_string())
 }
 
-fn display_path(workspace: Option<&Path>, resolved: &Path) -> String {
-    match workspace {
-        Some(root) => fs_util::display_relative(root, resolved),
-        None => resolved.to_string_lossy().replace('\\', "/"),
-    }
-}
+use crate::util::display_path;
 
 pub fn build_file_index(root: &Path) -> Vec<FileEntry> {
     let mut entries = Vec::new();
@@ -114,27 +109,23 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
     let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
 
     use tokio::io::AsyncReadExt;
-    let meta = tokio::fs::metadata(&resolved)
-        .await
-        .map_err(|e| format!("cannot stat {path}: {e}"))?;
-    let truncated = meta.len() > MAX_PREVIEW_BYTES as u64;
     let file = tokio::fs::File::open(&resolved)
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
     let mut buf = Vec::new();
-    file.take(MAX_PREVIEW_BYTES as u64)
+    file.take((MAX_PREVIEW_BYTES + 1) as u64)
         .read_to_end(&mut buf)
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
-    let cut = if truncated {
-        match std::str::from_utf8(&buf) {
+    let truncated = buf.len() > MAX_PREVIEW_BYTES;
+    if truncated {
+        buf.truncate(MAX_PREVIEW_BYTES);
+        let cut = match std::str::from_utf8(&buf) {
             Ok(s) => s.len(),
             Err(e) => e.valid_up_to(),
-        }
-    } else {
-        buf.len()
-    };
-    buf.truncate(cut);
+        };
+        buf.truncate(cut);
+    }
 
     Ok(FileContent {
         path: display_path(workspace.as_deref(), &resolved),
@@ -244,19 +235,6 @@ pub async fn read_document_metadata(
         mime: file_mime(&resolved),
         modified,
     })
-}
-
-#[tauri::command]
-pub async fn read_parsed_document(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<crate::document::ParsedDocumentDto, String> {
-    let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
-    tokio::task::spawn_blocking(move || crate::document::parse_document_file(&resolved))
-        .await
-        .map_err(|e| format!("document parse task failed: {e}"))?
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

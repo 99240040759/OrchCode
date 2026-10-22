@@ -63,9 +63,7 @@ pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 pub const MAX_SEARCH_OUTPUT_CHARS: usize = 40_000;
 pub const MAX_VIEW_TOOL_OUTPUT_CHARS: usize = 16_000;
 
-pub const CONTEXT_BUDGET_RATIO: f64 = 0.72;
 pub const PREAMBLE_TOKEN_RESERVE: usize = 6_000;
-pub const PROTECTED_TAIL_MESSAGES: usize = 4;
 
 pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.62;
 pub const KEEP_RECENT_USER_TURNS: usize = 4;

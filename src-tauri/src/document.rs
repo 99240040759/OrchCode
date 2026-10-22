@@ -99,6 +99,12 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
     })
 }
 
+pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx"];
+
+pub fn is_supported_document_extension(ext: &str) -> bool {
+    SUPPORTED_DOCUMENT_EXTENSIONS.contains(&ext)
+}
+
 fn detect_file_type(path: &Path) -> AppResult<String> {
     let ext = path
         .extension()
@@ -106,11 +112,15 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
+    if is_supported_document_extension(&ext) {
+        let canonical = match ext.as_str() {
+            "xls" | "ods" => "xlsx",
+            other => other,
+        };
+        return Ok(canonical.to_string());
+    }
+
     match ext.as_str() {
-        "pdf" => Ok("pdf".to_string()),
-        "docx" => Ok("docx".to_string()),
-        "xlsx" | "xls" | "ods" => Ok("xlsx".to_string()),
-        "pptx" => Ok("pptx".to_string()),
         "txt" | "text" | "md" | "markdown" | "csv" | "json" | "html" | "htm" | "xml" | "rtf" => {
             Ok(ext)
         }
@@ -171,18 +181,26 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
 }
 
 fn clean_pdf_text(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            line.chars()
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let mut first_word = true;
+        for word in line.split_whitespace() {
+            let filtered: String = word
+                .chars()
                 .filter(|c| !c.is_control() || *c == '\t')
-                .collect::<String>()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
+                .collect();
+            if !filtered.is_empty() {
+                if !first_word {
+                    out.push(' ');
+                } else if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&filtered);
+                first_word = false;
+            }
+        }
+    }
+    out
 }
 
 enum OfficeXmlKind {
@@ -222,10 +240,10 @@ fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocumen
 
             let mut sorted_slides = slide_names;
             sorted_slides.sort_by_key(|s| {
-                s.replace('\\', "/")
-                    .trim_start_matches("ppt/slides/slide")
-                    .trim_end_matches(".xml")
-                    .parse::<usize>()
+                let norm = s.replace('\\', "/");
+                norm.strip_prefix("ppt/slides/slide")
+                    .and_then(|p| p.strip_suffix(".xml"))
+                    .and_then(|n| n.parse::<usize>().ok())
                     .unwrap_or(0)
             });
 

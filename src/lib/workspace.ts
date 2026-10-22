@@ -80,13 +80,7 @@ function parseList(raw: string | null): WorkspaceMeta[] {
 
 async function loadAll(): Promise<WorkspaceMeta[]> {
   const scoped = await getUserPref(PREF_ALL_WORKSPACES, true);
-  if (scoped !== null) return parseList(scoped);
-  const legacy = parseList(await getUserPref(PREF_ALL_WORKSPACES));
-  if (legacy.length > 0) {
-    await setUserPref(PREF_ALL_WORKSPACES, JSON.stringify(legacy), true);
-    await setUserPref(PREF_ALL_WORKSPACES, "[]");
-  }
-  return legacy;
+  return scoped !== null ? parseList(scoped) : [];
 }
 
 async function saveAll(list: WorkspaceMeta[]): Promise<void> {
@@ -94,9 +88,7 @@ async function saveAll(list: WorkspaceMeta[]): Promise<void> {
 }
 
 async function loadLastId(): Promise<string | null> {
-  const scoped = await getUserPref(PREF_LAST_WORKSPACE, true).catch(() => null);
-  if (scoped) return scoped;
-  return getUserPref(PREF_LAST_WORKSPACE).catch(() => null);
+  return (await getUserPref(PREF_LAST_WORKSPACE, true).catch(() => null)) ?? null;
 }
 
 async function saveLastId(id: string): Promise<void> {

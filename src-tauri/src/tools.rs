@@ -1,9 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use circular_buffer::CircularBuffer;
 use command_group::AsyncCommandGroup;
 use ignore::WalkBuilder;
 use path_clean::PathClean;
@@ -136,25 +135,7 @@ pub mod fs_util {
         Ok(resolved)
     }
 
-    pub fn check_file_size(path: &Path) -> AppResult<u64> {
-        let meta = std::fs::metadata(path)?;
-        let size = meta.len();
-        if size > FILE_SIZE_LIMIT {
-            return Err(AppError::FileTooLarge(format!(
-                "{}: {size} bytes exceeds limit of {FILE_SIZE_LIMIT} bytes",
-                path.display()
-            )));
-        }
-        Ok(size)
-    }
-
-    pub fn display_relative(root: &Path, path: &Path) -> String {
-        let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        match path.strip_prefix(&canonical_root) {
-            Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
-            Err(_) => path.to_string_lossy().replace('\\', "/"),
-        }
-    }
+    pub use crate::util::display_relative;
 
     pub fn file_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
         static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
@@ -216,13 +197,7 @@ pub mod fs_util {
     }
 }
 
-fn basename(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(path)
-        .to_string()
-}
+use crate::util::basename;
 
 fn str_arg(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key)
@@ -436,33 +411,43 @@ impl InnerTask {
             return false;
         }
         self.cancel_requested = true;
-        match self.pid {
-            Some(pid) => {
-                crate::util::kill_process_tree(pid);
-                true
-            }
-            None => false,
+        if let Some(pid) = self.pid {
+            crate::util::kill_process_tree(pid);
         }
+        true
     }
 }
 
 struct RingBuffer {
-    data: Box<CircularBuffer<OUTPUT_RING_BYTES, u8>>,
+    data: VecDeque<u8>,
 }
 
 impl RingBuffer {
     fn new() -> Self {
         Self {
-            data: CircularBuffer::boxed(),
+            data: VecDeque::with_capacity(OUTPUT_RING_BYTES),
         }
     }
 
     fn push(&mut self, bytes: &[u8]) {
+        if bytes.len() >= OUTPUT_RING_BYTES {
+            self.data.clear();
+            self.data.extend(bytes[bytes.len() - OUTPUT_RING_BYTES..].iter().copied());
+            return;
+        }
+        let overflow = (self.data.len() + bytes.len()).saturating_sub(OUTPUT_RING_BYTES);
+        if overflow > 0 {
+            self.data.drain(..overflow);
+        }
         self.data.extend(bytes.iter().copied());
     }
 
     fn as_string(&mut self) -> String {
-        String::from_utf8_lossy(self.data.make_contiguous()).to_string()
+        let (s1, s2) = self.data.as_slices();
+        let mut text = String::with_capacity(s1.len() + s2.len());
+        text.push_str(&String::from_utf8_lossy(s1));
+        text.push_str(&String::from_utf8_lossy(s2));
+        text
     }
 }
 

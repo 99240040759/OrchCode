@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-declare const process: { env: Record<string, string | undefined> };
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
@@ -20,22 +19,23 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           const normalized = id.replace(/\\/g, "/");
-          if (!normalized.includes("node_modules")) return undefined;
-          if (normalized.includes("node_modules/react/") || normalized.includes("node_modules/react-dom/")) {
-            return "react";
-          }
-          if (normalized.includes("node_modules/@radix-ui/")) return "radix";
-          if (normalized.includes("node_modules/@xterm/")) return "xterm";
-          if (normalized.includes("node_modules/@react-symbols/")) return "symbols";
-          if (normalized.includes("node_modules/react-icons/")) return "icons";
-          if (normalized.includes("node_modules/prismjs/")) return "prism";
-          if (normalized.includes("node_modules/monaco-editor/")) {
-            if (normalized.includes("worker")) return undefined;
+          const idx = normalized.indexOf("node_modules/");
+          if (idx === -1) return undefined;
+          const pkg = normalized.slice(idx + 13);
+
+          if (pkg.startsWith("react/") || pkg.startsWith("react-dom/")) return "react";
+          if (pkg.startsWith("@radix-ui/")) return "radix";
+          if (pkg.startsWith("@xterm/")) return "xterm";
+          if (pkg.startsWith("@react-symbols/")) return "symbols";
+          if (pkg.startsWith("react-icons/")) return "icons";
+          if (pkg.startsWith("prismjs/")) return "prism";
+          if (pkg.startsWith("monaco-editor/")) {
+            if (pkg.includes("worker")) return undefined;
             return "monaco";
           }
-          if (normalized.includes("node_modules/@monaco-editor/")) return "monaco-react";
-          if (normalized.includes("node_modules/react-pdf/") || normalized.includes("node_modules/pdfjs-dist/")) {
-            if (normalized.includes("worker")) return undefined;
+          if (pkg.startsWith("@monaco-editor/")) return "monaco-react";
+          if (pkg.startsWith("react-pdf/") || pkg.startsWith("pdfjs-dist/")) {
+            if (pkg.includes("worker")) return undefined;
             return "pdf";
           }
           return undefined;

@@ -36,6 +36,7 @@ const VIEWER_FALLBACK = (
 function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
   if (tab.kind === "browser") return <ChromeIcon className="ArtifactTab-icon" />;
   if (tab.kind === "terminal") return <VscTerminal className="ArtifactTab-icon" />;
+  if (tab.kind === "file" && !tab.path) return <RiFolderOpenLine className="ArtifactTab-icon" />;
   const name = tab.path ? getBasename(tab.path) : `${tabName}.${tab.kind}`;
   return (
     <ExplorerIcon
