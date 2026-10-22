@@ -194,6 +194,8 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Titlebar-update-downloading { background:var(--md-hover); color:var(--md-on-var); cursor:default; }
 .Titlebar-update-ready { background:rgba(160,160,160,.16); border:1px solid rgba(160,160,160,.36); color:var(--md-secondary); }
 .Titlebar-update-ready:hover { background:rgba(160,160,160,.24); }
+.Titlebar-update-failed { background:rgba(227,70,113,.14); border:1px solid rgba(227,70,113,.32); color:var(--md-error-c); }
+.Titlebar-update-failed:hover { background:rgba(227,70,113,.22); }
 .Titlebar-spinner { animation:spin 1s linear infinite; will-change:transform; }
 
 /* ─── SIDEBAR ────────────────────────────────────────────────────────────── */

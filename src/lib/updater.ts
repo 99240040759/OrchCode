@@ -1,7 +1,27 @@
 import { create } from "zustand";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
 import * as api from "./api";
+
+const IS_MAC =
+  typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+
+const LATEST_RELEASE_URL =
+  "https://github.com/sameer786ss/OrchCode/releases/latest";
+const MANIFEST_URL =
+  "https://github.com/sameer786ss/OrchCode/releases/latest/download/latest.json";
+
+function isNewer(remote: string, current: string): boolean {
+  const r = remote.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+  const c = current.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(r.length, c.length); i++) {
+    const diff = (r[i] ?? 0) - (c[i] ?? 0);
+    if (diff !== 0) return diff > 0;
+  }
+  return false;
+}
 
 export type UpdateStatus =
   | "idle"
@@ -40,6 +60,26 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
       return;
     }
     set({ status: "checking", error: null });
+
+    if (IS_MAC) {
+      try {
+        const res = await fetch(MANIFEST_URL, { cache: "no-store" });
+        if (!res.ok) {
+          set({ status: "none", pendingUpdate: null });
+          return;
+        }
+        const data = (await res.json()) as { version?: string };
+        const currentVersion = await getVersion().catch(() => "0.0.1");
+        if (data.version && isNewer(data.version, currentVersion)) {
+          set({ status: "readyToRestart", version: data.version, pendingUpdate: null });
+        } else {
+          set({ status: "none", pendingUpdate: null });
+        }
+      } catch (e) {
+        set({ status: "failed", error: api.errorMessage(e), pendingUpdate: null });
+      }
+      return;
+    }
 
     let update: Update | null = null;
     try {
@@ -80,6 +120,11 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   },
 
   apply: async () => {
+    if (IS_MAC) {
+      await openUrl(LATEST_RELEASE_URL).catch(() => undefined);
+      return;
+    }
+
     const { status, pendingUpdate } = get();
     if (status !== "readyToRestart" || !pendingUpdate) return;
     set({ status: "installing", error: null });

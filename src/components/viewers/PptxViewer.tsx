@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PPTXViewer } from "pptxviewjs";
 import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
-import { ViewerError, ViewerLoading, ZoomControls, PageControls, useZoom } from "./ViewerChrome";
+import { ZoomControls, PageControls, useZoom } from "./ViewerChrome";
 
 const BASE_SLIDE_WIDTH = 960;
 const SLIDE_ASPECT = 9 / 16;

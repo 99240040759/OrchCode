@@ -43,13 +43,20 @@ function UpdateBadge() {
 
   if (status === "readyToRestart") {
     return (
-      <Tooltip content={`v${version} downloaded — restart to apply`} side="bottom">
+      <Tooltip
+        content={
+          IS_MAC
+            ? `v${version} available — click to download and update`
+            : `v${version} downloaded — restart to apply`
+        }
+        side="bottom"
+      >
         <Button
           className="Titlebar-update-badge Titlebar-update-ready"
           onClick={() => void apply()}
         >
           <VscRefresh />
-          <span>Restart to update</span>
+          <span>{IS_MAC ? "Update available" : "Restart to update"}</span>
         </Button>
       </Tooltip>
     );
