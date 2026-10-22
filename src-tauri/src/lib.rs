@@ -182,8 +182,9 @@ pub fn run() {
                 {
                     app.deep_link().register_all()?;
                     let handle = app.handle().clone();
+                    let args: Vec<String> = std::env::args().skip(1).collect();
                     tauri::async_runtime::spawn(async move {
-                        for arg in std::env::args().skip(1) {
+                        for arg in args {
                             if util::strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
                                 handle_deep_link_url(&handle, &arg).await;
                             }
