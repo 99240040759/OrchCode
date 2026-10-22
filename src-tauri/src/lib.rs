@@ -180,7 +180,7 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
-                    app.deep_link().register_all()?;
+                    let _ = app.deep_link().register_all();
                     let handle = app.handle().clone();
                     let args: Vec<String> = std::env::args().skip(1).collect();
                     tauri::async_runtime::spawn(async move {
@@ -249,6 +249,7 @@ pub fn run() {
             ipc::ipc_delete_document,
             ipc::ipc_search_documents,
             ipc::ipc_count_documents,
+            ipc::report_error,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the application");

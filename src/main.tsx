@@ -2,7 +2,20 @@ import "./lib/polyfills";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { reportError } from "./lib/api";
 import "./global.css";
+
+if (import.meta.env.PROD) {
+  window.addEventListener("error", (event) => {
+    const msg = event.error?.stack || event.message || "Unknown error";
+    void reportError(msg).catch(() => {});
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    void reportError(`Unhandled rejection: ${msg}`).catch(() => {});
+  });
+}
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("selectstart", (e) => {

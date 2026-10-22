@@ -1056,3 +1056,10 @@ pub async fn ipc_count_documents(state: State<'_, AppState>) -> Result<i64, Stri
         .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
     state.memory.count_documents(ws_str).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn report_error(message: String) {
+    if !cfg!(debug_assertions) {
+        sentry::capture_message(&message, sentry::Level::Error);
+    }
+}

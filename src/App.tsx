@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ErrorBoundary } from "react-error-boundary";
+import { reportError } from "./lib/api";
 import { useAuthStore } from "./lib/auth";
 import { useChatStore } from "./lib/store";
 import { useUpdaterStore } from "./lib/updater";
@@ -50,6 +51,13 @@ function AppError({
   error: Error;
   resetErrorBoundary: () => void;
 }) {
+  useEffect(() => {
+    void getCurrentWindow().show();
+    if (import.meta.env.PROD) {
+      void reportError(error.stack || error.message).catch(() => {});
+    }
+  }, [error]);
+
   return (
     <div className="AuthLoading">
       <div className="FatalError" role="alert">

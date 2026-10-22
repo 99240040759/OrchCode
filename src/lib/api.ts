@@ -414,6 +414,10 @@ export function countDocuments(): Promise<number> {
   return invoke("ipc_count_documents");
 }
 
+export function reportError(message: string): Promise<void> {
+  return invoke("report_error", { message });
+}
+
 export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
 
 const DOCUMENT_ARTIFACT_KINDS: Record<string, DocumentArtifactKind> = {
