@@ -555,19 +555,47 @@ export const useChatStore = create(
           case "compacted": {
             set((s) => {
               if (s.currentSessionId !== sessionId) return;
+              const noticeId = event.compactionMessageId || newId();
+              if (s.messages.some((m) => m.id === noticeId)) return;
+
               const notice: ChatMessage = {
-                id: newId(),
+                id: noticeId,
                 role: "system",
-                items: [{ type: "compactionNotice", id: newId(), originalMessageCount: event.originalMessageCount, ts: event.ts }],
+                items: [
+                  {
+                    type: "compactionNotice",
+                    id: event.compactionItemId || newId(),
+                    originalMessageCount: event.originalMessageCount,
+                    ts: event.ts,
+                  },
+                ],
                 attachments: [],
                 streaming: false,
               };
-              const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
-              if (streamingIdx >= 0) {
-                s.messages.splice(streamingIdx + 1, 0, notice);
-              } else {
-                s.messages.push(notice);
+
+              let insertIdx = -1;
+              if (event.afterMessageId) {
+                const afterIdx = s.messages.findIndex((m) => m.id === event.afterMessageId);
+                if (afterIdx >= 0) {
+                  insertIdx = afterIdx + 1;
+                }
               }
+
+              if (insertIdx === -1) {
+                const userIdx = s.messages.findIndex((m) => m.id === userMsgId);
+                if (userIdx >= 0) {
+                  insertIdx = userIdx;
+                } else {
+                  const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
+                  if (streamingIdx >= 0) {
+                    insertIdx = streamingIdx;
+                  } else {
+                    insertIdx = 0;
+                  }
+                }
+              }
+
+              s.messages.splice(insertIdx, 0, notice);
             });
             break;
           }

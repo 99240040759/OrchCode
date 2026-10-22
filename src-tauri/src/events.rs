@@ -62,6 +62,12 @@ pub enum ChatEvent {
     Compacted {
         original_message_count: usize,
         ts: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_message_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_message_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_item_id: Option<String>,
     },
     Notice {
         message: String,

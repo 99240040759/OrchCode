@@ -922,6 +922,10 @@ pub struct CompactionOutcome {
     pub original_message_count: usize,
     pub ts: i64,
     pub new_context_tokens: u64,
+    pub upto_seq: i64,
+    pub after_message_id: String,
+    pub compaction_message_id: String,
+    pub compaction_item_id: String,
 }
 
 pub async fn maybe_compact(
@@ -973,12 +977,17 @@ pub async fn maybe_compact(
     let new_context_tokens = estimate_messages_tokens(&[summary_msg])
         + estimate_messages_tokens(&input.remaining)
         + config::PREAMBLE_TOKEN_RESERVE as u64;
+    let upto_seq = input.summarize_upto_seq;
+    let after_message_id = crate::persistence::message_id(session_id, upto_seq);
+    let compaction_message_id = crate::persistence::compaction_message_id(session_id, upto_seq);
+    let compaction_item_id = crate::persistence::compaction_item_id(session_id, upto_seq);
+
     let ts = memory
         .apply_compaction(
             session_id,
             &summary,
             original_message_count,
-            input.summarize_upto_seq,
+            upto_seq,
             new_context_tokens,
         )
         .await?;
@@ -987,6 +996,10 @@ pub async fn maybe_compact(
         original_message_count,
         ts,
         new_context_tokens,
+        upto_seq,
+        after_message_id,
+        compaction_message_id,
+        compaction_item_id,
     }))
 }
 

@@ -395,6 +395,9 @@ pub async fn start_chat(
             let _ = on_event.send(ChatEvent::Compacted {
                 original_message_count: outcome.original_message_count,
                 ts: outcome.ts,
+                after_message_id: Some(outcome.after_message_id),
+                compaction_message_id: Some(outcome.compaction_message_id),
+                compaction_item_id: Some(outcome.compaction_item_id),
             });
             let _ = on_event.send(ChatEvent::Usage {
                 context_tokens: outcome.new_context_tokens,
@@ -502,6 +505,9 @@ pub async fn start_chat(
                         let _ = on_event.send(ChatEvent::Compacted {
                             original_message_count: outcome.original_message_count,
                             ts: outcome.ts,
+                            after_message_id: Some(outcome.after_message_id),
+                            compaction_message_id: Some(outcome.compaction_message_id),
+                            compaction_item_id: Some(outcome.compaction_item_id),
                         });
                         let _ = on_event.send(ChatEvent::Usage {
                             context_tokens: outcome.new_context_tokens,

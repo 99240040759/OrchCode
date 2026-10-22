@@ -950,10 +950,10 @@ fn build_session_views(
 
 fn compaction_view(cid: &str, record: &CompactionRecord) -> MessageView {
     MessageView {
-        id: stable_id(cid, record.upto_seq, 0, Some("compaction-message")),
+        id: compaction_message_id(cid, record.upto_seq),
         role: "system".to_string(),
         items: vec![MessageItemView::CompactionNotice {
-            id: stable_id(cid, record.upto_seq, 0, Some("compaction")),
+            id: compaction_item_id(cid, record.upto_seq),
             original_message_count: record.original_message_count,
             ts: record.ts,
         }],
@@ -1230,6 +1230,18 @@ fn fts5_query(raw: &str, joiner: &str) -> String {
 
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
     crate::util::stable_hash_hex(&format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or("")))
+}
+
+pub fn message_id(cid: &str, seq: i64) -> String {
+    stable_id(cid, seq, 0, None)
+}
+
+pub fn compaction_message_id(cid: &str, seq: i64) -> String {
+    stable_id(cid, seq, 0, Some("compaction-message"))
+}
+
+pub fn compaction_item_id(cid: &str, seq: i64) -> String {
+    stable_id(cid, seq, 0, Some("compaction"))
 }
 
 pub(crate) async fn run_db_task<T, F>(f: F) -> AppResult<T>

@@ -124,7 +124,14 @@ export type ChatStreamEvent =
   | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
   | { type: "toolResult"; id: string; output: string; isError: boolean }
   | { type: "usage"; contextTokens: number }
-  | { type: "compacted"; originalMessageCount: number; ts: number }
+  | {
+      type: "compacted";
+      originalMessageCount: number;
+      ts: number;
+      afterMessageId?: string;
+      compactionMessageId?: string;
+      compactionItemId?: string;
+    }
   | { type: "notice"; message: string }
   | { type: "done" }
   | { type: "cancelled" }
