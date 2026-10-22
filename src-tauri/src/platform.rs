@@ -26,6 +26,8 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
             );
         }
     }
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 
