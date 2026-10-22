@@ -157,7 +157,14 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -168,9 +175,13 @@ pub fn run() {
             skills::seed_bundled_skills(&data_dir);
 
             let app_state = AppState::new(&data_dir)?;
-            if let Err(e) = tauri::async_runtime::block_on(app_state.connector_manager.initialize(&app_state.memory)) {
-                eprintln!("connector manager init failed: {e}");
-            }
+            let init_memory = app_state.memory.clone();
+            let init_connectors = app_state.connector_manager.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = init_connectors.initialize(&init_memory).await {
+                    eprintln!("connector manager init failed: {e}");
+                }
+            });
             app.manage(app_state);
 
             AppState::spawn_background_loops(app.handle().clone());
