@@ -1,11 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "browser-window",
-  "description": "Untrusted browser child webviews: IPC reachability only, no plugin permissions",
+  "description": "Untrusted browser child webviews: no IPC bridge injection and no plugin permissions",
   "local": false,
   "webviews": ["browser-*"],
-  "remote": {
-    "urls": ["http://*/*", "https://*/*"]
-  },
   "permissions": []
 }

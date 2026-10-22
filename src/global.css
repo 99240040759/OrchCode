@@ -85,7 +85,7 @@
 
 ::selection { background:rgba(255,255,255,.18); color:inherit; }
 
-input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .Composer-input * { -webkit-user-select:text; user-select:text; }
+input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .Composer-input *, .selectable, .selectable *, .Message, .Message *, .Markdown, .Markdown *, .CodeBlock, .CodeBlock *, .ToolRow-body, .ToolRow-body *, .DocViewer-render, .DocViewer-render * { -webkit-user-select:text; user-select:text; }
 input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .DocViewer-pageInput { cursor:text; }
 
 img, a { -webkit-user-drag:none; }
@@ -314,7 +314,12 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .ThinkingShimmer-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, var(--md-on-dim) 0%, var(--md-on) 35%, #ffffff 50%, var(--md-on) 65%, var(--md-on-dim) 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
 .Msg-streamingText { animation:streamFadeIn .18s var(--ease); }
-.Msg-streamingText > .Markdown > *:last-child { background:linear-gradient(90deg, var(--md-on) 0%, var(--md-on) 65%, #ffffff 82%, var(--md-on-dim) 92%, var(--md-on) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.4s linear infinite; will-change:background-position; }
+.Msg-streamingText > .Markdown > p:last-child,
+.Msg-streamingText > .Markdown > span:last-child,
+.Msg-streamingText > .Markdown > h1:last-child,
+.Msg-streamingText > .Markdown > h2:last-child,
+.Msg-streamingText > .Markdown > h3:last-child,
+.Msg-streamingText > .Markdown > li:last-child { background:linear-gradient(90deg, var(--md-on) 0%, var(--md-on) 65%, #ffffff 82%, var(--md-on-dim) 92%, var(--md-on) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.4s linear infinite; will-change:background-position; }
 
 /* ─── REASONING ──────────────────────────────────────────────────────────── */
 .Reasoning { display:flex; flex-direction:column; gap:4px; }
@@ -763,7 +768,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 
 .DocxViewer { display:flex; flex-direction:column; height:100%; background:var(--md-s1); overflow:hidden; }
 .DocxViewer-scroll { flex:1; overflow-y:auto; overflow-x:auto; background:#e8e8e8; padding:24px; }
-.DocxViewer-scaleWrap { display:inline-block; min-width:100%; transform-origin:top center; }
+.DocxViewer-scaleWrap { display:inline-block; min-width:100%; }
 .DocxViewer-render { background:#ffffff; color:#111111; min-height:200px; }
 .DocxViewer-render * { color:inherit; }
 

@@ -72,7 +72,8 @@ fn default_allowed() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Budget {
     #[serde(default, alias = "costUsd", alias = "cost")]
     pub cost_usd: f64,
@@ -103,8 +104,8 @@ impl Gateway {
     fn require_token(&self) -> AppResult<String> {
         self.token
             .read()
-            .ok()
-            .and_then(|g| g.clone())
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
             .filter(|t| !t.is_empty())
             .ok_or(AppError::NoToken)
     }

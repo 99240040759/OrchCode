@@ -45,6 +45,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const overlayRef = useRef(overlayOpen);
   const syncRef = useRef<() => void>(() => {});
   const initialUrlRef = useRef(startUrl);
+  const initialLoadedRef = useRef(false);
   const lastPropUrl = useRef(startUrl);
   const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -125,6 +126,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
 
     return () => {
       disposed = true;
+      if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
       setReady(false);
       intersectionObserver.disconnect();
       resizeObserver.disconnect();
@@ -158,6 +160,10 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
 
   useEffect(() => {
     if (!ready || !label) return;
+    if (!initialLoadedRef.current) {
+      initialLoadedRef.current = true;
+      return;
+    }
     api.webviewNavigate(label, committedUrl).catch((e) => {
       setError(api.errorMessage(e));
       setLoading(false);
@@ -216,7 +222,11 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
               aria-label={loading ? "Stop loading" : "Reload"}
               onClick={() => {
                 if (loading) {
+                  if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
                   setLoading(false);
+                  if (ready && label) {
+                    void api.webviewHistory(label, "stop").catch(() => {});
+                  }
                 } else {
                   runHistory("reload");
                 }

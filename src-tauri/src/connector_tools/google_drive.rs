@@ -52,6 +52,16 @@ fn escape_gdrive_query(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
+fn format_gdrive_file_entry(f: &Value) -> String {
+    let name = f["name"].as_str().unwrap_or("(unnamed)");
+    let id = f["id"].as_str().unwrap_or("");
+    let mime = f["mimeType"].as_str().unwrap_or("");
+    let size = f["size"].as_str().unwrap_or("—");
+    let modified = f["modifiedTime"].as_str().unwrap_or("—");
+    let link = f["webViewLink"].as_str().unwrap_or("");
+    format!("• {name}\n  ID: {id}\n  Type: {mime}\n  Size: {size} bytes\n  Modified: {modified}\n  Link: {link}\n\n")
+}
+
 #[derive(Clone)]
 pub struct GoogleDriveListFiles {
     pub manager: Arc<ConnectorManager>,
@@ -64,16 +74,6 @@ pub struct GoogleDriveListFilesArgs {
     pub mime_type: Option<String>,
     pub max_results: Option<u32>,
     pub page_token: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct GoogleDriveFileEntry {
-    pub id: String,
-    pub name: String,
-    pub mime_type: String,
-    pub size: Option<String>,
-    pub modified_time: Option<String>,
-    pub web_view_link: Option<String>,
 }
 
 impl Tool for GoogleDriveListFiles {
@@ -132,15 +132,7 @@ impl Tool for GoogleDriveListFiles {
 
         let mut out = format!("Found {} file(s):\n\n", files.len());
         for f in &files {
-            let name = f["name"].as_str().unwrap_or("(unnamed)");
-            let id = f["id"].as_str().unwrap_or("");
-            let mime = f["mimeType"].as_str().unwrap_or("");
-            let size = f["size"].as_str().unwrap_or("—");
-            let modified = f["modifiedTime"].as_str().unwrap_or("—");
-            let link = f["webViewLink"].as_str().unwrap_or("");
-            out.push_str(&format!(
-                "• {name}\n  ID: {id}\n  Type: {mime}\n  Size: {size} bytes\n  Modified: {modified}\n  Link: {link}\n\n"
-            ));
+            out.push_str(&format_gdrive_file_entry(f));
         }
 
         if let Some(pt) = next_page {
@@ -346,15 +338,7 @@ impl Tool for GoogleDriveSearchFiles {
             args.query
         );
         for f in &files {
-            let name = f["name"].as_str().unwrap_or("(unnamed)");
-            let id = f["id"].as_str().unwrap_or("");
-            let mime = f["mimeType"].as_str().unwrap_or("");
-            let size = f["size"].as_str().unwrap_or("—");
-            let link = f["webViewLink"].as_str().unwrap_or("");
-            let modified = f["modifiedTime"].as_str().unwrap_or("—");
-            out.push_str(&format!(
-                "• {name}\n  ID: {id}\n  Type: {mime}\n  Size: {size} bytes\n  Modified: {modified}\n  Link: {link}\n\n"
-            ));
+            out.push_str(&format_gdrive_file_entry(f));
         }
 
         if let Some(pt) = next_page {

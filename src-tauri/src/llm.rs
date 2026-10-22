@@ -28,7 +28,7 @@ use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
 use crate::gateway::{ModelInfo, TokenHandle};
-use crate::persistence::SqliteMemory;
+use crate::persistence::{estimate_message_tokens, SqliteMemory};
 use crate::tools::{parse_display_info, window_lines, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
 
@@ -187,7 +187,7 @@ impl AgentHook for ContextGuard {
                 }
             }
             let rendered = res.output().render();
-            if !rendered.starts_with("data:image/") && rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
+            if rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
                 return OutcomeAction::rewrite_tool_result(&event, clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS));
             }
         }
@@ -356,9 +356,10 @@ Never claim success from reasoning alone."
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     Completed,
+    NeedsCompaction,
     Cancelled,
     Failed(String),
 }
@@ -373,6 +374,7 @@ pub struct RunRequest {
     pub run_id: String,
     pub session_id: String,
     pub user_message: Message,
+    pub context_window: u64,
 }
 
 struct CheckpointWrite {
@@ -421,11 +423,6 @@ impl Checkpointer {
         }
         self.pending_kind = Some(kind);
         self.pending.push_str(text);
-        if self.pending.len() >= config::CHECKPOINT_FLUSH_BYTES
-            || self.last_flush.elapsed() >= Duration::from_millis(config::CHECKPOINT_FLUSH_MS)
-        {
-            self.flush_pending();
-        }
     }
 
     fn event(&mut self, kind: &str, payload: &str) {
@@ -457,9 +454,19 @@ impl Checkpointer {
 struct ReasoningClock {
     started: Option<Instant>,
     durations: Vec<u64>,
+    turn_start_len: usize,
 }
 
 impl ReasoningClock {
+    fn mark_turn_start(&mut self) {
+        self.turn_start_len = self.durations.len();
+    }
+
+    fn retry_turn(&mut self) {
+        self.started = None;
+        self.durations.truncate(self.turn_start_len);
+    }
+
     fn close(&mut self, channel: &Channel<ChatEvent>, checkpoints: &mut Checkpointer) {
         let Some(start) = self.started.take() else {
             return;
@@ -490,9 +497,12 @@ pub async fn run_chat(
     let mut reasoning = ReasoningClock {
         started: None,
         durations: Vec::new(),
+        turn_start_len: 0,
     };
     let mut last_turn_input: u64 = 0;
     let mut saw_final_response = false;
+    let mut needs_compaction = false;
+    let mut tools_in_turn = false;
     let mut pending_tools: HashSet<String> = HashSet::new();
     let chunk_timeout = Duration::from_secs(config::STREAM_CHUNK_TIMEOUT_SECS);
     let tool_timeout = Duration::from_secs(config::TOOL_EXECUTION_TIMEOUT_SECS);
@@ -541,6 +551,9 @@ pub async fn run_chat(
 
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(item)) => {
+                if pending_tools.is_empty() {
+                    tools_in_turn = false;
+                }
                 if let rig::streaming::Item::Event(event) = item {
                     match event {
                         rig::streaming::StreamEvent::Text { text, .. } => {
@@ -562,6 +575,7 @@ pub async fn run_chat(
                 }
             }
             Ok(MultiTurnStreamItem::ToolCall { tool_call }) => {
+                tools_in_turn = true;
                 reasoning.close(&channel, &mut checkpoints);
                 let args_value = serde_json::Value::Object(tool_call.function.arguments.clone());
                 let args = args_value.to_string();
@@ -601,6 +615,14 @@ pub async fn run_chat(
                 })
                 .to_string();
                 checkpoints.event("tool_result", &payload);
+
+                if pending_tools.is_empty() {
+                    reasoning.mark_turn_start();
+                }
+
+                if needs_compaction && pending_tools.is_empty() {
+                    finish!(RunOutcome::NeedsCompaction);
+                }
             }
             Ok(MultiTurnStreamItem::CompletionCall(call)) => {
                 let turn = call.usage;
@@ -623,8 +645,19 @@ pub async fn run_chat(
                 let _ = channel.send(ChatEvent::Usage {
                     context_tokens: last_turn_input,
                 });
+
+                if request.context_window > 0 {
+                    let ratio = last_turn_input as f64 / request.context_window as f64;
+                    if ratio >= config::COMPACTION_THRESHOLD_RATIO {
+                        needs_compaction = true;
+                        if tools_in_turn && pending_tools.is_empty() {
+                            finish!(RunOutcome::NeedsCompaction);
+                        }
+                    }
+                }
             }
             Ok(MultiTurnStreamItem::ModelTurnRetried { turn }) => {
+                reasoning.retry_turn();
                 checkpoints.event("model_turn_retried", &format!("turn {turn}"));
             }
             Ok(MultiTurnStreamItem::FinalResponse(response)) => {
@@ -682,7 +715,7 @@ fn stringify_tool_result(tr: &ToolResult) -> String {
 fn mention_regex() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\]|@(?P<plain>[^\s@]+)")
+        regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\](?:(?P<brange>#L\d+(?:-\d+)?))?|@(?P<plain>[^\s@,;:!?#]+)(?:(?P<prange>#L\d+(?:-\d+)?))?")
             .expect("mention regex is a valid pattern")
     })
 }
@@ -693,22 +726,13 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathB
     };
     let mut out = Vec::new();
     for cap in mention_regex().captures_iter(prompt) {
-        let Some(raw) = cap
-            .name("bracket")
-            .or_else(|| cap.name("plain"))
-            .map(|value| value.as_str().trim())
-        else {
+        let (candidate, line_range) = if let Some(b) = cap.name("bracket") {
+            (b.as_str().trim(), cap.name("brange").map(|r| r.as_str().to_string()))
+        } else if let Some(p) = cap.name("plain") {
+            let raw = p.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?']);
+            (raw, cap.name("prange").map(|r| r.as_str().to_string()))
+        } else {
             continue;
-        };
-        if raw.is_empty() {
-            continue;
-        }
-        let (candidate, line_range) = match raw.find("#L") {
-            Some(hash_pos) => {
-                let (p, r) = raw.split_at(hash_pos);
-                (p, Some(r.to_string()))
-            }
-            None => (raw, None),
         };
         if candidate.is_empty() {
             continue;
@@ -721,16 +745,7 @@ fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathB
 }
 
 fn resolve_attachment(workspace: Option<&Path>, path: &str) -> Result<PathBuf, String> {
-    let raw = Path::new(path);
-    if raw.is_absolute() {
-        let canonical = dunce::canonicalize(raw).map_err(|e| e.to_string())?;
-        if canonical.is_file() {
-            return Ok(canonical);
-        }
-        return Err("not a file".to_string());
-    }
-    let ws = workspace.ok_or_else(|| "no workspace is open".to_string())?;
-    crate::tools::fs_util::resolve_existing_file(ws, path).map_err(|e| e.to_string())
+    crate::tools::fs_util::resolve_readable_file(workspace, path).map_err(|e| e.to_string())
 }
 
 fn display_label(path: &Path, workspace: Option<&Path>) -> String {
@@ -827,7 +842,7 @@ pub async fn build_user_message(
     prompt: &str,
     attachments: &[AttachmentRef],
     supports_images: bool,
-) -> BuiltUserMessage {
+) -> Result<BuiltUserMessage, String> {
     let mut notes: Vec<String> = Vec::new();
     let mut targets: Vec<(PathBuf, String, Option<String>)> = Vec::new();
 
@@ -865,16 +880,30 @@ pub async fn build_user_message(
         parts.push(UserContent::text(prompt.to_string()));
     }
     let mut images: Vec<UserContent> = Vec::new();
+    let mut successful_attachments = 0usize;
     for (_, result) in loaded {
         match result {
-            Ok(AttachmentPart::Text(text)) => parts.push(UserContent::text(text)),
+            Ok(AttachmentPart::Text(text)) => {
+                parts.push(UserContent::text(text));
+                successful_attachments += 1;
+            }
             Ok(AttachmentPart::Image(b64, media)) => {
-                images.push(UserContent::image_base64(b64, Some(media), Some(ImageDetail::Auto)))
+                images.push(UserContent::image_base64(b64, Some(media), Some(ImageDetail::Auto)));
+                successful_attachments += 1;
             }
             Err(error) => notes.push(error),
         }
     }
     parts.extend(images);
+
+    if prompt.trim().is_empty() && successful_attachments == 0 {
+        let reason = if notes.is_empty() {
+            "no prompt or attachments provided".to_string()
+        } else {
+            notes.join("; ")
+        };
+        return Err(format!("cannot proceed with request: {reason}"));
+    }
 
     if !notes.is_empty() {
         parts.push(UserContent::text(format!(
@@ -882,18 +911,11 @@ pub async fn build_user_message(
             notes.join("; ")
         )));
     }
-    if parts.is_empty() {
-        parts.push(UserContent::text(if prompt.trim().is_empty() {
-            "[Attachment-only user request]".to_string()
-        } else {
-            prompt.to_string()
-        }));
-    }
 
-    BuiltUserMessage {
+    Ok(BuiltUserMessage {
         message: Message::User { content: parts },
         notes,
-    }
+    })
 }
 
 pub struct CompactionOutcome {
@@ -920,17 +942,15 @@ pub async fn maybe_compact(
     }
 
     let Some(input) = memory
-        .get_compaction_input(session_id, config::KEEP_RECENT_USER_TURNS)
+        .get_compaction_input(session_id, config::RECENT_CONTEXT_TOKEN_BUDGET)
         .await?
     else {
         return Ok(None);
     };
 
-    let transcript_budget = (model_info.context_window as usize)
-        .saturating_sub(6_000)
-        .saturating_mul(3)
-        .min(80_000)
-        .max(12_000);
+    let transcript_budget = ((model_info.context_window as usize).saturating_sub(8_000) * 3)
+        .min(300_000)
+        .max(16_000);
     let transcript = render_transcript(&input.summarize, transcript_budget);
     if transcript.trim().is_empty() {
         return Ok(None);
@@ -947,7 +967,7 @@ pub async fn maybe_compact(
 
     let original_message_count = input.prior_message_count + input.summarize.len();
     let summary_msg = Message::user(format!(
-        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[END CONTEXT SUMMARY — continue with the recent messages below]",
+        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.]",
         original_message_count, summary
     ));
     let new_context_tokens = estimate_messages_tokens(&[summary_msg])
@@ -968,46 +988,6 @@ pub async fn maybe_compact(
         ts,
         new_context_tokens,
     }))
-}
-
-fn estimate_message_tokens(message: &Message) -> u64 {
-    let mut chars = 0usize;
-    match message {
-        Message::User { content } => {
-            for part in content.iter() {
-                match part {
-                    UserContent::Text(t) => chars += t.text.len(),
-                    UserContent::ToolResult(tr) => {
-                        for c in tr.content.iter() {
-                            if let ToolResultContent::Text(t) = c {
-                                chars += t.text.len();
-                            }
-                        }
-                    }
-                    _ => chars += 100,
-                }
-            }
-        }
-        Message::Assistant(assistant) => {
-            for part in assistant.content.iter() {
-                match part {
-                    AssistantContent::Text(t) => chars += t.text.len(),
-                    AssistantContent::ToolCall(tc) => {
-                        chars += tc.function.name.len()
-                            + serde_json::to_string(&tc.function.arguments)
-                                .map(|s| s.len())
-                                .unwrap_or(0);
-                    }
-                    AssistantContent::Reasoning(r) => chars += r.text.len(),
-                    _ => {}
-                }
-            }
-        }
-        Message::System { content } => {
-            chars += content.len();
-        }
-    }
-    ((chars / 4).max(1)) as u64
 }
 
 fn estimate_messages_tokens(messages: &[Message]) -> u64 {
@@ -1087,16 +1067,37 @@ Integrate the previous checkpoint with the new conversation excerpt below into a
     };
 
     let summary_prompt = format!(
-        "Generate a structured execution checkpoint from the conversation below. Use this exact format:\n\n\
-### Goal & Scope\n\
-- Summary of user intent and current task\n\n\
-### Modified & Referenced Files\n\
-- List of file paths with brief status of modifications\n\n\
-### Decisions & Findings\n\
-- Architecture choices, test results, or discovered constraints\n\n\
-### Next Actions\n\
-- Pending or incomplete tasks\n\n\
+        "Your task is to create a detailed summary of this conversation. This summary will be placed at the start of a continuing session; newer messages that build on this context will follow after your summary (you do not see them here). Summarize thoroughly so that someone reading only your summary and then the newer messages can fully understand what happened and continue the work.\n\n\
+CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\n\
+Your summary should include the following sections:\n\n\
+1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail.\n\
+2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.\n\
+3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Include full code snippets where applicable and include a summary of why this file read or edit is important.\n\
+4. Errors and fixes: List all errors encountered and how they were fixed. Pay special attention to specific user feedback.\n\
+5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.\n\
+6. All user messages: List ALL user messages that are not tool results. Preserve any security-relevant instructions or constraints verbatim so they remain in effect after compaction.\n\
+7. Pending Tasks: Outline any pending tasks.\n\
+8. Work Completed: Describe what was accomplished by the end of this portion.\n\
+9. Context for Continuing Work: Summarize any context, decisions, or state that would be needed to understand and continue the work in subsequent messages.\n\n\
 {prior_context}\
+Here is an example of how your output should be structured:\n\n\
+<example>\n\
+<analysis>\n\
+[Your thought process, ensuring all points are covered thoroughly and accurately]\n\
+</analysis>\n\n\
+<summary>\n\
+1. Primary Request and Intent:\n   [Detailed description]\n\n\
+2. Key Technical Concepts:\n   - [Concept 1]\n\n\
+3. Files and Code Sections:\n   - [File Name 1]\n     - [Summary of why this file is important]\n     - [Important Code Snippet]\n\n\
+4. Errors and fixes:\n   - [Error description]: [How you fixed it]\n\n\
+5. Problem Solving:\n   [Description]\n\n\
+6. All user messages:\n   - [Detailed non-tool user message]\n\n\
+7. Pending Tasks:\n   - [Task 1]\n\n\
+8. Work Completed:\n   [Description of what was accomplished]\n\n\
+9. Context for Continuing Work:\n   [Key context, decisions, or state needed to continue the work]\n\
+</summary>\n\
+</example>\n\n\
+Please provide your summary following this structure, ensuring precision and thoroughness in your response.\n\n\
 Conversation excerpt:\n---\n{transcript}\n---"
     );
 
@@ -1115,11 +1116,27 @@ Conversation excerpt:\n---\n{transcript}\n---"
         })
         .collect::<Vec<_>>()
         .join("\n");
-    if text.trim().is_empty() {
+
+    let clean = extract_summary_block(&text);
+    if clean.trim().is_empty() {
         Err(AppError::other("model returned no text for compaction summary"))
     } else {
-        Ok(text)
+        Ok(clean)
     }
+}
+
+fn extract_summary_block(text: &str) -> String {
+    if let Some(start) = text.find("<summary>") {
+        if let Some(end) = text.rfind("</summary>") {
+            if end > start + "<summary>".len() {
+                return text[start + "<summary>".len()..end].trim().to_string();
+            }
+        }
+    }
+    if let Some(end_analysis) = text.find("</analysis>") {
+        return text[end_analysis + "</analysis>".len()..].trim().to_string();
+    }
+    text.trim().to_string()
 }
 
 pub fn humanize_llm_error(raw: &str) -> String {

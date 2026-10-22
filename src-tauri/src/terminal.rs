@@ -109,6 +109,8 @@ pub fn open(
 
     {
         let channel = channel.clone();
+        let killer_for_wait = child.clone_killer();
+        let mut child = child;
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 16384];
@@ -136,12 +138,10 @@ pub fn open(
             }
             let _ = channel.send(TerminalEvent::Exit);
             on_exit(instance_id);
+            let _ = child.wait();
+            let _ = killer_for_wait.kill();
         });
     }
-
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
 
     Ok(TerminalSession {
         instance_id,

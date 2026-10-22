@@ -34,6 +34,7 @@ impl DictationHandle {
 pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResult<DictationHandle> {
     let recording = Arc::new(AtomicBool::new(true));
     let finished = Arc::new(AtomicBool::new(false));
+    let capture_finished = Arc::new(AtomicBool::new(false));
     let samples: Samples = Arc::new(Mutex::new(Vec::new()));
     let sample_rate = Arc::new(AtomicU32::new(0));
 
@@ -43,6 +44,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let sample_rate = sample_rate.clone();
         let channel = channel.clone();
         let finished = finished.clone();
+        let capture_finished = capture_finished.clone();
         std::thread::spawn(move || {
             if let Err(e) = capture_loop(&recording, &samples, &sample_rate) {
                 recording.store(false, Ordering::SeqCst);
@@ -51,16 +53,27 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
                     message: e.to_string(),
                 });
             }
+            capture_finished.store(true, Ordering::SeqCst);
         });
     }
 
     {
         let recording = recording.clone();
         let finished = finished.clone();
+        let capture_finished = capture_finished.clone();
         let samples = samples.clone();
         let sample_rate = sample_rate.clone();
         tauri::async_runtime::spawn(async move {
-            transcribe_when_stopped(gateway, channel, recording, finished, samples, sample_rate).await;
+            transcribe_when_stopped(
+                gateway,
+                channel,
+                recording,
+                finished,
+                capture_finished,
+                samples,
+                sample_rate,
+            )
+            .await;
         });
     }
 
@@ -104,20 +117,22 @@ fn capture_loop(
                     if !rec.load(Ordering::SeqCst) {
                         return;
                     }
-                    let mut mono: Vec<i16> = Vec::with_capacity(data.len() / channels + 1);
-                    for frame in data.chunks(channels) {
-                        let mut acc: i32 = 0;
-                        for &s in frame {
-                            acc += ($to_i16)(s) as i32;
-                        }
-                        mono.push((acc / frame.len().max(1) as i32) as i16);
-                    }
-                    if let Ok(mut guard) = buffer.lock() {
+                    if let Ok(mut guard) = buffer.try_lock() {
                         if guard.len() >= max_samples {
                             rec.store(false, Ordering::SeqCst);
                             return;
                         }
-                        guard.extend_from_slice(&mono);
+                        for frame in data.chunks(channels) {
+                            let mut acc: i32 = 0;
+                            for &s in frame {
+                                acc += ($to_i16)(s) as i32;
+                            }
+                            guard.push((acc / frame.len().max(1) as i32) as i16);
+                            if guard.len() >= max_samples {
+                                rec.store(false, Ordering::SeqCst);
+                                break;
+                            }
+                        }
                     }
                 },
                 err_fn,
@@ -156,11 +171,20 @@ async fn transcribe_when_stopped(
     channel: Channel<DictationEvent>,
     recording: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
+    capture_finished: Arc<AtomicBool>,
     samples: Samples,
     sample_rate: Arc<AtomicU32>,
 ) {
     while recording.load(Ordering::SeqCst) {
         tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while !capture_finished.load(Ordering::SeqCst)
+        && !finished.load(Ordering::SeqCst)
+        && tokio::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
     if finished.load(Ordering::SeqCst) {

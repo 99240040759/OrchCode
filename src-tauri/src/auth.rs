@@ -332,7 +332,11 @@ fn cached_user_path(data_dir: &Path) -> PathBuf {
 
 pub fn save_cached_user(data_dir: &Path, profile: &UserProfile) {
     if let Ok(json) = serde_json::to_vec(profile) {
-        let _ = std::fs::write(cached_user_path(data_dir), json);
+        let path = cached_user_path(data_dir);
+        let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
     }
 }
 
@@ -345,13 +349,25 @@ pub fn clear_cached_user(data_dir: &Path) {
     let _ = std::fs::remove_file(cached_user_path(data_dir));
 }
 
-pub fn jwt_expiry(token: &str) -> Option<i64> {
+fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload.trim_end_matches('='))
         .ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    value.get("exp")?.as_i64()
+    serde_json::from_slice(&bytes).ok()
+}
+
+pub fn jwt_expiry(token: &str) -> Option<i64> {
+    decode_jwt_payload(token)?.get("exp")?.as_i64()
+}
+
+pub fn jwt_user_id(token: &str) -> Option<String> {
+    let value = decode_jwt_payload(token)?;
+    value
+        .get("user_id")
+        .or_else(|| value.get("sub"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 #[derive(Default)]

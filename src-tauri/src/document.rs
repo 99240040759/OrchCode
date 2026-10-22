@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
@@ -14,7 +15,8 @@ use crate::util::now_ms;
 const PASSAGE_CHARS: usize = 2048;
 const PASSAGE_OVERLAP: usize = 200;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IngestResult {
     pub document_id: String,
     pub title: String,
@@ -43,13 +45,28 @@ async fn persist_document(
     Ok(count)
 }
 
-pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<IngestResult> {
+pub const MAX_INGEST_FILE_BYTES: u64 = 50 * 1024 * 1024;
+pub const MAX_DECOMPRESSED_ENTRY_BYTES: u64 = 25 * 1024 * 1024;
+
+pub async fn ingest_document(
+    path: &Path,
+    workspace: Option<&Path>,
+    memory: &SqliteMemory,
+) -> AppResult<IngestResult> {
     let canonical = dunce::canonicalize(path)
         .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
     let metadata = std::fs::metadata(&canonical).map_err(AppError::Io)?;
     if !metadata.is_file() {
         return Err(AppError::DocumentParseError(format!(
             "not a file: {}",
+            canonical.display()
+        )));
+    }
+    if metadata.len() > MAX_INGEST_FILE_BYTES {
+        return Err(AppError::FileTooLarge(format!(
+            "file too large to ingest ({} MB, limit {} MB): {}",
+            metadata.len() / (1024 * 1024),
+            MAX_INGEST_FILE_BYTES / (1024 * 1024),
             canonical.display()
         )));
     }
@@ -70,6 +87,12 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
     let word_count = count_words(&parsed.full_text);
     let title = parsed.title.unwrap_or_else(|| file_stem_title(&canonical));
     let now = now_ms();
+    let workspace_path = workspace.map(|w| {
+        dunce::canonicalize(w)
+            .unwrap_or_else(|_| w.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    });
 
     let doc = DocumentRecord {
         id: doc_id.clone(),
@@ -84,6 +107,7 @@ pub async fn ingest_document(path: &Path, memory: &SqliteMemory) -> AppResult<In
         metadata: serde_json::json!({ "path": canonical_path }),
         indexed_at: now,
         updated_at: now,
+        workspace_path,
     };
 
     let passage_count = persist_document(doc, &parsed.full_text, parsed.page_boundaries, memory).await?;
@@ -147,8 +171,8 @@ fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
     }
 }
 
-fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
-    let doc = lopdf::Document::load(path)
+fn parse_pdf_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
+    let doc = lopdf::Document::load_mem(bytes)
         .map_err(|e| AppError::DocumentParseError(format!("PDF load failed: {e}")))?;
 
     let pages = doc.get_pages();
@@ -157,22 +181,13 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     let mut page_boundaries = Vec::new();
 
     for (page_num, _page_id) in &pages {
-        match doc.extract_text(&[*page_num]) {
-            Ok(text) => {
-                let cleaned = clean_pdf_text(&text);
+        if let Ok(text) = doc.extract_text(&[*page_num]) {
+            let cleaned = clean_pdf_text(&text);
+            if !cleaned.trim().is_empty() {
                 let page_offset = full_text.len();
                 page_boundaries.push((page_offset, *page_num as usize));
-                if !cleaned.trim().is_empty() {
-                    full_text.push_str(&cleaned);
-                    full_text.push('\n');
-                } else {
-                    full_text.push_str(&format!("[Page {page_num}]\n"));
-                }
-            }
-            Err(_) => {
-                let page_offset = full_text.len();
-                page_boundaries.push((page_offset, *page_num as usize));
-                full_text.push_str(&format!("[Page {page_num}: image content — OCR not available]\n"));
+                full_text.push_str(&cleaned);
+                full_text.push('\n');
             }
         }
     }
@@ -180,27 +195,27 @@ fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
     Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count), page_boundaries })
 }
 
+fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
+    let bytes = std::fs::read(path).map_err(AppError::Io)?;
+    parse_pdf_from_bytes(&bytes)
+}
+
 fn clean_pdf_text(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.lines() {
-        let mut first_word = true;
-        for word in line.split_whitespace() {
-            let filtered: String = word
-                .chars()
-                .filter(|c| !c.is_control() || *c == '\t')
+    text.lines()
+        .filter_map(|line| {
+            let words: Vec<String> = line
+                .split_whitespace()
+                .map(|w| w.chars().filter(|c| !c.is_control() || *c == '\t').collect())
+                .filter(|w: &String| !w.is_empty())
                 .collect();
-            if !filtered.is_empty() {
-                if !first_word {
-                    out.push(' ');
-                } else if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&filtered);
-                first_word = false;
+            if words.is_empty() {
+                None
+            } else {
+                Some(words.join(" "))
             }
-        }
-    }
-    out
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 enum OfficeXmlKind {
@@ -208,9 +223,8 @@ enum OfficeXmlKind {
     Pptx,
 }
 
-fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
-    let data = std::fs::read(path).map_err(AppError::Io)?;
-    let cursor = Cursor::new(data);
+fn parse_office_zip_from_bytes(bytes: &[u8], kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
+    let cursor = Cursor::new(bytes);
     let mut zip = ZipArchive::new(cursor)
         .map_err(|e| AppError::DocumentParseError(format!("ZIP open error: {e}")))?;
 
@@ -226,38 +240,18 @@ fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocumen
             Ok(ParsedDocument { full_text: text, title, page_count: None, page_boundaries: vec![] })
         }
         OfficeXmlKind::Pptx => {
-            let slide_names: Vec<String> = (0..zip.len())
-                .filter_map(|i| {
-                    let entry = zip.by_index(i).ok()?;
-                    let raw_name = entry.name().replace('\\', "/");
-                    if raw_name.starts_with("ppt/slides/slide") && raw_name.ends_with(".xml") {
-                        Some(entry.name().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let mut sorted_slides = slide_names;
-            sorted_slides.sort_by_key(|s| {
-                let norm = s.replace('\\', "/");
-                norm.strip_prefix("ppt/slides/slide")
-                    .and_then(|p| p.strip_suffix(".xml"))
-                    .and_then(|n| n.parse::<usize>().ok())
-                    .unwrap_or(0)
-            });
-
+            let sorted_slides = ordered_pptx_slides(&mut zip);
             let slide_count = sorted_slides.len();
             let mut full_text = String::new();
             let mut page_boundaries = Vec::new();
 
             for (idx, slide_name) in sorted_slides.iter().enumerate() {
                 let slide_num = idx + 1;
-                let offset = full_text.len();
-                page_boundaries.push((offset, slide_num));
                 let xml = read_zip_entry(&mut zip, slide_name)?;
                 let slide_text = extract_office_text(&xml)?;
                 if !slide_text.trim().is_empty() {
+                    let offset = full_text.len();
+                    page_boundaries.push((offset, slide_num));
                     full_text.push_str(&format!("=== Slide {slide_num} ===\n{slide_text}\n\n"));
                 }
             }
@@ -272,14 +266,113 @@ fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocumen
     }
 }
 
-fn read_zip_entry(zip: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> AppResult<String> {
+fn parse_office_zip(path: &Path, kind: OfficeXmlKind) -> AppResult<ParsedDocument> {
+    let data = std::fs::read(path).map_err(AppError::Io)?;
+    parse_office_zip_from_bytes(&data, kind)
+}
+
+fn ordered_pptx_slides<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Vec<String> {
+    if let (Ok(pres_xml), Ok(rels_xml)) = (
+        read_zip_entry(zip, "ppt/presentation.xml"),
+        read_zip_entry(zip, "ppt/_rels/presentation.xml.rels"),
+    ) {
+        let mut rid_to_target: HashMap<String, String> = HashMap::new();
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut rels_reader = Reader::from_str(&rels_xml);
+        let mut buf = Vec::new();
+        while let Ok(event) = rels_reader.read_event_into(&mut buf) {
+            match event {
+                Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"Relationship" => {
+                    let mut id = None;
+                    let mut target = None;
+                    for attr in e.attributes().flatten() {
+                        if attr.key.as_ref() == b"Id" {
+                            id = std::str::from_utf8(&attr.value).ok().map(String::from);
+                        } else if attr.key.as_ref() == b"Target" {
+                            target = std::str::from_utf8(&attr.value).ok().map(String::from);
+                        }
+                    }
+                    if let (Some(id), Some(target)) = (id, target) {
+                        let normalized_target = if target.starts_with('/') {
+                            target.trim_start_matches('/').to_string()
+                        } else if target.starts_with("ppt/") {
+                            target
+                        } else {
+                            format!("ppt/{target}")
+                        };
+                        rid_to_target.insert(id, normalized_target);
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        let mut ordered = Vec::new();
+        let mut pres_reader = Reader::from_str(&pres_xml);
+        while let Ok(event) = pres_reader.read_event_into(&mut buf) {
+            match event {
+                Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"sldId" => {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"id" && attr.key.as_ref().starts_with(b"r:") {
+                            if let Ok(rid) = std::str::from_utf8(&attr.value) {
+                                if let Some(target) = rid_to_target.get(rid) {
+                                    ordered.push(target.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        if !ordered.is_empty() {
+            return ordered;
+        }
+    }
+
+    let mut slide_names: Vec<String> = zip
+        .file_names()
+        .filter(|name| {
+            let norm = name.replace('\\', "/");
+            norm.starts_with("ppt/slides/slide") && norm.ends_with(".xml")
+        })
+        .map(String::from)
+        .collect();
+
+    slide_names.sort_by_key(|s| {
+        let norm = s.replace('\\', "/");
+        norm.strip_prefix("ppt/slides/slide")
+            .and_then(|p| p.strip_suffix(".xml"))
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(0)
+    });
+
+    slide_names
+}
+
+fn read_zip_entry<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>, name: &str) -> AppResult<String> {
     let mut entry = zip
         .by_name(name)
         .map_err(|e| AppError::DocumentParseError(format!("zip entry '{name}' not found: {e}")))?;
     let mut content = String::new();
-    entry
+    let read_bytes = entry
+        .by_ref()
+        .take(MAX_DECOMPRESSED_ENTRY_BYTES + 1)
         .read_to_string(&mut content)
         .map_err(|e| AppError::DocumentParseError(format!("zip read '{name}': {e}")))?;
+    if read_bytes as u64 > MAX_DECOMPRESSED_ENTRY_BYTES {
+        return Err(AppError::FileTooLarge(format!(
+            "zip entry '{name}' exceeds maximum decompressed size limit of {} MB",
+            MAX_DECOMPRESSED_ENTRY_BYTES / (1024 * 1024)
+        )));
+    }
     Ok(content)
 }
 
@@ -292,6 +385,7 @@ fn extract_office_text(xml: &str) -> AppResult<String> {
 
     let mut text = String::new();
     let mut in_text = false;
+    let mut skip_depth: usize = 0;
     let mut buf = Vec::new();
 
     loop {
@@ -300,10 +394,16 @@ fn extract_office_text(xml: &str) -> AppResult<String> {
                 let local = e.local_name();
                 let lb = local.as_ref();
                 match lb {
-                    b"t" => in_text = true,
+                    b"del" | b"delText" | b"instrText" => skip_depth += 1,
+                    b"t" if skip_depth == 0 => in_text = true,
                     b"p" => {
                         if !text.is_empty() && !text.ends_with('\n') {
                             text.push('\n');
+                        }
+                    }
+                    b"tc" => {
+                        if !text.is_empty() && !text.ends_with('\t') && !text.ends_with('\n') {
+                            text.push('\t');
                         }
                     }
                     _ => {}
@@ -312,28 +412,36 @@ fn extract_office_text(xml: &str) -> AppResult<String> {
             Ok(Event::Empty(ref e)) => {
                 let local = e.local_name();
                 let lb = local.as_ref();
-                match lb {
-                    b"br" | b"cr" => text.push('\n'),
-                    b"tab" => text.push('\t'),
-                    _ => {}
+                if skip_depth == 0 {
+                    match lb {
+                        b"br" | b"cr" => text.push('\n'),
+                        b"tab" => text.push('\t'),
+                        _ => {}
+                    }
                 }
             }
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
                 let lb = local.as_ref();
-                if lb == b"t" {
-                    in_text = false;
+                match lb {
+                    b"del" | b"delText" | b"instrText" => {
+                        skip_depth = skip_depth.saturating_sub(1);
+                    }
+                    b"t" => {
+                        in_text = false;
+                    }
+                    _ => {}
                 }
             }
             Ok(Event::Text(e)) => {
-                if in_text {
+                if in_text && skip_depth == 0 {
                     if let Ok(t) = e.unescape() {
                         text.push_str(&t);
                     }
                 }
             }
             Ok(Event::CData(e)) => {
-                if in_text {
+                if in_text && skip_depth == 0 {
                     if let Ok(t) = std::str::from_utf8(e.as_ref()) {
                         text.push_str(t);
                     }
@@ -389,10 +497,31 @@ fn extract_xml_element(xml: &str, tag: &str) -> AppResult<String> {
     Ok(result)
 }
 
-fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
-    use calamine::{open_workbook_auto, Data, Reader};
+fn format_calamine_cell(cell: &calamine::Data) -> String {
+    use calamine::Data;
+    match cell {
+        Data::Empty => String::new(),
+        Data::String(s) => s.clone(),
+        Data::Float(f) => {
+            if *f == f.floor() && f.abs() < 1e15 {
+                format!("{}", *f as i64)
+            } else {
+                format!("{f}")
+            }
+        }
+        Data::Int(i) => i.to_string(),
+        Data::Bool(b) => b.to_string(),
+        Data::DateTime(dt) => format!("{dt}"),
+        Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
+        Data::Error(e) => format!("#{e:?}"),
+    }
+}
 
-    let mut workbook = open_workbook_auto(path)
+fn parse_xlsx_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
+    use calamine::{open_workbook_auto_from_rs, Reader};
+
+    let cursor = Cursor::new(bytes);
+    let mut workbook = open_workbook_auto_from_rs(cursor)
         .map_err(|e| AppError::DocumentParseError(format!("XLSX open failed: {e}")))?;
 
     let sheet_names = workbook.sheet_names().to_vec();
@@ -404,22 +533,7 @@ fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
             for row in range.rows() {
                 let row_text: Vec<String> = row
                     .iter()
-                    .map(|cell| match cell {
-                        Data::Empty => String::new(),
-                        Data::String(s) => s.clone(),
-                        Data::Float(f) => {
-                            if *f == f.floor() && f.abs() < 1e15 {
-                                format!("{}", *f as i64)
-                            } else {
-                                format!("{f}")
-                            }
-                        }
-                        Data::Int(i) => i.to_string(),
-                        Data::Bool(b) => b.to_string(),
-                        Data::DateTime(dt) => format!("{dt}"),
-                        Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
-                        Data::Error(e) => format!("[err:{e:?}]"),
-                    })
+                    .map(format_calamine_cell)
                     .filter(|s| !s.is_empty())
                     .collect();
                 if !row_text.is_empty() {
@@ -439,15 +553,24 @@ fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
     })
 }
 
-fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
-    let raw = std::fs::read(path).map_err(AppError::Io)?;
-    let (cow, _, _) = encoding_rs::UTF_8.decode(&raw);
+fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
+    let bytes = std::fs::read(path).map_err(AppError::Io)?;
+    parse_xlsx_from_bytes(&bytes)
+}
+
+fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
+    let (cow, _, _) = encoding_rs::UTF_8.decode(bytes);
     Ok(ParsedDocument {
         full_text: cow.into_owned(),
         title: None,
         page_count: None,
         page_boundaries: vec![],
     })
+}
+
+fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
+    let raw = std::fs::read(path).map_err(AppError::Io)?;
+    parse_plain_text_from_bytes(&raw)
 }
 
 fn chunk_text_into_passages(
@@ -505,12 +628,7 @@ fn file_stem_title(path: &Path) -> String {
 }
 
 fn stable_passage_id(document_id: &str, seq: i64) -> String {
-    let input = format!("{document_id}:{seq}");
-    let hash = Sha256::digest(input.as_bytes());
-    format!(
-        "{:016x}",
-        u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
-    )
+    crate::util::stable_hash_hex(&format!("{document_id}:{seq}"))
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -545,14 +663,24 @@ pub fn is_parseable_document(path: &Path) -> bool {
 }
 
 pub fn parse_document_bytes(bytes: &[u8], extension: &str) -> AppResult<ParsedDocumentDto> {
-    let dir = tempfile::tempdir().map_err(AppError::Io)?;
-    let file_path = dir.path().join(format!("doc.{}", extension.trim_start_matches('.')));
-    std::fs::write(&file_path, bytes).map_err(AppError::Io)?;
-    let file_type = detect_file_type(&file_path)?;
-    let parsed = parse_document(&file_path, &file_type)?;
+    let ext = extension.trim_start_matches('.').to_lowercase();
+    let file_type = match ext.as_str() {
+        "pdf" => "pdf",
+        "docx" => "docx",
+        "xlsx" | "xls" | "ods" => "xlsx",
+        "pptx" => "pptx",
+        _ => "text",
+    };
+    let parsed = match file_type {
+        "pdf" => parse_pdf_from_bytes(bytes)?,
+        "docx" => parse_office_zip_from_bytes(bytes, OfficeXmlKind::Word)?,
+        "xlsx" => parse_xlsx_from_bytes(bytes)?,
+        "pptx" => parse_office_zip_from_bytes(bytes, OfficeXmlKind::Pptx)?,
+        _ => parse_plain_text_from_bytes(bytes)?,
+    };
     Ok(ParsedDocumentDto {
         title: parsed.title,
-        file_type,
+        file_type: file_type.to_string(),
         page_count: parsed.page_count,
         full_text: parsed.full_text,
     })
@@ -584,22 +712,7 @@ pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppRes
             let cells: Vec<String> = row
                 .iter()
                 .take(max_cols)
-                .map(|cell| match cell {
-                    Data::Empty => String::new(),
-                    Data::String(s) => s.clone(),
-                    Data::Float(f) => {
-                        if *f == f.floor() && f.abs() < 1e15 {
-                            format!("{}", *f as i64)
-                        } else {
-                            format!("{f}")
-                        }
-                    }
-                    Data::Int(i) => i.to_string(),
-                    Data::Bool(b) => b.to_string(),
-                    Data::DateTime(dt) => format!("{dt}"),
-                    Data::DateTimeIso(s) | Data::DurationIso(s) => s.clone(),
-                    Data::Error(e) => format!("#{e:?}"),
-                })
+                .map(format_calamine_cell)
                 .collect();
             if cells.iter().all(|c| c.is_empty()) {
                 continue;

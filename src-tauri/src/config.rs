@@ -6,15 +6,15 @@ pub fn firebase_api_key() -> &'static str {
     env!("FIREBASE_API_KEY")
 }
 
-pub fn firebase_auth_domain() -> &'static str {
-    env!("FIREBASE_AUTH_DOMAIN")
-}
-
 pub fn sentry_dsn() -> &'static str {
     option_env!("SENTRY_DSN").unwrap_or("")
 }
 
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
+
+fn clean_base_url() -> &'static str {
+    gcp_functions_url().trim_end_matches('/')
+}
 
 pub fn inference_base_url(provider: &str) -> String {
     let clean = if provider.trim().is_empty() {
@@ -22,27 +22,27 @@ pub fn inference_base_url(provider: &str) -> String {
     } else {
         provider.trim()
     };
-    format!("{}/{}/v1", gcp_functions_url(), clean)
+    format!("{}/{}/v1", clean_base_url(), clean)
 }
 
 pub fn models_url() -> String {
-    format!("{}/models", gcp_functions_url())
+    format!("{}/models", clean_base_url())
 }
 
 pub fn title_url() -> String {
-    format!("{}/title", gcp_functions_url())
+    format!("{}/title", clean_base_url())
 }
 
 pub fn budget_url() -> String {
-    format!("{}/budget", gcp_functions_url())
+    format!("{}/budget", clean_base_url())
 }
 
 pub fn transcribe_url() -> String {
-    format!("{}/transcribe", gcp_functions_url())
+    format!("{}/transcribe", clean_base_url())
 }
 
 pub fn tavily_url() -> String {
-    format!("{}/tavily", gcp_functions_url())
+    format!("{}/tavily", clean_base_url())
 }
 
 const DEFAULT_INFERENCE_PROVIDER: &str = "vertex";
@@ -65,8 +65,8 @@ pub const MAX_VIEW_TOOL_OUTPUT_CHARS: usize = 16_000;
 
 pub const PREAMBLE_TOKEN_RESERVE: usize = 6_000;
 
-pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.62;
-pub const KEEP_RECENT_USER_TURNS: usize = 4;
+pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.80;
+pub const RECENT_CONTEXT_TOKEN_BUDGET: u64 = 25_000;
 
 pub const MODEL_CATALOG_REFRESH_INTERVAL_SECS: u64 = 300;
 pub const TOKEN_REFRESH_CHECK_INTERVAL_SECS: u64 = 60;

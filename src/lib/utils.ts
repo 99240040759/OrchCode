@@ -1,47 +1,46 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { clsx } from "clsx";
+import { clsx, type ClassValue } from "clsx";
+import { normalize, basename, dirname, extname, relative, isAbsolute } from "pathe";
 
-export { clsx as cn };
+export function cn(...inputs: ClassValue[]): string {
+  return clsx(inputs);
+}
 
 export function normalizePath(pathStr: string): string {
-  return pathStr.replace(/\\/g, "/");
+  if (!pathStr) return "";
+  return normalize(pathStr);
 }
 
 export function toRelativeWorkspacePath(path: string, workspaceRoot?: string | null): string {
   const clean = normalizePath(path);
   if (!workspaceRoot) return clean;
-  const root = normalizePath(workspaceRoot).replace(/\/+$/, "");
-  if (clean.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
-    return clean.slice(root.length + 1);
+  const root = normalizePath(workspaceRoot);
+  const rel = relative(root, clean);
+  if (!rel.startsWith("..") && !isAbsolute(rel)) {
+    return rel;
   }
   return clean;
 }
 
 export function splitPathParts(pathStr: string): string[] {
+  if (!pathStr) return [];
   return normalizePath(pathStr).split("/").filter(Boolean);
 }
 
 export function getBasename(pathStr: string): string {
   if (!pathStr) return "";
-  const parts = splitPathParts(pathStr);
-  return parts.length > 0 ? parts[parts.length - 1] : "";
+  return basename(pathStr);
 }
 
 export function getDirname(pathStr: string): string {
   if (!pathStr) return "";
-  const normalized = normalizePath(pathStr);
-  const isAbs = normalized.startsWith("/");
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length <= 1) return isAbs ? "/" : "";
-  parts.pop();
-  return (isAbs ? "/" : "") + parts.join("/");
+  return dirname(pathStr);
 }
 
 export function getExt(pathStr: string): string {
-  const base = getBasename(pathStr);
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) return "";
-  return base.slice(dot + 1).toLowerCase();
+  if (!pathStr) return "";
+  const ext = extname(pathStr);
+  return ext.startsWith(".") ? ext.slice(1).toLowerCase() : ext.toLowerCase();
 }
 
 export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);

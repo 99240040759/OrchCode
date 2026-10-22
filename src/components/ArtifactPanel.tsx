@@ -84,7 +84,6 @@ export function ArtifactPanelHeader() {
   const closeTab      = useArtifactsStore((s) => s.closeTab);
   const setActive     = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
-  const setPanelOpen  = useArtifactsStore((s) => s.setPanelOpen);
 
   return (
     <div className="ArtifactPanel-header" data-tauri-drag-region>
@@ -176,8 +175,11 @@ function DocumentViewer({ kind, path }: { kind: ArtifactTab["kind"]; path: strin
 }
 
 function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
+  const hasRendered = useRef(active);
+  if (active) hasRendered.current = true;
+  if (!hasRendered.current) return null;
+
   const stateful = tab.kind === "terminal" || tab.kind === "browser";
-  if (!active && !stateful) return null;
   return (
     <div
       className="ArtifactTabPanel"

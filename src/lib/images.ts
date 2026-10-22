@@ -2,33 +2,74 @@ import { useEffect, useState } from "react";
 import { errorMessage, readImageDataUrl } from "./api";
 
 const CACHE_LIMIT = 200;
-const cache = new Map<string, string>();
-const inflight = new Map<string, Promise<string>>();
 
-function remember(path: string, url: string) {
-  if (cache.size >= CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
+class LruImageCache {
+  private readonly max: number;
+  private readonly map = new Map<string, string>();
+
+  constructor(max: number = CACHE_LIMIT) {
+    this.max = max;
   }
-  cache.set(path, url);
+
+  get(key: string): string | undefined {
+    const val = this.map.get(key);
+    if (val !== undefined) {
+      // Refresh recency by re-inserting
+      this.map.delete(key);
+      this.map.set(key, val);
+    }
+    return val;
+  }
+
+  set(key: string, value: string): void {
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    } else if (this.map.size >= this.max) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.delete(oldestKey);
+      }
+    }
+    this.map.set(key, value);
+  }
+
+  has(key: string): boolean {
+    return this.map.has(key);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
 }
 
-function loadImageDataUrl(path: string, fresh = false): Promise<string> {
-  if (!fresh) {
-    const cached = cache.get(path);
-    if (cached) return Promise.resolve(cached);
-    const pending = inflight.get(path);
-    if (pending) return pending;
-  }
+const cache = new LruImageCache(CACHE_LIMIT);
+const inflight = new Map<string, Promise<string>>();
+
+export function clearImageCache(): void {
+  cache.clear();
+  inflight.clear();
+}
+
+function loadImageDataUrl(path: string, version = 0): Promise<string> {
+  const cacheKey = `${path}@${version}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return Promise.resolve(cached);
+
+  const pending = inflight.get(cacheKey);
+  if (pending) return pending;
+
   const request = readImageDataUrl(path)
     .then((url) => {
-      remember(path, url);
+      cache.set(cacheKey, url);
       return url;
     })
     .finally(() => {
-      if (inflight.get(path) === request) inflight.delete(path);
+      if (inflight.get(cacheKey) === request) {
+        inflight.delete(cacheKey);
+      }
     });
-  inflight.set(path, request);
+
+  inflight.set(cacheKey, request);
   return request;
 }
 
@@ -39,24 +80,25 @@ export interface ImageDataUrlState {
 }
 
 export function useImageDataUrl(path: string | null | undefined, version = 0): ImageDataUrlState {
+  const cacheKey = path ? `${path}@${version}` : null;
   const [state, setState] = useState<ImageDataUrlState>(() => {
-    const cached = path ? cache.get(path) : undefined;
+    const cached = cacheKey ? cache.get(cacheKey) : undefined;
     return { src: cached ?? null, error: null, loading: Boolean(path && !cached) };
   });
 
   useEffect(() => {
-    if (!path) {
+    if (!path || !cacheKey) {
       setState({ src: null, error: null, loading: false });
       return;
     }
-    const cached = version === 0 ? cache.get(path) : undefined;
+    const cached = cache.get(cacheKey);
     if (cached) {
       setState({ src: cached, error: null, loading: false });
       return;
     }
     let active = true;
     setState({ src: null, error: null, loading: true });
-    loadImageDataUrl(path, version > 0).then(
+    loadImageDataUrl(path, version).then(
       (src) => {
         if (active) setState({ src, error: null, loading: false });
       },
@@ -67,7 +109,7 @@ export function useImageDataUrl(path: string | null | undefined, version = 0): I
     return () => {
       active = false;
     };
-  }, [path, version]);
+  }, [path, version, cacheKey]);
 
   return state;
 }

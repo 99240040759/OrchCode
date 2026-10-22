@@ -26,16 +26,7 @@ pub struct FileContent {
 }
 
 fn resolve_readable_file(workspace: Option<&Path>, path: &str) -> Result<PathBuf, String> {
-    let raw = Path::new(path);
-    if raw.is_absolute() {
-        let canonical = dunce::canonicalize(raw).map_err(|e| format!("cannot resolve {path}: {e}"))?;
-        if !canonical.is_file() {
-            return Err(format!("not a file: {path}"));
-        }
-        return Ok(canonical);
-    }
-    let root = workspace.ok_or_else(|| "no workspace folder set".to_string())?;
-    fs_util::resolve_existing_file(root, path).map_err(|e| e.to_string())
+    fs_util::resolve_readable_file(workspace, path).map_err(|e| e.to_string())
 }
 
 use crate::util::display_path;
@@ -125,6 +116,9 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
             Err(e) => e.valid_up_to(),
         };
         buf.truncate(cut);
+    }
+    if crate::util::looks_binary(&buf) {
+        return Err(format!("cannot read binary file as text: {path}"));
     }
 
     Ok(FileContent {

@@ -84,11 +84,16 @@ impl Tool for GitHubListRepos {
             .map_err(|e| ToolError::msg(format!("GitHub auth: {e}")))?;
 
         let visibility = args.visibility.as_deref().unwrap_or("owner");
+        let enc_visibility = urlencoding::encode(visibility);
         let limit = args.max_results.unwrap_or(30).min(100);
         let page = args.page.unwrap_or(1).max(1);
 
+        let param_name = match visibility {
+            "public" | "private" => "visibility",
+            _ => "type",
+        };
         let url = format!(
-            "{GITHUB_API}/user/repos?type={visibility}&sort=updated&per_page={limit}&page={page}"
+            "{GITHUB_API}/user/repos?{param_name}={enc_visibility}&sort=updated&per_page={limit}&page={page}"
         );
 
         let repos_json = request_json(

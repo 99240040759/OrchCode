@@ -13,6 +13,15 @@ pub fn now_secs() -> i64 {
     now_ms() / 1000
 }
 
+pub fn stable_hash_hex(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(input.as_bytes());
+    format!(
+        "{:016x}",
+        u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
+    )
+}
+
 pub fn http_client() -> reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT
@@ -42,9 +51,9 @@ pub fn streaming_http_client() -> reqwest::Client {
 }
 
 pub fn basename(path: &str) -> String {
-    path.replace('\\', "/")
-        .rsplit('/')
-        .next()
+    Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
         .unwrap_or(path)
         .to_string()
 }
@@ -156,6 +165,8 @@ fn resolve_login_path() -> Option<String> {
     let extra = [
         "/opt/homebrew/bin".to_string(),
         "/opt/homebrew/sbin".to_string(),
+        "/opt/local/bin".to_string(),
+        "/opt/local/sbin".to_string(),
         "/usr/local/bin".to_string(),
         "/usr/bin".to_string(),
         "/bin".to_string(),
@@ -192,22 +203,25 @@ fn query_shell_path(shell: &str, flags: &str) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if started.elapsed() < Duration::from_secs(6) => {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let raw_bytes = match rx.recv_timeout(Duration::from_secs(6)) {
+        Ok(out) => {
+            let _ = child.wait();
+            out
         }
-    }
-    let mut output = String::new();
-    child.stdout.take()?.read_to_string(&mut output).ok()?;
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    };
+    let output = String::from_utf8_lossy(&raw_bytes);
     let start = output.find(MARKER)? + MARKER.len();
     let rest = &output[start..];
     let end = rest.find(MARKER)?;
@@ -228,7 +242,7 @@ pub fn kill_process_tree(pid: u32) {
     #[cfg(unix)]
     {
         let _ = std::process::Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

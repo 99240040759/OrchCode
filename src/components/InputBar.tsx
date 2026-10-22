@@ -96,7 +96,7 @@ function extractPromptFromDoc(doc: any): string {
   doc.descendants((node: any) => {
     if (node.type.name === "mention") {
       const path = node.attrs.id || "";
-      text += path.includes(" ") ? `@[${path}] ` : `@${path} `;
+      text += `@[${path}] `;
       return false;
     }
     if (node.isText) {
@@ -374,86 +374,14 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const closePopoverRef = useRef(closePopover);
   closePopoverRef.current = closePopover;
 
-  const insertMention = useCallback(
-    (filePath: string) => {
-      if (!editor) return;
-      const filename = api.getBasename(filePath) || filePath;
-      const range = tokenRangeRef.current;
-      if (range) {
-        editor
-          .chain()
-          .focus()
-          .deleteRange({ from: range.from, to: range.to })
-          .insertContent([
-            {
-              type: "mention",
-              attrs: { id: filePath, label: filename },
-            },
-            {
-              type: "text",
-              text: " ",
-            },
-          ])
-          .run();
-      } else {
-        editor
-          .chain()
-          .focus()
-          .insertContent([
-            {
-              type: "mention",
-              attrs: { id: filePath, label: filename },
-            },
-            {
-              type: "text",
-              text: " ",
-            },
-          ])
-          .run();
-      }
-      closePopover();
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [closePopover]
-  );
-  const insertMentionRef = useRef(insertMention);
-  insertMentionRef.current = insertMention;
+  const insertMentionRef = useRef<(filePath: string) => void>(() => {});
+  const runCommandRef = useRef<(command: CommandItem) => void>(() => {});
+  const doSendRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
-  const runCommand = useCallback(
-    (command: CommandItem) => {
-      if (command.key === "clear") {
-        newChat();
-        editor?.commands.clearContent();
-        setAttachments([]);
-        setNotice(null);
-      }
-      closePopover();
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [newChat, closePopover]
-  );
-  const runCommandRef = useRef(runCommand);
-  runCommandRef.current = runCommand;
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
 
-  const doSend = useCallback(async () => {
-    if (!editor) return;
-    const text = extractPromptFromDoc(editor.state.doc).trim();
-    if (!text && attachments.length === 0) return;
-
-    const pending = attachments;
-    editor.commands.clearContent();
-    setAttachments([]);
-    setNotice(null);
-    closePopover();
-
-    const ok = await send(text, pending);
-    if (!ok) {
-      editor.commands.setContent(text);
-      setAttachments(pending);
-    }
-  }, [attachments, send, closePopover]);
-  const doSendRef = useRef(doSend);
-  doSendRef.current = doSend;
+  const toggleDictationRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   const placeholderText = promptMode
     ? "Write a message..."
@@ -528,6 +456,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
+          if (recordingRef.current) {
+            void toggleDictationRef.current();
+          }
           void doSendRef.current();
           return true;
         }
@@ -565,6 +496,85 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
     },
   });
 
+  const insertMention = useCallback(
+    (filePath: string) => {
+      if (!editor) return;
+      const filename = api.getBasename(filePath) || filePath;
+      const range = tokenRangeRef.current;
+      if (range) {
+        editor
+          .chain()
+          .focus()
+          .deleteRange({ from: range.from, to: range.to })
+          .insertContent([
+            {
+              type: "mention",
+              attrs: { id: filePath, label: filename },
+            },
+            {
+              type: "text",
+              text: " ",
+            },
+          ])
+          .run();
+      } else {
+        editor
+          .chain()
+          .focus()
+          .insertContent([
+            {
+              type: "mention",
+              attrs: { id: filePath, label: filename },
+            },
+            {
+              type: "text",
+              text: " ",
+            },
+          ])
+          .run();
+      }
+      closePopover();
+    },
+    [editor, closePopover]
+  );
+  insertMentionRef.current = insertMention;
+
+  const runCommand = useCallback(
+    (command: CommandItem) => {
+      if (command.key === "clear") {
+        if (!streaming) {
+          newChat();
+          editor?.commands.clearContent();
+          setAttachments([]);
+          setNotice(null);
+        }
+      }
+      closePopover();
+    },
+    [streaming, newChat, editor, closePopover]
+  );
+  runCommandRef.current = runCommand;
+
+  const doSend = useCallback(async () => {
+    if (!editor) return;
+    const text = extractPromptFromDoc(editor.state.doc).trim();
+    if (!text && attachments.length === 0) return;
+
+    const pending = attachments;
+    const savedDoc = editor.getJSON();
+    editor.commands.clearContent();
+    setAttachments([]);
+    setNotice(null);
+    closePopover();
+
+    const ok = await send(text, pending);
+    if (!ok) {
+      editor.commands.setContent(savedDoc);
+      setAttachments(pending);
+    }
+  }, [editor, attachments, send, closePopover]);
+  doSendRef.current = doSend;
+
   const toggleDictation = useCallback(async () => {
     if (recording) {
       setRecording(false);
@@ -600,6 +610,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       setNotice(api.errorMessage(e));
     }
   }, [recording, editor]);
+  toggleDictationRef.current = toggleDictation;
 
   const pickFiles = useCallback(
     async (imagesOnly: boolean) => {

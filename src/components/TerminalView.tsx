@@ -72,10 +72,13 @@ export function TerminalView({ id }: { id: string }) {
         }
       })
       .catch((e) => {
-        term.write(`\r\n\x1b[31m${api.errorMessage(e)}\x1b[0m\r\n`);
+        if (!disposed) {
+          term.write(`\r\n\x1b[31m${api.errorMessage(e)}\x1b[0m\r\n`);
+        }
       });
 
     const dataSubscription = term.onData((data) => {
+      if (disposed) return;
       void api.terminalWrite(sessionId, data).catch(() => undefined);
     });
 
@@ -90,7 +93,7 @@ export function TerminalView({ id }: { id: string }) {
       dataSubscription.dispose();
       observer.disconnect();
       if (opened) void api.terminalClose(sessionId).catch(() => undefined);
-      window.setTimeout(() => term.dispose(), 0);
+      term.dispose();
     };
   }, [id]);
 

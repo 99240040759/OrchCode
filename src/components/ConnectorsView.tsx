@@ -127,19 +127,13 @@ export function ConnectorsView() {
 
   useEffect(() => {
     if (!actionId) return;
-    let focusTimer: number | undefined;
     const onFocus = () => {
-      window.clearTimeout(focusTimer);
-      focusTimer = window.setTimeout(() => {
-        setActionId(null);
-        void refresh();
-      }, 1500);
+      void refresh();
     };
     const timeout = window.setTimeout(() => setActionId(null), 120_000);
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
-      window.clearTimeout(focusTimer);
       window.clearTimeout(timeout);
     };
   }, [actionId, refresh]);

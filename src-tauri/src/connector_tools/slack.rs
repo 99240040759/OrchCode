@@ -38,7 +38,9 @@ async fn resolve_user_names(
         let result = request_json(manager.http().get(&url).bearer_auth(token), "Slack").await;
         (id, result)
     });
-    for (id, result) in futures::future::join_all(lookups).await {
+    use futures::stream::{self, StreamExt};
+    let results = stream::iter(lookups).buffer_unordered(10).collect::<Vec<_>>().await;
+    for (id, result) in results {
         let Ok(json) = result else { continue };
         if !json["ok"].as_bool().unwrap_or(false) {
             continue;

@@ -25,7 +25,7 @@ pub mod util;
 use state::AppState;
 use tauri::{Emitter, Manager};
 
-const MAIN_WINDOW_LABEL: &str = "main";
+pub const MAIN_WINDOW_LABEL: &str = "main";
 
 fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
@@ -91,7 +91,13 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(rest) = util::strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
         handle_connector_callback(app, rest).await;
-    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://").is_some() {
+    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth/").is_some()
+        || util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth").is_some()
+        || util::strip_prefix_ignore_ascii_case(raw_url, "orch://login").is_some()
+        || raw_url.contains("code=")
+        || raw_url.contains("id_token=")
+        || raw_url.contains("access_token=")
+    {
         handle_sign_in_callback(app, raw_url).await;
     }
     focus_main_window(app);
@@ -162,15 +168,10 @@ pub fn run() {
             skills::seed_bundled_skills(&data_dir);
 
             let app_state = AppState::new(&data_dir)?;
+            if let Err(e) = tauri::async_runtime::block_on(app_state.connector_manager.initialize(&app_state.memory)) {
+                eprintln!("connector manager init failed: {e}");
+            }
             app.manage(app_state);
-
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let state = app_handle.state::<AppState>();
-                if let Err(e) = state.connector_manager.initialize(&state.memory).await {
-                    eprintln!("connector manager init failed: {e}");
-                }
-            });
 
             AppState::spawn_background_loops(app.handle().clone());
 
@@ -227,6 +228,7 @@ pub fn run() {
             ipc::list_models,
             ipc::get_budget,
             ipc::get_session_view,
+            ipc::get_session_messages_page,
             ipc::clear_session,
             ipc::get_user_pref,
             ipc::set_user_pref,

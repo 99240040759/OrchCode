@@ -306,7 +306,8 @@ impl Tool for JiraGetIssue {
                 format!("showing last {count}")
             };
             out.push_str(&format!("\n## Comments ({total_comments} total — {label}):\n\n"));
-            for c in comments.iter().rev().take(10).collect::<Vec<_>>().iter().rev() {
+            let start = comments.len().saturating_sub(10);
+            for c in &comments[start..] {
                 let author = c["author"]["displayName"].as_str().unwrap_or("—");
                 let created = c["created"].as_str().unwrap_or("—");
                 let body = extract_adf_text(&c["body"]);

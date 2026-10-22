@@ -5,12 +5,21 @@ use std::pin::Pin;
 use rig::completion::Message;
 use rig::id::ConversationId;
 use rig::memory::{ConversationMemory, MemoryError};
-use rig::message::{AssistantContent, AssistantMessage, CallId, ToolName, ToolResultContent, UserContent};
+use rig::message::{AssistantContent, AssistantMessage, CallId, ToolName, ToolResult, ToolResultContent, UserContent};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::error::{AppError, AppResult};
-use crate::persistence::SqliteMemory;
+use crate::persistence::{pool_err, run_db_task, sql_err, SqliteMemory};
 use crate::util::now_ms;
+
+fn safe_tool_name(name: &str) -> ToolName {
+    let clean = name.trim();
+    if clean.is_empty() {
+        ToolName::new("unknown").expect("static identifier")
+    } else {
+        ToolName::new(clean).unwrap_or_else(|_| ToolName::new("unknown").expect("static identifier"))
+    }
+}
 
 pub const DURABLE_RUN_SCHEMA: &str = r#"
 ALTER TABLE messages ADD COLUMN run_id TEXT;
@@ -84,7 +93,7 @@ pub struct BeginRun<'a> {
     pub conversation_id: &'a str,
     pub model: &'a str,
     pub raw_prompt: &'a str,
-    pub initial_user_message: &'a Message,
+    pub initial_user_message: Option<&'a Message>,
     pub workspace_path: &'a str,
     pub user_id: &'a str,
 }
@@ -105,8 +114,13 @@ impl SqliteMemory {
         let raw_prompt = begin.raw_prompt.to_string();
         let workspace_path = begin.workspace_path.to_string();
         let user_id = begin.user_id.to_string();
-        let user_message = serde_json::to_string(begin.initial_user_message)
-            .map_err(|error| AppError::other(format!("serialize durable user message: {error}")))?;
+        let user_message = begin
+            .initial_user_message
+            .map(|msg| {
+                serde_json::to_string(msg)
+                    .map_err(|error| AppError::other(format!("serialize durable user message: {error}")))
+            })
+            .transpose()?;
 
         run_db_task(move || {
             let mut connection = pool.get().map_err(pool_err)?;
@@ -482,12 +496,15 @@ fn finalize_chat_run_sync(
         events
     };
 
-    let user_message = user_message
+    let decoded_user_message = user_message
         .as_deref()
-        .and_then(|encoded| serde_json::from_str::<Message>(encoded).ok())
-        .unwrap_or_else(|| Message::user(raw_prompt));
-    let mut messages = vec![user_message];
-    messages.extend(reconstruct_partial_run(&events, status, terminal_error));
+        .and_then(|encoded| serde_json::from_str::<Message>(encoded).ok());
+    let partial_messages = reconstruct_partial_run(&events, status, terminal_error);
+    let mut messages: Vec<Message> = Vec::with_capacity(1 + partial_messages.len());
+    if let Some(um) = decoded_user_message {
+        messages.push(um);
+    }
+    messages.extend(partial_messages);
     insert_run_messages(&transaction, &conversation_id, run_id, &messages)?;
 
     let now = now_ms();
@@ -558,22 +575,23 @@ impl TurnBuilder {
             match part {
                 AssistantContent::ToolCall(_) => {
                     let Some(call) = call_iter.next() else { continue };
-                    let Some((output, _)) = self.results.get(&call.internal_id) else {
-                        continue;
-                    };
-                    let content = output.clone();
-                    let tool_name = ToolName::new(&call.name).or_else(|_| ToolName::new("unknown")).expect("fallback is non-empty");
+                    let (content, is_error) =
+                        self.results.get(&call.internal_id).cloned().unwrap_or_else(|| {
+                            ("(tool result unavailable: run was cancelled or timed out)".to_string(), true)
+                        });
+                    let tool_name = safe_tool_name(&call.name);
+                    let call_id = CallId::from_wire(&call.call_id);
                     assistant_parts.push(AssistantContent::tool_call(
                         call.call_id.clone(),
                         tool_name.clone(),
                         call.args.clone(),
                     ));
-                    let body = vec![ToolResultContent::text(content)];
-                    tool_results.push(UserContent::tool_result(
-                        CallId::from_wire(&call.call_id),
+                    tool_results.push(UserContent::ToolResult(ToolResult {
+                        call: call_id,
                         tool_name,
-                        body,
-                    ));
+                        content: vec![ToolResultContent::text(content)],
+                        is_error,
+                    }));
                 }
                 AssistantContent::Text(t) if t.text.trim().is_empty() => {}
                 other => assistant_parts.push(other),
@@ -611,12 +629,13 @@ fn reconstruct_partial_run(
     }
     turn.finish(&mut out);
 
-    let note = fallback_note(status, detail);
-    match out.last_mut() {
-        Some(Message::Assistant(assistant)) => {
-            assistant.content.push(AssistantContent::text(format!("\n\n{note}")));
+    if let Some(note) = fallback_note(status, detail) {
+        match out.last_mut() {
+            Some(Message::Assistant(assistant)) => {
+                assistant.content.push(AssistantContent::text(format!("\n\n{note}")));
+            }
+            _ => out.push(Message::assistant(note)),
         }
-        _ => out.push(Message::assistant(note)),
     }
     out
 }
@@ -639,7 +658,7 @@ fn apply_event(turn: &mut TurnBuilder, kind: &str, payload: &str) {
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
                 .unwrap_or_else(|| serde_json::json!({}));
             let name = value["name"].as_str().unwrap_or("unknown").to_string();
-            let tool_name = ToolName::new(&name).or_else(|_| ToolName::new("unknown")).expect("fallback is non-empty");
+            let tool_name = safe_tool_name(&name);
             turn.parts
                 .push(AssistantContent::tool_call(call_id.clone(), tool_name, args.clone()));
             turn.calls.push(PendingCall {
@@ -664,14 +683,16 @@ fn apply_event(turn: &mut TurnBuilder, kind: &str, payload: &str) {
     }
 }
 
-fn fallback_note(status: &str, detail: Option<&str>) -> String {
+fn fallback_note(status: &str, detail: Option<&str>) -> Option<String> {
     let detail = detail.map(str::trim).filter(|value| !value.is_empty());
     match (status, detail) {
-        ("cancelled", _) => "_Stopped before completion._".to_string(),
-        ("interrupted", _) => "_The app closed before this run finished._".to_string(),
-        ("completed", _) => "_The run ended before its transcript was saved._".to_string(),
-        (_, Some(detail)) => format!("_Run failed: {detail}_"),
-        _ => "_Run failed before completion._".to_string(),
+        ("compacted", _) => None,
+        ("cancelled", _) => Some("_Stopped before completion._".to_string()),
+        ("interrupted", _) => Some("_The app closed before this run finished._".to_string()),
+        ("completed", None) => None,
+        ("completed", Some(d)) => Some(format!("_The run ended before its transcript was saved: {d}._")),
+        (_, Some(detail)) => Some(format!("_Run failed: {detail}_")),
+        _ => Some("_Run failed before completion._".to_string()),
     }
 }
 
@@ -717,13 +738,27 @@ fn update_run_and_session_usage(
     last_turn_input: i64,
     complete: bool,
 ) -> AppResult<DurableRunUsage> {
-    let conversation_id: String = transaction
+    let (conversation_id, prior_input, prior_output, prior_total): (String, i64, i64, i64) = transaction
         .query_row(
-            "SELECT conversation_id FROM chat_runs WHERE run_id = ?1",
+            "SELECT conversation_id, prior_input_tokens, prior_output_tokens, prior_total_tokens
+             FROM chat_runs WHERE run_id = ?1",
             params![run_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(sql_err)?;
+
+    let (run_input, run_output, run_total): (i64, i64, i64) = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)
+             FROM chat_run_usage WHERE run_id = ?1",
+            params![run_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(sql_err)?;
+
+    let total_input = prior_input.saturating_add(run_input);
+    let total_output = prior_output.saturating_add(run_output);
+    let total_tokens = prior_total.saturating_add(run_total);
 
     let now = now_ms();
     transaction
@@ -742,9 +777,18 @@ fn update_run_and_session_usage(
         .map_err(sql_err)?;
     transaction
         .execute(
-            "UPDATE sessions SET last_context_tokens = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE sessions SET
+                 last_context_tokens = ?1,
+                 total_input_tokens = ?2,
+                 total_output_tokens = ?3,
+                 total_tokens = ?4,
+                 updated_at = ?5
+             WHERE id = ?6",
             params![
                 last_turn_input.max(0),
+                total_input,
+                total_output,
+                total_tokens,
                 now,
                 conversation_id
             ],
@@ -770,22 +814,4 @@ fn to_db_token(value: u64) -> i64 {
 
 fn from_db_token(value: i64) -> u64 {
     value.max(0) as u64
-}
-
-async fn run_db_task<T, F>(task: F) -> AppResult<T>
-where
-    T: Send + 'static,
-    F: FnOnce() -> AppResult<T> + Send + 'static,
-{
-    tokio::task::spawn_blocking(task)
-        .await
-        .map_err(|error| AppError::other(format!("db task failed: {error}")))?
-}
-
-fn sql_err(error: rusqlite::Error) -> AppError {
-    AppError::other(format!("sqlite error: {error}"))
-}
-
-fn pool_err(error: r2d2::Error) -> AppError {
-    AppError::other(format!("db pool error: {error}"))
 }

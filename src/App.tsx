@@ -33,9 +33,9 @@ function AppShell() {
         {sidebarOpen && <Sidebar currentView={view} onViewChange={setView} />}
         <div className="Main">
           <div className="Main-view" style={{ display: view === "chat" ? "contents" : "none" }}>
-            <ChatPanel />
+            <ChatPanel visible={view === "chat"} />
           </div>
-          {view === "library" && <LibraryView />}
+          {view === "library" && <LibraryView onOpenDocument={() => setView("chat")} />}
           {view === "connectors" && <ConnectorsView />}
         </div>
       </div>
@@ -102,7 +102,9 @@ function Root() {
 
   useEffect(() => {
     if (authStatus === "loading") return;
-    void startUpdater();
+    if (import.meta.env.PROD) {
+      void startUpdater();
+    }
   }, [authStatus, startUpdater]);
 
   useEffect(() => {

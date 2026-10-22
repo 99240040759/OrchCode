@@ -8,7 +8,7 @@ export const useOverlayStore = create<{ count: number; change: (delta: number) =
   change: (delta) => set((s) => ({ count: Math.max(0, s.count + delta) })),
 }));
 
-function OverlayPresence() {
+export function OverlayPresence() {
   const change = useOverlayStore((s) => s.change);
   useEffect(() => {
     change(1);

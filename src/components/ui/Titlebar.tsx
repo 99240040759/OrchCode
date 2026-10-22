@@ -26,7 +26,9 @@ function UpdateBadge() {
   const status  = useUpdaterStore((s) => s.status);
   const version = useUpdaterStore((s) => s.version);
   const percent = useUpdaterStore((s) => s.percent);
+  const error   = useUpdaterStore((s) => s.error);
   const apply   = useUpdaterStore((s) => s.apply);
+  const start   = useUpdaterStore((s) => s.start);
 
   if (status === "downloading") {
     return (
@@ -60,6 +62,20 @@ function UpdateBadge() {
           <VscRefresh className="Titlebar-spinner" />
           <span>Restarting…</span>
         </span>
+      </Tooltip>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <Tooltip content={`Update failed: ${error || "Unknown error"} — click to retry`} side="bottom">
+        <Button
+          className="Titlebar-update-badge Titlebar-update-failed"
+          onClick={() => void start()}
+        >
+          <VscRefresh />
+          <span>Update failed</span>
+        </Button>
       </Tooltip>
     );
   }
@@ -155,7 +171,6 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar, view 
   const inShell = Boolean(onToggleSidebar);
   const showSidebarSegment = inShell && Boolean(sidebarOpen);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
-  const maximized = useArtifactsStore((s) => s.maximized);
   const showArtifactSegment = inShell && panelOpen && (view === undefined || view === "chat");
 
   return (

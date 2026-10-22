@@ -2,7 +2,7 @@ use super::{request_json, truncate_text};
 
 use std::sync::Arc;
 
-use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -84,7 +84,7 @@ impl Tool for GmailListEmails {
             })
             .collect();
 
-        let results = join_all(fetch_futures).await;
+        let results = stream::iter(fetch_futures).buffer_unordered(10).collect::<Vec<_>>().await;
 
         let failed = results.iter().filter(|(_, r)| r.is_err()).count();
         let mut out = format!("Found {} email(s):\n\n", results.len() - failed);
@@ -193,7 +193,8 @@ impl Tool for GmailReadEmail {
 
 fn decode_gmail_b64(data: &str) -> Option<Vec<u8>> {
     let cleaned: String = data.chars().filter(|c| !c.is_whitespace()).collect();
-    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &cleaned).ok()
+    let unpadded = cleaned.trim_end_matches('=');
+    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, unpadded).ok()
 }
 
 fn extract_plain_text(payload: &Value) -> Option<String> {

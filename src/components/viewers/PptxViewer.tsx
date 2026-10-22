@@ -104,8 +104,17 @@ export function PptxViewer({ path }: { path: string }) {
   useEffect(() => {
     if (!readyRef.current) return;
     const handleKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const tag = target.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target.isContentEditable ||
+        Boolean(target.closest?.("input, textarea, [contenteditable='true'], [contenteditable=''], .Composer-input"))
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); goToPrev(); }
       if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); goToNext(); }
     };

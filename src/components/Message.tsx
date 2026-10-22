@@ -101,8 +101,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
   const [open, setOpen] = useState(false);
   const output = tool.output?.trim() ?? "";
   const hasOutput = output.length > 0;
-  const isFileAction = Boolean(tool.displayInfo.filename);
-  const showToggle = hasOutput && (!isFileAction || tool.status === "error");
+  const showToggle = hasOutput;
 
   return (
     <div className="ToolRow" data-status={tool.status}>

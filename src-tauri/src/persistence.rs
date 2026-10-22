@@ -194,6 +194,19 @@ const CONVERSATION_SCOPE_SCHEMA: &str = "
      ON sessions(workspace_path, user_id, updated_at DESC);
 ";
 
+const WORKSPACE_DOCUMENT_SCHEMA: &str = "
+ ALTER TABLE documents ADD COLUMN workspace_path TEXT;
+ CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_path);
+";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionViewPage {
+    pub messages: Vec<MessageView>,
+    pub has_more: bool,
+    pub earliest_seq: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
@@ -292,6 +305,7 @@ impl SqliteMemory {
             rusqlite_migration::M::up(crate::run_persistence::DURABLE_RUN_SCHEMA),
             rusqlite_migration::M::up(PASSAGE_INDEX_SCHEMA),
             rusqlite_migration::M::up(CONVERSATION_SCOPE_SCHEMA),
+            rusqlite_migration::M::up(WORKSPACE_DOCUMENT_SCHEMA),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -432,6 +446,24 @@ impl SqliteMemory {
         .await
     }
 
+    pub async fn session_owner(&self, conversation_id: &str) -> AppResult<Option<String>> {
+        let pool = self.pool.clone();
+        let cid = conversation_id.to_string();
+        run_db_task(move || {
+            let c = pool.get().map_err(pool_err)?;
+            let owner: Option<String> = c
+                .query_row(
+                    "SELECT user_id FROM sessions WHERE id = ?1",
+                    params![cid],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sql_err)?;
+            Ok(owner)
+        })
+        .await
+    }
+
     pub async fn session_context_tokens(&self, conversation_id: &str) -> AppResult<u64> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
@@ -538,7 +570,7 @@ impl SqliteMemory {
     pub async fn get_compaction_input(
         &self,
         conversation_id: &str,
-        keep_recent_user_turns: usize,
+        recent_token_budget: u64,
     ) -> AppResult<Option<CompactionInput>> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
@@ -547,6 +579,10 @@ impl SqliteMemory {
             let latest = latest_compaction(&c, &cid).map_err(sql_err)?;
             let after = latest.as_ref().map(|r| r.upto_seq).unwrap_or(-1);
             let rows = load_after(&c, &cid, after).map_err(sql_err)?;
+
+            if rows.len() < 2 {
+                return Ok(None);
+            }
 
             let mut decoded: Vec<(i64, Message)> = Vec::with_capacity(rows.len());
             for row in rows {
@@ -562,20 +598,47 @@ impl SqliteMemory {
                 .map(|(i, _)| i)
                 .collect();
 
-            if user_turn_positions.len() < 2 {
+            if user_turn_positions.is_empty() {
                 return Ok(None);
             }
-            let keep = keep_recent_user_turns
-                .max(1)
-                .min(user_turn_positions.len() - 1);
-            let cut = user_turn_positions[user_turn_positions.len() - keep];
-            if cut == 0 {
+
+            let mut chosen_cut = 0usize;
+            let mut found_fit = false;
+
+            for &pos in user_turn_positions.iter().rev() {
+                let turn_tokens: u64 = decoded[pos..]
+                    .iter()
+                    .map(|(_, m)| estimate_message_tokens(m))
+                    .sum();
+                if turn_tokens <= recent_token_budget {
+                    chosen_cut = pos;
+                    found_fit = true;
+                } else {
+                    break;
+                }
+            }
+
+            let cut = if !found_fit || chosen_cut == 0 {
+                if user_turn_positions.len() > 1 {
+                    *user_turn_positions.last().unwrap()
+                } else if decoded.len() >= 4 {
+                    decoded.len() / 2
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                chosen_cut
+            };
+
+            if cut == 0 || cut >= decoded.len() {
                 return Ok(None);
             }
 
             let summarize: Vec<Message> = decoded[..cut].iter().map(|(_, m)| m.clone()).collect();
             let summarize_upto_seq = decoded[cut - 1].0;
+
             let remaining: Vec<Message> = decoded[cut..].iter().map(|(_, m)| m.clone()).collect();
+
             let (previous_summary, prior_message_count) = match latest {
                 Some(record) => (Some(record.summary), record.original_message_count),
                 None => (None, 0),
@@ -624,203 +687,267 @@ impl SqliteMemory {
         .await
     }
 
+    pub async fn get_session_view_paginated(
+        &self,
+        conversation_id: &str,
+        limit: usize,
+        before_seq: Option<i64>,
+    ) -> AppResult<SessionViewPage> {
+        let pool = self.pool.clone();
+        let cid = conversation_id.to_string();
+        run_db_task(move || {
+            let (rows, has_more, compactions, reasoning_durations) = {
+                let c = pool.get().map_err(pool_err)?;
+                let (rows, has_more) = load_page(&c, &cid, limit, before_seq).map_err(sql_err)?;
+                let compactions = list_compactions(&c, &cid).map_err(sql_err)?;
+
+                let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
+                {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
+                        )
+                        .map_err(sql_err)?;
+                    let iter = stmt
+                        .query_map(params![cid], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                        })
+                        .map_err(sql_err)?;
+                    for row in iter {
+                        let (item_id, secs) = row.map_err(sql_err)?;
+                        reasoning_durations.insert(item_id, secs.max(0) as u64);
+                    }
+                }
+                (rows, has_more, compactions, reasoning_durations)
+            };
+
+            let earliest_seq = rows.first().map(|r| r.seq);
+            let messages = build_session_views(&cid, &rows, &compactions, &reasoning_durations)?;
+            Ok(SessionViewPage {
+                messages,
+                has_more,
+                earliest_seq,
+            })
+        })
+        .await
+    }
+
     pub async fn get_session_view(&self, conversation_id: &str) -> AppResult<Vec<MessageView>> {
         let pool = self.pool.clone();
         let cid = conversation_id.to_string();
         run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let rows = load_all(&c, &cid).map_err(sql_err)?;
-            let compactions = list_compactions(&c, &cid).map_err(sql_err)?;
+            let (rows, compactions, reasoning_durations) = {
+                let c = pool.get().map_err(pool_err)?;
+                let rows = load_all(&c, &cid).map_err(sql_err)?;
+                let compactions = list_compactions(&c, &cid).map_err(sql_err)?;
 
-            let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
-            {
-                let mut stmt = c
-                    .prepare(
-                        "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
-                    )
-                    .map_err(sql_err)?;
-                let iter = stmt
-                    .query_map(params![cid], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                    })
-                    .map_err(sql_err)?;
-                for row in iter {
-                    let (item_id, secs) = row.map_err(sql_err)?;
-                    reasoning_durations.insert(item_id, secs.max(0) as u64);
-                }
-            }
-
-            let mut decoded: Vec<(i64, Message)> = Vec::with_capacity(rows.len());
-            for row in &rows {
-                let msg: Message = serde_json::from_str(&row.data)
-                    .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
-                decoded.push((row.seq, msg));
-            }
-
-            let mut tool_outputs: HashMap<String, String> = HashMap::new();
-            for (_, msg) in &decoded {
-                if let Message::User { content } = msg {
-                    for part in content.iter() {
-                        if let UserContent::ToolResult(tr) = part {
-                            let output: String = tr
-                                .content
-                                .iter()
-                                .filter_map(|c| match c {
-                                    ToolResultContent::Text(t) => Some(t.text.as_str()),
-                                    _ => None,
-                                })
-                                .collect();
-                            tool_outputs.insert(tr.call.to_string(), output);
-                        }
+                let mut reasoning_durations: HashMap<String, u64> = HashMap::new();
+                {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
+                        )
+                        .map_err(sql_err)?;
+                    let iter = stmt
+                        .query_map(params![cid], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                        })
+                        .map_err(sql_err)?;
+                    for row in iter {
+                        let (item_id, secs) = row.map_err(sql_err)?;
+                        reasoning_durations.insert(item_id, secs.max(0) as u64);
                     }
                 }
-            }
+                (rows, compactions, reasoning_durations)
+            };
 
-            let mut views: Vec<MessageView> = Vec::new();
-            let mut pending_compactions = compactions.iter().peekable();
-
-            for (seq, msg) in &decoded {
-                while let Some(record) = pending_compactions.next_if(|r| r.upto_seq < *seq) {
-                    views.push(compaction_view(&cid, record));
-                }
-
-                let msg_id = stable_id(&cid, *seq, 0, None);
-                match msg {
-                    Message::User { content } => {
-                        let mut text = String::new();
-                        let mut attachments: Vec<AttachmentView> = Vec::new();
-
-                        for part in content.iter() {
-                            match part {
-                                UserContent::Text(t) => {
-                                    if is_payload_part(&t.text) {
-                                        if let Some(label) = payload_part_label(&t.text) {
-                                            attachments.push(AttachmentView {
-                                                name: crate::util::basename(&label),
-                                                is_image: false,
-                                                data_url: None,
-                                            });
-                                        }
-                                    } else if text.is_empty() {
-                                        text = t.text.clone();
-                                    }
-                                }
-                                UserContent::Image(img) => {
-                                    let mime = img
-                                        .media_type
-                                        .as_ref()
-                                        .map(|m| m.to_mime_type().to_string())
-                                        .unwrap_or_else(|| "image/png".to_string());
-                                    let data_url = match &img.data {
-                                        DocumentSourceKind::Base64(b64) => {
-                                            crate::media::thumbnail_data_url_from_base64(b64, &mime, 320)
-                                        }
-                                        DocumentSourceKind::Url(url) => Some(url.clone()),
-                                        _ => None,
-                                    };
-                                    let ext = mime.split('/').nth(1).unwrap_or("png").to_string();
-                                    attachments.push(AttachmentView {
-                                        name: format!("image.{ext}"),
-                                        is_image: true,
-                                        data_url,
-                                    });
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if text.is_empty() && attachments.is_empty() {
-                            continue;
-                        }
-
-                        views.push(MessageView {
-                            id: msg_id,
-                            role: "user".to_string(),
-                            items: if text.is_empty() {
-                                vec![]
-                            } else {
-                                vec![MessageItemView::Text {
-                                    id: stable_id(&cid, *seq, 0, Some("text")),
-                                    text,
-                                }]
-                            },
-                            attachments,
-                        });
-                    }
-                    Message::Assistant(assistant) => {
-                        let mut items: Vec<MessageItemView> = Vec::new();
-                        let mut item_idx = 0usize;
-                        for part in assistant.content.iter() {
-                            match part {
-                                AssistantContent::Reasoning(r) => {
-                                    let text = r.text.clone();
-                                    if text.is_empty() {
-                                        continue;
-                                    }
-                                    let item_id = stable_id(&cid, *seq, item_idx, Some("reasoning"));
-                                    let duration_seconds = reasoning_durations.get(&item_id).copied();
-                                    items.push(MessageItemView::Reasoning {
-                                        id: item_id,
-                                        text,
-                                        duration_seconds,
-                                    });
-                                    item_idx += 1;
-                                }
-                                AssistantContent::ToolCall(tc) => {
-                                    let args = serde_json::to_string(&tc.function.arguments).unwrap_or_default();
-                                    let display_info = parse_display_info(&tc.function.name.to_string(), &args);
-                                    let raw = tool_outputs.get(&tc.id.to_string());
-                                    let status = match raw {
-                                        Some(_) => "done",
-                                        None => "error",
-                                    };
-                                    items.push(MessageItemView::ToolCall {
-                                        id: stable_id(&cid, *seq, item_idx, Some("tool")),
-                                        name: tc.function.name.to_string(),
-                                        args,
-                                        output: raw.map(|o| {
-                                            crate::util::clip_middle(
-                                                o,
-                                                config::MAX_VIEW_TOOL_OUTPUT_CHARS,
-                                            )
-                                        }),
-                                        display_info,
-                                        status: status.to_string(),
-                                    });
-                                    item_idx += 1;
-                                }
-                                AssistantContent::Text(t) => {
-                                    if t.text.is_empty() {
-                                        continue;
-                                    }
-                                    items.push(MessageItemView::Text {
-                                        id: stable_id(&cid, *seq, item_idx, Some("text")),
-                                        text: t.text.clone(),
-                                    });
-                                    item_idx += 1;
-                                }
-                                _ => {}
-                            }
-                        }
-                        if !items.is_empty() {
-                            views.push(MessageView {
-                                id: msg_id,
-                                role: "assistant".to_string(),
-                                items,
-                                attachments: vec![],
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            for record in pending_compactions {
-                views.push(compaction_view(&cid, record));
-            }
-            Ok(views)
+            build_session_views(&cid, &rows, &compactions, &reasoning_durations)
         })
         .await
     }
+}
+
+fn build_session_views(
+    cid: &str,
+    rows: &[MessageRow],
+    compactions: &[CompactionRecord],
+    reasoning_durations: &HashMap<String, u64>,
+) -> AppResult<Vec<MessageView>> {
+    let mut decoded: Vec<(i64, Message)> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let msg: Message = serde_json::from_str(&row.data)
+            .map_err(|e| AppError::other(format!("message decode failed: {e}")))?;
+        decoded.push((row.seq, msg));
+    }
+
+    let mut tool_outputs: HashMap<String, (String, bool)> = HashMap::new();
+    for (_, msg) in &decoded {
+        if let Message::User { content } = msg {
+            for part in content.iter() {
+                if let UserContent::ToolResult(tr) = part {
+                    let output: String = tr
+                        .content
+                        .iter()
+                        .filter_map(|c| match c {
+                            ToolResultContent::Text(t) => Some(t.text.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    tool_outputs.insert(tr.call.to_string(), (output, tr.is_error));
+                }
+            }
+        }
+    }
+
+    let mut views: Vec<MessageView> = Vec::new();
+    let min_seq = decoded.first().map(|(s, _)| *s).unwrap_or(0);
+    let mut pending_compactions = compactions
+        .iter()
+        .filter(|r| r.upto_seq >= min_seq || decoded.is_empty())
+        .peekable();
+
+    for (seq, msg) in &decoded {
+        while let Some(record) = pending_compactions.next_if(|r| r.upto_seq < *seq) {
+            views.push(compaction_view(cid, record));
+        }
+
+        let msg_id = stable_id(cid, *seq, 0, None);
+        match msg {
+            Message::User { content } => {
+                let mut text = String::new();
+                let mut attachments: Vec<AttachmentView> = Vec::new();
+
+                for part in content.iter() {
+                    match part {
+                        UserContent::Text(t) => {
+                            if is_payload_part(&t.text) {
+                                if let Some(label) = payload_part_label(&t.text) {
+                                    attachments.push(AttachmentView {
+                                        name: crate::util::basename(&label),
+                                        is_image: false,
+                                        data_url: None,
+                                    });
+                                }
+                            } else if text.is_empty() {
+                                text = t.text.clone();
+                            }
+                        }
+                        UserContent::Image(img) => {
+                            let mime = img
+                                .media_type
+                                .as_ref()
+                                .map(|m| m.to_mime_type().to_string())
+                                .unwrap_or_else(|| "image/png".to_string());
+                            let data_url = match &img.data {
+                                DocumentSourceKind::Base64(b64) => {
+                                    crate::media::thumbnail_data_url_from_base64(b64, &mime, 320)
+                                }
+                                DocumentSourceKind::Url(url) => Some(url.clone()),
+                                _ => None,
+                            };
+                            let ext = mime.split('/').nth(1).unwrap_or("png").to_string();
+                            attachments.push(AttachmentView {
+                                name: format!("image.{ext}"),
+                                is_image: true,
+                                data_url,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+
+                if text.is_empty() && attachments.is_empty() {
+                    continue;
+                }
+
+                views.push(MessageView {
+                    id: msg_id,
+                    role: "user".to_string(),
+                    items: if text.is_empty() {
+                        vec![]
+                    } else {
+                        vec![MessageItemView::Text {
+                            id: stable_id(cid, *seq, 0, Some("text")),
+                            text,
+                        }]
+                    },
+                    attachments,
+                });
+            }
+            Message::Assistant(assistant) => {
+                let mut items: Vec<MessageItemView> = Vec::new();
+                let mut item_idx = 0usize;
+                for part in assistant.content.iter() {
+                    match part {
+                        AssistantContent::Reasoning(r) => {
+                            let text = r.text.clone();
+                            if text.is_empty() {
+                                continue;
+                            }
+                            let item_id = stable_id(cid, *seq, item_idx, Some("reasoning"));
+                            let duration_seconds = reasoning_durations.get(&item_id).copied();
+                            items.push(MessageItemView::Reasoning {
+                                id: item_id,
+                                text,
+                                duration_seconds,
+                            });
+                            item_idx += 1;
+                        }
+                        AssistantContent::ToolCall(tc) => {
+                            let args = serde_json::to_string(&tc.function.arguments).unwrap_or_default();
+                            let display_info = parse_display_info(&tc.function.name.to_string(), &args);
+                            let raw_entry = tool_outputs.get(&tc.id.to_string());
+                            let status = match raw_entry {
+                                Some((_, true)) => "error",
+                                Some((_, false)) => "done",
+                                None => "error",
+                            };
+                            let raw = raw_entry.map(|(o, _)| o.as_str());
+                            items.push(MessageItemView::ToolCall {
+                                id: stable_id(cid, *seq, item_idx, Some("tool")),
+                                name: tc.function.name.to_string(),
+                                args,
+                                output: raw.map(|o| {
+                                    crate::util::clip_middle(
+                                        o,
+                                        config::MAX_VIEW_TOOL_OUTPUT_CHARS,
+                                    )
+                                }),
+                                display_info,
+                                status: status.to_string(),
+                            });
+                            item_idx += 1;
+                        }
+                        AssistantContent::Text(t) => {
+                            if t.text.is_empty() {
+                                continue;
+                            }
+                            items.push(MessageItemView::Text {
+                                id: stable_id(cid, *seq, item_idx, Some("text")),
+                                text: t.text.clone(),
+                            });
+                            item_idx += 1;
+                        }
+                        _ => {}
+                    }
+                }
+                if !items.is_empty() {
+                    views.push(MessageView {
+                        id: msg_id,
+                        role: "assistant".to_string(),
+                        items,
+                        attachments: vec![],
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    for record in pending_compactions {
+        views.push(compaction_view(cid, record));
+    }
+    Ok(views)
+}
 }
 
 fn compaction_view(cid: &str, record: &CompactionRecord) -> MessageView {
@@ -853,7 +980,7 @@ impl ConversationMemory for SqliteMemory {
                 let mut out = Vec::with_capacity(rows.len() + 1);
                 if let Some(record) = latest {
                     out.push(Message::user(format!(
-                        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[END CONTEXT SUMMARY — continue with the recent messages below]",
+                        "[CONTEXT SUMMARY — {} earlier messages summarized]\n\n{}\n\n[The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.]",
                         record.original_message_count, record.summary
                     )));
                 }
@@ -941,16 +1068,16 @@ impl ConversationMemory for SqliteMemory {
 }
 
 pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(10))?;
     conn.execute_batch("
         PRAGMA foreign_keys = ON;
         PRAGMA recursive_triggers = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
         PRAGMA temp_store = MEMORY;
-        PRAGMA mmap_size = 30000000000;
-        PRAGMA cache_size = -65536;
+        PRAGMA mmap_size = 268435456;
+        PRAGMA cache_size = -16384;
     ")?;
-    conn.busy_timeout(std::time::Duration::from_secs(10))?;
     Ok(())
 }
 
@@ -984,6 +1111,41 @@ fn load_after(
     rows.collect()
 }
 
+fn load_page(
+    conn: &Connection,
+    conversation_id: &str,
+    limit: usize,
+    before_seq: Option<i64>,
+) -> rusqlite::Result<(Vec<MessageRow>, bool)> {
+    if let Some(before) = before_seq {
+        let mut stmt = conn.prepare(
+            "SELECT seq, data FROM messages
+             WHERE conversation_id = ?1 AND seq < ?2 AND kind = 'message'
+             ORDER BY seq DESC LIMIT ?3",
+        )?;
+        let fetched: Vec<MessageRow> = stmt
+            .query_map(params![conversation_id, before, (limit + 1) as i64], map_message_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        let has_more = fetched.len() > limit;
+        let mut rows: Vec<MessageRow> = fetched.into_iter().take(limit).collect();
+        rows.reverse();
+        Ok((rows, has_more))
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT seq, data FROM messages
+             WHERE conversation_id = ?1 AND kind = 'message'
+             ORDER BY seq DESC LIMIT ?2",
+        )?;
+        let fetched: Vec<MessageRow> = stmt
+            .query_map(params![conversation_id, (limit + 1) as i64], map_message_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        let has_more = fetched.len() > limit;
+        let mut rows: Vec<MessageRow> = fetched.into_iter().take(limit).collect();
+        rows.reverse();
+        Ok((rows, has_more))
+    }
+}
+
 fn map_compaction_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CompactionRecord> {
     Ok(CompactionRecord {
         upto_seq: row.get(0)?,
@@ -1014,10 +1176,51 @@ fn list_compactions(conn: &Connection, conversation_id: &str) -> rusqlite::Resul
 
 pub(crate) fn is_user_turn(msg: &Message) -> bool {
     match msg {
-        Message::User { content } => content.iter().any(|c| matches!(c, UserContent::Text(_))),
+        Message::User { content } => content.iter().any(|c| matches!(c, UserContent::Text(_) | UserContent::Image(_))),
         _ => false,
     }
 }
+
+pub fn estimate_message_tokens(message: &Message) -> u64 {
+    let mut chars = 0usize;
+    match message {
+        Message::User { content } => {
+            for part in content.iter() {
+                match part {
+                    UserContent::Text(t) => chars += t.text.len(),
+                    UserContent::ToolResult(tr) => {
+                        for c in tr.content.iter() {
+                            if let ToolResultContent::Text(t) = c {
+                                chars += t.text.len();
+                            }
+                        }
+                    }
+                    _ => chars += 100,
+                }
+            }
+        }
+        Message::Assistant(assistant) => {
+            for part in assistant.content.iter() {
+                match part {
+                    AssistantContent::Text(t) => chars += t.text.len(),
+                    AssistantContent::ToolCall(tc) => {
+                        chars += tc.function.name.len()
+                            + serde_json::to_string(&tc.function.arguments)
+                                .map(|s| s.len())
+                                .unwrap_or(0);
+                    }
+                    AssistantContent::Reasoning(r) => chars += r.text.len(),
+                    _ => {}
+                }
+            }
+        }
+        Message::System { content } => {
+            chars += content.len();
+        }
+    }
+    ((chars / 4).max(1)) as u64
+}
+
 
 fn fts5_query(raw: &str, joiner: &str) -> String {
     raw.split_whitespace()
@@ -1028,15 +1231,10 @@ fn fts5_query(raw: &str, joiner: &str) -> String {
 }
 
 fn stable_id(cid: &str, seq: i64, item_idx: usize, kind: Option<&str>) -> String {
-    let input = format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or(""));
-    let hash = Sha256::digest(input.as_bytes());
-    format!(
-        "{:016x}",
-        u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
-    )
+    crate::util::stable_hash_hex(&format!("{cid}:{seq}:{item_idx}:{}", kind.unwrap_or("")))
 }
 
-async fn run_db_task<T, F>(f: F) -> AppResult<T>
+pub(crate) async fn run_db_task<T, F>(f: F) -> AppResult<T>
 where
     T: Send + 'static,
     F: FnOnce() -> AppResult<T> + Send + 'static,
@@ -1046,11 +1244,11 @@ where
         .map_err(|e| AppError::other(format!("db task failed: {e}")))?
 }
 
-fn sql_err(e: rusqlite::Error) -> AppError {
+pub(crate) fn sql_err(e: rusqlite::Error) -> AppError {
     AppError::other(format!("sqlite error: {e}"))
 }
 
-fn pool_err(e: r2d2::Error) -> AppError {
+pub(crate) fn pool_err(e: r2d2::Error) -> AppError {
     AppError::other(format!("db pool error: {e}"))
 }
 
@@ -1069,6 +1267,7 @@ pub struct DocumentRecord {
     pub metadata: serde_json::Value,
     pub indexed_at: i64,
     pub updated_at: i64,
+    pub workspace_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1110,9 +1309,34 @@ pub struct ConnectorRecord {
     pub updated_at: i64,
 }
 
-fn search_passages(conn: &Connection, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
-    let mut stmt = conn
-        .prepare(
+fn search_passages(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    workspace_path: Option<&str>,
+) -> AppResult<Vec<SearchHit>> {
+    let (sql, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(ws) = workspace_path {
+        (
+            "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
+                    snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
+                    bm25(passages_fts),
+                    p.page_number
+             FROM passages_fts
+             JOIN passages p ON p.pid = passages_fts.rowid
+             JOIN documents d ON d.id = p.document_id
+             WHERE passages_fts MATCH ?1
+               AND (d.workspace_path = ?2 OR d.workspace_path IS NULL OR d.source != 'local')
+             ORDER BY bm25(passages_fts)
+             LIMIT ?3"
+                .to_string(),
+            vec![
+                Box::new(query.to_string()),
+                Box::new(ws.to_string()),
+                Box::new(limit as i64),
+            ],
+        )
+    } else {
+        (
             "SELECT p.document_id, p.id, d.title, d.file_type, d.source, d.file_path,
                     snippet(passages_fts, 0, '<b>', '</b>', '...', 32),
                     bm25(passages_fts),
@@ -1122,11 +1346,15 @@ fn search_passages(conn: &Connection, query: &str, limit: usize) -> AppResult<Ve
              JOIN documents d ON d.id = p.document_id
              WHERE passages_fts MATCH ?1
              ORDER BY bm25(passages_fts)
-             LIMIT ?2",
+             LIMIT ?2"
+                .to_string(),
+            vec![Box::new(query.to_string()), Box::new(limit as i64)],
         )
-        .map_err(sql_err)?;
+    };
+    let refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|v| v.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(sql_err)?;
     let rows = stmt
-        .query_map(params![query, limit as i64], |row| {
+        .query_map(refs.as_slice(), |row| {
             Ok(SearchHit {
                 document_id: row.get(0)?,
                 passage_id: row.get(1)?,
@@ -1165,8 +1393,8 @@ impl SqliteMemory {
             })?;
             tx.execute(
                 "INSERT INTO documents (id, title, file_path, source, source_id, file_type,
-                  size_bytes, page_count, word_count, metadata, indexed_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                  size_bytes, page_count, word_count, metadata, indexed_at, updated_at, workspace_path)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                 params![
                     doc.id,
                     doc.title,
@@ -1179,7 +1407,8 @@ impl SqliteMemory {
                     doc.word_count,
                     meta,
                     doc.indexed_at,
-                    doc.updated_at
+                    doc.updated_at,
+                    doc.workspace_path
                 ],
             )
             .map_err(sql_err)?;
@@ -1224,8 +1453,22 @@ impl SqliteMemory {
         .await
     }
 
+    pub async fn clear_all_documents(&self) -> AppResult<()> {
+        let pool = self.pool.clone();
+        run_db_task(move || {
+            let mut c = pool.get().map_err(pool_err)?;
+            let tx = c.transaction().map_err(sql_err)?;
+            tx.execute("DELETE FROM passages", []).map_err(sql_err)?;
+            tx.execute("DELETE FROM documents", []).map_err(sql_err)?;
+            tx.commit().map_err(sql_err)?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn list_documents(
         &self,
+        workspace_path: Option<String>,
         source: Option<String>,
         file_type: Option<String>,
         limit: usize,
@@ -1236,10 +1479,14 @@ impl SqliteMemory {
             let c = pool.get().map_err(pool_err)?;
             let mut sql = String::from(
                 "SELECT id, title, file_path, source, source_id, file_type,
-                        size_bytes, page_count, word_count, metadata, indexed_at, updated_at
+                        size_bytes, page_count, word_count, metadata, indexed_at, updated_at, workspace_path
                  FROM documents WHERE 1=1",
             );
             let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            if let Some(ws) = workspace_path {
+                sql.push_str(" AND (workspace_path = ? OR workspace_path IS NULL OR source != 'local')");
+                values.push(Box::new(ws));
+            }
             if let Some(s) = source {
                 sql.push_str(" AND source=?");
                 values.push(Box::new(s));
@@ -1264,23 +1511,6 @@ impl SqliteMemory {
         .await
     }
 
-    pub async fn get_document(&self, document_id: &str) -> AppResult<Option<DocumentRecord>> {
-        let pool = self.pool.clone();
-        let did = document_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.query_row(
-                "SELECT id, title, file_path, source, source_id, file_type,
-                        size_bytes, page_count, word_count, metadata, indexed_at, updated_at
-                 FROM documents WHERE id=?1",
-                params![did],
-                map_document_row,
-            )
-            .optional()
-            .map_err(sql_err)
-        })
-        .await
-    }
 
     pub async fn document_exists_by_path(&self, path: &str) -> AppResult<Option<String>> {
         let pool = self.pool.clone();
@@ -1298,7 +1528,12 @@ impl SqliteMemory {
         .await
     }
 
-    pub async fn search_documents(&self, query: &str, limit: usize) -> AppResult<Vec<SearchHit>> {
+    pub async fn search_documents(
+        &self,
+        query: &str,
+        limit: usize,
+        workspace_path: Option<String>,
+    ) -> AppResult<Vec<SearchHit>> {
         let strict = fts5_query(query, " ");
         if strict.is_empty() {
             return Ok(Vec::new());
@@ -1307,21 +1542,30 @@ impl SqliteMemory {
         let pool = self.pool.clone();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            let hits = search_passages(&c, &strict, limit)?;
+            let hits = search_passages(&c, &strict, limit, workspace_path.as_deref())?;
             if hits.is_empty() && loose != strict {
-                return search_passages(&c, &loose, limit);
+                return search_passages(&c, &loose, limit, workspace_path.as_deref());
             }
             Ok(hits)
         })
         .await
     }
 
-    pub async fn count_documents(&self) -> AppResult<i64> {
+    pub async fn count_documents(&self, workspace_path: Option<String>) -> AppResult<i64> {
         let pool = self.pool.clone();
         run_db_task(move || {
             let c = pool.get().map_err(pool_err)?;
-            c.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
+            if let Some(ws) = workspace_path {
+                c.query_row(
+                    "SELECT COUNT(*) FROM documents WHERE (workspace_path = ?1 OR workspace_path IS NULL OR source != 'local')",
+                    params![ws],
+                    |r| r.get(0),
+                )
                 .map_err(sql_err)
+            } else {
+                c.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))
+                    .map_err(sql_err)
+            }
         })
         .await
     }
@@ -1477,5 +1721,6 @@ fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord>
         metadata,
         indexed_at: row.get(10)?,
         updated_at: row.get(11)?,
+        workspace_path: row.get(12)?,
     })
 }

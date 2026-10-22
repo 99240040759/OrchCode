@@ -136,7 +136,7 @@ export type DictationEvent =
 
 export type TerminalEvent = { type: "data"; data: string } | { type: "exit" };
 
-export type HistoryAction = "back" | "forward" | "reload";
+export type HistoryAction = "back" | "forward" | "reload" | "stop";
 
 export function getAuthUser(): Promise<UserDisplay | null> {
   return invoke("get_auth_user");
@@ -166,8 +166,8 @@ export function listSessionsForWorkspace(workspacePath: string): Promise<Session
   return invoke("list_sessions_for_workspace", { workspacePath });
 }
 
-export function listModels(): Promise<ModelDto[]> {
-  return invoke("list_models");
+export function listModels(forceRefresh?: boolean): Promise<ModelDto[]> {
+  return invoke("list_models", { forceRefresh });
 }
 
 export function getBudget(): Promise<Budget> {
@@ -176,6 +176,24 @@ export function getBudget(): Promise<Budget> {
 
 export function getSessionView(sessionId: string): Promise<MessageView[]> {
   return invoke("get_session_view", { sessionId });
+}
+
+export interface SessionViewPage {
+  messages: MessageView[];
+  hasMore: boolean;
+  earliestSeq: number | null;
+}
+
+export function getSessionMessagesPage(
+  sessionId: string,
+  limit?: number,
+  beforeSeq?: number | null
+): Promise<SessionViewPage> {
+  return invoke("get_session_messages_page", {
+    sessionId,
+    limit: limit ?? 50,
+    beforeSeq: beforeSeq ?? null,
+  });
 }
 
 export function clearSession(sessionId: string): Promise<void> {

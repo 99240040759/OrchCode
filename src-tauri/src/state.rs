@@ -89,16 +89,15 @@ impl AppState {
 
     pub fn set_token(&self, token: Option<String>) {
         let clean = token.filter(|t| !t.is_empty());
-        if let Ok(mut guard) = self.token.write() {
-            *guard = clean;
-        }
+        let mut guard = self.token.write().unwrap_or_else(|e| e.into_inner());
+        *guard = clean;
     }
 
     pub fn access_token(&self) -> Option<String> {
         self.token
             .read()
-            .ok()
-            .and_then(|g| g.clone())
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
             .filter(|t| !t.is_empty())
     }
 
@@ -122,6 +121,7 @@ impl AppState {
 
     pub async fn sign_out(&self) {
         self.cancel_all_runs();
+        self.close_all_terminals();
         self.reset_session_memory();
         auth::clear_tokens();
         auth::clear_cached_user(&self.data_dir);
@@ -131,10 +131,15 @@ impl AppState {
     }
 
     pub async fn complete_sign_in(&self, id_token: String, profile: &auth::UserProfile) {
-        let previous = auth::load_cached_user(&self.data_dir).map(|p| p.id);
+        let previous = self
+            .current_user_id()
+            .or_else(|| auth::load_cached_user(&self.data_dir).map(|p| p.id));
         if previous.as_deref().is_some_and(|id| id != profile.id) {
             if let Err(error) = self.connector_manager.logout_all(&self.memory).await {
                 eprintln!("[auth] clearing previous account connectors failed: {error}");
+            }
+            if let Err(error) = self.memory.clear_all_documents().await {
+                eprintln!("[auth] clearing previous account documents failed: {error}");
             }
         }
         self.set_token(Some(id_token));
@@ -246,6 +251,7 @@ impl AppState {
     }
 
     pub async fn refresh_catalog(&self) -> AppResult<ModelCatalog> {
+        self.ensure_fresh_token().await?;
         let fresh = self.gateway.models().await?;
         *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = Some(fresh.clone());
         Ok(fresh)
@@ -253,8 +259,8 @@ impl AppState {
 
     fn token_is_fresh(token: &str) -> bool {
         match auth::jwt_expiry(token) {
-            Some(exp) => exp - crate::util::now_secs() > config::TOKEN_REFRESH_SKEW_SECS,
-            None => !token.trim().is_empty(),
+            Some(exp) => exp.saturating_sub(crate::util::now_secs()) > config::TOKEN_REFRESH_SKEW_SECS,
+            None => false,
         }
     }
 
@@ -276,9 +282,13 @@ impl AppState {
                 auth::save_refresh_token(rt)?;
             }
         }
-        self.set_token(Some(session.access_token));
+        self.set_token(Some(session.access_token.clone()));
         if let Some(user) = session.user.as_ref() {
             self.set_authenticated_user(&user.id);
+        } else if let Some(uid) = auth::jwt_user_id(&session.access_token) {
+            self.set_authenticated_user(&uid);
+        } else if let Some(cached) = auth::load_cached_user(&self.data_dir) {
+            self.set_authenticated_user(&cached.id);
         }
         Ok(())
     }
@@ -343,6 +353,13 @@ impl AppState {
         Ok((run_id, cancel))
     }
 
+    pub fn update_run_id(&self, session_id: &str, new_run_id: &str) {
+        let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(handle) = guard.get_mut(session_id) {
+            handle.run_id = new_run_id.to_string();
+        }
+    }
+
     pub fn finish_run(&self, session_id: &str, run_id: &str) {
         let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
         if guard
@@ -363,7 +380,7 @@ impl AppState {
             })
         };
         if let Some(run_id) = run_id {
-            self.command_manager.kill_foreground_for_run(&run_id);
+            self.command_manager.kill_for_run(&run_id);
         }
     }
 
@@ -406,6 +423,14 @@ impl AppState {
         }
     }
 
+    pub fn close_all_terminals(&self) {
+        let mut guard = self.terminals.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, session) in guard.iter_mut() {
+            session.kill();
+        }
+        guard.clear();
+    }
+
     pub fn shutdown(&self) {
         {
             let runs = self.runs.lock().unwrap_or_else(|error| error.into_inner());
@@ -414,11 +439,7 @@ impl AppState {
             }
         }
         self.command_manager.kill_all();
-        let mut guard = self.terminals.lock().unwrap_or_else(|e| e.into_inner());
-        for (_, session) in guard.iter_mut() {
-            session.kill();
-        }
-        guard.clear();
+        self.close_all_terminals();
         if let Ok(mut dictation) = self.dictation.lock() {
             if let Some(handle) = dictation.take() {
                 handle.cancel();

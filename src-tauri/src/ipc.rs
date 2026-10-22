@@ -15,13 +15,14 @@ use crate::llm::{
     RunOutcome, RunRequest,
 };
 use crate::persistence::MessageView;
-use crate::run_persistence::{BeginRun, RunCommitKind};
+use crate::run_persistence::BeginRun;
 use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
 
 use rig::id::ConversationId;
 use rig::memory::ConversationMemory;
+use rig::message::Message;
 
 fn is_safe_path_segment(s: &str) -> bool {
     !s.is_empty()
@@ -60,28 +61,6 @@ impl ModelDto {
             max_tokens: m.max_tokens,
             capabilities: m.capabilities,
             badge: m.badge,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BudgetDto {
-    pub cost_usd: f64,
-    pub limit_usd: f64,
-    pub remaining: f64,
-    pub period: String,
-    pub allowed: bool,
-}
-
-impl From<Budget> for BudgetDto {
-    fn from(b: Budget) -> Self {
-        Self {
-            cost_usd: b.cost_usd,
-            limit_usd: b.limit_usd,
-            remaining: b.remaining,
-            period: b.period,
-            allowed: b.allowed,
         }
     }
 }
@@ -233,10 +212,6 @@ pub async fn forget_workspace(
 
     if delete_project {
         let root = dunce::canonicalize(state.quick_projects_root()).map_err(|e| e.to_string())?;
-        let target = dunce::canonicalize(&workspace).map_err(|e| format!("cannot resolve project: {e}"))?;
-        if target == root || !target.starts_with(&root) {
-            return Err("only quick projects created by Orch can be deleted".to_string());
-        }
         let session_ids = state
             .memory
             .session_ids_for_workspace(&canonical)
@@ -248,10 +223,21 @@ pub async fn forget_workspace(
             .delete_sessions_for_workspace(&canonical)
             .await
             .map_err(|e| e.to_string())?;
-        tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&target))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| format!("failed to delete quick project directory: {e}"))?;
+
+        if state.workspace().as_deref() == Some(canonical.as_path()) {
+            state.close_all_terminals();
+        }
+
+        if workspace.exists() {
+            let target = dunce::canonicalize(&workspace).map_err(|e| format!("cannot resolve project: {e}"))?;
+            if target == root || !target.starts_with(&root) {
+                return Err("only quick projects created by Orch can be deleted".to_string());
+            }
+            tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&target))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| format!("failed to delete quick project directory: {e}"))?;
+        }
     }
 
     let _ = app.emit("sessions-updated", ());
@@ -273,13 +259,12 @@ pub async fn list_models(state: State<'_, AppState>, force_refresh: Option<bool>
 }
 
 #[tauri::command]
-pub async fn get_budget(state: State<'_, AppState>) -> Result<BudgetDto, String> {
+pub async fn get_budget(state: State<'_, AppState>) -> Result<Budget, String> {
     state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
     state
         .gateway
         .budget()
         .await
-        .map(BudgetDto::from)
         .map_err(|e| e.to_string())
 }
 
@@ -358,13 +343,20 @@ pub async fn start_chat(
         }
     };
 
-    let built = build_user_message(
+    let built = match build_user_message(
         Some(&workspace),
         &prompt,
         &attachments,
         model_info.supports_images(),
     )
-    .await;
+    .await
+    {
+        Ok(built) => built,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            return Err(error);
+        }
+    };
     if !built.notes.is_empty() {
         let _ = on_event.send(ChatEvent::Notice {
             message: built.notes.join("\n"),
@@ -379,7 +371,7 @@ pub async fn start_chat(
             conversation_id: &session_id,
             model: &model,
             raw_prompt: &raw_prompt,
-            initial_user_message: &built.message,
+            initial_user_message: Some(&built.message),
             workspace_path: &workspace_string,
             user_id: &user_id,
         })
@@ -413,84 +405,203 @@ pub async fn start_chat(
         Err(error) => eprintln!("[chat] pre-run compaction failed: {error}"),
     }
 
-    let tool_context = ToolContext {
-        workspace: Some(workspace.clone()),
-        run_id: run_id.clone(),
-        gateway: state.gateway.clone(),
-        app_handle: app.clone(),
-        command_manager: (*state.command_manager).clone(),
-        data_dir: state.data_dir.clone(),
-        memory: state.memory.clone(),
-        connector_manager: state.connector_manager.clone(),
-    };
-    let enabled_connectors = state.connector_manager.enabled_ids();
-    let tool_errors = crate::llm::ToolErrorTracker::new();
-    let agent = build_agent(
-        AgentInputs {
-            client: &client,
-            model: &model_info,
-            tools: &tool_context,
-            data_dir: &state.data_dir,
-            workspace: Some(workspace.as_path()),
-            enabled_connectors: &enabled_connectors,
-        },
-        state.memory.scoped_to_run(&run_id),
-        tool_errors.clone(),
-    );
-    let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
+    let mut current_run_id = run_id;
+    let mut current_user_message = built.message;
+    let mut compactions_count: usize = 0;
+    const MAX_INFLIGHT_COMPACTIONS: usize = 10;
 
-    let result = run_chat(
-        agent,
-        RunRequest {
-            run_id: run_id.clone(),
-            session_id: session_id.clone(),
-            user_message: built.message,
-        },
-        cancel,
-        on_event.clone(),
-        state.memory.clone(),
-        tool_errors,
-    )
-    .await;
-    state.command_manager.kill_foreground_for_run(&run_id);
+    let final_outcome = loop {
+        let tool_context = ToolContext {
+            workspace: Some(workspace.clone()),
+            run_id: current_run_id.clone(),
+            gateway: state.gateway.clone(),
+            app_handle: app.clone(),
+            command_manager: (*state.command_manager).clone(),
+            data_dir: state.data_dir.clone(),
+            memory: state.memory.clone(),
+            connector_manager: state.connector_manager.clone(),
+        };
+        let enabled_connectors = state.connector_manager.enabled_ids();
+        let tool_errors = crate::llm::ToolErrorTracker::new();
+        let agent = build_agent(
+            AgentInputs {
+                client: &client,
+                model: &model_info,
+                tools: &tool_context,
+                data_dir: &state.data_dir,
+                workspace: Some(workspace.as_path()),
+                enabled_connectors: &enabled_connectors,
+            },
+            state.memory.scoped_to_run(&current_run_id),
+            tool_errors.clone(),
+        );
+        let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
 
-    let outcome = result.outcome.clone();
-    let (status, terminal_error) = match &outcome {
-        RunOutcome::Completed => ("completed", None),
-        RunOutcome::Cancelled => ("cancelled", Some("cancelled by the user")),
-        RunOutcome::Failed(message) => ("error", Some(message.as_str())),
-    };
-    let commit_kind = match state
-        .memory
-        .finalize_chat_run(&run_id, status, terminal_error)
-        .await
-    {
-        Ok(kind) => kind,
-        Err(error) => {
-            state.finish_run(&session_id, &run_id);
-            let _ = app.emit("sessions-updated", ());
-            let _ = on_event.send(ChatEvent::Error {
-                message: format!("failed to save the chat history: {error}"),
-            });
-            return Ok(());
+        let result = run_chat(
+            agent,
+            RunRequest {
+                run_id: current_run_id.clone(),
+                session_id: session_id.clone(),
+                user_message: current_user_message,
+                context_window: model_info.context_window,
+            },
+            cancel.clone(),
+            on_event.clone(),
+            state.memory.clone(),
+            tool_errors,
+        )
+        .await;
+        state.command_manager.kill_foreground_for_run(&current_run_id);
+
+        let reasoning_durations = result.reasoning_durations;
+
+        match result.outcome {
+            RunOutcome::NeedsCompaction => {
+                let commit_kind = match state
+                    .memory
+                    .finalize_chat_run(&current_run_id, "compacted", None)
+                    .await
+                {
+                    Ok(kind) => kind,
+                    Err(error) => {
+                        break RunOutcome::Failed(format!("failed to commit partial chat run: {error}"));
+                    }
+                };
+
+                if !reasoning_durations.is_empty() {
+                    if let Err(error) = state
+                        .memory
+                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
+                        .await
+                    {
+                        eprintln!("[chat] failed to persist reasoning durations: {error}");
+                    }
+                }
+
+                if cancel.is_cancelled() {
+                    break RunOutcome::Cancelled;
+                }
+
+                if compactions_count >= MAX_INFLIGHT_COMPACTIONS {
+                    break RunOutcome::Failed("maximum in-flight compaction limit reached".to_string());
+                }
+                compactions_count += 1;
+
+                let compact_result = maybe_compact(
+                    &state.memory,
+                    &client,
+                    &model_info,
+                    &session_id,
+                    result.last_turn_input_tokens,
+                    &cancel,
+                )
+                .await;
+
+                match compact_result {
+                    Ok(Some(outcome)) => {
+                        let _ = on_event.send(ChatEvent::Compacted {
+                            original_message_count: outcome.original_message_count,
+                            ts: outcome.ts,
+                        });
+                        let _ = on_event.send(ChatEvent::Usage {
+                            context_tokens: outcome.new_context_tokens,
+                        });
+                        let _ = app.emit("sessions-updated", ());
+                    }
+                    Ok(None) => {
+                        if cancel.is_cancelled() {
+                            break RunOutcome::Cancelled;
+                        }
+                        break RunOutcome::Completed;
+                    }
+                    Err(error) => {
+                        eprintln!("[chat] in-flight compaction failed: {error}");
+                        break RunOutcome::Failed(format!("in-flight compaction failed: {error}"));
+                    }
+                }
+
+                if cancel.is_cancelled() {
+                    break RunOutcome::Cancelled;
+                }
+
+                let next_run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
+                state.update_run_id(&session_id, &next_run_id);
+                current_run_id = next_run_id;
+
+                current_user_message = Message::user("Continue with the previous task.");
+
+                if let Err(error) = state
+                    .memory
+                    .begin_chat_run(BeginRun {
+                        run_id: &current_run_id,
+                        conversation_id: &session_id,
+                        model: &model,
+                        raw_prompt: "",
+                        initial_user_message: None,
+                        workspace_path: &workspace_string,
+                        user_id: &user_id,
+                    })
+                    .await
+                {
+                    break RunOutcome::Failed(format!("failed to begin continuation run: {error}"));
+                }
+                let _ = app.emit("sessions-updated", ());
+            }
+            RunOutcome::Completed => {
+                let _ = state
+                    .memory
+                    .finalize_chat_run(&current_run_id, "completed", None)
+                    .await;
+                if !reasoning_durations.is_empty() {
+                    if let Err(error) = state
+                        .memory
+                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
+                        .await
+                    {
+                        eprintln!("[chat] failed to persist reasoning durations: {error}");
+                    }
+                }
+                break RunOutcome::Completed;
+            }
+            RunOutcome::Cancelled => {
+                let _ = state
+                    .memory
+                    .finalize_chat_run(&current_run_id, "cancelled", Some("cancelled by the user"))
+                    .await;
+                if !reasoning_durations.is_empty() {
+                    if let Err(error) = state
+                        .memory
+                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
+                        .await
+                    {
+                        eprintln!("[chat] failed to persist reasoning durations: {error}");
+                    }
+                }
+                break RunOutcome::Cancelled;
+            }
+            RunOutcome::Failed(message) => {
+                let _ = state
+                    .memory
+                    .finalize_chat_run(&current_run_id, "error", Some(message.as_str()))
+                    .await;
+                if !reasoning_durations.is_empty() {
+                    if let Err(error) = state
+                        .memory
+                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
+                        .await
+                    {
+                        eprintln!("[chat] failed to persist reasoning durations: {error}");
+                    }
+                }
+                break RunOutcome::Failed(message);
+            }
         }
     };
 
-    if !result.reasoning_durations.is_empty() {
-        if let Err(error) = state
-            .memory
-            .assign_reasoning_durations(&session_id, base_seq, result.reasoning_durations)
-            .await
-        {
-            eprintln!("[chat] failed to persist reasoning durations: {error}");
-        }
-    }
-
-    state.finish_run(&session_id, &run_id);
+    state.finish_run(&session_id, &current_run_id);
     let _ = app.emit("sessions-updated", ());
-    let event = match outcome {
-        RunOutcome::Completed => ChatEvent::Done,
-        _ if commit_kind == RunCommitKind::Canonical => ChatEvent::Done,
+    let event = match final_outcome {
+        RunOutcome::Completed | RunOutcome::NeedsCompaction => ChatEvent::Done,
         RunOutcome::Cancelled => ChatEvent::Cancelled,
         RunOutcome::Failed(message) => ChatEvent::Error { message },
     };
@@ -551,6 +662,13 @@ pub fn cancel_chat(state: State<'_, AppState>, session_id: String) {
 
 #[tauri::command]
 pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    if let Some(user_id) = state.current_user_id() {
+        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+            if owner != user_id {
+                return Err("session does not belong to the current user".to_string());
+            }
+        }
+    }
     state.cancel_run(&session_id);
     state
         .wait_for_runs(std::slice::from_ref(&session_id), Duration::from_secs(10))
@@ -566,9 +684,37 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
 
 #[tauri::command]
 pub async fn get_session_view(state: State<'_, AppState>, session_id: String) -> Result<Vec<MessageView>, String> {
+    if let Some(user_id) = state.current_user_id() {
+        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+            if owner != user_id {
+                return Err("session does not belong to the current user".to_string());
+            }
+        }
+    }
     state
         .memory
         .get_session_view(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_session_messages_page(
+    state: State<'_, AppState>,
+    session_id: String,
+    limit: Option<usize>,
+    before_seq: Option<i64>,
+) -> Result<SessionViewPage, String> {
+    if let Some(user_id) = state.current_user_id() {
+        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+            if owner != user_id {
+                return Err("session does not belong to the current user".to_string());
+            }
+        }
+    }
+    state
+        .memory
+        .get_session_view_paginated(&session_id, limit.unwrap_or(50).clamp(1, 200), before_seq)
         .await
         .map_err(|e| e.to_string())
 }
@@ -647,6 +793,7 @@ pub async fn terminal_open(
 ) -> Result<(), String> {
     let workspace = state.workspace().unwrap_or_else(|| {
         std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .unwrap_or_else(|| state.data_dir.clone())
     });
@@ -823,42 +970,26 @@ pub async fn disconnect_connector(state: State<'_, AppState>, connector_id: Stri
         .map_err(|e| e.to_string())
 }
 
-use crate::document::ingest_document;
-use crate::persistence::{DocumentRecord, SearchHit};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IngestResultDto {
-    pub document_id: String,
-    pub title: String,
-    pub file_type: String,
-    pub passage_count: usize,
-    pub word_count: usize,
-    pub page_count: Option<usize>,
-    pub was_update: bool,
-}
+use crate::document::{ingest_document, IngestResult};
+use crate::persistence::{DocumentRecord, SearchHit, SessionViewPage};
 
 #[tauri::command]
-pub async fn ipc_ingest_document(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<IngestResultDto, String> {
+pub async fn ipc_ingest_document(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<IngestResult, String> {
+    if state.current_user_id().is_none() {
+        return Err("authentication required to ingest documents".to_string());
+    }
     let resolved = dunce::canonicalize(PathBuf::from(&path)).map_err(|e| format!("cannot resolve path: {e}"))?;
     if !resolved.is_file() {
         return Err(format!("not a file: {path}"));
     }
-    let result = ingest_document(&resolved, &state.memory)
+    let ws = state.workspace();
+    let result = ingest_document(&resolved, ws.as_deref(), &state.memory)
         .await
         .map_err(|e| e.to_string())?;
 
     let _ = app.emit("documents-updated", ());
 
-    Ok(IngestResultDto {
-        document_id: result.document_id,
-        title: result.title,
-        file_type: result.file_type,
-        passage_count: result.passage_count,
-        word_count: result.word_count,
-        page_count: result.page_count,
-        was_update: result.was_update,
-    })
+    Ok(result)
 }
 
 #[tauri::command]
@@ -869,15 +1000,24 @@ pub async fn ipc_list_documents(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<Vec<DocumentRecord>, String> {
+    if state.current_user_id().is_none() {
+        return Err("authentication required".to_string());
+    }
+    let ws_str = state
+        .workspace()
+        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
     state
         .memory
-        .list_documents(source, file_type, limit.unwrap_or(50).clamp(1, 500), offset.unwrap_or(0))
+        .list_documents(ws_str, source, file_type, limit.unwrap_or(50).clamp(1, 500), offset.unwrap_or(0))
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn ipc_delete_document(app: tauri::AppHandle, state: State<'_, AppState>, document_id: String) -> Result<(), String> {
+    if state.current_user_id().is_none() {
+        return Err("authentication required".to_string());
+    }
     state
         .memory
         .delete_document(&document_id)
@@ -893,14 +1033,26 @@ pub async fn ipc_search_documents(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, String> {
+    if state.current_user_id().is_none() {
+        return Err("authentication required".to_string());
+    }
+    let ws_str = state
+        .workspace()
+        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
     state
         .memory
-        .search_documents(&query, limit.unwrap_or(20).clamp(1, 100))
+        .search_documents(&query, limit.unwrap_or(20).clamp(1, 100), ws_str)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn ipc_count_documents(state: State<'_, AppState>) -> Result<i64, String> {
-    state.memory.count_documents().await.map_err(|e| e.to_string())
+    if state.current_user_id().is_none() {
+        return Err("authentication required".to_string());
+    }
+    let ws_str = state
+        .workspace()
+        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
+    state.memory.count_documents(ws_str).await.map_err(|e| e.to_string())
 }

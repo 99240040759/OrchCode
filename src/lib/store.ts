@@ -3,7 +3,7 @@ import { immer } from "zustand/middleware/immer";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import { newId } from "./api";
-import { useWorkspaceStore, registerWorkspaceActivatedCallback } from "./workspace";
+import { useWorkspaceStore } from "./workspace";
 import { useArtifactsStore } from "./artifacts";
 import type {
   AttachmentRef,
@@ -115,6 +115,9 @@ interface ChatState {
   sessions: SessionSummary[];
   currentSessionId: string;
   messages: ChatMessage[];
+  hasMoreMessages: boolean;
+  earliestSeq: number | null;
+  loadingEarlierMessages: boolean;
   streaming: boolean;
   streamingSessionId: string | null;
   sessionTokens: TokenUsage;
@@ -131,6 +134,7 @@ interface ChatActions {
   reset: () => void;
   newChat: () => void;
   selectSession: (id: string) => Promise<void>;
+  loadEarlierMessages: () => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
   cancel: () => void;
@@ -147,6 +151,9 @@ const INITIAL_STATE: ChatState = {
   sessions: [],
   currentSessionId: newId(),
   messages: [],
+  hasMoreMessages: false,
+  earliestSeq: null,
+  loadingEarlierMessages: false,
   streaming: false,
   streamingSessionId: null,
   sessionTokens: ZERO_USAGE,
@@ -161,6 +168,7 @@ type UnlistenFn = () => void;
 let boundUnlisteners: UnlistenFn[] = [];
 let listenerEpoch = 0;
 let initEpoch = 0;
+let isInitializing = false;
 
 function unbindListeners() {
   listenerEpoch += 1;
@@ -196,7 +204,8 @@ export const useChatStore = create(
     ...INITIAL_STATE,
 
     initialize: async () => {
-      if (get().initialized) return;
+      if (isInitializing || get().initialized) return;
+      isInitializing = true;
       set((s) => { s.initialized = true; });
       const epoch = initEpoch;
 
@@ -247,6 +256,7 @@ export const useChatStore = create(
       const running = get().streamingSessionId;
       if (running) void api.cancelChat(running).catch(() => undefined);
       initEpoch += 1;
+      isInitializing = false;
       unbindListeners();
       set((s) => {
         Object.assign(s, INITIAL_STATE, { currentSessionId: newId() });
@@ -259,6 +269,9 @@ export const useChatStore = create(
       set((s) => {
         s.currentSessionId = freshId;
         s.messages = [];
+        s.hasMoreMessages = false;
+        s.earliestSeq = null;
+        s.loadingEarlierMessages = false;
         s.sessionTokens = ZERO_USAGE;
         s.error = null;
       });
@@ -271,15 +284,20 @@ export const useChatStore = create(
       set((s) => {
         s.currentSessionId = id;
         s.messages = [];
+        s.hasMoreMessages = false;
+        s.earliestSeq = null;
+        s.loadingEarlierMessages = false;
         s.sessionTokens = target ? usageFrom(target) : ZERO_USAGE;
         s.error = null;
       });
 
       try {
-        const views = await api.getSessionView(id);
+        const page = await api.getSessionMessagesPage(id, 50);
         set((s) => {
           if (s.currentSessionId !== id) return;
-          s.messages = views.map((v) => ({
+          s.hasMoreMessages = page.hasMore;
+          s.earliestSeq = page.earliestSeq;
+          s.messages = page.messages.map((v) => ({
             id: v.id,
             role: v.role as ChatMessage["role"],
             items: v.items.map(viewItemToLocal),
@@ -298,9 +316,44 @@ export const useChatStore = create(
       }
     },
 
+    loadEarlierMessages: async () => {
+      const state = get();
+      if (!state.hasMoreMessages || state.loadingEarlierMessages || state.earliestSeq == null) return;
+      const id = state.currentSessionId;
+      set((s) => { s.loadingEarlierMessages = true; });
+
+      try {
+        const page = await api.getSessionMessagesPage(id, 50, state.earliestSeq);
+        set((s) => {
+          if (s.currentSessionId !== id) return;
+          s.loadingEarlierMessages = false;
+          s.hasMoreMessages = page.hasMore;
+          s.earliestSeq = page.earliestSeq;
+          const earlierMessages: ChatMessage[] = page.messages.map((v) => ({
+            id: v.id,
+            role: v.role as ChatMessage["role"],
+            items: v.items.map(viewItemToLocal),
+            attachments: v.attachments.map((a) => ({
+              name: a.name,
+              isImage: a.isImage,
+              dataUrl: a.dataUrl ?? undefined,
+            })),
+            streaming: false,
+          }));
+          s.messages = [...earlierMessages, ...s.messages];
+        });
+      } catch {
+        set((s) => {
+          s.loadingEarlierMessages = false;
+        });
+      }
+    },
+
     deleteSession: async (id: string) => {
-      if (get().streaming && get().currentSessionId === id) {
-        get().cancel();
+      if (get().streaming && (get().streamingSessionId === id || get().currentSessionId === id)) {
+        try {
+          await api.cancelChat(id);
+        } catch {}
       }
       try {
         await api.clearSession(id);
@@ -362,8 +415,13 @@ export const useChatStore = create(
       const patch = (fn: (m: ChatMessage) => void) => {
         set((s) => {
           if (s.currentSessionId !== sessionId) return;
-          const msg = s.messages.find((m) => m.id === assistantMsgId);
-          if (msg) fn(msg);
+          const last = s.messages[s.messages.length - 1];
+          if (last && last.id === assistantMsgId) {
+            fn(last);
+          } else {
+            const msg = s.messages.find((m) => m.id === assistantMsgId);
+            if (msg) fn(msg);
+          }
         });
       };
 
@@ -371,6 +429,14 @@ export const useChatStore = create(
       const settle = () => {
         if (settled) return;
         settled = true;
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        if (flushTimeoutId !== null) {
+          clearTimeout(flushTimeoutId);
+          flushTimeoutId = null;
+        }
         patch((m) => { m.streaming = false; });
         set((s) => {
           if (s.streamingSessionId === sessionId) s.streamingSessionId = null;
@@ -383,6 +449,7 @@ export const useChatStore = create(
       let textBuffer = "";
       let reasoningBuffer = "";
       let rafId: number | null = null;
+      let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
       const flush = () => {
         const pendingText = textBuffer;
@@ -408,8 +475,23 @@ export const useChatStore = create(
         if (rafId === null) {
           rafId = requestAnimationFrame(() => {
             rafId = null;
+            if (flushTimeoutId !== null) {
+              clearTimeout(flushTimeoutId);
+              flushTimeoutId = null;
+            }
             flush();
           });
+          if (flushTimeoutId !== null) {
+            clearTimeout(flushTimeoutId);
+          }
+          flushTimeoutId = setTimeout(() => {
+            flushTimeoutId = null;
+            if (rafId !== null) {
+              cancelAnimationFrame(rafId);
+              rafId = null;
+              flush();
+            }
+          }, 100);
         }
       };
 
@@ -417,6 +499,10 @@ export const useChatStore = create(
         if (rafId !== null) {
           cancelAnimationFrame(rafId);
           rafId = null;
+        }
+        if (flushTimeoutId !== null) {
+          clearTimeout(flushTimeoutId);
+          flushTimeoutId = null;
         }
         flush();
       };
@@ -478,7 +564,7 @@ export const useChatStore = create(
               };
               const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
               if (streamingIdx >= 0) {
-                s.messages.splice(streamingIdx, 0, notice);
+                s.messages.splice(streamingIdx + 1, 0, notice);
               } else {
                 s.messages.push(notice);
               }
@@ -579,6 +665,8 @@ export const useChatStore = create(
   }))
 );
 
-registerWorkspaceActivatedCallback(() => {
-  if (useChatStore.getState().initialized) void useChatStore.getState().reloadForWorkspace();
+useWorkspaceStore.subscribe((state, prev) => {
+  if (state.current?.id !== prev.current?.id && useChatStore.getState().initialized) {
+    void useChatStore.getState().reloadForWorkspace();
+  }
 });

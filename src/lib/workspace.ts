@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
+import { uniqueNamesGenerator, adjectives, animals } from "unique-names-generator";
+import { clearImageCache } from "./images";
 import {
   getUserPref,
   setUserPref,
@@ -12,14 +14,17 @@ import {
 } from "./api";
 
 type WorkspaceActivatedFn = () => void;
-let onWorkspaceActivated: WorkspaceActivatedFn | null = null;
 
-export function registerWorkspaceActivatedCallback(fn: WorkspaceActivatedFn) {
-  onWorkspaceActivated = fn;
-}
-
-function notifyWorkspaceActivated() {
-  onWorkspaceActivated?.();
+export function registerWorkspaceActivatedCallback(fn: WorkspaceActivatedFn): () => void {
+  return useWorkspaceStore.subscribe((state, prev) => {
+    if (state.current?.id !== prev.current?.id) {
+      try {
+        fn();
+      } catch (e) {
+        console.error("workspace activated callback failed:", e);
+      }
+    }
+  });
 }
 
 export interface WorkspaceMeta {
@@ -104,7 +109,7 @@ function upsert(list: WorkspaceMeta[], meta: WorkspaceMeta): WorkspaceMeta[] {
   const index = list.findIndex((w) => w.id === meta.id || w.path === meta.path);
   if (index === -1) return [...list, meta];
   const next = [...list];
-  next[index] = { ...next[index], path: meta.path };
+  next[index] = { ...next[index], ...meta };
   return next;
 }
 
@@ -112,33 +117,32 @@ function failureStatus(current: WorkspaceMeta | null): WorkspacePickStatus {
   return current ? "ready" : "error";
 }
 
-const ADJECTIVES = [
-  "amber", "brave", "calm", "dusk", "epic", "fast", "gold", "hazy",
-  "idle", "jade", "keen", "lush", "mist", "neat", "opal", "pure",
-  "quiet", "rust", "sage", "teal", "urban", "vast", "warm", "zeal",
-];
-const NOUNS = [
-  "atlas", "bloom", "comet", "delta", "echo", "forge", "grove", "haven",
-  "iris", "jumper", "kite", "lance", "maple", "nexus", "orbit", "prism",
-  "quill", "river", "spark", "tide", "unity", "vortex", "wave", "zenith",
-];
-
 function randomProjectName(existingNames: Set<string>): string {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-    const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-    const name = `${adj}-${noun}`;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const name = uniqueNamesGenerator({
+      dictionaries: [adjectives, animals],
+      separator: "-",
+      length: 2,
+      style: "lowerCase",
+    });
     if (!existingNames.has(name)) return name;
   }
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  return `${adj}-${noun}-${newId().slice(0, 4)}`;
+  const fallbackBase = uniqueNamesGenerator({
+    dictionaries: [adjectives, animals],
+    separator: "-",
+    length: 2,
+    style: "lowerCase",
+  });
+  return `${fallbackBase}-${newId().slice(0, 4)}`;
 }
 
 export const useWorkspaceStore = create(
   immer<WorkspaceStore>((set, get) => {
+    let inProgress = false;
+
     const exclusive = async (task: () => Promise<void>) => {
-      if (get().busy) return;
+      if (inProgress || get().busy) return;
+      inProgress = true;
       set((s) => {
         s.busy = true;
       });
@@ -150,6 +154,7 @@ export const useWorkspaceStore = create(
           s.status = failureStatus(s.current);
         });
       } finally {
+        inProgress = false;
         set((s) => {
           s.busy = false;
         });
@@ -165,7 +170,7 @@ export const useWorkspaceStore = create(
         s.status = "ready";
         s.error = null;
       });
-      notifyWorkspaceActivated();
+      clearImageCache();
     };
 
     return {
@@ -211,7 +216,7 @@ export const useWorkspaceStore = create(
             s.current = active;
             s.status = "ready";
           });
-          notifyWorkspaceActivated();
+          clearImageCache();
         } catch (e) {
           set((s) => {
             s.status = "needs_pick";
@@ -279,7 +284,7 @@ export const useWorkspaceStore = create(
               s.status = "needs_pick";
             }
           });
-          if (wasCurrent) notifyWorkspaceActivated();
+          if (wasCurrent) clearImageCache();
         }),
 
       dismissError: () => {

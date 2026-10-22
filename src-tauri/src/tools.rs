@@ -135,6 +135,19 @@ pub mod fs_util {
         Ok(resolved)
     }
 
+    pub fn resolve_readable_file(root: Option<&Path>, input: &str) -> AppResult<PathBuf> {
+        let p = Path::new(input);
+        if p.is_absolute() {
+            let canonical = dunce::canonicalize(p)?;
+            if !canonical.is_file() {
+                return Err(AppError::Other(format!("not a file: {input}")));
+            }
+            return Ok(canonical);
+        }
+        let ws = root.ok_or_else(|| AppError::Other("no workspace folder set".to_string()))?;
+        resolve_existing_file(ws, input)
+    }
+
     pub use crate::util::display_relative;
 
     pub fn file_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
@@ -443,11 +456,7 @@ impl RingBuffer {
     }
 
     fn as_string(&mut self) -> String {
-        let (s1, s2) = self.data.as_slices();
-        let mut text = String::with_capacity(s1.len() + s2.len());
-        text.push_str(&String::from_utf8_lossy(s1));
-        text.push_str(&String::from_utf8_lossy(s2));
-        text
+        String::from_utf8_lossy(self.data.make_contiguous()).into_owned()
     }
 }
 
@@ -459,6 +468,17 @@ pub struct CommandManager {
 impl CommandManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn mark_background(&self, task_id: &str) {
+        let task = {
+            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            guard.get(task_id).cloned()
+        };
+        if let Some(task) = task {
+            let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+            g.background = true;
+        }
     }
 
     pub fn spawn_task(
@@ -614,6 +634,10 @@ impl CommandManager {
         g.request_kill()
     }
 
+    pub fn kill_for_run(&self, run_id: &str) {
+        self.kill_matching(|task| task.run_id == run_id);
+    }
+
     pub fn kill_foreground_for_run(&self, run_id: &str) {
         self.kill_matching(|task| task.run_id == run_id && !task.background);
     }
@@ -674,16 +698,6 @@ pub struct ReadFile {
     workspace: Option<PathBuf>,
 }
 
-fn raster_mime(ext: &str) -> &'static str {
-    match ext {
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        _ => "image/png",
-    }
-}
-
 pub(crate) fn window_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
@@ -730,7 +744,7 @@ impl Tool for ReadFile {
         "Read the contents of a file in the workspace. \
 Returns text content for source code, config, markdown, JSON, SVG, PDF, Word, Excel and PowerPoint files. \
 Output is limited to about 2000 lines per call; pass start_line and end_line (1-based, inclusive) to read other sections. \
-Raster images return a data URL. ALWAYS call this before editing any file."
+ALWAYS call this before editing any file."
             .to_string()
     }
 
@@ -750,11 +764,37 @@ Raster images return a data URL. ALWAYS call this before editing any file."
         let root = workspace_root(&self.workspace)?;
         let path = fs_util::resolve_existing_file(&root, &args.path)?;
         let rel = fs_util::display_relative(&root, &path);
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .map_err(|e| ToolError::msg(format!("cannot stat {rel}: {e}")))?;
+        if meta.len() > FILE_SIZE_LIMIT {
+            return Err(ToolError::msg(format!(
+                "file too large ({} bytes, limit {} bytes): {rel}",
+                meta.len(),
+                FILE_SIZE_LIMIT
+            )));
+        }
+
         let ext = path
             .extension()
             .and_then(|s| s.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
+
+        if crate::media::is_raster_extension(&ext) {
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|e| ToolError::msg(format!("cannot read image {rel}: {e}")))?;
+            let dimensions = crate::media::image_dimensions(&bytes);
+            let dim_str = match dimensions {
+                Some((w, h)) => format!("{w}x{h} px"),
+                None => "unknown dimensions".to_string(),
+            };
+            return Ok(format!(
+                "[Image file: {rel} ({ext}), size: {} bytes, dimensions: {dim_str}]",
+                bytes.len()
+            ));
+        }
 
         if crate::document::is_parseable_document(&path) {
             let doc_path = path.clone();
@@ -767,38 +807,6 @@ Raster images return a data URL. ALWAYS call this before editing any file."
             return Ok(window_lines(&parsed.full_text, args.start_line, args.end_line));
         }
 
-        if crate::media::is_raster_extension(&ext) {
-            let bytes = tokio::fs::read(&path)
-                .await
-                .map_err(|e| ToolError::msg(format!("cannot read image {rel}: {e}")))?;
-            let mime = raster_mime(&ext);
-            let b64 = tokio::task::spawn_blocking(move || {
-                crate::media::encode_for_model(
-                    &bytes,
-                    &ext,
-                    config::MAX_MODEL_IMAGE_DIMENSION,
-                    config::MAX_MODEL_IMAGE_BYTES,
-                )
-                .map(|(encoded, _)| encoded)
-            })
-            .await
-            .ok()
-            .and_then(Result::ok);
-
-            if let Some(b64) = b64 {
-                return Ok(format!("data:{mime};base64,{b64}"));
-            }
-        }
-
-        let meta = tokio::fs::metadata(&path)
-            .await
-            .map_err(|e| ToolError::msg(format!("cannot stat {rel}: {e}")))?;
-        if meta.len() > FILE_SIZE_LIMIT {
-            return Err(ToolError::msg(format!(
-                "file too large ({} bytes): {rel}",
-                meta.len()
-            )));
-        }
         let bytes = tokio::fs::read(&path)
             .await
             .map_err(|e| ToolError::msg(format!("cannot read {rel}: {e}")))?;
@@ -952,7 +960,6 @@ Each old_string must match exactly one location. Line endings are normalized aut
         let mut content = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| ToolError::msg(format!("cannot read {} as UTF-8 text: {e}", args.path)))?;
-        let uses_crlf = content.contains("\r\n");
 
         for (i, r) in args.replacements.iter().enumerate() {
             if r.old_string.is_empty() {
@@ -961,27 +968,52 @@ Each old_string must match exactly one location. Line endings are normalized aut
                     i + 1
                 )));
             }
-            let (old, new) = if uses_crlf {
-                (to_crlf(&r.old_string), to_crlf(&r.new_string))
-            } else {
-                (r.old_string.replace("\r\n", "\n"), r.new_string.replace("\r\n", "\n"))
+
+            let lf_old = r.old_string.replace("\r\n", "\n");
+            let lf_new = r.new_string.replace("\r\n", "\n");
+            let crlf_old = to_crlf(&r.old_string);
+            let crlf_new = to_crlf(&r.new_string);
+
+            let mut candidates = vec![(r.old_string.as_str(), r.new_string.as_str())];
+            if lf_old != r.old_string {
+                candidates.push((lf_old.as_str(), lf_new.as_str()));
+            }
+            if crlf_old != r.old_string && crlf_old != lf_old {
+                candidates.push((crlf_old.as_str(), crlf_new.as_str()));
+            }
+
+            let mut matched = None;
+            let mut first_count = 0;
+            for (idx, &(old, new)) in candidates.iter().enumerate() {
+                let count = content.matches(old).count();
+                if idx == 0 {
+                    first_count = count;
+                }
+                if count == 1 {
+                    matched = Some((old, new));
+                    break;
+                }
+            }
+
+            let (target, replacement) = match matched {
+                Some(pair) => pair,
+                None => {
+                    if first_count == 0 {
+                        return Err(ToolError::msg(format!(
+                            "replacement #{} not applied: old_string not found in {}. Re-read the file and copy the exact text.",
+                            i + 1,
+                            args.path
+                        )));
+                    } else {
+                        return Err(ToolError::msg(format!(
+                            "replacement #{} is ambiguous: old_string matches {first_count} locations in {}. Include more surrounding context.",
+                            i + 1,
+                            args.path
+                        )));
+                    }
+                }
             };
-            let count = content.matches(old.as_str()).count();
-            if count == 0 {
-                return Err(ToolError::msg(format!(
-                    "replacement #{} not applied: old_string not found in {}. Re-read the file and copy the exact text.",
-                    i + 1,
-                    args.path
-                )));
-            }
-            if count > 1 {
-                return Err(ToolError::msg(format!(
-                    "replacement #{} is ambiguous: old_string matches {count} locations in {}. Include more surrounding context.",
-                    i + 1,
-                    args.path
-                )));
-            }
-            content = content.replacen(old.as_str(), &new, 1);
+            content = content.replacen(target, replacement, 1);
         }
 
         fs_util::atomic_write(&path, content.as_bytes()).await?;
@@ -1199,6 +1231,7 @@ Set background=true for servers and watchers."
 
             let remaining = handoff.saturating_sub(started.elapsed());
             if remaining.is_zero() {
+                self.manager.mark_background(&task_id);
                 return Ok(format!(
                     "Command still running after {}s and is now tracked as task_id: '{task_id}'. Use get_command_status to check it.",
                     config::COMMAND_FOREGROUND_HANDOFF_SECS
@@ -1597,6 +1630,7 @@ impl ToolContext {
     pub fn search_documents(&self) -> SearchDocuments {
         SearchDocuments {
             memory: self.memory.clone(),
+            workspace: self.workspace.clone(),
         }
     }
 
@@ -1624,6 +1658,7 @@ impl ToolContext {
 
 pub struct SearchDocuments {
     pub memory: crate::persistence::SqliteMemory,
+    pub workspace: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1653,9 +1688,13 @@ impl Tool for SearchDocuments {
 
     async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let limit = args.limit.unwrap_or(10).clamp(1, 20);
+        let ws_str = self
+            .workspace
+            .as_ref()
+            .map(|w| dunce::canonicalize(w).unwrap_or_else(|_| w.clone()).to_string_lossy().into_owned());
         let hits = self
             .memory
-            .search_documents(&args.query, limit)
+            .search_documents(&args.query, limit, ws_str)
             .await
             .map_err(|e| ToolError::msg(e.to_string()))?;
 

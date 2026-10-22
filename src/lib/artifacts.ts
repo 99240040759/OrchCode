@@ -144,7 +144,7 @@ export const useArtifactsStore = create(
 
     dropWorkspaceTabs: () => {
       set((s) => {
-        s.tabs = s.tabs.filter((t) => t.kind === "browser" || t.kind === "terminal" || (t.path ?? "").startsWith("/") || /^[a-zA-Z]:[\\/]/.test(t.path ?? ""));
+        s.tabs = s.tabs.filter((t) => t.kind === "browser");
         if (!s.tabs.some((t) => t.id === s.activeId)) s.activeId = s.tabs[0]?.id ?? null;
         if (s.tabs.length === 0) {
           s.panelOpen = false;
@@ -166,12 +166,18 @@ export const useArtifactsStore = create(
         if (preview) {
           preview.path = path;
           preview.kind = kind;
-          if (!userBusy) s.activeId = preview.id;
+          if (!userBusy) {
+            s.activeId = preview.id;
+            s.panelOpen = true;
+          }
           return;
         }
         const tab: ArtifactTab = { id: newId(), kind, path, preview: true };
         s.tabs.push(tab);
-        if (!userBusy) s.activeId = tab.id;
+        if (!userBusy) {
+          s.activeId = tab.id;
+          s.panelOpen = true;
+        }
       });
     },
 
@@ -205,6 +211,8 @@ export const useArtifactsStore = create(
     setActive: (id: string) => {
       set((s) => {
         s.activeId = id;
+        const tab = s.tabs.find((t) => t.id === id);
+        if (tab) tab.preview = false;
       });
     },
 

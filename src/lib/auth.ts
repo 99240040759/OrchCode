@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "./api";
 import type { UserDisplay } from "./api";
@@ -19,7 +19,6 @@ interface AuthState {
   error: string | null;
   justSignedIn: boolean;
   initialized: boolean;
-  signInTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 interface AuthActions {
@@ -43,14 +42,7 @@ function clearWorkspaceState() {
   useWorkspaceStore.getState().reset();
 }
 
-function applySignedOut(
-  s: AuthState,
-  error: string | null
-) {
-  if (s.signInTimeoutId !== null) {
-    clearTimeout(s.signInTimeoutId);
-    s.signInTimeoutId = null;
-  }
+function applySignedOut(s: AuthState, error: string | null) {
   s.status = "signedOut";
   s.user = null;
   s.signingIn = false;
@@ -60,13 +52,15 @@ function applySignedOut(
 
 export const useAuthStore = create(
   immer<AuthStore>((set, get) => {
+    let initializing = false;
+    let signInTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let unlistenAuthChanged: UnlistenFn | null = null;
+    let unlistenAuthError: UnlistenFn | null = null;
+
     const cancelTimeout = () => {
-      const current = get().signInTimeoutId;
-      if (current !== null) {
-        clearTimeout(current);
-        set((s) => {
-          s.signInTimeoutId = null;
-        });
+      if (signInTimeoutId !== null) {
+        clearTimeout(signInTimeoutId);
+        signInTimeoutId = null;
       }
     };
 
@@ -77,15 +71,24 @@ export const useAuthStore = create(
       error: null,
       justSignedIn: false,
       initialized: false,
-      signInTimeoutId: null,
 
       initialize: async () => {
-        if (get().initialized) return;
+        if (initializing || get().initialized) return;
+        initializing = true;
         set((s) => {
           s.initialized = true;
         });
 
-        await listen<AuthChangedPayload>("auth-changed", (event) => {
+        if (unlistenAuthChanged) {
+          unlistenAuthChanged();
+          unlistenAuthChanged = null;
+        }
+        if (unlistenAuthError) {
+          unlistenAuthError();
+          unlistenAuthError = null;
+        }
+
+        unlistenAuthChanged = await listen<AuthChangedPayload>("auth-changed", (event) => {
           cancelTimeout();
           const { user, error } = event.payload;
           if (user) {
@@ -102,7 +105,7 @@ export const useAuthStore = create(
           set((s) => applySignedOut(s, error));
         });
 
-        await listen<{ error: string }>("auth-error", (event) => {
+        unlistenAuthError = await listen<{ error: string }>("auth-error", (event) => {
           cancelTimeout();
           set((s) => {
             s.signingIn = false;
@@ -129,9 +132,9 @@ export const useAuthStore = create(
         if (get().signingIn) return;
         cancelTimeout();
 
-        const timeoutId = setTimeout(() => {
+        signInTimeoutId = setTimeout(() => {
+          signInTimeoutId = null;
           set((s) => {
-            s.signInTimeoutId = null;
             if (!s.signingIn) return;
             s.signingIn = false;
             s.error = "Sign-in timed out. Please try again.";
@@ -141,7 +144,6 @@ export const useAuthStore = create(
         set((s) => {
           s.signingIn = true;
           s.error = null;
-          s.signInTimeoutId = timeoutId;
         });
 
         try {

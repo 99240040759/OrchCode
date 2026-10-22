@@ -1,10 +1,14 @@
 import "../../lib/polyfills";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import "pdfjs-dist/build/pdf.worker.mjs";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ViewerError, ViewerLoading, ZoomControls, PageControls, useZoom } from "./ViewerChrome";
+
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
 
 export function PdfViewer({ path }: { path: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -100,6 +104,7 @@ export function PdfViewer({ path }: { path: string }) {
 
       const task = pdfPage.render({
         canvasContext: ctx,
+        canvas,
         viewport,
       });
       renderTaskRef.current = task;
@@ -118,13 +123,28 @@ export function PdfViewer({ path }: { path: string }) {
   }, [loading, error, numPages, page, zoomValue, renderPage]);
 
   const goToPrev = useCallback(() => setPage((p) => Math.max(1, p - 1)), []);
-  const goToNext = useCallback(() => setPage((p) => Math.min(numPages, p + 1)), [numPages]);
-  const goTo = useCallback((n: number) => setPage(Math.min(Math.max(1, n), numPages)), [numPages]);
+  const goToNext = useCallback(
+    () => setPage((p) => (numPages > 0 ? Math.min(numPages, p + 1) : 1)),
+    [numPages]
+  );
+  const goTo = useCallback(
+    (n: number) => setPage(numPages > 0 ? Math.min(Math.max(1, n), numPages) : 1),
+    [numPages]
+  );
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const tag = target.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target.isContentEditable ||
+        Boolean(target.closest?.("input, textarea, [contenteditable='true'], [contenteditable=''], .Composer-input"))
+      ) {
+        return;
+      }
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); goToPrev(); }
       if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); goToNext(); }
     };

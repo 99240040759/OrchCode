@@ -8,6 +8,9 @@ const NEAR_BOTTOM_PX = 120;
 export function MessageList() {
   const messages  = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
+  const hasMoreMessages = useChatStore((s) => s.hasMoreMessages);
+  const loadingEarlier = useChatStore((s) => s.loadingEarlierMessages);
+  const loadEarlier = useChatStore((s) => s.loadEarlierMessages);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef    = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
@@ -52,6 +55,26 @@ export function MessageList() {
         onScroll={handleScroll}
       >
         <div className="MessageList-inner">
+          {hasMoreMessages && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+              <button
+                type="button"
+                disabled={loadingEarlier}
+                onClick={() => void loadEarlier()}
+                style={{
+                  background: "transparent",
+                  border: "1px solid var(--border, rgba(255,255,255,0.12))",
+                  borderRadius: "6px",
+                  padding: "4px 12px",
+                  fontSize: "12px",
+                  color: "var(--foreground-muted, #888)",
+                  cursor: loadingEarlier ? "default" : "pointer",
+                }}
+              >
+                {loadingEarlier ? "Loading earlier messages..." : "Load earlier messages"}
+              </button>
+            </div>
+          )}
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}

@@ -221,7 +221,7 @@ impl Tool for NotionReadPage {
         )
         .await?;
 
-        let complete = content.len() <= NOTION_CONTENT_BUDGET;
+        let complete = content.chars().count() <= NOTION_CONTENT_BUDGET;
         let mut content = truncate_text(&content, NOTION_CONTENT_BUDGET, "");
         if !complete {
             content.push_str("\n\n[Content truncated — page is very large]");
@@ -380,12 +380,17 @@ fn render_block(block: &Value, indent: &str, out: &mut String) {
             out.push_str(&format!("{indent}[Table — see rows below]\n"));
         }
         "table_row" => {
+            let was_in_table = out.trim_end().ends_with('|');
             let cells = content["cells"].as_array().cloned().unwrap_or_default();
             let row: Vec<String> = cells
                 .iter()
                 .map(|cell| extract_rich_text(cell))
                 .collect();
             out.push_str(&format!("{indent}| {} |\n", row.join(" | ")));
+            if !was_in_table && !cells.is_empty() {
+                let sep: Vec<&str> = vec!["---"; cells.len()];
+                out.push_str(&format!("{indent}| {} |\n", sep.join(" | ")));
+            }
         }
         "image" => {
             let caption = extract_rich_text(&content["caption"]);

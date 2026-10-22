@@ -68,8 +68,16 @@ function isWorkspaceLink(href: string): boolean {
 }
 
 function workspacePathFromHref(href: string): string {
-  const withoutScheme = href.startsWith("file:") ? href.replace(/^file:\/*/, "") : href;
-  const withoutFragment = withoutScheme.replace(/#L\d+(?:-\d+)?$/, "");
+  let path = href;
+  if (path.startsWith("file://")) {
+    path = path.slice(7);
+    if (/^\/[a-zA-Z]:\//.test(path)) {
+      path = path.slice(1);
+    }
+  } else if (path.startsWith("file:")) {
+    path = path.slice(5);
+  }
+  const withoutFragment = path.replace(/#L\d+(?:-\d+)?$/, "");
   try {
     return decodeURIComponent(withoutFragment);
   } catch {
@@ -247,27 +255,6 @@ const MARKDOWN_COMPONENTS: Components = {
 
 const REMARK_PLUGINS = [remarkGfm];
 
-function splitMarkdownBlocks(text: string): string[] {
-  const blocks: string[] = [];
-  let current: string[] = [];
-  let fence: string | null = null;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trimStart();
-    const fenceMatch = /^(```+|~~~+)/.exec(trimmed);
-    if (fenceMatch) {
-      if (fence === null) fence = fenceMatch[1][0];
-      else if (trimmed.startsWith(fence)) fence = null;
-    }
-    current.push(line);
-    if (fence === null && line.trim() === "" && current.some((l) => l.trim() !== "")) {
-      blocks.push(current.join("\n"));
-      current = [];
-    }
-  }
-  if (current.length > 0) blocks.push(current.join("\n"));
-  return blocks;
-}
-
 const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
   return (
     <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
@@ -278,18 +265,9 @@ const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string
 
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
   if (!children || !children.trim()) return null;
-  if (children.length < 4000) {
-    return (
-      <div className="Markdown">
-        <MarkdownBlock text={children} />
-      </div>
-    );
-  }
   return (
     <div className="Markdown">
-      {splitMarkdownBlocks(children).map((block, index) => (
-        <MarkdownBlock key={index} text={block} />
-      ))}
+      <MarkdownBlock text={children} />
     </div>
   );
 });

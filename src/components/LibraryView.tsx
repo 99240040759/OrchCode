@@ -139,7 +139,7 @@ function SearchResultRow({ hit }: { hit: SearchHit }) {
   );
 }
 
-export function LibraryView() {
+export function LibraryView({ onOpenDocument }: { onOpenDocument?: () => void } = {}) {
   const openDocument = useArtifactsStore((s) => s.openDocument);
   const [view, setView] = useState<ViewMode>("browse");
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
@@ -159,8 +159,11 @@ export function LibraryView() {
   const handleOpen = useCallback((doc: DocumentRecord) => {
     if (!doc.filePath) return;
     const kind = documentArtifactKind(doc.fileType);
-    if (kind) openDocument(doc.filePath, kind, doc.title);
-  }, [openDocument]);
+    if (kind) {
+      openDocument(doc.filePath, kind, doc.title);
+      onOpenDocument?.();
+    }
+  }, [openDocument, onOpenDocument]);
 
   const loadDocuments = useCallback(async (requested: number) => {
     setLoading(true);
@@ -257,6 +260,8 @@ export function LibraryView() {
     try {
       await deleteDocument(id);
       setSearchHits((prev) => prev.filter((hit) => hit.documentId !== id));
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
     } catch (e) {
       setError(errorMessage(e));
     } finally {

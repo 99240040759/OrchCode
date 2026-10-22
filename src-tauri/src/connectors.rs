@@ -643,12 +643,11 @@ impl ConnectorManager {
                 "{connector_id} is not connected; connect it in Integrations"
             )));
         };
-        let has_refresh = load_connector_refresh_token(connector_id)?.is_some();
         if let Some(exp) = expires_at {
             if exp > threshold {
                 return Ok(tok);
             }
-        } else if !has_refresh {
+        } else {
             return Ok(tok);
         }
 
@@ -665,7 +664,7 @@ impl ConnectorManager {
                 if exp > threshold {
                     return Ok(tok);
                 }
-            } else if !has_refresh {
+            } else {
                 return Ok(tok);
             }
         }

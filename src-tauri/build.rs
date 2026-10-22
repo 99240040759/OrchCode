@@ -1,5 +1,5 @@
 const REQUIRED_HTTPS: &[&str] = &["GCP_FUNCTIONS_URL"];
-const REQUIRED_VARS: &[&str] = &["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN"];
+const REQUIRED_VARS: &[&str] = &["FIREBASE_API_KEY"];
 const OPTIONAL_VARS: &[&str] = &[
     "SENTRY_DSN",
     "GOOGLE_CLIENT_ID",
@@ -35,12 +35,18 @@ fn load_dotenv_for_compile() {
         let _ = dotenvy::dotenv();
     }
 
+    let is_release = std::env::var("PROFILE").map(|p| p == "release").unwrap_or(false);
+
     for key in REQUIRED_HTTPS {
-        let value = std::env::var(key).unwrap_or_default();
+        let mut value = std::env::var(key).unwrap_or_default();
         if value.is_empty() {
-            panic!("{key} is not set: define it in .env or the build environment before compiling");
-        }
-        if !value.starts_with("https://") {
+            if is_release {
+                panic!("{key} is not set: define it in .env or the build environment before compiling release");
+            } else {
+                println!("cargo:warning={key} not set; using development fallback URL");
+                value = "https://functions.orch.live".into();
+            }
+        } else if !value.starts_with("https://") {
             panic!("{key} must be an https:// URL, got: {value}");
         }
         println!("cargo:rustc-env={key}={value}");
@@ -48,9 +54,14 @@ fn load_dotenv_for_compile() {
     }
 
     for key in REQUIRED_VARS {
-        let value = std::env::var(key).unwrap_or_default();
+        let mut value = std::env::var(key).unwrap_or_default();
         if value.is_empty() {
-            panic!("{key} is not set: define it in .env or the build environment before compiling");
+            if is_release {
+                panic!("{key} is not set: define it in .env or the build environment before compiling release");
+            } else {
+                println!("cargo:warning={key} not set; using development fallback key");
+                value = "orch-dev-key".into();
+            }
         }
         println!("cargo:rustc-env={key}={value}");
         println!("cargo:rerun-if-env-changed={key}");

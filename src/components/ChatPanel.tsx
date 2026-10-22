@@ -17,7 +17,7 @@ function chatSizeFor(panelOpen: boolean, maximized: boolean): number {
   return maximized ? 0 : 60;
 }
 
-export function ChatPanel() {
+export function ChatPanel({ visible = true }: { visible?: boolean }) {
   const hasMessages  = useChatStore((s) => s.messages.length > 0);
   const error        = useChatStore((s) => s.error);
   const dismissError = useChatStore((s) => s.dismissError);
@@ -34,7 +34,7 @@ export function ChatPanel() {
   }, [panelOpen, maximized]);
 
   useEffect(() => {
-    if (!panelOpen) {
+    if (!panelOpen || !visible) {
       document.documentElement.style.removeProperty("--artifact-panel-w");
       return;
     }
@@ -54,7 +54,7 @@ export function ChatPanel() {
       ro.disconnect();
       document.documentElement.style.removeProperty("--artifact-panel-w");
     };
-  }, [panelOpen]);
+  }, [panelOpen, visible]);
 
   const onArtifactsCollapse = () => {
     if (useArtifactsStore.getState().panelOpen) useArtifactsStore.getState().setPanelOpen(false);

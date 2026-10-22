@@ -54,7 +54,7 @@ export function ExplorerIcon({ type, name, className, style, ...svgProps }: Expl
   if (ext === "docx" || ext === "doc") {
     return <BsFileEarmarkWordFill className={className} style={{ color: "#185abd", ...style }} {...svgProps} />;
   }
-  if (ext === "xlsx" || ext === "xls") {
+  if (ext === "xlsx" || ext === "xls" || ext === "ods") {
     return <BsFileEarmarkExcelFill className={className} style={{ color: "#107c41", ...style }} {...svgProps} />;
   }
   if (ext === "pptx" || ext === "ppt") {

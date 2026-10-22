@@ -44,7 +44,7 @@ impl AppError {
     pub fn is_fatal_auth(&self) -> bool {
         match self {
             AppError::NoToken => true,
-            AppError::Gateway { status, .. } => matches!(status, 400 | 401 | 403),
+            AppError::Gateway { status, .. } => matches!(status, 401 | 403),
             _ => false,
         }
     }
@@ -55,6 +55,12 @@ impl AppError {
             AppError::Gateway { status, .. } => *status == 429 || *status >= 500,
             _ => false,
         }
+    }
+}
+
+impl From<AppError> for tauri::ipc::InvokeError {
+    fn from(err: AppError) -> Self {
+        tauri::ipc::InvokeError::from(err.to_string())
     }
 }
 

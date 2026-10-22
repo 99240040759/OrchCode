@@ -39,6 +39,7 @@ pub fn webview_history(
         "back" => "history.back()",
         "forward" => "history.forward()",
         "reload" => "location.reload()",
+        "stop" => "window.stop()",
         _ => return Err(format!("unsupported browser history action: {action}")),
     };
 
