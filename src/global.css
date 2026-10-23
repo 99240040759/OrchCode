@@ -81,7 +81,13 @@
 /* ─── RESET & BASE ───────────────────────────────────────────────────────── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; -webkit-user-select:none; user-select:none; -webkit-user-drag:none; }
 
-* { overscroll-behavior:none; scrollbar-width:thin; }
+::-webkit-scrollbar { width:6px; height:6px; background:transparent; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-corner { background:transparent; }
+::-webkit-scrollbar-button { display:none; width:0; height:0; }
+::-webkit-scrollbar-thumb { background:rgba(255,255,255,.16); border-radius:var(--r-full); }
+::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,.28); }
+::-webkit-scrollbar-thumb:active { background:rgba(255,255,255,.36); }
 
 ::selection { background:rgba(255,255,255,.18); color:inherit; }
 
@@ -91,7 +97,7 @@ input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .
 img, a { -webkit-user-drag:none; }
 img { image-rendering:-webkit-optimize-contrast; }
 
-html, body { height:100%; overflow:hidden; touch-action:none; background:var(--md-bg); color:var(--md-on); font-family:var(--font); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:geometricPrecision; color-scheme:dark; cursor:default; }
+html, body { height:100%; overflow:hidden; overscroll-behavior:none; touch-action:none; background:var(--md-bg); color:var(--md-on); font-family:var(--font); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:geometricPrecision; color-scheme:dark; cursor:default; }
 #root { height:100%; }
 
 svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events:none; }
@@ -532,7 +538,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Markdown hr { display:none; }
 .Markdown blockquote { margin:0 0 10px; padding:2px 12px; border-left:3px solid var(--md-outline); color:var(--md-on-var); }
 .Markdown code:not(.CodeBlock code) { font-family:var(--font-mono); font-size:12.5px; padding:2px 5px; border-radius:var(--r-xs); background:rgba(255,255,255,.07); color:var(--md-on); }
-.Markdown-tableWrap { width:100%; overflow-x:auto; margin:12px 0; }
+.Markdown-tableWrap { width:100%; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; overscroll-behavior-y:auto; margin:12px 0; }
 .Markdown table { width:100%; border-collapse:collapse; border-spacing:0; font-size:13px; text-align:left; }
 .Markdown th, .Markdown td { padding:6px 12px; border:1px solid var(--md-outline); }
 .Markdown th { font-weight:600; color:var(--md-on); background:rgba(255,255,255,.04); }

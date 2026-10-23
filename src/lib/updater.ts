@@ -69,7 +69,7 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
           return;
         }
         const data = (await res.json()) as { version?: string };
-        const currentVersion = await getVersion().catch(() => "0.0.1");
+        const currentVersion = await getVersion();
         if (data.version && isNewer(data.version, currentVersion)) {
           set({ status: "readyToRestart", version: data.version, pendingUpdate: null });
         } else {

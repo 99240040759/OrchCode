@@ -518,8 +518,15 @@ impl CommandManager {
             #[cfg(target_os = "windows")]
             let mut cmd = {
                 let mut cmd = Command::new("powershell.exe");
-                cmd.args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
-                    .creation_flags(0x08000000);
+                cmd.args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    &cmd_str,
+                ]);
                 cmd
             };
 
@@ -542,7 +549,12 @@ impl CommandManager {
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
 
-            match cmd.group_spawn() {
+            #[cfg(target_os = "windows")]
+            let spawn_result = cmd.group().creation_flags(0x08000000).spawn();
+            #[cfg(not(target_os = "windows"))]
+            let spawn_result = cmd.group_spawn();
+
+            match spawn_result {
                 Ok(mut child) => {
                     let pid = child.id();
                     let killed_before_start = {

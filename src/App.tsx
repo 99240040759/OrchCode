@@ -104,7 +104,8 @@ function Root() {
   }, []);
 
   useEffect(() => {
-    void getCurrentWindow().show();
+    const win = getCurrentWindow();
+    void win.show().then(() => win.setFocus());
     void initializeAuth();
   }, [initializeAuth]);
 
