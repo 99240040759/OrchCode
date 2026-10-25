@@ -12,7 +12,6 @@ use crate::tools::ToolError;
 use crate::persistence::SqliteMemory;
 
 const GDRIVE_API: &str = "https://www.googleapis.com/drive/v3";
-const GDRIVE_EXPORT_API: &str = "https://www.googleapis.com/drive/v3/files";
 
 fn document_extension(mime: &str, name: &str) -> Option<&'static str> {
     let by_mime = match mime {
@@ -194,7 +193,7 @@ impl Tool for GoogleDriveReadFile {
         let link = meta["webViewLink"].as_str().unwrap_or("");
 
         let header = format!("File: {name}\nType: {mime}\nSize: {size} bytes\nModified: {modified}\nLink: {link}\n\n");
-        let file_url = format!("{GDRIVE_EXPORT_API}/{}", urlencoding::encode(&args.file_id));
+        let file_url = format!("{GDRIVE_API}/files/{}", urlencoding::encode(&args.file_id));
 
         let content = if mime.starts_with("application/vnd.google-apps") {
             let default_export = match mime.as_str() {

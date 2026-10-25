@@ -17,7 +17,6 @@ use crate::util::now_ms;
 pub enum AuthKind {
     None,
     OAuth2,
-    ApiKey,
 }
 
 impl AuthKind {
@@ -25,7 +24,6 @@ impl AuthKind {
         match self {
             AuthKind::None => "none",
             AuthKind::OAuth2 => "oauth2",
-            AuthKind::ApiKey => "apikey",
         }
     }
 }
@@ -247,7 +245,6 @@ pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_in: Option<i64>,
-    pub token_type: Option<String>,
     #[serde(default)]
     pub authed_user: Option<AuthedUser>,
     #[serde(default)]

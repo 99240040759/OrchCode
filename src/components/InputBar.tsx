@@ -3,11 +3,10 @@ import {
   VscAdd,
   VscArrowUp,
   VscDebugStop,
-  VscFile,
-  VscFileMedia,
   VscFolderOpened,
   VscMic,
 } from "react-icons/vsc";
+import { RiFileTextLine, RiImageLine } from "react-icons/ri";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useDebouncedCallback } from "use-debounce";
@@ -178,20 +177,35 @@ interface ContextBarProps {
   maxContext: number;
   contextTokens: number;
   fillPct: number;
+  cachedTokens?: number;
+  inputTokens?: number;
 }
 
-function ContextBar({ maxContext, contextTokens, fillPct }: ContextBarProps) {
-  const level = fillPct > 85 ? "danger" : fillPct > 60 ? "warn" : "normal";
+function ContextBar({ maxContext, contextTokens, fillPct, cachedTokens, inputTokens }: ContextBarProps) {
+  const compactAt = Math.min(api.AUTO_COMPACT_TOKENS, maxContext);
+  const level =
+    contextTokens >= compactAt || fillPct > 85
+      ? "danger"
+      : contextTokens >= compactAt * 0.8
+        ? "warn"
+        : "normal";
+  const markPct = Math.min(100, Math.round((compactAt / maxContext) * 100));
+  const cacheHit =
+    inputTokens && cachedTokens !== undefined && inputTokens > 0
+      ? Math.round((cachedTokens / inputTokens) * 100)
+      : null;
+  const used = api.formatTokens(contextTokens);
+  const total = api.formatWindow(maxContext);
+  const tooltip =
+    `Context: ${used} of ${total} tokens (${fillPct}%).` +
+    (cacheHit !== null ? ` Prompt cache: ${cacheHit}% of the last request's input.` : "");
   return (
-    <Tooltip
-      content={`Context Window: ${contextTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens (${fillPct}%)`}
-      side="top"
-    >
+    <Tooltip content={tooltip} side="top">
       <div className="ContextBar" data-level={level}>
         <div className="ContextBar-track">
           <div className="ContextBar-fill" style={{ width: `${fillPct}%` }} />
+          <div className="ContextBar-mark" style={{ left: `${markPct}%` }} />
         </div>
-        <span className="ContextBar-label">{fillPct}%</span>
       </div>
     </Tooltip>
   );
@@ -330,7 +344,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       const atMatch = /(^|\s)@([^\s]*)$/.exec(textBefore);
       if (atMatch) {
         const queryStr = atMatch[2];
-        const matchLength = queryStr.length + 1; // +1 for '@'
+        const matchLength = queryStr.length + 1;
         return {
           trigger: "@",
           query: queryStr,
@@ -342,7 +356,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       const slashMatch = /^\s*\/([^\s]*)$/.exec(textBefore);
       if (slashMatch) {
         const queryStr = slashMatch[1];
-        const matchLength = queryStr.length + 1; // +1 for '/'
+        const matchLength = queryStr.length + 1;
         return {
           trigger: "/",
           query: queryStr,
@@ -362,7 +376,6 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const activeIndex =
     hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
 
-  // References to keep event handlers fresh without re-binding Tiptap
   const popoverOpenRef = useRef(popoverOpen);
   popoverOpenRef.current = popoverOpen;
   const hitsRef = useRef(hits);
@@ -754,11 +767,11 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                     if (modelSupportsImages) void pickFiles(true);
                   }}
                 >
-                  <VscFileMedia />
+                  <RiImageLine />
                   <span>Image</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void pickFiles(false)}>
-                  <VscFile />
+                  <RiFileTextLine />
                   <span>File</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -779,6 +792,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                 maxContext={maxContext}
                 contextTokens={sessionTokens.contextTokens}
                 fillPct={fillPct}
+                cachedTokens={sessionTokens.cachedTokens}
+                inputTokens={sessionTokens.inputTokens}
               />
             )}
 
@@ -875,6 +890,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               maxContext={maxContext}
               contextTokens={sessionTokens.contextTokens}
               fillPct={fillPct}
+              cachedTokens={sessionTokens.cachedTokens}
+              inputTokens={sessionTokens.inputTokens}
             />
           </div>
         </div>

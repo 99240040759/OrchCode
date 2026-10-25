@@ -31,10 +31,6 @@ impl ModelInfo {
     pub fn supports_images(&self) -> bool {
         self.capabilities.iter().any(|c| c == "images")
     }
-
-    pub fn target_model_id(&self) -> &str {
-        &self.id
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -189,6 +185,32 @@ impl Gateway {
 
         let body: TitleResp = resp.json().await?;
         Ok(body.title)
+    }
+
+    pub async fn summarize(&self, system: &str, prompt: &str, max_tokens: u64) -> AppResult<String> {
+        let token = self.require_token()?;
+        let resp = self
+            .http
+            .post(config::summarize_url())
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(config::SUMMARY_REQUEST_TIMEOUT_SECS))
+            .json(&json!({
+                "system": system,
+                "prompt": prompt,
+                "maxTokens": max_tokens,
+            }))
+            .send()
+            .await?;
+        let resp = check_status(resp).await?;
+
+        #[derive(Deserialize)]
+        struct SummaryResp {
+            #[serde(default)]
+            text: String,
+        }
+
+        let body: SummaryResp = resp.json().await?;
+        Ok(body.text)
     }
 }
 

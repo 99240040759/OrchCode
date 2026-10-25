@@ -29,7 +29,6 @@ export default defineConfig(({ mode }) => {
               return undefined;
             }
 
-            // Extract the canonical package name even in pnpm or nested structures
             const nmIndex = normalized.lastIndexOf("/node_modules/");
             const pathAfter = normalized.slice(nmIndex + "/node_modules/".length);
             const segments = pathAfter.split("/");
@@ -52,7 +51,6 @@ export default defineConfig(({ mode }) => {
             if (pkgName === "prismjs") {
               return "vendor-prism";
             }
-            // Keep monaco-editor and @monaco-editor/react together to prevent circular dependency cycles
             if (pkgName === "monaco-editor" || pkgName === "@monaco-editor/react") {
               if (normalized.includes("worker")) return undefined;
               return "vendor-monaco";

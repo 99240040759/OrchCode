@@ -129,11 +129,7 @@ pub fn is_supported_document_extension(ext: &str) -> bool {
 }
 
 fn detect_file_type(path: &Path) -> AppResult<String> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_default();
+    let ext = crate::util::lowercase_extension(path);
 
     if is_supported_document_extension(&ext) {
         let canonical = match ext.as_str() {
@@ -652,13 +648,7 @@ pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
 }
 
 pub fn is_parseable_document(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .as_deref(),
-        Some("pdf" | "docx" | "xlsx" | "xls" | "ods" | "pptx")
-    )
+    is_supported_document_extension(&crate::util::lowercase_extension(path))
 }
 
 pub fn parse_document_bytes(bytes: &[u8], extension: &str) -> AppResult<ParsedDocumentDto> {

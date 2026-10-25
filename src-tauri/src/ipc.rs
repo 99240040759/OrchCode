@@ -6,23 +6,19 @@ use tauri::ipc::Channel;
 use tauri::{Emitter, State};
 
 use crate::auth::{self, UserDisplay};
+use crate::config;
 use crate::dictation;
 use crate::error::AppError;
 use crate::events::{ChatEvent, DictationEvent, TerminalEvent};
 use crate::gateway::{Budget, ModelInfo};
 use crate::llm::{
-    build_agent, build_user_message, maybe_compact, run_chat, AgentInputs, AttachmentRef,
-    RunOutcome, RunRequest,
+    build_agent, build_user_message, run_chat, AgentInputs, AttachmentRef, ChatRun, RunOutcome,
+    RunParams,
 };
-use crate::persistence::MessageView;
-use crate::run_persistence::BeginRun;
+use crate::session;
 use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
-
-use rig::id::ConversationId;
-use rig::memory::ConversationMemory;
-use rig::message::Message;
 
 fn is_safe_path_segment(s: &str) -> bool {
     !s.is_empty()
@@ -218,6 +214,11 @@ pub async fn forget_workspace(
             .await
             .map_err(|e| e.to_string())?;
         state.wait_for_runs(&session_ids, Duration::from_secs(5)).await;
+        for id in &session_ids {
+            if let Err(error) = session::destroy(&state.data_dir, id).await {
+                eprintln!("[sessions] could not delete the conversation of {id}: {error}");
+            }
+        }
         state
             .memory
             .delete_sessions_for_workspace(&canonical)
@@ -311,6 +312,9 @@ pub async fn start_chat(
     if session_id.trim().is_empty() {
         return Err("session id must not be empty".to_string());
     }
+    if !session::is_safe_session_id(&session_id) {
+        return Err("invalid session id".to_string());
+    }
     if model.trim().is_empty() {
         return Err("Select a model before sending a message".to_string());
     }
@@ -363,25 +367,13 @@ pub async fn start_chat(
         });
     }
 
-    let raw_prompt = durable_prompt_text(&prompt, &attachments);
-    match state
+    if let Err(error) = state
         .memory
-        .begin_chat_run(BeginRun {
-            run_id: &run_id,
-            conversation_id: &session_id,
-            model: &model,
-            raw_prompt: &raw_prompt,
-            initial_user_message: Some(&built.message),
-            workspace_path: &workspace_string,
-            user_id: &user_id,
-        })
+        .touch_session(&session_id, &workspace_string, &user_id)
         .await
     {
-        Ok(_) => {}
-        Err(error) => {
-            state.finish_run(&session_id, &run_id);
-            return Err(format!("failed to save the chat request: {error}"));
-        }
+        state.finish_run(&session_id, &run_id);
+        return Err(format!("failed to save the chat request: {error}"));
     }
     let _ = app.emit("sessions-updated", ());
 
@@ -389,255 +381,74 @@ pub async fn start_chat(
         spawn_title_generation(&app, &state, &session_id, &prompt);
     }
 
-    let context_tokens = state.memory.session_context_tokens(&session_id).await.unwrap_or(0);
-    match maybe_compact(&state.memory, &client, &model_info, &session_id, context_tokens, &cancel).await {
-        Ok(Some(outcome)) => {
-            let _ = on_event.send(ChatEvent::Compacted {
-                original_message_count: outcome.original_message_count,
-                ts: outcome.ts,
-                after_message_id: Some(outcome.after_message_id),
-                compaction_message_id: Some(outcome.compaction_message_id),
-                compaction_item_id: Some(outcome.compaction_item_id),
-            });
-            let _ = on_event.send(ChatEvent::Usage {
-                context_tokens: outcome.new_context_tokens,
-            });
-            let _ = app.emit("sessions-updated", ());
-        }
-        Ok(None) => {}
-        Err(error) => eprintln!("[chat] pre-run compaction failed: {error}"),
-    }
-
-    let mut current_run_id = run_id;
-    let mut current_user_message = built.message;
-    let mut compactions_count: usize = 0;
-    const MAX_INFLIGHT_COMPACTIONS: usize = 10;
-
-    let final_outcome = loop {
-        let tool_context = ToolContext {
-            workspace: Some(workspace.clone()),
-            run_id: current_run_id.clone(),
-            gateway: state.gateway.clone(),
-            app_handle: app.clone(),
-            command_manager: (*state.command_manager).clone(),
-            data_dir: state.data_dir.clone(),
-            memory: state.memory.clone(),
-            connector_manager: state.connector_manager.clone(),
-        };
-        let enabled_connectors = state.connector_manager.enabled_ids();
-        let tool_errors = crate::llm::ToolErrorTracker::new();
-        let agent = build_agent(
-            AgentInputs {
-                client: &client,
-                model: &model_info,
-                tools: &tool_context,
-                data_dir: &state.data_dir,
-                workspace: Some(workspace.as_path()),
-                enabled_connectors: &enabled_connectors,
-            },
-            state.memory.scoped_to_run(&current_run_id),
-            tool_errors.clone(),
-        );
-        let base_seq = state.memory.max_seq(&session_id).await.unwrap_or(-1);
-
-        let result = run_chat(
-            agent,
-            RunRequest {
-                run_id: current_run_id.clone(),
-                session_id: session_id.clone(),
-                user_message: current_user_message,
-                context_window: model_info.context_window,
-            },
-            cancel.clone(),
-            on_event.clone(),
-            state.memory.clone(),
-            tool_errors,
-        )
-        .await;
-        state.command_manager.kill_foreground_for_run(&current_run_id);
-
-        let reasoning_durations = result.reasoning_durations;
-
-        match result.outcome {
-            RunOutcome::NeedsCompaction => {
-                let _commit_kind = match state
-                    .memory
-                    .finalize_chat_run(&current_run_id, "compacted", None)
-                    .await
-                {
-                    Ok(kind) => kind,
-                    Err(error) => {
-                        break RunOutcome::Failed(format!("failed to commit partial chat run: {error}"));
-                    }
-                };
-
-                if !reasoning_durations.is_empty() {
-                    if let Err(error) = state
-                        .memory
-                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
-                        .await
-                    {
-                        eprintln!("[chat] failed to persist reasoning durations: {error}");
-                    }
-                }
-
-                if cancel.is_cancelled() {
-                    break RunOutcome::Cancelled;
-                }
-
-                if compactions_count >= MAX_INFLIGHT_COMPACTIONS {
-                    break RunOutcome::Failed("maximum in-flight compaction limit reached".to_string());
-                }
-                compactions_count += 1;
-
-                let compact_result = maybe_compact(
-                    &state.memory,
-                    &client,
-                    &model_info,
-                    &session_id,
-                    result.last_turn_input_tokens,
-                    &cancel,
-                )
-                .await;
-
-                match compact_result {
-                    Ok(Some(outcome)) => {
-                        let _ = on_event.send(ChatEvent::Compacted {
-                            original_message_count: outcome.original_message_count,
-                            ts: outcome.ts,
-                            after_message_id: Some(outcome.after_message_id),
-                            compaction_message_id: Some(outcome.compaction_message_id),
-                            compaction_item_id: Some(outcome.compaction_item_id),
-                        });
-                        let _ = on_event.send(ChatEvent::Usage {
-                            context_tokens: outcome.new_context_tokens,
-                        });
-                        let _ = app.emit("sessions-updated", ());
-                    }
-                    Ok(None) => {
-                        if cancel.is_cancelled() {
-                            break RunOutcome::Cancelled;
-                        }
-                        break RunOutcome::Completed;
-                    }
-                    Err(error) => {
-                        eprintln!("[chat] in-flight compaction failed: {error}");
-                        break RunOutcome::Failed(format!("in-flight compaction failed: {error}"));
-                    }
-                }
-
-                if cancel.is_cancelled() {
-                    break RunOutcome::Cancelled;
-                }
-
-                let next_run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
-                state.update_run_id(&session_id, &next_run_id);
-                current_run_id = next_run_id;
-
-                current_user_message = Message::user("Continue with the previous task.");
-
-                if let Err(error) = state
-                    .memory
-                    .begin_chat_run(BeginRun {
-                        run_id: &current_run_id,
-                        conversation_id: &session_id,
-                        model: &model,
-                        raw_prompt: "",
-                        initial_user_message: None,
-                        workspace_path: &workspace_string,
-                        user_id: &user_id,
-                    })
-                    .await
-                {
-                    break RunOutcome::Failed(format!("failed to begin continuation run: {error}"));
-                }
-                let _ = app.emit("sessions-updated", ());
-            }
-            RunOutcome::Completed => {
-                let _ = state
-                    .memory
-                    .finalize_chat_run(&current_run_id, "completed", None)
-                    .await;
-                if !reasoning_durations.is_empty() {
-                    if let Err(error) = state
-                        .memory
-                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
-                        .await
-                    {
-                        eprintln!("[chat] failed to persist reasoning durations: {error}");
-                    }
-                }
-                break RunOutcome::Completed;
-            }
-            RunOutcome::Cancelled => {
-                let _ = state
-                    .memory
-                    .finalize_chat_run(&current_run_id, "cancelled", Some("cancelled by the user"))
-                    .await;
-                if !reasoning_durations.is_empty() {
-                    if let Err(error) = state
-                        .memory
-                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
-                        .await
-                    {
-                        eprintln!("[chat] failed to persist reasoning durations: {error}");
-                    }
-                }
-                break RunOutcome::Cancelled;
-            }
-            RunOutcome::Failed(message) => {
-                let _ = state
-                    .memory
-                    .finalize_chat_run(&current_run_id, "error", Some(message.as_str()))
-                    .await;
-                if !reasoning_durations.is_empty() {
-                    if let Err(error) = state
-                        .memory
-                        .assign_reasoning_durations(&session_id, base_seq, reasoning_durations)
-                        .await
-                    {
-                        eprintln!("[chat] failed to persist reasoning durations: {error}");
-                    }
-                }
-                break RunOutcome::Failed(message);
-            }
+    let chat = match ChatRun::begin(RunParams {
+        data_dir: &state.data_dir,
+        session_id: &session_id,
+        gateway: state.gateway.clone(),
+        memory: state.memory.clone(),
+        channel: on_event.clone(),
+        model: &model_info,
+        cancel: cancel.clone(),
+    })
+    .await
+    {
+        Ok(chat) => chat,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            return Err(format!("failed to open the conversation: {error}"));
         }
     };
 
-    state.finish_run(&session_id, &current_run_id);
+    let tool_context = ToolContext {
+        workspace: Some(workspace.clone()),
+        run_id: run_id.clone(),
+        gateway: state.gateway.clone(),
+        app_handle: app.clone(),
+        command_manager: (*state.command_manager).clone(),
+        data_dir: state.data_dir.clone(),
+        memory: state.memory.clone(),
+        connector_manager: state.connector_manager.clone(),
+    };
+    let enabled_connectors = state.connector_manager.enabled_ids();
+    let agent = build_agent(AgentInputs {
+        client: &client,
+        model: &model_info,
+        tools: &tool_context,
+        data_dir: &state.data_dir,
+        workspace: Some(workspace.as_path()),
+        enabled_connectors: &enabled_connectors,
+    });
+
+    let result = run_chat(
+        agent,
+        &chat,
+        built.message.clone(),
+        cancel.clone(),
+        on_event.clone(),
+    )
+    .await;
+    state.command_manager.kill_foreground_for_run(&run_id);
+
+    if let Err(error) = chat.finish(&built.message, &result).await {
+        eprintln!("[chat] failed to save the conversation: {error}");
+    }
+    if result.overflowed {
+        let _ = state
+            .memory
+            .set_context_tokens(&session_id, config::COMPACTION_TRIGGER_TOKENS)
+            .await;
+    }
+
+    state.finish_run(&session_id, &run_id);
     let _ = app.emit("sessions-updated", ());
-    let event = match final_outcome {
-        RunOutcome::Completed | RunOutcome::NeedsCompaction => ChatEvent::Done,
+    let event = match result.outcome {
+        RunOutcome::Completed => ChatEvent::Done,
         RunOutcome::Cancelled => ChatEvent::Cancelled,
         RunOutcome::Failed(message) => ChatEvent::Error { message },
     };
     let _ = on_event.send(event);
     Ok(())
 }
-
-fn durable_prompt_text(prompt: &str, attachments: &[AttachmentRef]) -> String {
-    let mut text = prompt.trim().to_string();
-    if !attachments.is_empty() {
-        if !text.is_empty() {
-            text.push_str("\n\n");
-        }
-        text.push_str("[Attachments submitted: ");
-        text.push_str(
-            &attachments
-                .iter()
-                .map(|attachment| attachment.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-        text.push(']');
-    }
-    if text.is_empty() {
-        "[Attachment-only user request]".to_string()
-    } else {
-        text
-    }
-}
-
 
 fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: &str, prompt: &str) {
     let gateway = state.gateway.clone();
@@ -679,29 +490,16 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
     state
         .wait_for_runs(std::slice::from_ref(&session_id), Duration::from_secs(10))
         .await;
+    session::destroy(&state.data_dir, &session_id)
+        .await
+        .map_err(|e| e.to_string())?;
     state
         .memory
-        .clear(&ConversationId::from(session_id.as_str()))
+        .delete_session(&session_id)
         .await
         .map_err(|e| e.to_string())?;
     let _ = app.emit("sessions-updated", ());
     Ok(())
-}
-
-#[tauri::command]
-pub async fn get_session_view(state: State<'_, AppState>, session_id: String) -> Result<Vec<MessageView>, String> {
-    if let Some(user_id) = state.current_user_id() {
-        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-            if owner != user_id {
-                return Err("session does not belong to the current user".to_string());
-            }
-        }
-    }
-    state
-        .memory
-        .get_session_view(&session_id)
-        .await
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -718,11 +516,20 @@ pub async fn get_session_messages_page(
             }
         }
     }
-    state
+    let durations = state
         .memory
-        .get_session_view_paginated(&session_id, limit.unwrap_or(50).clamp(1, 200), before_seq)
+        .reasoning_durations(&session_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    session::view_page(
+        &state.data_dir,
+        &session_id,
+        durations,
+        limit.unwrap_or(50).clamp(1, 200),
+        before_seq,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn prefs_key(state: &AppState, key: &str, scoped: bool) -> String {

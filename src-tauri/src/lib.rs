@@ -15,7 +15,7 @@ pub mod llm;
 pub mod media;
 pub mod persistence;
 pub mod platform;
-pub mod run_persistence;
+pub mod session;
 pub mod skills;
 pub mod state;
 pub mod terminal;
@@ -240,7 +240,6 @@ pub fn run() {
             ipc::forget_workspace,
             ipc::list_models,
             ipc::get_budget,
-            ipc::get_session_view,
             ipc::get_session_messages_page,
             ipc::clear_session,
             ipc::get_user_pref,

@@ -6,7 +6,7 @@ export function cn(...inputs: ClassValue[]): string {
   return clsx(inputs);
 }
 
-export function normalizePath(pathStr: string): string {
+function normalizePath(pathStr: string): string {
   if (!pathStr) return "";
   return normalize(pathStr);
 }
@@ -57,6 +57,29 @@ const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
 
 export function createMentionRegex(): RegExp {
   return new RegExp(MENTION_PATTERN, "g");
+}
+
+export const AUTO_COMPACT_TOKENS = 100_000;
+
+function trimTrailingZero(value: string): string {
+  return value.endsWith(".0") ? value.slice(0, -2) : value;
+}
+
+export function formatTokens(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (tokens < 1_000) return String(Math.round(tokens));
+  if (tokens < 1_000_000) {
+    const thousands = tokens / 1_000;
+    return thousands < 100
+      ? `${trimTrailingZero(thousands.toFixed(1))}k`
+      : `${Math.round(thousands)}k`;
+  }
+  return `${trimTrailingZero((tokens / 1_000_000).toFixed(1))}M`;
+}
+
+export function formatWindow(tokens: number): string {
+  if (tokens >= 100_000) return formatTokens(Math.round(tokens / 10_000) * 10_000);
+  return formatTokens(tokens);
 }
 
 const USD_FORMAT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });

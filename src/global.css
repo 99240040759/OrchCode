@@ -336,7 +336,10 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Reasoning-label { font-size:13px; line-height:22px; }
 .Reasoning-chevron { width:13px; height:13px; transition:transform var(--dur) var(--ease); opacity:.7; }
 .Reasoning-toggle[data-open='true'] .Reasoning-chevron { transform:rotate(90deg); }
-.Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
+.Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); opacity:.68; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
+.Reasoning-body > :first-child { margin-top:0; }
+.Reasoning-body > :last-child { margin-bottom:0; }
+.Reasoning-body p { margin:0 0 6px; }
 
 /* ─── TOOL ROWS ──────────────────────────────────────────────────────────── */
 .ToolList { display:flex; flex-direction:column; gap:4px; }
@@ -437,7 +440,8 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 
 .ContextBar { display:inline-flex; align-items:center; gap:6px; padding:0 4px; height:20px; user-select:none; cursor:pointer; }
 .ContextBar:hover .ContextBar-label { color:var(--md-on); }
-.ContextBar-track { width:60px; height:4px; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; flex-shrink:0; }
+.ContextBar-track { position:relative; width:60px; height:4px; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; flex-shrink:0; }
+.ContextBar-mark { position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.55); }
 .ContextBar-fill { height:100%; border-radius:2px; background:var(--md-on-var); transition:width .2s ease; }
 .ContextBar[data-level='warn'] .ContextBar-fill { background:var(--md-warn); }
 .ContextBar[data-level='danger'] .ContextBar-fill { background:var(--md-error); }

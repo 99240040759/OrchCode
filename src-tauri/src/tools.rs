@@ -787,11 +787,7 @@ ALWAYS call this before editing any file."
             )));
         }
 
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-            .unwrap_or_default();
+        let ext = crate::util::lowercase_extension(&path);
 
         if crate::media::is_raster_extension(&ext) {
             let bytes = tokio::fs::read(&path)

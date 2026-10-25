@@ -33,6 +33,10 @@ pub fn title_url() -> String {
     format!("{}/title", clean_base_url())
 }
 
+pub fn summarize_url() -> String {
+    format!("{}/summarize", clean_base_url())
+}
+
 pub fn budget_url() -> String {
     format!("{}/budget", clean_base_url())
 }
@@ -63,10 +67,15 @@ pub const MAX_SEARCH_LINE_CHARS: usize = 300;
 pub const MAX_SEARCH_OUTPUT_CHARS: usize = 40_000;
 pub const MAX_VIEW_TOOL_OUTPUT_CHARS: usize = 16_000;
 
-pub const PREAMBLE_TOKEN_RESERVE: usize = 6_000;
+pub const PREAMBLE_TOKEN_RESERVE: u64 = 9_000;
 
-pub const COMPACTION_THRESHOLD_RATIO: f64 = 0.80;
-pub const RECENT_CONTEXT_TOKEN_BUDGET: u64 = 25_000;
+pub const COMPACTION_TRIGGER_TOKENS: u64 = 100_000;
+
+pub const COMPACTION_KEEP_RECENT_TOKENS: usize = 24_000;
+
+pub const COMPACTION_SUMMARY_TOKENS: u64 = 10_000;
+
+pub const COMPACTION_SNIPPET_CHARS: usize = 3_000;
 
 pub const MODEL_CATALOG_REFRESH_INTERVAL_SECS: u64 = 300;
 pub const TOKEN_REFRESH_CHECK_INTERVAL_SECS: u64 = 60;
@@ -76,8 +85,7 @@ pub const AUTH_REQUEST_TIMEOUT_SECS: u64 = 15;
 
 pub const STREAM_CHUNK_TIMEOUT_SECS: u64 = 360;
 pub const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 1_800;
-pub const CHECKPOINT_FLUSH_MS: u64 = 2_000;
-pub const CHECKPOINT_FLUSH_BYTES: usize = 32 * 1024;
+pub const SUMMARY_REQUEST_TIMEOUT_SECS: u64 = 180;
 
 pub const FILE_INDEX_TTL_SECS: u64 = 10;
 pub const MAX_INDEXED_FILES: usize = 200_000;

@@ -1,8 +1,3 @@
-/**
- * Environment polyfills targeting ES2024+ and TC39 Stage 3 standards.
- * Required by pdfjs-dist v6+ and modern web standards on WebKit/JavaScriptCore.
- */
-
 declare global {
   interface Map<K, V> {
     getOrInsertComputed(key: K, callbackfn: (key: K) => V): V;
@@ -17,7 +12,6 @@ declare global {
   }
 }
 
-// TC39 Stage 3 proposal: Map.prototype.getOrInsertComputed (used by pdfjs-dist v6+)
 if (typeof (Map.prototype as any).getOrInsertComputed !== "function") {
   Object.defineProperty(Map.prototype, "getOrInsertComputed", {
     value: function <K, V>(this: Map<K, V>, key: K, callbackfn: (key: K) => V): V {
@@ -36,7 +30,6 @@ if (typeof (Map.prototype as any).getOrInsertComputed !== "function") {
   });
 }
 
-// TC39 Stage 3 proposal: Map.prototype.getOrInsert
 if (typeof (Map.prototype as any).getOrInsert !== "function") {
   Object.defineProperty(Map.prototype, "getOrInsert", {
     value: function <K, V>(this: Map<K, V>, key: K, defaultValue: V): V {
@@ -51,7 +44,6 @@ if (typeof (Map.prototype as any).getOrInsert !== "function") {
   });
 }
 
-// ECMAScript 2024: Promise.withResolvers
 if (typeof Promise.withResolvers !== "function") {
   Object.defineProperty(Promise, "withResolvers", {
     value: function <T>() {
@@ -68,7 +60,6 @@ if (typeof Promise.withResolvers !== "function") {
   });
 }
 
-// ECMAScript 2024: Object.groupBy
 if (typeof (Object as any).groupBy !== "function") {
   Object.defineProperty(Object, "groupBy", {
     value: function <K extends PropertyKey, T>(
@@ -92,7 +83,6 @@ if (typeof (Object as any).groupBy !== "function") {
   });
 }
 
-// ECMAScript 2024: Map.groupBy
 if (typeof (Map as any).groupBy !== "function") {
   Object.defineProperty(Map, "groupBy", {
     value: function <K, T>(

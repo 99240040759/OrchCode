@@ -13,6 +13,9 @@ export {
   looksLikePath,
   createMentionRegex,
   formatUsd,
+  formatTokens,
+  formatWindow,
+  AUTO_COMPACT_TOKENS,
   useCopy,
 } from "./utils";
 
@@ -123,7 +126,12 @@ export type ChatStreamEvent =
   | { type: "reasoningDone"; durationSeconds: number }
   | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
   | { type: "toolResult"; id: string; output: string; isError: boolean }
-  | { type: "usage"; contextTokens: number }
+  | {
+      type: "usage";
+      contextTokens: number;
+      inputTokens?: number;
+      cachedTokens?: number;
+    }
   | {
       type: "compacted";
       originalMessageCount: number;
@@ -179,10 +187,6 @@ export function listModels(forceRefresh?: boolean): Promise<ModelDto[]> {
 
 export function getBudget(): Promise<Budget> {
   return invoke("get_budget");
-}
-
-export function getSessionView(sessionId: string): Promise<MessageView[]> {
-  return invoke("get_session_view", { sessionId });
 }
 
 export interface SessionViewPage {

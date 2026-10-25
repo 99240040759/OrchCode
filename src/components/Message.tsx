@@ -101,7 +101,7 @@ function ToolRow({ tool }: { tool: ToolCallItem }) {
   const [open, setOpen] = useState(false);
   const output = tool.output?.trim() ?? "";
   const hasOutput = output.length > 0;
-  const showToggle = hasOutput;
+  const showToggle = hasOutput && tool.name === "run_command";
 
   return (
     <div className="ToolRow" data-status={tool.status}>
@@ -182,7 +182,7 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
       </button>
       {isOpen && (
         <div className="Reasoning-body" ref={bodyRef}>
-          {item.text}
+          <Markdown>{item.text.replace(/\n{3,}/g, "\n\n")}</Markdown>
         </div>
       )}
     </div>

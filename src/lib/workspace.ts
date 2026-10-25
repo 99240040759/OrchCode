@@ -13,20 +13,6 @@ import {
   forgetWorkspace,
 } from "./api";
 
-type WorkspaceActivatedFn = () => void;
-
-export function registerWorkspaceActivatedCallback(fn: WorkspaceActivatedFn): () => void {
-  return useWorkspaceStore.subscribe((state, prev) => {
-    if (state.current?.id !== prev.current?.id) {
-      try {
-        fn();
-      } catch (e) {
-        console.error("workspace activated callback failed:", e);
-      }
-    }
-  });
-}
-
 export interface WorkspaceMeta {
   id: string;
   name: string;

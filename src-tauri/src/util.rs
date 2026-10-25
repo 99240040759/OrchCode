@@ -58,6 +58,13 @@ pub fn basename(path: &str) -> String {
         .to_string()
 }
 
+pub fn lowercase_extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default()
+}
+
 pub fn display_relative(root: &Path, path: &Path) -> String {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     match path.strip_prefix(&canonical_root) {

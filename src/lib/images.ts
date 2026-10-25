@@ -14,7 +14,6 @@ class LruImageCache {
   get(key: string): string | undefined {
     const val = this.map.get(key);
     if (val !== undefined) {
-      // Refresh recency by re-inserting
       this.map.delete(key);
       this.map.set(key, val);
     }
@@ -31,10 +30,6 @@ class LruImageCache {
       }
     }
     this.map.set(key, value);
-  }
-
-  has(key: string): boolean {
-    return this.map.has(key);
   }
 
   clear(): void {

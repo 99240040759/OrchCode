@@ -206,11 +206,7 @@ pub async fn read_document_metadata(
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("metadata error: {e}"))?;
-    let extension = resolved
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(str::to_lowercase)
-        .unwrap_or_default();
+    let extension = crate::util::lowercase_extension(&resolved);
     let name = resolved
         .file_name()
         .and_then(|s| s.to_str())

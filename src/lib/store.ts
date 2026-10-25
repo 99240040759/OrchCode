@@ -58,6 +58,8 @@ export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNo
 
 export interface TokenUsage {
   contextTokens: number;
+  inputTokens?: number;
+  cachedTokens?: number;
 }
 
 export interface ChatMessage {
@@ -546,7 +548,11 @@ export const useChatStore = create(
           case "usage":
             set((s) => {
               if (s.currentSessionId === sessionId)
-                s.sessionTokens = { contextTokens: event.contextTokens };
+                s.sessionTokens = {
+                  contextTokens: event.contextTokens,
+                  inputTokens: event.inputTokens,
+                  cachedTokens: event.cachedTokens,
+                };
             });
             break;
           case "notice":
@@ -582,16 +588,12 @@ export const useChatStore = create(
               }
 
               if (insertIdx === -1) {
-                const userIdx = s.messages.findIndex((m) => m.id === userMsgId);
-                if (userIdx >= 0) {
-                  insertIdx = userIdx;
+                const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
+                if (streamingIdx >= 0) {
+                  insertIdx = streamingIdx;
                 } else {
-                  const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
-                  if (streamingIdx >= 0) {
-                    insertIdx = streamingIdx;
-                  } else {
-                    insertIdx = 0;
-                  }
+                  const userIdx = s.messages.findIndex((m) => m.id === userMsgId);
+                  insertIdx = userIdx >= 0 ? userIdx : 0;
                 }
               }
 
