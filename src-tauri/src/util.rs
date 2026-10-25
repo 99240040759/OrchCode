@@ -22,12 +22,14 @@ pub fn stable_hash_hex(input: &str) -> String {
     )
 }
 
+pub const USER_AGENT: &str = concat!("Orch/", env!("CARGO_PKG_VERSION"));
+
 pub fn http_client() -> reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
-                .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
+                .user_agent(USER_AGENT)
                 .connect_timeout(Duration::from_secs(15))
                 .timeout(Duration::from_secs(120))
                 .build()
@@ -41,7 +43,7 @@ pub fn streaming_http_client() -> reqwest::Client {
     CLIENT
         .get_or_init(|| {
             reqwest::Client::builder()
-                .user_agent(concat!("Orch/", env!("CARGO_PKG_VERSION")))
+                .user_agent(USER_AGENT)
                 .connect_timeout(Duration::from_secs(15))
                 .tcp_nodelay(true)
                 .build()

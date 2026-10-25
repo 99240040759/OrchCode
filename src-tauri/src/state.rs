@@ -129,14 +129,6 @@ impl AppState {
     }
 
     pub async fn complete_sign_in(&self, id_token: String, profile: &auth::UserProfile) {
-        let previous = self
-            .current_user_id()
-            .or_else(|| auth::load_cached_user(&self.data_dir).map(|p| p.id));
-        if previous.as_deref().is_some_and(|id| id != profile.id) {
-            if let Err(error) = self.memory.clear_all_documents().await {
-                eprintln!("[auth] clearing previous account documents failed: {error}");
-            }
-        }
         self.set_token(Some(id_token));
         self.set_authenticated_user(&profile.id);
         auth::save_cached_user(&self.data_dir, profile);
@@ -379,12 +371,12 @@ impl AppState {
         }
     }
 
-    pub fn cancel_runs_in_workspace(&self, workspace: &Path) -> Vec<String> {
+    pub fn cancel_runs_matching(&self, predicate: impl Fn(&RunHandle) -> bool) -> Vec<String> {
         let targets: Vec<String> = {
             let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
             guard
                 .iter()
-                .filter(|(_, run)| run.workspace.as_deref().is_some_and(|ws| ws.starts_with(workspace)))
+                .filter(|(_, run)| predicate(run))
                 .map(|(session, _)| session.clone())
                 .collect()
         };
@@ -394,14 +386,12 @@ impl AppState {
         targets
     }
 
+    pub fn cancel_runs_in_workspace(&self, workspace: &Path) -> Vec<String> {
+        self.cancel_runs_matching(|run| run.workspace.as_deref().is_some_and(|ws| ws.starts_with(workspace)))
+    }
+
     pub fn cancel_all_runs(&self) {
-        let sessions: Vec<String> = {
-            let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-            guard.keys().cloned().collect()
-        };
-        for session in sessions {
-            self.cancel_run(&session);
-        }
+        self.cancel_runs_matching(|_| true);
     }
 
     pub async fn wait_for_runs(&self, sessions: &[String], timeout: Duration) {

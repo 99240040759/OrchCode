@@ -2,129 +2,11 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use uuid::Uuid;
 use zip::ZipArchive;
 
-use text_splitter::{ChunkConfig, TextSplitter};
-
 use crate::error::{AppError, AppResult};
-use crate::persistence::{DocumentRecord, PassageRecord, SqliteMemory};
-use crate::util::now_ms;
 
-const PASSAGE_CHARS: usize = 2048;
-const PASSAGE_OVERLAP: usize = 200;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IngestResult {
-    pub document_id: String,
-    pub title: String,
-    pub file_type: String,
-    pub passage_count: usize,
-    pub word_count: usize,
-    pub page_count: Option<usize>,
-    pub was_update: bool,
-}
-
-async fn persist_document(
-    doc: DocumentRecord,
-    text: &str,
-    page_boundaries: Vec<(usize, usize)>,
-    memory: &SqliteMemory,
-) -> AppResult<usize> {
-    let doc_id = doc.id.clone();
-    let text_clone = text.to_string();
-    let passages = tokio::task::spawn_blocking(move || {
-        chunk_text_into_passages(&text_clone, &doc_id, page_boundaries)
-    })
-    .await
-    .map_err(|e| AppError::DocumentParseError(format!("chunking task failed: {e}")))?;
-    let count = passages.len();
-    memory.replace_document_with_passages(doc, passages).await?;
-    Ok(count)
-}
-
-pub const MAX_INGEST_FILE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_DECOMPRESSED_ENTRY_BYTES: u64 = 25 * 1024 * 1024;
-
-pub async fn ingest_document(
-    path: &Path,
-    workspace: Option<&Path>,
-    memory: &SqliteMemory,
-) -> AppResult<IngestResult> {
-    let canonical = dunce::canonicalize(path)
-        .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
-    let metadata = std::fs::metadata(&canonical).map_err(AppError::Io)?;
-    if !metadata.is_file() {
-        return Err(AppError::DocumentParseError(format!(
-            "not a file: {}",
-            canonical.display()
-        )));
-    }
-    if metadata.len() > MAX_INGEST_FILE_BYTES {
-        return Err(AppError::FileTooLarge(format!(
-            "file too large to ingest ({} MB, limit {} MB): {}",
-            metadata.len() / (1024 * 1024),
-            MAX_INGEST_FILE_BYTES / (1024 * 1024),
-            canonical.display()
-        )));
-    }
-
-    let canonical_path = canonical.to_string_lossy().into_owned();
-    let file_type = detect_file_type(&canonical)?;
-    let existing_id = memory.document_exists_by_path(&canonical_path).await?;
-    let was_update = existing_id.is_some();
-    let doc_id = existing_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let size_bytes = metadata.len() as i64;
-
-    let canonical_clone = canonical.clone();
-    let file_type_clone = file_type.clone();
-    let parsed = tokio::task::spawn_blocking(move || parse_document(&canonical_clone, &file_type_clone))
-        .await
-        .map_err(|e| AppError::DocumentParseError(format!("task failed: {e}")))??;
-
-    let word_count = count_words(&parsed.full_text);
-    let title = parsed.title.unwrap_or_else(|| file_stem_title(&canonical));
-    let now = now_ms();
-    let workspace_path = workspace.map(|w| {
-        dunce::canonicalize(w)
-            .unwrap_or_else(|_| w.to_path_buf())
-            .to_string_lossy()
-            .into_owned()
-    });
-
-    let (artifact_kind, type_label) = document_type_info(&file_type);
-    let doc = DocumentRecord {
-        id: doc_id.clone(),
-        title: title.clone(),
-        file_path: Some(canonical_path.clone()),
-        source: "local".to_string(),
-        source_id: None,
-        file_type: file_type.clone(),
-        artifact_kind,
-        type_label,
-        size_bytes,
-        page_count: parsed.page_count.map(|p| p as i64),
-        word_count: Some(word_count as i64),
-        metadata: serde_json::json!({ "path": canonical_path }),
-        indexed_at: now,
-        updated_at: now,
-        workspace_path,
-    };
-
-    let passage_count = persist_document(doc, &parsed.full_text, parsed.page_boundaries, memory).await?;
-
-    Ok(IngestResult {
-        document_id: doc_id,
-        title,
-        file_type,
-        passage_count,
-        word_count,
-        page_count: parsed.page_count,
-        was_update,
-    })
-}
-
 pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx"];
 
 pub fn document_type_info(file_type: &str) -> (Option<String>, String) {
@@ -543,169 +425,6 @@ fn format_calamine_cell(cell: &calamine::Data) -> String {
     }
 }
 
-fn parse_xlsx_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
-    use calamine::{open_workbook_auto_from_rs, Reader};
-
-    let cursor = Cursor::new(bytes);
-    let mut workbook = open_workbook_auto_from_rs(cursor)
-        .map_err(|e| AppError::DocumentParseError(format!("XLSX open failed: {e}")))?;
-
-    let sheet_names = workbook.sheet_names().to_vec();
-    let mut full_text = String::new();
-
-    for sheet_name in &sheet_names {
-        if let Ok(range) = workbook.worksheet_range(sheet_name) {
-            full_text.push_str(&format!("=== Sheet: {sheet_name} ===\n"));
-            for row in range.rows() {
-                let row_text: Vec<String> = row
-                    .iter()
-                    .map(format_calamine_cell)
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if !row_text.is_empty() {
-                    full_text.push_str(&row_text.join("\t"));
-                    full_text.push('\n');
-                }
-            }
-            full_text.push('\n');
-        }
-    }
-
-    Ok(ParsedDocument {
-        full_text,
-        title: None,
-        page_count: Some(sheet_names.len()),
-        page_boundaries: vec![],
-    })
-}
-
-fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
-    let bytes = std::fs::read(path).map_err(AppError::Io)?;
-    parse_xlsx_from_bytes(&bytes)
-}
-
-fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
-    let (cow, _, _) = encoding_rs::UTF_8.decode(bytes);
-    Ok(ParsedDocument {
-        full_text: cow.into_owned(),
-        title: None,
-        page_count: None,
-        page_boundaries: vec![],
-    })
-}
-
-fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
-    let raw = std::fs::read(path).map_err(AppError::Io)?;
-    parse_plain_text_from_bytes(&raw)
-}
-
-fn chunk_text_into_passages(
-    text: &str,
-    document_id: &str,
-    page_boundaries: Vec<(usize, usize)>,
-) -> Vec<PassageRecord> {
-    if text.trim().is_empty() {
-        return vec![];
-    }
-
-    let config = ChunkConfig::new(PASSAGE_CHARS)
-        .with_overlap(PASSAGE_OVERLAP)
-        .unwrap_or_else(|_| ChunkConfig::new(PASSAGE_CHARS));
-    let splitter = TextSplitter::new(config);
-
-    let mut passages = Vec::new();
-    let mut seq = 0i64;
-
-    for (start, chunk) in splitter.chunk_indices(text) {
-        let trimmed = chunk.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let end = start + chunk.len();
-        let page_number = page_boundaries
-            .iter()
-            .rev()
-            .find(|(offset, _)| *offset <= start)
-            .map(|(_, page)| *page as i64);
-
-        passages.push(PassageRecord {
-            id: stable_passage_id(document_id, seq),
-            document_id: document_id.to_string(),
-            seq,
-            text: chunk.to_string(),
-            page_number,
-            char_start: Some(start as i64),
-            char_end: Some(end as i64),
-        });
-        seq += 1;
-    }
-
-    passages
-}
-
-fn count_words(text: &str) -> usize {
-    text.split_whitespace().count()
-}
-
-fn file_stem_title(path: &Path) -> String {
-    path.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Untitled".to_string())
-}
-
-fn stable_passage_id(document_id: &str, seq: i64) -> String {
-    crate::util::stable_hash_hex(&format!("{document_id}:{seq}"))
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ParsedDocumentDto {
-    pub title: Option<String>,
-    pub file_type: String,
-    pub page_count: Option<usize>,
-    pub full_text: String,
-}
-
-pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
-    let canonical = dunce::canonicalize(path)
-        .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
-    let file_type = detect_file_type(&canonical)?;
-    let parsed = parse_document(&canonical, &file_type)?;
-    Ok(ParsedDocumentDto {
-        title: parsed.title.or_else(|| Some(file_stem_title(&canonical))),
-        file_type,
-        page_count: parsed.page_count,
-        full_text: parsed.full_text,
-    })
-}
-
-pub fn is_parseable_document(path: &Path) -> bool {
-    is_supported_document_extension(&crate::util::lowercase_extension(path))
-}
-
-pub fn parse_document_bytes(bytes: &[u8], extension: &str) -> AppResult<ParsedDocumentDto> {
-    let ext = extension.trim_start_matches('.').to_lowercase();
-    let file_type = match ext.as_str() {
-        "pdf" => "pdf",
-        "docx" => "docx",
-        "xlsx" | "xls" | "ods" => "xlsx",
-        "pptx" => "pptx",
-        _ => "text",
-    };
-    let parsed = match file_type {
-        "pdf" => parse_pdf_from_bytes(bytes)?,
-        "docx" => parse_office_zip_from_bytes(bytes, OfficeXmlKind::Word)?,
-        "xlsx" => parse_xlsx_from_bytes(bytes)?,
-        "pptx" => parse_office_zip_from_bytes(bytes, OfficeXmlKind::Pptx)?,
-        _ => parse_plain_text_from_bytes(bytes)?,
-    };
-    Ok(ParsedDocumentDto {
-        title: parsed.title,
-        file_type: file_type.to_string(),
-        page_count: parsed.page_count,
-        full_text: parsed.full_text,
-    })
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpreadsheetSheet {
@@ -750,4 +469,72 @@ pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppRes
         });
     }
     Ok(sheets)
+}
+
+fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
+    let sheets = read_spreadsheet(path, usize::MAX, usize::MAX)?;
+    let mut full_text = String::new();
+    for sheet in &sheets {
+        full_text.push_str(&format!("=== Sheet: {} ===\n", sheet.name));
+        for row in &sheet.rows {
+            let non_empty: Vec<&str> = row.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
+            if !non_empty.is_empty() {
+                full_text.push_str(&non_empty.join("\t"));
+                full_text.push('\n');
+            }
+        }
+        full_text.push('\n');
+    }
+    Ok(ParsedDocument {
+        full_text,
+        title: None,
+        page_count: Some(sheets.len()),
+        page_boundaries: vec![],
+    })
+}
+
+fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
+    let (cow, _, _) = encoding_rs::UTF_8.decode(bytes);
+    Ok(ParsedDocument {
+        full_text: cow.into_owned(),
+        title: None,
+        page_count: None,
+        page_boundaries: vec![],
+    })
+}
+
+fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
+    let raw = std::fs::read(path).map_err(AppError::Io)?;
+    parse_plain_text_from_bytes(&raw)
+}
+
+fn file_stem_title(path: &Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Untitled".to_string())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ParsedDocumentDto {
+    pub title: Option<String>,
+    pub file_type: String,
+    pub page_count: Option<usize>,
+    pub full_text: String,
+}
+
+pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
+    let canonical = dunce::canonicalize(path)
+        .map_err(|e| AppError::DocumentParseError(format!("cannot resolve path: {e}")))?;
+    let file_type = detect_file_type(&canonical)?;
+    let parsed = parse_document(&canonical, &file_type)?;
+    Ok(ParsedDocumentDto {
+        title: parsed.title.or_else(|| Some(file_stem_title(&canonical))),
+        file_type,
+        page_count: parsed.page_count,
+        full_text: parsed.full_text,
+    })
+}
+
+pub fn is_parseable_document(path: &Path) -> bool {
+    is_supported_document_extension(&crate::util::lowercase_extension(path))
 }

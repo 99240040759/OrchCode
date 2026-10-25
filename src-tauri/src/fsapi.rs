@@ -25,10 +25,6 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
-fn resolve_readable_file(workspace: Option<&Path>, path: &str) -> Result<PathBuf, String> {
-    fs_util::resolve_readable_file(workspace, path).map_err(|e| e.to_string())
-}
-
 use crate::util::display_path;
 
 pub fn build_file_index(root: &Path) -> Vec<FileEntry> {
@@ -97,7 +93,7 @@ pub async fn list_workspace_files(
 #[tauri::command]
 pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<FileContent, String> {
     let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
+    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
 
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(&resolved)
@@ -138,7 +134,7 @@ fn file_mime(path: &Path) -> String {
 #[tauri::command]
 pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Result<String, String> {
     let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
+    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("cannot stat {path}: {e}"))?;
@@ -172,7 +168,7 @@ pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Re
 #[tauri::command]
 pub async fn read_binary_file(state: State<'_, AppState>, path: String) -> Result<tauri::ipc::Response, String> {
     let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
+    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("cannot stat {path}: {e}"))?;
@@ -203,7 +199,7 @@ pub async fn read_document_metadata(
     path: String,
 ) -> Result<DocumentFileMeta, String> {
     let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
+    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
 
     let meta = tokio::fs::metadata(&resolved)
         .await
@@ -238,7 +234,7 @@ pub async fn read_spreadsheet(
     path: String,
 ) -> Result<Vec<crate::document::SpreadsheetSheet>, String> {
     let workspace = state.workspace();
-    let resolved = resolve_readable_file(workspace.as_deref(), &path)?;
+    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || {
         crate::document::read_spreadsheet(&resolved, config::MAX_SPREADSHEET_ROWS, config::MAX_SPREADSHEET_COLS)
     })

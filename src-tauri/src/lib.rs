@@ -27,8 +27,6 @@ use tauri::{Emitter, Manager};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
-const LEGACY_CONNECTOR_PURGE_KEY: &str = "legacy_connector_credentials_purged";
-
 fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.unminimize();
@@ -151,16 +149,6 @@ pub fn run() {
 
             let app_state = AppState::new(&data_dir)?;
             app.manage(app_state);
-
-            {
-                use tauri_plugin_store::StoreExt;
-                let prefs = app.store("prefs.json")?;
-                if prefs.get(LEGACY_CONNECTOR_PURGE_KEY).is_none() {
-                    connectors::purge_legacy_credentials();
-                    prefs.set(LEGACY_CONNECTOR_PURGE_KEY, true);
-                    prefs.save()?;
-                }
-            }
 
             AppState::spawn_background_loops(app.handle().clone());
 

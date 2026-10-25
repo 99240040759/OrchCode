@@ -104,22 +104,13 @@ function failureStatus(current: WorkspaceMeta | null): WorkspacePickStatus {
 }
 
 function randomProjectName(existingNames: Set<string>): string {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const name = uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: "-",
-      length: 2,
-      style: "lowerCase",
-    });
-    if (!existingNames.has(name)) return name;
-  }
-  const fallbackBase = uniqueNamesGenerator({
+  const name = uniqueNamesGenerator({
     dictionaries: [adjectives, animals],
     separator: "-",
     length: 2,
     style: "lowerCase",
   });
-  return `${fallbackBase}-${newId().slice(0, 4)}`;
+  return existingNames.has(name) ? `${name}-${newId().slice(0, 4)}` : name;
 }
 
 export const useWorkspaceStore = create(

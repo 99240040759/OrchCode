@@ -7,13 +7,11 @@ use rig::tool::DynamicTool;
 use crate::connector_tools::actions::{self, ActionDef};
 use crate::connector_tools::client::{AccountWire, ComposioClient};
 use crate::connector_tools::tool::ToolSpec;
-use crate::credentials;
 use crate::error::{AppError, AppResult};
 use crate::gateway::TokenHandle;
 
 const ACTIVE_STATUS: &str = "ACTIVE";
 const DEFINITIONS_TTL: Duration = Duration::from_secs(60 * 60);
-const LEGACY_CONNECTOR_IDS: [&str; 6] = ["google_drive", "gmail", "github", "notion", "slack", "jira"];
 
 #[derive(Debug)]
 pub struct ConnectorDef {
@@ -92,13 +90,6 @@ pub fn resolve_defs(ids: &[String]) -> AppResult<Vec<&'static ConnectorDef>> {
 
 pub fn def_for_slug(slug: &str) -> Option<&'static ConnectorDef> {
     CONNECTOR_DEFS.iter().find(|def| slug.starts_with(def.slug_prefix))
-}
-
-pub fn purge_legacy_credentials() {
-    for id in LEGACY_CONNECTOR_IDS {
-        credentials::delete(&format!("connector_{id}_access"));
-        credentials::delete(&format!("connector_{id}_refresh"));
-    }
 }
 
 struct CachedSpecs {

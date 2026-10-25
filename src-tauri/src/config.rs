@@ -13,7 +13,8 @@ pub fn sentry_dsn() -> &'static str {
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
 
 fn clean_base_url() -> &'static str {
-    gcp_functions_url().trim_end_matches('/')
+    static BASE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| gcp_functions_url().trim_end_matches('/'))
 }
 
 pub fn inference_base_url(provider: &str) -> String {
