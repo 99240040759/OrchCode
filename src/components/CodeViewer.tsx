@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import Prism from "prismjs";
 import { getPrismGrammar, renderToken } from "./Markdown";
-import * as api from "../lib/api";
+import * as utils from "../lib/utils";
 
 const EXT_TO_LANG: Record<string, string> = {
   mjs: "javascript",
@@ -27,10 +27,10 @@ const EXT_TO_LANG: Record<string, string> = {
 };
 
 function langFromPath(path: string): string {
-  const base = api.getBasename(path).toLowerCase();
+  const base = utils.getBasename(path).toLowerCase();
   if (base === "dockerfile") return "docker";
   if (base === "makefile") return "bash";
-  const ext = api.getExt(path);
+  const ext = utils.getExt(path);
   return EXT_TO_LANG[ext] ?? ext;
 }
 
@@ -64,7 +64,7 @@ export const CodeViewer = React.memo(function CodeViewer({ path, content }: Code
       className="CodeViewer"
       style={{ ["--gutter-ch" as string]: gutterWidth }}
     >
-      <pre className="CodeViewer-pre" aria-label={`Source of ${api.getBasename(path)}`}>
+      <pre className="CodeViewer-pre" aria-label={`Source of ${utils.getBasename(path)}`}>
         <code className={`language-${lang}`}>
           {lines.map((line) => (
             <span className="CodeViewer-line" key={line.key}>

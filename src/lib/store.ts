@@ -10,6 +10,7 @@ import type {
   Budget,
   ChatStreamEvent,
   MessageItemView,
+  MessageView,
   ModelDto,
   SessionSummary,
   ToolDisplayInfo,
@@ -107,6 +108,21 @@ function viewItemToLocal(item: MessageItemView): MessageItem {
   }
 }
 
+function messageViewToLocal(v: MessageView): ChatMessage {
+  return {
+    id: v.id,
+    role: v.role as ChatMessage["role"],
+    items: v.items.map(viewItemToLocal),
+    attachments: v.attachments.map((a) => ({
+      name: a.name,
+      isImage: a.isImage,
+      path: a.path ?? undefined,
+      dataUrl: a.dataUrl ?? undefined,
+    })),
+    streaming: false,
+  };
+}
+
 function usageFrom(session: SessionSummary): TokenUsage {
   return {
     contextTokens: session.contextTokens,
@@ -114,11 +130,12 @@ function usageFrom(session: SessionSummary): TokenUsage {
 }
 
 interface ChatState {
+  connectorSelections: Record<string, string[]>;
   sessions: SessionSummary[];
   currentSessionId: string;
   messages: ChatMessage[];
   hasMoreMessages: boolean;
-  earliestSeq: number | null;
+  earliestMessageId: number | null;
   loadingEarlierMessages: boolean;
   streaming: boolean;
   streamingSessionId: string | null;
@@ -140,6 +157,8 @@ interface ChatActions {
   deleteSession: (id: string) => Promise<void>;
   send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
   cancel: () => void;
+  toggleConnector: (id: string) => void;
+  pruneConnectors: (connectedIds: string[]) => void;
   setSelectedModel: (key: string) => void;
   refreshSessions: () => Promise<void>;
   refreshModels: () => Promise<void>;
@@ -149,12 +168,19 @@ interface ChatActions {
 
 export type ChatStore = ChatState & ChatActions;
 
+const NO_CONNECTORS: string[] = [];
+
+export function selectActiveConnectors(state: ChatState): string[] {
+  return state.connectorSelections[state.currentSessionId] ?? NO_CONNECTORS;
+}
+
 const INITIAL_STATE: ChatState = {
+  connectorSelections: {},
   sessions: [],
   currentSessionId: newId(),
   messages: [],
   hasMoreMessages: false,
-  earliestSeq: null,
+  earliestMessageId: null,
   loadingEarlierMessages: false,
   streaming: false,
   streamingSessionId: null,
@@ -181,7 +207,7 @@ function unbindListeners() {
 async function bindListeners() {
   unbindListeners();
   const epoch = listenerEpoch;
-  const fns = await Promise.all([
+  const results = await Promise.allSettled([
     listen("sessions-updated", () => {
       void useChatStore.getState().refreshSessions();
     }),
@@ -189,6 +215,12 @@ async function bindListeners() {
       void useChatStore.getState().refreshModels();
     }),
   ]);
+  const fns = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) {
+    for (const fn of fns) fn();
+    throw failure.reason;
+  }
   if (epoch !== listenerEpoch) {
     for (const fn of fns) fn();
     return;
@@ -208,28 +240,42 @@ export const useChatStore = create(
     initialize: async () => {
       if (isInitializing || get().initialized) return;
       isInitializing = true;
-      set((s) => { s.initialized = true; });
       const epoch = initEpoch;
 
-      const wsPath = useWorkspaceStore.getState().current?.path ?? null;
+      try {
+        const wsPath = useWorkspaceStore.getState().current?.path ?? null;
 
-      const [sessions, models, savedModel] = await Promise.all([
-        wsPath
-          ? api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
-          : Promise.resolve([] as SessionSummary[]),
-        api.listModels().catch(() => [] as ModelDto[]),
-        api.getUserPref("selectedModel").catch(() => null),
-      ]);
-      if (epoch !== initEpoch) return;
+        const [sessions, models, savedModel] = await Promise.all([
+          wsPath
+            ? api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
+            : Promise.resolve([] as SessionSummary[]),
+          api.listModels().catch(() => [] as ModelDto[]),
+          api.getUserPref("selectedModel").catch(() => null),
+        ]);
+        if (epoch !== initEpoch) return;
 
-      set((s) => {
-        s.sessions = sessions;
-        s.models = models;
-        s.selectedModel = pickModel(models, savedModel);
-      });
+        set((s) => {
+          s.sessions = sessions;
+          s.models = models;
+          s.selectedModel = pickModel(models, savedModel);
+        });
 
-      void get().refreshBudget();
-      await bindListeners();
+        await bindListeners();
+        if (epoch !== initEpoch) return;
+        set((s) => {
+          s.initialized = true;
+        });
+        void get().refreshBudget();
+      } catch (e) {
+        if (epoch === initEpoch) {
+          set((s) => {
+            s.initialized = false;
+            s.error = api.errorMessage(e);
+          });
+        }
+      } finally {
+        if (epoch === initEpoch) isInitializing = false;
+      }
     },
 
     reloadForWorkspace: async () => {
@@ -272,7 +318,7 @@ export const useChatStore = create(
         s.currentSessionId = freshId;
         s.messages = [];
         s.hasMoreMessages = false;
-        s.earliestSeq = null;
+        s.earliestMessageId = null;
         s.loadingEarlierMessages = false;
         s.sessionTokens = ZERO_USAGE;
         s.error = null;
@@ -287,7 +333,7 @@ export const useChatStore = create(
         s.currentSessionId = id;
         s.messages = [];
         s.hasMoreMessages = false;
-        s.earliestSeq = null;
+        s.earliestMessageId = null;
         s.loadingEarlierMessages = false;
         s.sessionTokens = target ? usageFrom(target) : ZERO_USAGE;
         s.error = null;
@@ -298,18 +344,8 @@ export const useChatStore = create(
         set((s) => {
           if (s.currentSessionId !== id) return;
           s.hasMoreMessages = page.hasMore;
-          s.earliestSeq = page.earliestSeq;
-          s.messages = page.messages.map((v) => ({
-            id: v.id,
-            role: v.role as ChatMessage["role"],
-            items: v.items.map(viewItemToLocal),
-            attachments: v.attachments.map((a) => ({
-              name: a.name,
-              isImage: a.isImage,
-              dataUrl: a.dataUrl ?? undefined,
-            })),
-            streaming: false,
-          }));
+          s.earliestMessageId = page.earliestMessageId;
+          s.messages = page.messages.map(messageViewToLocal);
         });
       } catch (e) {
         set((s) => {
@@ -320,28 +356,18 @@ export const useChatStore = create(
 
     loadEarlierMessages: async () => {
       const state = get();
-      if (!state.hasMoreMessages || state.loadingEarlierMessages || state.earliestSeq == null) return;
+      if (!state.hasMoreMessages || state.loadingEarlierMessages || state.earliestMessageId == null) return;
       const id = state.currentSessionId;
       set((s) => { s.loadingEarlierMessages = true; });
 
       try {
-        const page = await api.getSessionMessagesPage(id, 50, state.earliestSeq);
+        const page = await api.getSessionMessagesPage(id, 50, state.earliestMessageId);
         set((s) => {
           if (s.currentSessionId !== id) return;
           s.loadingEarlierMessages = false;
           s.hasMoreMessages = page.hasMore;
-          s.earliestSeq = page.earliestSeq;
-          const earlierMessages: ChatMessage[] = page.messages.map((v) => ({
-            id: v.id,
-            role: v.role as ChatMessage["role"],
-            items: v.items.map(viewItemToLocal),
-            attachments: v.attachments.map((a) => ({
-              name: a.name,
-              isImage: a.isImage,
-              dataUrl: a.dataUrl ?? undefined,
-            })),
-            streaming: false,
-          }));
+          s.earliestMessageId = page.earliestMessageId;
+          const earlierMessages: ChatMessage[] = page.messages.map(messageViewToLocal);
           s.messages = [...earlierMessages, ...s.messages];
         });
       } catch {
@@ -365,6 +391,7 @@ export const useChatStore = create(
       }
       set((s) => {
         s.sessions = s.sessions.filter((sess) => sess.id !== id);
+        delete s.connectorSelections[id];
         if (s.currentSessionId === id) {
           s.currentSessionId = newId();
           s.messages = [];
@@ -377,7 +404,7 @@ export const useChatStore = create(
     },
 
     send: async (prompt: string, attachments: AttachmentRef[]) => {
-      const { streaming, currentSessionId, selectedModel } = get();
+      const { streaming, currentSessionId, selectedModel, connectorSelections } = get();
       const text = prompt.trim();
       if (streaming) return false;
       if (!text && attachments.length === 0) return false;
@@ -414,14 +441,16 @@ export const useChatStore = create(
         });
       });
 
+      let activeAssistantId = assistantMsgId;
+
       const patch = (fn: (m: ChatMessage) => void) => {
         set((s) => {
           if (s.currentSessionId !== sessionId) return;
           const last = s.messages[s.messages.length - 1];
-          if (last && last.id === assistantMsgId) {
+          if (last && last.id === activeAssistantId) {
             fn(last);
           } else {
-            const msg = s.messages.find((m) => m.id === assistantMsgId);
+            const msg = s.messages.find((m) => m.id === activeAssistantId);
             if (msg) fn(msg);
           }
         });
@@ -431,15 +460,13 @@ export const useChatStore = create(
       const settle = () => {
         if (settled) return;
         settled = true;
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-        if (flushTimeoutId !== null) {
-          clearTimeout(flushTimeoutId);
-          flushTimeoutId = null;
-        }
-        patch((m) => { m.streaming = false; });
+        syncFlush();
+        patch((m) => {
+          m.streaming = false;
+          for (const item of m.items) {
+            if (item.type === "toolCall" && item.status === "running") item.status = "error";
+          }
+        });
         set((s) => {
           if (s.streamingSessionId === sessionId) s.streamingSessionId = null;
           if (s.currentSessionId === sessionId) s.streaming = false;
@@ -559,6 +586,7 @@ export const useChatStore = create(
             patch((m) => { m.notice = event.message; });
             break;
           case "compacted": {
+            syncFlush();
             set((s) => {
               if (s.currentSessionId !== sessionId) return;
               const noticeId = event.compactionMessageId || newId();
@@ -579,25 +607,23 @@ export const useChatStore = create(
                 streaming: false,
               };
 
-              let insertIdx = -1;
-              if (event.afterMessageId) {
-                const afterIdx = s.messages.findIndex((m) => m.id === event.afterMessageId);
-                if (afterIdx >= 0) {
-                  insertIdx = afterIdx + 1;
-                }
+              const currentIdx = s.messages.findIndex((m) => m.id === activeAssistantId);
+              if (currentIdx < 0) return;
+              const current = s.messages[currentIdx];
+              if (current.items.length === 0) {
+                s.messages.splice(currentIdx, 0, notice);
+                return;
               }
-
-              if (insertIdx === -1) {
-                const streamingIdx = s.messages.findIndex((m) => m.id === assistantMsgId);
-                if (streamingIdx >= 0) {
-                  insertIdx = streamingIdx;
-                } else {
-                  const userIdx = s.messages.findIndex((m) => m.id === userMsgId);
-                  insertIdx = userIdx >= 0 ? userIdx : 0;
-                }
-              }
-
-              s.messages.splice(insertIdx, 0, notice);
+              current.streaming = false;
+              const continuation: ChatMessage = {
+                id: newId(),
+                role: "assistant",
+                items: [],
+                attachments: [],
+                streaming: true,
+              };
+              s.messages.push(notice, continuation);
+              activeAssistantId = continuation.id;
             });
             break;
           }
@@ -617,7 +643,14 @@ export const useChatStore = create(
       };
 
       try {
-        await api.startChat(sessionId, selectedModel.key, text, attachments, handleEvent);
+        await api.startChat(
+          sessionId,
+          selectedModel.key,
+          text,
+          attachments,
+          connectorSelections[sessionId] ?? [],
+          handleEvent
+        );
         syncFlush(); settle();
         return true;
       } catch (e) {
@@ -636,6 +669,25 @@ export const useChatStore = create(
         });
         return true;
       }
+    },
+
+    toggleConnector: (id: string) => {
+      set((s) => {
+        const current = s.connectorSelections[s.currentSessionId] ?? [];
+        const next = current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id];
+        if (next.length === 0) delete s.connectorSelections[s.currentSessionId];
+        else s.connectorSelections[s.currentSessionId] = next;
+      });
+    },
+
+    pruneConnectors: (connectedIds: string[]) => {
+      set((s) => {
+        for (const [sessionId, selected] of Object.entries(s.connectorSelections)) {
+          const kept = selected.filter((id) => connectedIds.includes(id));
+          if (kept.length === 0) delete s.connectorSelections[sessionId];
+          else if (kept.length !== selected.length) s.connectorSelections[sessionId] = kept;
+        }
+      });
     },
 
     cancel: () => {

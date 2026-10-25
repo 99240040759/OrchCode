@@ -49,6 +49,10 @@ pub fn tavily_url() -> String {
     format!("{}/tavily", clean_base_url())
 }
 
+pub fn composio_url(path: &str) -> String {
+    format!("{}/composio{}", clean_base_url(), path)
+}
+
 const DEFAULT_INFERENCE_PROVIDER: &str = "vertex";
 
 pub const DEFAULT_MAX_TURNS: usize = 100;

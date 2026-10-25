@@ -62,6 +62,7 @@ impl AppState {
         let token: TokenHandle = Arc::new(RwLock::new(None));
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
+        let connector_manager = Arc::new(ConnectorManager::new(token.clone()));
 
         let quick_projects_dir = data_dir.join("quick-projects");
         std::fs::create_dir_all(&quick_projects_dir)?;
@@ -77,7 +78,7 @@ impl AppState {
             dictation: Mutex::new(None),
             terminals: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
-            connector_manager: Arc::new(ConnectorManager::new()),
+            connector_manager,
             current_user_id: RwLock::new(None),
             sign_in: Mutex::new(None),
             token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -125,9 +126,6 @@ impl AppState {
         self.reset_session_memory();
         auth::clear_tokens();
         auth::clear_cached_user(&self.data_dir);
-        if let Err(error) = self.connector_manager.logout_all(&self.memory).await {
-            eprintln!("[auth] connector sign-out failed: {error}");
-        }
     }
 
     pub async fn complete_sign_in(&self, id_token: String, profile: &auth::UserProfile) {
@@ -135,9 +133,6 @@ impl AppState {
             .current_user_id()
             .or_else(|| auth::load_cached_user(&self.data_dir).map(|p| p.id));
         if previous.as_deref().is_some_and(|id| id != profile.id) {
-            if let Err(error) = self.connector_manager.logout_all(&self.memory).await {
-                eprintln!("[auth] clearing previous account connectors failed: {error}");
-            }
             if let Err(error) = self.memory.clear_all_documents().await {
                 eprintln!("[auth] clearing previous account documents failed: {error}");
             }

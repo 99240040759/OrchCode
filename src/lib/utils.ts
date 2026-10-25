@@ -53,7 +53,7 @@ export function looksLikePath(value: string): boolean {
   return /[\\/]/.test(value) || /\.[a-zA-Z0-9]+$/.test(value);
 }
 
-const MENTION_PATTERN = "(?:@\\[([^\\]]+)\\]|@([^\\s@]+))(#L\\d+(?:-\\d+)?)?";
+const MENTION_PATTERN = "@\\[([^\\]]+)\\](#L\\d+(?:-\\d+)?)?|@([^\\s@,;:!?#]+)(#L\\d+(?:-\\d+)?)?";
 
 export function createMentionRegex(): RegExp {
   return new RegExp(MENTION_PATTERN, "g");

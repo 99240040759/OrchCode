@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use rig::completion::Message;
 use rig::conversation::{Author, Conversation, MessageId};
+use rig::tool::Tool;
 use rig::message::{
     AssistantContent, DocumentSourceKind, MimeType, ToolResultContent, UserContent,
 };
@@ -15,7 +16,7 @@ use crate::llm::{is_payload_part, payload_part_label};
 use crate::persistence::{
     AttachmentView, MessageItemView, MessageView, SessionViewPage,
 };
-use crate::tools::parse_display_info;
+use crate::tools::{parse_display_info, RunCommand};
 
 pub const LOG: &str = "main";
 
@@ -115,57 +116,86 @@ fn shown(store: &DirStore, conversation: &Conversation) -> Result<Vec<Shown>, Se
     }
     let records = history(store, LOG)?;
     for compacted in compactions.iter().rev() {
-        let made = records.iter().find_map(|(stamp, record)| match record {
-            LogRecord::Change(recorded) if summary_in(&recorded.change) == Some(compacted.summary) => {
-                Some((stamp.n, stamp.t))
-            }
-            _ => None,
-        });
-        let Some((n, t)) = made else { continue };
-        let Ok(before) = as_of(store, LOG, n) else { continue };
+        let (n, t) = records
+            .iter()
+            .find_map(|(stamp, record)| match record {
+                LogRecord::Change(recorded) if summary_in(&recorded.change) == Some(compacted.summary) => {
+                    Some((stamp.n, stamp.t))
+                }
+                _ => None,
+            })
+            .ok_or_else(|| unreadable("a compaction has no record in the log"))?;
+        let before = as_of(store, LOG, n)?;
         let mut originals: Vec<Shown> = Vec::new();
         for id in &compacted.replaced {
-            let Some(at) = before.index_of(*id) else { continue };
-            let Some(entry) = before.entry(at) else { continue };
+            let entry = before
+                .index_of(*id)
+                .and_then(|at| before.entry(at))
+                .ok_or_else(|| unreadable("a compacted message is missing from the log"))?;
             originals.push(Shown::Message {
                 id: *id,
                 message: entry.message,
                 author: entry.author,
             });
         }
-        let position = list.iter().position(
-            |item| matches!(item, Shown::Message { id, .. } if *id == compacted.summary),
-        );
-        let Some(position) = position else { continue };
         let replaced = originals
             .iter()
             .filter(|item| matches!(item, Shown::Message { author: None, .. }))
             .count();
-        originals.push(Shown::Compaction {
-            summary: compacted.summary,
-            replaced,
-            ts: i64::try_from(t).unwrap_or(0),
-        });
+        let position = list
+            .iter()
+            .position(|item| matches!(item, Shown::Message { id, .. } if *id == compacted.summary))
+            .ok_or_else(|| unreadable("a compaction summary is missing from the conversation"))?;
         let _ = list.splice(position..=position, originals);
+
+        let last_before = before
+            .entries()
+            .next_back()
+            .map(|entry| entry.id)
+            .ok_or_else(|| unreadable("a compaction happened in an empty conversation"))?;
+        let after = list
+            .iter()
+            .position(|item| matches!(item, Shown::Message { id, .. } if *id == last_before))
+            .ok_or_else(|| unreadable("the message a compaction followed is missing"))?;
+        list.insert(
+            after + 1,
+            Shown::Compaction {
+                summary: compacted.summary,
+                replaced,
+                ts: i64::try_from(t).unwrap_or(0),
+            },
+        );
     }
     Ok(list)
 }
 
-fn tool_outputs(items: &[Shown]) -> HashMap<String, (String, bool)> {
+fn unreadable(why: &str) -> SessionError {
+    SessionError::Record {
+        log: LOG.to_string(),
+        line: 0,
+        why: why.to_string(),
+    }
+}
+
+pub fn render_tool_result<'a>(content: impl IntoIterator<Item = &'a ToolResultContent>) -> String {
+    content
+        .into_iter()
+        .filter_map(|part| match part {
+            ToolResultContent::Text(t) => Some(t.text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tool_outputs(items: &[Shown]) -> HashMap<String, (Option<String>, bool)> {
     let mut outputs = HashMap::new();
     for item in items {
         let Shown::Message { message, .. } = item else { continue };
         let Message::User { content } = &**message else { continue };
         for part in content {
             if let UserContent::ToolResult(result) = part {
-                let output: String = result
-                    .content
-                    .iter()
-                    .filter_map(|c| match c {
-                        ToolResultContent::Text(t) => Some(t.text.as_str()),
-                        _ => None,
-                    })
-                    .collect();
+                let output = (result.name == *<RunCommand as Tool>::NAME)
+                    .then(|| render_tool_result(result.content.iter()));
                 outputs.insert(result.call.to_string(), (output, result.is_error));
             }
         }
@@ -181,11 +211,26 @@ fn user_view(cid: &str, id: MessageId, content: &[UserContent]) -> Option<Messag
             UserContent::Text(t) => {
                 if is_payload_part(&t.text) {
                     if let Some(label) = payload_part_label(&t.text) {
+                        let path = label
+                            .split_once("#L")
+                            .map(|(path, _)| path)
+                            .unwrap_or(&label)
+                            .to_string();
                         attachments.push(AttachmentView {
-                            name: crate::util::basename(&label),
+                            name: crate::util::basename(&path),
                             is_image: false,
+                            path: Some(path),
                             data_url: None,
                         });
+                    } else if let Some(note) = t
+                        .text
+                        .strip_prefix(crate::llm::NOTE_PART_PREFIX)
+                        .and_then(|value| value.strip_suffix("</note>"))
+                    {
+                        if !text.is_empty() {
+                            text.push_str("\n\n");
+                        }
+                        text.push_str(note);
                     }
                 } else if text.is_empty() {
                     text = t.text.clone();
@@ -208,6 +253,7 @@ fn user_view(cid: &str, id: MessageId, content: &[UserContent]) -> Option<Messag
                 attachments.push(AttachmentView {
                     name: format!("image.{ext}"),
                     is_image: true,
+                    path: None,
                     data_url,
                 });
             }
@@ -236,7 +282,7 @@ fn assistant_view(
     cid: &str,
     id: MessageId,
     content: &[AssistantContent],
-    outputs: &HashMap<String, (String, bool)>,
+    outputs: &HashMap<String, (Option<String>, bool)>,
     durations: &HashMap<String, u64>,
 ) -> Option<MessageView> {
     let mut items: Vec<MessageItemView> = Vec::new();
@@ -268,8 +314,10 @@ fn assistant_view(
                     id: stable_id(cid, id.get(), item_idx, Some("tool")),
                     name: tc.function.name.to_string(),
                     args,
-                    output: entry.map(|(output, _)| {
-                        crate::util::clip_middle(output, config::MAX_VIEW_TOOL_OUTPUT_CHARS)
+                    output: entry.and_then(|(output, _)| {
+                        output
+                            .as_deref()
+                            .map(|text| crate::util::clip_middle(text, config::MAX_VIEW_TOOL_OUTPUT_CHARS))
                     }),
                     display_info,
                     status: status.to_string(),
@@ -300,35 +348,63 @@ fn assistant_view(
     })
 }
 
+pub fn replaced_message_count(conversation: &Conversation, end: usize) -> usize {
+    conversation
+        .entries()
+        .take(end)
+        .filter(|entry| entry.author.is_none())
+        .count()
+}
+
+struct ViewEntry {
+    seq: i64,
+    view: MessageView,
+}
+
+fn persistent_seq(id: MessageId) -> i64 {
+    i64::try_from(id.get()).unwrap_or(i64::MAX)
+}
+
 fn build_views(
     cid: &str,
     store: &DirStore,
     conversation: &Conversation,
     durations: &HashMap<String, u64>,
-) -> Result<Vec<MessageView>, SessionError> {
+) -> Result<Vec<ViewEntry>, SessionError> {
     let items = shown(store, conversation)?;
     let outputs = tool_outputs(&items);
     let mut views = Vec::with_capacity(items.len());
     for item in &items {
         match item {
-            Shown::Compaction { summary, replaced, ts } => views.push(MessageView {
-                id: compaction_message_id(cid, *summary),
-                role: "system".to_string(),
-                items: vec![MessageItemView::CompactionNotice {
-                    id: compaction_item_id(cid, *summary),
-                    original_message_count: *replaced,
-                    ts: *ts,
-                }],
-                attachments: Vec::new(),
+            Shown::Compaction { summary, replaced, ts } => views.push(ViewEntry {
+                seq: persistent_seq(*summary),
+                view: MessageView {
+                    id: compaction_message_id(cid, *summary),
+                    role: "system".to_string(),
+                    items: vec![MessageItemView::CompactionNotice {
+                        id: compaction_item_id(cid, *summary),
+                        original_message_count: *replaced,
+                        ts: *ts,
+                    }],
+                    attachments: Vec::new(),
+                },
             }),
             Shown::Message { author: Some(_), .. } => {}
-            Shown::Message { id, message, author: None } => match &**message {
-                Message::User { content } => views.extend(user_view(cid, *id, content)),
-                Message::Assistant(assistant) => {
-                    views.extend(assistant_view(cid, *id, &assistant.content, &outputs, durations));
+            Shown::Message { id, message, author: None } => {
+                let view = match &**message {
+                    Message::User { content } => user_view(cid, *id, content),
+                    Message::Assistant(assistant) => {
+                        assistant_view(cid, *id, &assistant.content, &outputs, durations)
+                    }
+                    _ => None,
+                };
+                if let Some(view) = view {
+                    views.push(ViewEntry {
+                        seq: persistent_seq(*id),
+                        view,
+                    });
                 }
-                _ => {}
-            },
+            }
         }
     }
     Ok(views)
@@ -346,16 +422,18 @@ pub async fn view_page(
     tokio::task::spawn_blocking(move || -> AppResult<SessionViewPage> {
         let conversation = rig_memory::load(&store, LOG).map_err(session_error)?;
         let views = build_views(&cid, &store, &conversation, &durations).map_err(session_error)?;
-        let end = match before {
-            Some(at) => usize::try_from(at).unwrap_or(0).min(views.len()),
-            None => views.len(),
-        };
+        let end = before
+            .and_then(|cursor| views.iter().position(|entry| entry.seq >= cursor))
+            .unwrap_or(views.len());
         let start = end.saturating_sub(limit);
-        let messages: Vec<MessageView> = views.into_iter().skip(start).take(end - start).collect();
+        let messages = views[start..end]
+            .iter()
+            .map(|entry| entry.view.clone())
+            .collect();
         Ok(SessionViewPage {
             messages,
             has_more: start > 0,
-            earliest_seq: Some(start as i64),
+            earliest_message_id: (start > 0).then(|| views[start].seq),
         })
     })
     .await
@@ -398,4 +476,142 @@ pub fn reasoning_keys(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rig::completion::AssistantMessage;
+    use rig::message::{AssistantContent, ToolCall, ToolFunction, ToolName};
+    use rig_memory::{apply_summary, save, summary_author, SummaryState};
+
+    fn step(call: &str, tool: &str) -> (Message, Message) {
+        let name = ToolName::new(tool).unwrap();
+        let tool_call = ToolCall::from_wire(call, ToolFunction::new(name, serde_json::json!({"path": "a"})));
+        let result = tool_call.result(vec![ToolResultContent::text(format!("output of {call}"))]);
+        (
+            Message::Assistant(AssistantMessage::new(vec![
+                AssistantContent::text(format!("step {call}")),
+                AssistantContent::ToolCall(tool_call),
+            ])),
+            Message::tool_results(vec![result]),
+        )
+    }
+
+    fn state() -> SummaryState {
+        SummaryState { summary: "summary".to_string(), tracked: Vec::new() }
+    }
+
+    fn describe(views: &[ViewEntry]) -> Vec<String> {
+        views
+            .iter()
+            .map(|entry| match entry.view.items.first() {
+                Some(MessageItemView::CompactionNotice { .. }) => "NOTICE".to_string(),
+                Some(MessageItemView::Text { text, .. }) => text.clone(),
+                Some(MessageItemView::ToolCall { name, .. }) => format!("tool:{name}"),
+                _ => entry.view.role.clone(),
+            })
+            .collect()
+    }
+
+    fn compacted_run() -> (tempfile::TempDir, DirStore, Conversation) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DirStore::open(dir.path().join("s")).unwrap();
+        let mut conversation = rig_memory::load(&store, LOG).unwrap();
+        conversation.extend([Message::user("old question"), Message::assistant("old answer"), Message::user("prompt")]);
+        for index in 0..4 {
+            let (assistant, result) = step(&format!("c{index}"), "read_file");
+            conversation.extend([assistant, result]);
+        }
+        save(&store, LOG, &mut conversation).unwrap();
+        let keep_from = conversation.id(7);
+        apply_summary(&mut conversation, keep_from, &state()).unwrap();
+        save(&store, LOG, &mut conversation).unwrap();
+        let (assistant, result) = step("after", "read_file");
+        conversation.extend([assistant, result, Message::assistant("final answer")]);
+        save(&store, LOG, &mut conversation).unwrap();
+        let loaded = rig_memory::load(&store, LOG).unwrap();
+        (dir, store, loaded)
+    }
+
+    #[test]
+    fn the_notice_follows_the_last_message_that_existed_when_the_compaction_ran() {
+        let (_dir, store, conversation) = compacted_run();
+        let views = build_views("s", &store, &conversation, &HashMap::new()).unwrap();
+        assert_eq!(
+            describe(&views),
+            vec![
+                "old question",
+                "old answer",
+                "prompt",
+                "step c0",
+                "step c1",
+                "step c2",
+                "step c3",
+                "NOTICE",
+                "step after",
+                "final answer",
+            ]
+        );
+    }
+
+    #[test]
+    fn view_order_stays_monotonic_so_pagination_cursors_hold() {
+        let (_dir, store, conversation) = compacted_run();
+        let views = build_views("s", &store, &conversation, &HashMap::new()).unwrap();
+        assert!(views.windows(2).all(|pair| pair[0].seq <= pair[1].seq));
+    }
+
+    #[test]
+    fn the_notice_counts_only_the_messages_the_user_could_see_replaced() {
+        let (_dir, store, conversation) = compacted_run();
+        let views = build_views("s", &store, &conversation, &HashMap::new()).unwrap();
+        let notice = views
+            .iter()
+            .find_map(|entry| match entry.view.items.first() {
+                Some(MessageItemView::CompactionNotice { original_message_count, .. }) => Some(*original_message_count),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(notice, 7);
+    }
+
+    #[test]
+    fn replaced_count_ignores_earlier_summaries() {
+        let mut conversation = Conversation::new();
+        conversation.extend([Message::user("a"), Message::assistant("b"), Message::user("c"), Message::assistant("d")]);
+        let keep_from = conversation.id(2);
+        apply_summary(&mut conversation, keep_from, &state()).unwrap();
+        assert_eq!(replaced_message_count(&conversation, 3), 2);
+        assert_eq!(replaced_message_count(&conversation, 1), 0);
+        let _ = summary_author();
+    }
+
+    #[test]
+    fn only_run_command_keeps_its_output_in_the_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = DirStore::open(dir.path().join("s")).unwrap();
+        let mut conversation = rig_memory::load(&store, LOG).unwrap();
+        let (read, read_result) = step("r", "read_file");
+        let (run, run_result) = step("x", "run_command");
+        conversation.extend([Message::user("go"), read, read_result, run, run_result]);
+        save(&store, LOG, &mut conversation).unwrap();
+        let conversation = rig_memory::load(&store, LOG).unwrap();
+        let views = build_views("s", &store, &conversation, &HashMap::new()).unwrap();
+        let outputs: Vec<(String, Option<String>)> = views
+            .iter()
+            .flat_map(|entry| entry.view.items.iter())
+            .filter_map(|item| match item {
+                MessageItemView::ToolCall { name, output, .. } => Some((name.clone(), output.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outputs,
+            vec![
+                ("read_file".to_string(), None),
+                ("run_command".to_string(), Some("output of x".to_string())),
+            ]
+        );
+    }
 }

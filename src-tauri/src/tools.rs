@@ -349,14 +349,6 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             ..Default::default()
         },
 
-        "search_documents" => ToolDisplayInfo {
-            label: "Searched Docs".to_string(),
-            target_text: str_arg(&args, "query"),
-            icon: ToolIcon::Search,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
         "connector_search" => ToolDisplayInfo {
             label: format!("{}: Search", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
             target_text: str_arg(&args, "query"),
@@ -381,13 +373,13 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             ..Default::default()
         },
 
-        other => ToolDisplayInfo {
+        other => crate::connector_tools::display::display_info(other, &args).unwrap_or_else(|| ToolDisplayInfo {
             label: other.to_string(),
             target_text: Some(args_json.chars().take(120).collect()),
             icon: ToolIcon::Terminal,
             opens_artifact: false,
             ..Default::default()
-        },
+        }),
     }
 }
 
@@ -611,7 +603,7 @@ impl CommandManager {
                 }
             }
 
-            done_signal.notify_waiters();
+            done_signal.notify_one();
         });
 
         (task_id, done)
@@ -1576,8 +1568,6 @@ pub struct ToolContext {
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
     pub data_dir: PathBuf,
-    pub memory: crate::persistence::SqliteMemory,
-    pub connector_manager: Arc<crate::connectors::ConnectorManager>,
 }
 
 impl ToolContext {
@@ -1634,100 +1624,5 @@ impl ToolContext {
         StopCommand {
             manager: self.command_manager.clone(),
         }
-    }
-    pub fn search_documents(&self) -> SearchDocuments {
-        SearchDocuments {
-            memory: self.memory.clone(),
-            workspace: self.workspace.clone(),
-        }
-    }
-
-    pub fn connector_search(&self) -> crate::connector_tools::ConnectorSearch {
-        crate::connector_tools::ConnectorSearch {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-
-    pub fn connector_read(&self) -> crate::connector_tools::ConnectorRead {
-        crate::connector_tools::ConnectorRead {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-
-    pub fn connector_list(&self) -> crate::connector_tools::ConnectorList {
-        crate::connector_tools::ConnectorList {
-            manager: self.connector_manager.clone(),
-            memory: self.memory.clone(),
-        }
-    }
-}
-
-pub struct SearchDocuments {
-    pub memory: crate::persistence::SqliteMemory,
-    pub workspace: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SearchDocumentsArgs {
-    pub query: String,
-    pub limit: Option<usize>,
-}
-
-impl Tool for SearchDocuments {
-    const NAME: &'static str = "search_documents";
-
-    type Args = SearchDocumentsArgs;
-    type Output = String;
-    type Error = ToolError;
-
-    fn description(&self) -> String {
-        "Search the knowledge library (PDFs, Word docs, Excel files, presentations, text) using full-text search. Returns matching passages with document names, file types, and page numbers.".to_string()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(Self::Args)).unwrap_or_default()
-    }
-
-    fn map_error(&self, error: Self::Error) -> ToolExecutionError {
-        tool_failure(error)
-    }
-
-    async fn call(&self, _ctx: &mut rig::tool::ToolContext, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let limit = args.limit.unwrap_or(10).clamp(1, 20);
-        let ws_str = self
-            .workspace
-            .as_ref()
-            .map(|w| dunce::canonicalize(w).unwrap_or_else(|_| w.clone()).to_string_lossy().into_owned());
-        let hits = self
-            .memory
-            .search_documents(&args.query, limit, ws_str)
-            .await
-            .map_err(|e| ToolError::msg(e.to_string()))?;
-
-        if hits.is_empty() {
-            return Ok(format!("No documents found matching '{}'.", args.query));
-        }
-
-        let mut out = format!("Found {} matching passage(s) for '{}':\n\n", hits.len(), args.query);
-        for (i, hit) in hits.iter().enumerate() {
-            let page_info = hit
-                .page_number
-                .map(|p| format!(" (page {p})"))
-                .unwrap_or_default();
-            let snippet = hit.snippet.replace("<b>", "**").replace("</b>", "**");
-            out.push_str(&format!(
-                "{}. {} [{}]{}\n   Source: {}\n   {}\n\n",
-                i + 1,
-                hit.document_title,
-                hit.file_type,
-                page_info,
-                hit.file_path.as_deref().unwrap_or(&hit.source),
-                snippet
-            ));
-        }
-
-        Ok(out)
     }
 }

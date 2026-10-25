@@ -9,7 +9,7 @@ import {
 import { RiFolderOpenLine } from "react-icons/ri";
 import { listen } from "@tauri-apps/api/event";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../lib/artifacts";
-import { getBasename } from "../lib/api";
+import { getBasename } from "../lib/utils";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { TerminalView } from "./TerminalView";

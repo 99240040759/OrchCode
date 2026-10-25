@@ -8,7 +8,6 @@ import {
   VscRocket,
   VscSignOut,
   VscTrash,
-  VscLibrary,
   VscExtensions,
 } from "react-icons/vsc";
 import { Avatar } from "./ChatPrimitives";
@@ -23,7 +22,8 @@ import {
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
 import { useWorkspaceStore } from "../lib/workspace";
-import { formatRelativeTime, formatUsd } from "../lib/api";
+import { formatRelativeTime } from "../lib/api";
+import { formatUsd } from "../lib/utils";
 import type { SessionSummary } from "../lib/api";
 import type { AppView } from "../App";
 
@@ -246,18 +246,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       </div>
 
       <nav className="Sidebar-viewnav" aria-label="Views">
-        <Tooltip content="Knowledge Library" side="right">
-          <button
-            type="button"
-            className="Sidebar-viewbtn"
-            data-active={currentView === "library"}
-            onClick={() => onViewChange("library")}
-            aria-label="Knowledge Library"
-          >
-            <VscLibrary />
-            <span>Library</span>
-          </button>
-        </Tooltip>
         <Tooltip content="Integrations" side="right">
           <button
             type="button"

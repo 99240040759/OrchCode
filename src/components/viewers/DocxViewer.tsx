@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { renderAsync } from "docx-preview";
-import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
+import { errorMessage, readBinaryFile } from "../../lib/api";
+import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ViewerError, ViewerLoading, ZoomControls, useZoom } from "./ViewerChrome";
 

@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   VscAdd,
   VscArrowUp,
+  VscChevronRight,
   VscDebugStop,
   VscFolderOpened,
   VscMic,
+  VscPlug,
 } from "react-icons/vsc";
 import { RiFileTextLine, RiImageLine } from "react-icons/ri";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -22,16 +24,24 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Mention from "@tiptap/extension-mention";
 import * as api from "../lib/api";
-import { useChatStore } from "../lib/store";
+import * as utils from "../lib/utils";
+import { selectActiveConnectors, useChatStore } from "../lib/store";
+import { useConnectorsStore } from "../lib/connectors";
 import { useWorkspaceStore } from "../lib/workspace";
 import { useArtifactsStore } from "../lib/artifacts";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { AttachmentCard, ExplorerIcon } from "./ChatPrimitives";
+import { ConnectorIcon } from "./icons/ConnectorIcon";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/DropdownMenu";
 interface CommandItem {
@@ -56,7 +66,7 @@ interface ActiveToken {
 function MentionNodeView(props: ReactNodeViewProps) {
   const path = (props.node.attrs.id as string) || "";
   const name =
-    (props.node.attrs.label as string) || api.getBasename(path) || path;
+    (props.node.attrs.label as string) || utils.getBasename(path) || path;
   const openFile = useArtifactsStore((s) => s.openFile);
 
   return (
@@ -182,7 +192,7 @@ interface ContextBarProps {
 }
 
 function ContextBar({ maxContext, contextTokens, fillPct, cachedTokens, inputTokens }: ContextBarProps) {
-  const compactAt = Math.min(api.AUTO_COMPACT_TOKENS, maxContext);
+  const compactAt = Math.min(utils.AUTO_COMPACT_TOKENS, maxContext);
   const level =
     contextTokens >= compactAt || fillPct > 85
       ? "danger"
@@ -194,8 +204,8 @@ function ContextBar({ maxContext, contextTokens, fillPct, cachedTokens, inputTok
     inputTokens && cachedTokens !== undefined && inputTokens > 0
       ? Math.round((cachedTokens / inputTokens) * 100)
       : null;
-  const used = api.formatTokens(contextTokens);
-  const total = api.formatWindow(maxContext);
+  const used = utils.formatTokens(contextTokens);
+  const total = utils.formatWindow(maxContext);
   const tooltip =
     `Context: ${used} of ${total} tokens (${fillPct}%).` +
     (cacheHit !== null ? ` Prompt cache: ${cacheHit}% of the last request's input.` : "");
@@ -211,6 +221,49 @@ function ContextBar({ maxContext, contextTokens, fillPct, cachedTokens, inputTok
   );
 }
 
+function ConnectorsMenu() {
+  const connectors = useConnectorsStore((s) => s.connectors);
+  const loaded = useConnectorsStore((s) => s.loaded);
+  const loadFailed = useConnectorsStore((s) => s.loadFailed);
+  const active = useChatStore(selectActiveConnectors);
+  const toggleConnector = useChatStore((s) => s.toggleConnector);
+  const connected = useMemo(() => connectors.filter((connector) => connector.connected), [connectors]);
+
+  let emptyLabel = "No connected apps";
+  if (loadFailed) emptyLabel = "Couldn't load connectors";
+  else if (!loaded) emptyLabel = "Loading…";
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <VscPlug />
+        <span className="DropdownMenuSubTrigger-label">Connectors</span>
+        {active.length > 0 && <span className="DropdownMenuSubTrigger-count">{active.length}</span>}
+        <VscChevronRight className="DropdownMenuSubTrigger-chevron" />
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {connected.length === 0 ? (
+          <DropdownMenuItem disabled>
+            <span>{emptyLabel}</span>
+          </DropdownMenuItem>
+        ) : (
+          connected.map((connector) => (
+            <DropdownMenuCheckboxItem
+              key={connector.id}
+              checked={active.includes(connector.id)}
+              onCheckedChange={() => toggleConnector(connector.id)}
+              onSelect={(event) => event.preventDefault()}
+            >
+              <ConnectorIcon id={connector.id} size={14} />
+              <span className="ModelItem-name">{connector.name}</span>
+            </DropdownMenuCheckboxItem>
+          ))
+        )}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const send = useChatStore((s) => s.send);
   const cancel = useChatStore((s) => s.cancel);
@@ -220,6 +273,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const newChat = useChatStore((s) => s.newChat);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
+  const refreshConnectors = useConnectorsStore((s) => s.refresh);
 
   const currentWs = useWorkspaceStore((s) => s.current);
 
@@ -248,10 +302,10 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
     (paths: string[]) => {
       if (paths.length === 0) return;
       const rejected = paths
-        .filter((path) => api.isImagePath(path) && !modelSupportsImages)
-        .map((path) => api.getBasename(path));
+        .filter((path) => utils.isImagePath(path) && !modelSupportsImages)
+        .map((path) => utils.getBasename(path));
       const accepted = paths.filter(
-        (path) => !(api.isImagePath(path) && !modelSupportsImages)
+        (path) => !(utils.isImagePath(path) && !modelSupportsImages)
       );
       setAttachments((previous) => {
         const known = new Set(previous.map((a) => a.path));
@@ -261,8 +315,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
           known.add(path);
           next.push({
             path,
-            name: api.getBasename(path),
-            isImage: api.isImagePath(path),
+            name: utils.getBasename(path),
+            isImage: utils.isImagePath(path),
           });
         }
         return next;
@@ -512,7 +566,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const insertMention = useCallback(
     (filePath: string) => {
       if (!editor) return;
-      const filename = api.getBasename(filePath) || filePath;
+      const filename = utils.getBasename(filePath) || filePath;
       const range = tokenRangeRef.current;
       if (range) {
         editor
@@ -630,7 +684,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       const selected = await openDialog({
         multiple: true,
         filters: imagesOnly
-          ? [{ name: "Images", extensions: [...api.IMAGE_EXTENSIONS] }]
+          ? [{ name: "Images", extensions: [...utils.IMAGE_EXTENSIONS] }]
           : undefined,
       });
       if (!selected) return;
@@ -661,8 +715,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               </div>
             ) : (
               fileHits.map((file, index) => {
-                const filename = api.getBasename(file.path) || file.name;
-                const dir = api.getDirname(file.path);
+                const filename = utils.getBasename(file.path) || file.name;
+                const dir = utils.getDirname(file.path);
                 return (
                   <button
                     type="button"
@@ -749,8 +803,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                 : "Composer-row"
             }
           >
-            <DropdownMenu>
-              <Tooltip content="Add files or images" side="top">
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (open) void refreshConnectors();
+              }}
+            >
+              <Tooltip content="Add files, images, or connectors" side="top">
                 <DropdownMenuTrigger asChild>
                   <Button
                     className="Composer-plus"
@@ -774,6 +832,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                   <RiFileTextLine />
                   <span>File</span>
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <ConnectorsMenu />
               </DropdownMenuContent>
             </DropdownMenu>
 

@@ -15,6 +15,7 @@ use crate::llm::{
     build_agent, build_user_message, run_chat, AgentInputs, AttachmentRef, ChatRun, RunOutcome,
     RunParams,
 };
+use crate::persistence::SessionViewPage;
 use crate::session;
 use crate::state::AppState;
 use crate::terminal;
@@ -307,6 +308,7 @@ pub async fn start_chat(
     model: String,
     prompt: String,
     attachments: Vec<AttachmentRef>,
+    active_connectors: Vec<String>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     if session_id.trim().is_empty() {
@@ -341,6 +343,19 @@ pub async fn start_chat(
         user_id,
     } = match ready {
         Ok(ready) => ready,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            return Err(error);
+        }
+    };
+
+    let prepared = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err("cancelled".to_string()),
+        result = state.connector_manager.prepare(&active_connectors) => result.map_err(|error| error.to_string()),
+    };
+    let connectors = match prepared {
+        Ok(connectors) => connectors,
         Err(error) => {
             state.finish_run(&session_id, &run_id);
             return Err(error);
@@ -406,17 +421,15 @@ pub async fn start_chat(
         app_handle: app.clone(),
         command_manager: (*state.command_manager).clone(),
         data_dir: state.data_dir.clone(),
-        memory: state.memory.clone(),
-        connector_manager: state.connector_manager.clone(),
     };
-    let enabled_connectors = state.connector_manager.enabled_ids();
     let agent = build_agent(AgentInputs {
         client: &client,
         model: &model_info,
         tools: &tool_context,
         data_dir: &state.data_dir,
         workspace: Some(workspace.as_path()),
-        enabled_connectors: &enabled_connectors,
+        connectors: connectors.defs,
+        connector_tools: connectors.tools,
     });
 
     let result = run_chat(
@@ -507,7 +520,7 @@ pub async fn get_session_messages_page(
     state: State<'_, AppState>,
     session_id: String,
     limit: Option<usize>,
-    before_seq: Option<i64>,
+    before_message_id: Option<i64>,
 ) -> Result<SessionViewPage, String> {
     if let Some(user_id) = state.current_user_id() {
         if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
@@ -526,17 +539,20 @@ pub async fn get_session_messages_page(
         &session_id,
         durations,
         limit.unwrap_or(50).clamp(1, 200),
-        before_seq,
+        before_message_id,
     )
     .await
     .map_err(|e| e.to_string())
 }
 
-fn prefs_key(state: &AppState, key: &str, scoped: bool) -> String {
-    match (scoped, state.current_user_id()) {
-        (true, Some(user)) => format!("user:{user}:{key}"),
-        _ => key.to_string(),
+fn prefs_key(state: &AppState, key: &str, scoped: bool) -> Result<String, String> {
+    if !scoped {
+        return Ok(key.to_string());
     }
+    let user = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required for scoped preference".to_string())?;
+    Ok(format!("user:{user}:{key}"))
 }
 
 #[tauri::command]
@@ -548,7 +564,7 @@ pub fn get_user_pref(
 ) -> Result<Option<String>, String> {
     use tauri_plugin_store::StoreExt;
     let store = app.store("prefs.json").map_err(|e| e.to_string())?;
-    let full_key = prefs_key(&state, &key, scoped.unwrap_or(false));
+    let full_key = prefs_key(&state, &key, scoped.unwrap_or(false))?;
     Ok(store
         .get(&full_key)
         .and_then(|v| v.as_str().map(|s| s.to_string())))
@@ -564,7 +580,7 @@ pub fn set_user_pref(
 ) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
     let store = app.store("prefs.json").map_err(|e| e.to_string())?;
-    let full_key = prefs_key(&state, &key, scoped.unwrap_or(false));
+    let full_key = prefs_key(&state, &key, scoped.unwrap_or(false))?;
     store.set(full_key, serde_json::Value::String(value));
     store.save().map_err(|e| e.to_string())
 }
@@ -677,8 +693,7 @@ pub async fn terminal_close(state: State<'_, AppState>, id: String) -> Result<()
     Ok(())
 }
 
-use crate::connectors::{self, ConnectorDef, CONNECTOR_DEFS};
-use crate::persistence::ConnectorRecord;
+use crate::connectors::CONNECTOR_DEFS;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -687,187 +702,49 @@ pub struct ConnectorDto {
     pub name: String,
     pub description: String,
     pub category: String,
-    pub auth_kind: String,
-    pub is_configured: bool,
-    pub has_token: bool,
-    pub token_expires_at: Option<i64>,
-    pub error: Option<String>,
-}
-
-fn connector_dto(def: &ConnectorDef, rec: Option<&ConnectorRecord>, has_token: bool) -> ConnectorDto {
-    ConnectorDto {
-        id: def.id.to_string(),
-        name: def.name.to_string(),
-        description: def.description.to_string(),
-        category: def.category.to_string(),
-        auth_kind: def.auth_kind.as_str().to_string(),
-        is_configured: def.is_configured(),
-        has_token,
-        token_expires_at: rec.and_then(|r| r.token_expires_at),
-        error: rec.and_then(|r| r.error.clone()),
-    }
+    pub connected: bool,
+    pub tool_count: usize,
 }
 
 #[tauri::command]
 pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<ConnectorDto>, String> {
-    let records = state
-        .memory
-        .list_connectors()
+    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    let connected = state
+        .connector_manager
+        .connected_ids()
         .await
         .map_err(|e| e.to_string())?;
-    let record_map: std::collections::HashMap<&str, &ConnectorRecord> =
-        records.iter().map(|r| (r.id.as_str(), r)).collect();
-
     Ok(CONNECTOR_DEFS
         .iter()
-        .map(|def| {
-            connector_dto(
-                def,
-                record_map.get(def.id).copied(),
-                state.connector_manager.has_token(def.id),
-            )
+        .map(|def| ConnectorDto {
+            id: def.id.to_string(),
+            name: def.name.to_string(),
+            description: def.description.to_string(),
+            category: def.category.to_string(),
+            connected: connected.contains(&def.id),
+            tool_count: def.actions.len(),
         })
         .collect())
 }
 
 #[tauri::command]
 pub async fn get_connector_auth_url(state: State<'_, AppState>, connector_id: String) -> Result<String, String> {
-    let def = connectors::find_def(&connector_id).ok_or_else(|| format!("Connector not found: {connector_id}"))?;
-    let (state_param, challenge) = state
-        .connector_manager
-        .begin_oauth(&connector_id)
-        .map_err(|e| e.to_string())?;
-    connectors::build_auth_url(def, &state_param, challenge.as_deref()).map_err(|e| e.to_string())
-}
-
-pub async fn complete_connector_auth(
-    state: &AppState,
-    connector_id: String,
-    code: String,
-    oauth_state: String,
-) -> Result<ConnectorDto, String> {
-    let def = connectors::find_def(&connector_id).ok_or_else(|| format!("Connector not found: {connector_id}"))?;
-    let verifier = state
-        .connector_manager
-        .consume_oauth(&connector_id, &oauth_state)
-        .map_err(|e| e.to_string())?;
-
-    let redirect_uri = connectors::connector_redirect_uri(def.deep_link_id);
-    let tokens = connectors::exchange_code(
-        def,
-        &code,
-        &redirect_uri,
-        verifier.as_deref(),
-        state.connector_manager.http(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
+    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
     state
         .connector_manager
-        .store_tokens(&connector_id, &tokens, &state.memory)
+        .begin_connect(&connector_id)
         .await
-        .map_err(|e| e.to_string())?;
-
-    let records = state.memory.list_connectors().await.map_err(|e| e.to_string())?;
-    let rec = records.iter().find(|r| r.id == connector_id);
-    Ok(connector_dto(def, rec, state.connector_manager.has_token(&connector_id)))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn disconnect_connector(state: State<'_, AppState>, connector_id: String) -> Result<(), String> {
+    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
     state
         .connector_manager
-        .disconnect(&connector_id, &state.memory)
+        .disconnect(&connector_id)
         .await
         .map_err(|e| e.to_string())
-}
-
-use crate::document::{ingest_document, IngestResult};
-use crate::persistence::{DocumentRecord, SearchHit, SessionViewPage};
-
-#[tauri::command]
-pub async fn ipc_ingest_document(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<IngestResult, String> {
-    if state.current_user_id().is_none() {
-        return Err("authentication required to ingest documents".to_string());
-    }
-    let resolved = dunce::canonicalize(PathBuf::from(&path)).map_err(|e| format!("cannot resolve path: {e}"))?;
-    if !resolved.is_file() {
-        return Err(format!("not a file: {path}"));
-    }
-    let ws = state.workspace();
-    let result = ingest_document(&resolved, ws.as_deref(), &state.memory)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let _ = app.emit("documents-updated", ());
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn ipc_list_documents(
-    state: State<'_, AppState>,
-    source: Option<String>,
-    file_type: Option<String>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-) -> Result<Vec<DocumentRecord>, String> {
-    if state.current_user_id().is_none() {
-        return Err("authentication required".to_string());
-    }
-    let ws_str = state
-        .workspace()
-        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
-    state
-        .memory
-        .list_documents(ws_str, source, file_type, limit.unwrap_or(50).clamp(1, 500), offset.unwrap_or(0))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn ipc_delete_document(app: tauri::AppHandle, state: State<'_, AppState>, document_id: String) -> Result<(), String> {
-    if state.current_user_id().is_none() {
-        return Err("authentication required".to_string());
-    }
-    state
-        .memory
-        .delete_document(&document_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("documents-updated", ());
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn ipc_search_documents(
-    state: State<'_, AppState>,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<SearchHit>, String> {
-    if state.current_user_id().is_none() {
-        return Err("authentication required".to_string());
-    }
-    let ws_str = state
-        .workspace()
-        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
-    state
-        .memory
-        .search_documents(&query, limit.unwrap_or(20).clamp(1, 100), ws_str)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn ipc_count_documents(state: State<'_, AppState>) -> Result<i64, String> {
-    if state.current_user_id().is_none() {
-        return Err("authentication required".to_string());
-    }
-    let ws_str = state
-        .workspace()
-        .map(|w| dunce::canonicalize(&w).unwrap_or(w).to_string_lossy().into_owned());
-    state.memory.count_documents(ws_str).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

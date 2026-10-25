@@ -24,10 +24,10 @@ pub enum AppError {
     FileTooLarge(String),
     #[error("connector not found: {0}")]
     ConnectorNotFound(String),
-    #[error("connector '{0}' is not configured (missing OAuth client credentials)")]
-    ConnectorNotConfigured(String),
-    #[error("connector auth error: {0}")]
-    ConnectorAuthError(String),
+    #[error("{0} is not connected. Connect it in Integrations and try again.")]
+    ConnectorNotConnected(String),
+    #[error("{0}")]
+    Connector(String),
     #[error("document parse error: {0}")]
     DocumentParseError(String),
     #[error("unsupported file type: {0}")]

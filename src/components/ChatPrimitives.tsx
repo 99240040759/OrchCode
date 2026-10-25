@@ -7,7 +7,7 @@ import {
   BsFileEarmarkPptFill,
 } from "react-icons/bs";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
-import { cn, getBasename } from "../lib/api";
+import { cn, getBasename } from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 

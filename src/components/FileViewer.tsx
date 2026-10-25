@@ -3,6 +3,7 @@ import { useDebouncedCallback } from "use-debounce";
 import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
 
 import * as api from "../lib/api";
+import * as utils from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 import { Markdown } from "./Markdown";
@@ -60,11 +61,11 @@ const MEDIA_MIMES: Record<"video" | "audio", Record<string, string>> = {
 };
 
 function mediaMime(kind: "video" | "audio", path: string): string {
-  return MEDIA_MIMES[kind][api.getExt(path)] ?? (kind === "video" ? "video/mp4" : "audio/mpeg");
+  return MEDIA_MIMES[kind][utils.getExt(path)] ?? (kind === "video" ? "video/mp4" : "audio/mpeg");
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
-  const parts = api.splitPathParts(path);
+  const parts = utils.splitPathParts(path);
   return (
     <div className="FileBreadcrumb">
       {parts.map((part, index) => (
@@ -122,8 +123,8 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
           <p className="FilePicker-empty">No files found</p>
         ) : (
           hits.map((hit) => {
-            const filename = api.getBasename(hit.path) || hit.name;
-            const dir = api.getDirname(hit.path);
+            const filename = utils.getBasename(hit.path) || hit.name;
+            const dir = utils.getDirname(hit.path);
             return (
               <button
                 type="button"
@@ -149,7 +150,7 @@ function ImagePreview({ path, version }: { path: string; version: number }) {
   if (error || !src) return <div className="FileContent-msg">{error ?? "Image could not be loaded"}</div>;
   return (
     <div className="NativeMediaViewer">
-      <img src={src} alt={api.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+      <img src={src} alt={utils.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
     </div>
   );
 }
@@ -199,13 +200,13 @@ function MediaPreview({ path, kind }: { path: string; kind: "video" | "audio" })
 }
 
 function BinaryFileMessage({ path }: { path: string }) {
-  const name = api.getBasename(path);
+  const name = utils.getBasename(path);
   return (
     <div className="FileContent-msg">
       <div className="BinaryFileMsg">
         <ExplorerIcon type="file" name={name} width={40} height={40} className="BinaryFileMsg-icon" />
         <span className="BinaryFileMsg-name">{name}</span>
-        <span className="BinaryFileMsg-hint">Binary file (.{api.getExt(path)}) — cannot be displayed as text</span>
+        <span className="BinaryFileMsg-hint">Binary file (.{utils.getExt(path)}) — cannot be displayed as text</span>
       </div>
     </div>
   );
@@ -238,7 +239,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   const [reloadTick, setReloadTick] = useState(0);
   const current = file && file.path === path ? file : null;
   const content = current?.content ?? "";
-  const { copied, copy } = api.useCopy(content);
+  const { copied, copy } = utils.useCopy(content);
 
   useEffect(() => {
     setMode("preview");

@@ -1,24 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { formatDistanceToNowStrict } from "date-fns";
-import { getExt } from "./utils";
-
-export {
-  cn,
-  splitPathParts,
-  getBasename,
-  getDirname,
-  getExt,
-  IMAGE_EXTENSIONS,
-  isImagePath,
-  looksLikePath,
-  createMentionRegex,
-  formatUsd,
-  formatTokens,
-  formatWindow,
-  AUTO_COMPACT_TOKENS,
-  useCopy,
-} from "./utils";
-
 export interface ModelDto {
   key: string;
   id: string;
@@ -66,6 +47,7 @@ export interface ToolDisplayInfo {
   targetText?: string | null;
   icon: ToolIcon;
   opensArtifact: boolean;
+  connector?: string | null;
 }
 
 export type MessageItemView =
@@ -85,6 +67,7 @@ export type MessageItemView =
 export interface AttachmentView {
   name: string;
   isImage: boolean;
+  path?: string | null;
   dataUrl?: string | null;
 }
 
@@ -125,7 +108,7 @@ export type ChatStreamEvent =
   | { type: "reasoning"; delta: string }
   | { type: "reasoningDone"; durationSeconds: number }
   | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
-  | { type: "toolResult"; id: string; output: string; isError: boolean }
+  | { type: "toolResult"; id: string; output?: string; isError: boolean }
   | {
       type: "usage";
       contextTokens: number;
@@ -136,7 +119,6 @@ export type ChatStreamEvent =
       type: "compacted";
       originalMessageCount: number;
       ts: number;
-      afterMessageId?: string;
       compactionMessageId?: string;
       compactionItemId?: string;
     }
@@ -157,8 +139,8 @@ export function getAuthUser(): Promise<UserDisplay | null> {
   return invoke("get_auth_user");
 }
 
-export function getOAuthUrl(redirectTo: string): Promise<string> {
-  return invoke("get_oauth_url", { redirectTo });
+export function getOAuthUrl(redirectTo?: string): Promise<string> {
+  return invoke("get_oauth_url", redirectTo ? { redirectTo } : {});
 }
 
 export function signOutAuth(): Promise<void> {
@@ -192,18 +174,18 @@ export function getBudget(): Promise<Budget> {
 export interface SessionViewPage {
   messages: MessageView[];
   hasMore: boolean;
-  earliestSeq: number | null;
+  earliestMessageId: number | null;
 }
 
 export function getSessionMessagesPage(
   sessionId: string,
   limit?: number,
-  beforeSeq?: number | null
+  beforeMessageId?: number | null
 ): Promise<SessionViewPage> {
   return invoke("get_session_messages_page", {
     sessionId,
     limit: limit ?? 50,
-    beforeSeq: beforeSeq ?? null,
+    beforeMessageId: beforeMessageId ?? null,
   });
 }
 
@@ -224,11 +206,19 @@ export function startChat(
   model: string,
   prompt: string,
   attachments: AttachmentRef[],
+  activeConnectors: string[],
   onEvent: (evt: ChatStreamEvent) => void
 ): Promise<void> {
   const channel = new Channel<ChatStreamEvent>();
   channel.onmessage = onEvent;
-  return invoke("start_chat", { sessionId, model, prompt, attachments, onEvent: channel });
+  return invoke("start_chat", {
+    sessionId,
+    model,
+    prompt,
+    attachments,
+    activeConnectors,
+    onEvent: channel,
+  });
 }
 
 export function cancelChat(sessionId: string): Promise<void> {
@@ -267,6 +257,8 @@ export interface DocumentFileMeta {
   sizeBytes: number;
   extension: string;
   mime: string;
+  artifactKind?: DocumentArtifactKind | null;
+  typeLabel: string;
   modified: number | null;
 }
 
@@ -339,11 +331,8 @@ export interface ConnectorDto {
   name: string;
   description: string;
   category: string;
-  authKind: string;
-  isConfigured: boolean;
-  hasToken: boolean;
-  tokenExpiresAt?: number | null;
-  error?: string | null;
+  connected: boolean;
+  toolCount: number;
 }
 
 export function listConnectors(): Promise<ConnectorDto[]> {
@@ -358,110 +347,8 @@ export function disconnectConnector(connectorId: string): Promise<void> {
   return invoke("disconnect_connector", { connectorId });
 }
 
-export interface DocumentRecord {
-  id: string;
-  title: string;
-  filePath?: string | null;
-  source: string;
-  sourceId?: string | null;
-  fileType: string;
-  sizeBytes: number;
-  pageCount?: number | null;
-  wordCount?: number | null;
-  metadata: unknown;
-  indexedAt: number;
-  updatedAt: number;
-}
-
-export interface SearchHit {
-  documentId: string;
-  documentTitle: string;
-  fileType: string;
-  source: string;
-  filePath?: string | null;
-  passageId: string;
-  snippet: string;
-  pageNumber?: number | null;
-  score: number;
-}
-
-export interface IngestResultDto {
-  documentId: string;
-  title: string;
-  fileType: string;
-  passageCount: number;
-  wordCount: number;
-  pageCount?: number | null;
-  wasUpdate: boolean;
-}
-
-export function ingestDocument(path: string): Promise<IngestResultDto> {
-  return invoke("ipc_ingest_document", { path });
-}
-
-export function listDocuments(opts?: {
-  source?: string;
-  fileType?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<DocumentRecord[]> {
-  return invoke("ipc_list_documents", {
-    source: opts?.source ?? null,
-    fileType: opts?.fileType ?? null,
-    limit: opts?.limit ?? 50,
-    offset: opts?.offset ?? 0,
-  });
-}
-
-export function deleteDocument(documentId: string): Promise<void> {
-  return invoke("ipc_delete_document", { documentId });
-}
-
-export function searchDocuments(query: string, limit?: number): Promise<SearchHit[]> {
-  return invoke("ipc_search_documents", { query, limit: limit ?? 20 });
-}
-
-export function countDocuments(): Promise<number> {
-  return invoke("ipc_count_documents");
-}
+export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
 
 export function reportError(message: string): Promise<void> {
   return invoke("report_error", { message });
-}
-
-export type DocumentArtifactKind = "pdf" | "docx" | "xlsx" | "pptx";
-
-const DOCUMENT_ARTIFACT_KINDS: Record<string, DocumentArtifactKind> = {
-  pdf: "pdf",
-  docx: "docx",
-  xls: "xlsx",
-  xlsx: "xlsx",
-  ods: "xlsx",
-  pptx: "pptx",
-};
-
-export function documentArtifactKind(fileType: string): DocumentArtifactKind | undefined {
-  return DOCUMENT_ARTIFACT_KINDS[fileType.toLowerCase()];
-}
-
-export function documentArtifactKindForPath(path: string): DocumentArtifactKind | undefined {
-  return documentArtifactKind(getExt(path));
-}
-
-const DOCUMENT_TYPE_LABELS: Record<string, string> = {
-  pdf: "PDF",
-  docx: "Word",
-  xlsx: "Excel",
-  xls: "Excel",
-  ods: "Spreadsheet",
-  pptx: "PowerPoint",
-  txt: "Text",
-  md: "Markdown",
-  csv: "CSV",
-  json: "JSON",
-};
-
-export function documentTypeLabel(fileType: string): string {
-  const key = fileType.toLowerCase();
-  return DOCUMENT_TYPE_LABELS[key] ?? fileType.toUpperCase();
 }

@@ -114,41 +114,41 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 
 /* ─── SHARED BASE RESETS & UTILITIES ─────────────────────────────────────── */
 /* 1. All Button Resets */
-button, [role="button"], [role="menuitem"], a, select, summary, .Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .LibraryView-pagination button, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .DocViewer-pageBtn, .DocViewer-pageCurrent, .XlsxViewer-tab, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
+button, [role="button"], [role="menuitem"], a, select, summary, .Button, .IconBtn, .WinBtn, .Sidebar-newchat, .Sidebar-viewbtn, .Sidebar-wsBtn, .ThreadItem-btn, .ThreadItem-del, .ThreadItem-confirmYes, .ThreadItem-confirmNo, .ChatPane-errorClose, .MessageList-jump, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .Composer-send, .AttachmentCard-remove, .MentionItem, .DropdownMenuItem, .WsMenuItem-name, .WsMenuItem-del, .WsMenuItem-confirmYes, .WsMenuItem-confirmNo, .ArtifactCard, .ArtifactTab, .ArtifactTab-iconWrap, .CodeBlock-copy, .FilePicker-item, .GoogleBtn, .ConnectorCard-actionBtn, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .DocViewer-pageBtn, .DocViewer-pageCurrent, .XlsxViewer-tab, .WorkspacePicker-card, .WorkspacePicker-error-dismiss { font-family:inherit; cursor:pointer; border:none; outline:none; background:transparent; padding:0; margin:0; }
 
 /* 2. Common Transitions */
 .IconBtn, .WinBtn, .Sidebar-viewbtn, .Reasoning-toggle, .ToolRow-toggle, .Composer-plus, .Composer-model, .Composer-repo, .AttachmentCard, .AttachmentCard-remove, .DropdownMenuItem, .FilePicker-item, .DocViewer-zoom-btn, .DocViewer-zoom-pct, .DocViewer-pageBtn, .DocViewer-pageCurrent { transition:background var(--dur) var(--ease), color var(--dur) var(--ease); }
 
-.Sidebar-newchat, .Sidebar-wsBtn, .ArtifactCard, .ArtifactTab, .ConnectorsView-filterTab, .ConnectorCard, .ConnectorCard-actionBtn, .LibraryView-addBtn, .LibraryRow, .LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo, .WorkspacePicker-card { transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
+.Sidebar-newchat, .Sidebar-wsBtn, .ArtifactCard, .ArtifactTab, .ConnectorsView-filterTab, .ConnectorCard, .ConnectorCard-actionBtn, .WorkspacePicker-card { transition:background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
 
 /* 3. Common Hover & Selection States */
-.IconBtn:hover:not(:disabled), .WinBtn:hover, .Sidebar-viewbtn:hover, .Sidebar-wsBtn:hover, .ThreadItem:hover, .DropdownMenuItem[data-highlighted], .WsMenuItem:hover, .ArtifactCard:hover, .ArtifactTab:hover, .CodeBlock-copy:hover:not(:disabled), .FilePicker-item:hover, .ConnectorsView-filterTab:hover, .LibraryView-pagination button:hover:not(:disabled), .LibraryRow:hover, .DocViewer-zoom-btn:hover:not(:disabled), .DocViewer-zoom-pct:hover, .DocViewer-pageBtn:hover:not(:disabled), .DocViewer-pageCurrent:hover, .XlsxViewer-tab:hover, .WorkspacePicker-card:hover:not(:disabled) { background:var(--md-hover); }
+.IconBtn:hover:not(:disabled), .WinBtn:hover, .Sidebar-viewbtn:hover, .Sidebar-wsBtn:hover, .ThreadItem:hover, .DropdownMenuItem[data-highlighted], .WsMenuItem:hover, .ArtifactCard:hover, .ArtifactTab:hover, .CodeBlock-copy:hover:not(:disabled), .FilePicker-item:hover, .ConnectorsView-filterTab:hover, .DocViewer-zoom-btn:hover:not(:disabled), .DocViewer-zoom-pct:hover, .DocViewer-pageBtn:hover:not(:disabled), .DocViewer-pageCurrent:hover, .XlsxViewer-tab:hover, .WorkspacePicker-card:hover:not(:disabled) { background:var(--md-hover); }
 
-.Sidebar-viewbtn[data-active="true"], .ThreadItem[data-active='true'], .ArtifactTab[data-active='true'], .ConnectorsView-filterTab[data-active="true"], .ConnectorCard-actionBtn--connect:hover:not(:disabled), .LibraryView-addBtn:hover:not(:disabled) { background:var(--md-selected); color:var(--md-on); }
+.Sidebar-viewbtn[data-active="true"], .ThreadItem[data-active='true'], .ArtifactTab[data-active='true'], .ConnectorsView-filterTab[data-active="true"], .ConnectorCard-actionBtn--connect:hover:not(:disabled) { background:var(--md-selected); color:var(--md-on); }
 
 /* 4. Common Disabled States */
-button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-disabled], [disabled], .IconBtn:disabled, .ThreadItem-btn:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .ConnectorCard-actionBtn:disabled, .LibraryView-addBtn:disabled, .LibraryView-pagination button:disabled, .DocViewer-zoom-btn:disabled, .DocViewer-pageBtn:disabled { opacity:.38; cursor:default; }
+button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-disabled], [disabled], .IconBtn:disabled, .ThreadItem-btn:disabled, .DropdownMenuItem[data-disabled], .CodeBlock-copy:disabled, .ConnectorCard-actionBtn:disabled, .DocViewer-zoom-btn:disabled, .DocViewer-pageBtn:disabled { opacity:.38; cursor:default; }
 
 /* 5. Common Text Ellipsis */
-.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .ThreadItem-time, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .LibraryRow-title, .LibraryRow-path, .LibraryRow-time, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.Titlebar-title, .Sidebar-wsName, .ThreadItem-title, .ThreadItem-time, .Account-name, .Account-plan, .ToolRow-target, .ToolRow-text, .FileTag-name, .Composer-footer .Composer-repo > span, .AttachmentCard-name, .MentionItem-name, .MentionItem-path, .ModelItem-name, .WsMenuItem-name, .ArtifactTab-title, .FileBreadcrumb, .FilePicker-name, .FilePicker-path, .DocViewer-title, .XlsxViewer-cell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* 6. Common Text / Search Inputs */
-.FilePicker-input, .LibraryView-searchInput, .DocViewer-pageInput { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
-.FilePicker-input:focus, .LibraryView-searchInput:focus, .DocViewer-pageInput:focus { border-color:var(--md-outline-hi); }
+.FilePicker-input, .DocViewer-pageInput { background:var(--md-input-bg); border:1px solid var(--md-outline); border-radius:var(--r-md); color:var(--md-on); font-family:inherit; outline:none; transition:border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.FilePicker-input:focus, .DocViewer-pageInput:focus { border-color:var(--md-outline-hi); }
 
 /* 7. Common Alert & Notification Banners */
 .ChatPane-error, .Msg-error, .BrowserView-error, .ConnectorsView-error, .WorkspacePicker-error { display:flex; align-items:center; background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.25); border-radius:var(--r-md); color:var(--md-error-c); }
 
 /* 8. Common Scroll Containers (Disable Elastic Bounce / Rubber-Banding) */
-.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer, .PdfViewer-scroll { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
+.MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer, .PdfViewer-scroll { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
 
 .Composer-notice, .FileContent-trunc { background:rgba(241,180,103,.09); color:var(--md-warn); }
 
 /* 9. Common Empty State Alignment */
-.Sidebar-empty, .EmptyState, .MentionItem-empty, .ArtifactEmpty, .FileContent-msg, .FilePicker-empty, .LibraryView-empty, .DocViewer-empty { color:var(--md-on-dim); text-align:center; }
+.Sidebar-empty, .EmptyState, .MentionItem-empty, .ArtifactEmpty, .FileContent-msg, .FilePicker-empty, .DocViewer-empty { color:var(--md-on-dim); text-align:center; }
 
 /* 10. Common Badges & Status Pills */
-.Titlebar-update-badge, .Composer-badge, .ConnectorsView-statusPill, .ConnectorCard-badge, .LibraryView-count, .LibraryRow-source { border-radius:var(--r-full); font-weight:600; display:inline-flex; align-items:center; justify-content:center; }
+.Titlebar-update-badge, .Composer-badge, .ConnectorsView-statusPill, .ConnectorCard-badge { border-radius:var(--r-full); font-weight:600; display:inline-flex; align-items:center; justify-content:center; }
 
 /* ─── APP SHELL ──────────────────────────────────────────────────────────── */
 .AppShell { display:flex; flex-direction:column; height:100%; width:100%; background:var(--md-bg); overflow:hidden; }
@@ -469,6 +469,12 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .DropdownMenuItem[data-selected='true'] { color:var(--md-primary); font-weight:500; }
 .ModelItem-name { flex:1; }
 .DropdownMenu-separator { height:1px; background:var(--md-outline); margin:var(--sp-1) 0; }
+.DropdownMenuSubTrigger-label { flex:1; }
+.DropdownMenuSubTrigger-count { min-width:16px; height:16px; padding:0 4px; border-radius:var(--r-full); background:var(--md-hover); color:var(--md-on); font-size:10px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; }
+.DropdownMenuSubTrigger[data-state='open'] { background:var(--md-hover); }
+.DropdownMenuCheckboxItem { padding-right:6px; }
+.DropdownMenuCheckboxItem-check { width:14px; height:14px; margin-left:auto; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.DropdownMenuCheckboxItem-check svg { color:var(--md-primary); }
 
 /* ─── WORKSPACE MENU ITEMS ───────────────────────────────────────────────── */
 .WsMenuItem { display:flex; align-items:center; padding:0 var(--sp-1); border-radius:var(--r-sm); gap:2px; }
@@ -686,68 +692,13 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .ConnectorCard-category { font-size:11px; color:var(--md-on-dim); }
 .ConnectorCard-badge { font-size:10px; letter-spacing:.04em; padding:2px 7px; flex-shrink:0; }
 .ConnectorCard-badge[data-state="connected"] { background:rgba(112,180,137,.15); color:var(--md-success); }
-.ConnectorCard-badge[data-state="configured"] { background:var(--md-hover); color:var(--md-on-dim); }
-.ConnectorCard-badge[data-state="unconfigured"] { background:rgba(241,180,103,.12); color:var(--md-warn); }
+.ConnectorCard-badge[data-state="available"] { background:var(--md-hover); color:var(--md-on-dim); }
 .ConnectorCard-description { font-size:12px; color:var(--md-on-var); margin:var(--sp-3) 0 var(--sp-4); line-height:1.5; flex:1; }
-.ConnectorCard-error { font-size:11px; color:var(--md-error); margin:0 0 var(--sp-2); }
 .ConnectorCard-footer { display:flex; align-items:center; padding-top:var(--sp-3); border-top:1px solid var(--md-outline-var); }
 .ConnectorCard-actionBtn { font-size:12px; font-weight:500; padding:6px var(--sp-4); border-radius:var(--r-sm); border:1px solid var(--md-outline); background:var(--md-hover); color:var(--md-on); width:100%; text-align:center; }
 .ConnectorCard-actionBtn--connect:hover:not(:disabled) { border-color:var(--md-outline-hi); }
 .ConnectorCard-actionBtn--disconnect { border-color:rgba(227,70,113,.2); background:transparent; color:var(--md-on-dim); }
 .ConnectorCard-actionBtn--disconnect:hover:not(:disabled) { background:rgba(227,70,113,.12); color:var(--md-error); border-color:var(--md-error); }
-
-/* ─── LIBRARY VIEW ───────────────────────────────────────────────────────── */
-.LibraryView { display:flex; flex-direction:column; height:100%; overflow:hidden; }
-.LibraryView-header { flex:0 0 auto; padding:28px 40px 0; }
-.LibraryView-title-row { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
-.LibraryView-title { font-size:22px; font-weight:700; color:var(--md-on); margin:0; }
-.LibraryView-count { font-size:12px; color:var(--md-on-dim); background:var(--md-hover); padding:2px 8px; }
-.LibraryView-subtitle { font-size:13px; color:var(--md-on-dim); margin:0 0 20px; }
-.LibraryView-toolbar { flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:0 40px 16px; border-bottom:1px solid var(--md-outline); }
-.LibraryView-search { flex:1; }
-.LibraryView-searchInput { width:100%; height:34px; padding:0 12px; border-color:var(--md-outline-in); font-size:13px; }
-.LibraryView-searchInput:focus { background:var(--md-hover); }
-.LibraryView-searchInput::placeholder { color:var(--md-on-dim); }
-.LibraryView-addBtn { flex:0 0 auto; height:34px; padding:0 14px; border-radius:var(--r-md); border:1px solid var(--md-outline-hi); background:var(--md-hover); color:var(--md-on); font-size:13px; font-weight:500; white-space:nowrap; }
-.LibraryView-addBtn:hover:not(:disabled) { border-color:var(--md-on); }
-.LibraryView-error, .LibraryView-success { flex:0 0 auto; display:flex; align-items:center; gap:10px; margin:0 40px; padding:10px 14px; border-radius:var(--r-md); font-size:13px; }
-.LibraryView-error { background:rgba(227,70,113,.1); border:1px solid rgba(227,70,113,.24); color:var(--md-error); }
-.LibraryView-success { background:rgba(112,180,137,.11); border:1px solid rgba(112,180,137,.24); color:var(--md-success); }
-.LibraryView-content { flex:1; min-height:0; overflow-y:auto; padding:12px 40px 32px; }
-.LibraryView-loading, .LibraryView-noResults { color:var(--md-on-dim); font-size:13px; padding:24px 0; }
-.LibraryView-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:60px 0; font-size:14px; }
-.LibraryView-list { display:flex; flex-direction:column; }
-.LibraryView-searchResults { display:flex; flex-direction:column; gap:12px; }
-.LibraryView-resultCount { font-size:12px; color:var(--md-on-dim); margin:0 0 12px; }
-.LibraryView-pagination { display:flex; align-items:center; justify-content:center; gap:16px; padding:16px 0; font-size:12px; color:var(--md-on-dim); }
-.LibraryView-pagination button { font-size:12px; padding:4px 12px; border-radius:var(--r-sm); border:1px solid var(--md-outline); color:var(--md-on-var); }
-
-.LibraryRow { display:flex; align-items:center; gap:12px; padding:10px 12px; border-bottom:1px solid var(--md-outline); }
-.LibraryRow[data-deleting="true"] { opacity:.5; }
-.LibraryRow[role="button"] { cursor:pointer; }
-.LibraryRow-icon { font-size:18px; flex-shrink:0; }
-.LibraryRow-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-.LibraryRow-title { font-size:13px; font-weight:500; color:var(--md-on); }
-.LibraryRow-meta { font-size:11px; color:var(--md-on-dim); }
-.LibraryRow-path { font-size:10px; color:var(--md-on-dim); opacity:.7; }
-.LibraryRow-source { flex:0 0 auto; gap:5px; font-size:10px; letter-spacing:.04em; padding:2px 7px; background:var(--md-hover); border:1px solid var(--md-outline-var); color:var(--md-on-var); text-transform:capitalize; }
-.LibraryRow-time { flex:0 0 auto; font-size:11px; color:var(--md-on-dim); }
-.LibraryRow-actions { flex:0 0 auto; display:flex; gap:6px; }
-.LibraryRow-delete, .LibraryRow-confirmYes, .LibraryRow-confirmNo { font-size:11px; padding:4px 10px; border-radius:var(--r-sm); border:1px solid var(--md-outline); }
-.LibraryRow-delete { color:var(--md-on-dim); }
-.LibraryRow-delete:hover { background:rgba(227,70,113,.11); color:var(--md-error); border-color:rgba(227,70,113,.24); }
-.LibraryRow-confirmYes { color:var(--md-error); border-color:rgba(227,70,113,.3); background:rgba(227,70,113,.09); }
-.LibraryRow-confirmYes:hover { background:rgba(227,70,113,.18); }
-.LibraryRow-confirmNo { color:var(--md-on-dim); }
-.LibraryRow-confirmNo:hover { background:var(--md-hover); }
-
-.SearchResultRow { padding:14px 16px; border-radius:var(--r-md); border:1px solid var(--md-outline); background:var(--md-s0); display:flex; flex-direction:column; gap:8px; }
-.SearchResultRow-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.SearchResultRow-title { font-size:13px; font-weight:600; color:var(--md-on); }
-.SearchResultRow-type { font-size:11px; color:var(--md-on-dim); }
-.SearchResultRow-source { font-size:10px; gap:5px; padding:2px 7px; background:var(--md-hover); border:1px solid var(--md-outline-var); color:var(--md-on-var); text-transform:capitalize; }
-.SearchResultRow-snippet { font-size:13px; color:var(--md-on-var); line-height:1.55; margin:0; }
-.SearchResultRow-snippet b { color:var(--md-on); font-weight:600; background:rgba(255,255,255,.08); padding:0 2px; border-radius:2px; }
 
 /* ─── DOCUMENT VIEWERS ───────────────────────────────────────────────────── */
 .DocViewer-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; height:100%; color:var(--md-on-var); font-size:13px; }

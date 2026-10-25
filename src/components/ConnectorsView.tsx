@@ -1,79 +1,61 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
-import {
-  listConnectors,
-  getConnectorAuthUrl,
-  disconnectConnector,
-  errorMessage,
-  type ConnectorDto,
-} from "../lib/api";
+import { getConnectorAuthUrl, disconnectConnector, errorMessage, type ConnectorDto } from "../lib/api";
+import { useConnectorsStore } from "../lib/connectors";
 import { Button } from "./ui/Button";
 import { ConnectorIcon } from "./icons/ConnectorIcon";
 
+type PendingAction = { id: string; kind: "connect" | "disconnect" };
+
+const CONNECT_WAIT_MS = 120_000;
+
 interface ConnectorCardProps {
   connector: ConnectorDto;
+  pending: PendingAction | null;
   onConnect: (id: string) => void;
   onDisconnect: (id: string) => void;
-  loading: boolean;
 }
 
-function ConnectorCard({ connector, onConnect, onDisconnect, loading }: ConnectorCardProps) {
+function ConnectorCard({ connector, pending, onConnect, onDisconnect }: ConnectorCardProps) {
+  const own = pending?.id === connector.id ? pending.kind : null;
+  const busy = pending !== null;
+
   return (
-    <article className="ConnectorCard" data-connected={connector.hasToken}>
+    <article className="ConnectorCard" data-connected={connector.connected}>
       <div className="ConnectorCard-top">
         <div className="ConnectorCard-icon">
           <ConnectorIcon id={connector.id} size={32} />
         </div>
         <div className="ConnectorCard-identity">
           <h3 className="ConnectorCard-name">{connector.name}</h3>
-          <span className="ConnectorCard-category">{connector.category}</span>
+          <span className="ConnectorCard-category">
+            {connector.category} · {connector.toolCount} tools
+          </span>
         </div>
-        <span
-          className="ConnectorCard-badge"
-          data-state={
-            connector.hasToken
-              ? "connected"
-              : connector.isConfigured
-              ? "configured"
-              : "unconfigured"
-          }
-        >
-          {connector.hasToken
-            ? "Connected"
-            : connector.isConfigured
-            ? "Ready"
-            : "Needs credentials"}
+        <span className="ConnectorCard-badge" data-state={connector.connected ? "connected" : "available"}>
+          {connector.connected ? "Connected" : "Available"}
         </span>
       </div>
 
       <p className="ConnectorCard-description">{connector.description}</p>
 
-      {connector.error && (
-        <p className="ConnectorCard-error">{connector.error}</p>
-      )}
-
       <div className="ConnectorCard-footer">
-        {connector.hasToken ? (
+        {connector.connected ? (
           <Button
             className="ConnectorCard-actionBtn ConnectorCard-actionBtn--disconnect"
             onClick={() => onDisconnect(connector.id)}
-            disabled={loading}
+            disabled={busy}
           >
-            {loading ? "Disconnecting…" : "Disconnect"}
+            {own === "disconnect" ? "Disconnecting…" : "Disconnect"}
           </Button>
         ) : (
           <Button
             className="ConnectorCard-actionBtn ConnectorCard-actionBtn--connect"
             onClick={() => onConnect(connector.id)}
-            disabled={loading || !connector.isConfigured}
-            title={
-              !connector.isConfigured
-                ? "Add OAuth credentials to .env to enable this connector"
-                : undefined
-            }
+            disabled={busy}
           >
-            {loading ? "Connecting…" : "Connect"}
+            {own === "connect" ? "Connecting…" : "Connect"}
           </Button>
         )}
       </div>
@@ -82,40 +64,23 @@ function ConnectorCard({ connector, onConnect, onDisconnect, loading }: Connecto
 }
 
 export function ConnectorsView() {
-  const [connectors, setConnectors] = useState<ConnectorDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [actionId, setActionId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const connectors = useConnectorsStore((s) => s.connectors);
+  const loaded = useConnectorsStore((s) => s.loaded);
+  const error = useConnectorsStore((s) => s.error);
+  const refresh = useConnectorsStore((s) => s.refresh);
+  const setError = useConnectorsStore((s) => s.setError);
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [activeFilter, setActiveFilter] = useState("all");
-
-  const refresh = useCallback(async () => {
-    try {
-      const list = await listConnectors();
-      setConnectors(list);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void refresh();
-    void listen<{ connector: ConnectorDto | null; error: string | null }>(
-      "connector-changed",
-      (event) => {
-        const { connector, error } = event.payload;
-        if (error) setError(error);
-        if (connector) {
-          setConnectors((prev) => prev.map((c) => (c.id === connector.id ? connector : c)));
-        } else {
-          void refresh();
-        }
-        setActionId(null);
-      }
-    ).then((stop) => {
+    void listen<{ error: string | null }>("connector-changed", (event) => {
+      if (event.payload.error) setError(event.payload.error);
+      void refresh();
+      setPending(null);
+    }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;
     });
@@ -123,54 +88,64 @@ export function ConnectorsView() {
       disposed = true;
       unlisten?.();
     };
-  }, [refresh]);
+  }, [refresh, setError]);
 
   useEffect(() => {
-    if (!actionId) return;
+    if (pending?.kind !== "connect") return;
     const onFocus = () => {
       void refresh();
     };
-    const timeout = window.setTimeout(() => setActionId(null), 120_000);
+    const timeout = window.setTimeout(() => setPending(null), CONNECT_WAIT_MS);
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
       window.clearTimeout(timeout);
     };
-  }, [actionId, refresh]);
+  }, [pending, refresh]);
 
-  const handleConnect = useCallback(async (id: string) => {
-    setActionId(id);
-    setError(null);
-    try {
-      const url = await getConnectorAuthUrl(id);
-      await openUrl(url);
-    } catch (e) {
-      setError(errorMessage(e));
-      setActionId(null);
+  useEffect(() => {
+    if (pending?.kind !== "connect") return;
+    if (connectors.some((connector) => connector.id === pending.id && connector.connected)) {
+      setPending(null);
     }
-  }, []);
+  }, [connectors, pending]);
 
-  const handleDisconnect = useCallback(async (id: string) => {
-    setActionId(id);
-    setError(null);
-    try {
-      await disconnectConnector(id);
-      await refresh();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setActionId(null);
-    }
-  }, [refresh]);
-
-  const connectedCount = useMemo(
-    () => connectors.filter((c) => c.hasToken).length,
-    [connectors]
+  const handleConnect = useCallback(
+    async (id: string) => {
+      setPending({ id, kind: "connect" });
+      setError(null);
+      try {
+        const url = await getConnectorAuthUrl(id);
+        await openUrl(url);
+      } catch (e) {
+        setError(errorMessage(e));
+        setPending(null);
+      }
+    },
+    [setError]
   );
+
+  const handleDisconnect = useCallback(
+    async (id: string) => {
+      setPending({ id, kind: "disconnect" });
+      setError(null);
+      try {
+        await disconnectConnector(id);
+        await refresh();
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setPending(null);
+      }
+    },
+    [refresh, setError]
+  );
+
+  const connectedCount = useMemo(() => connectors.filter((c) => c.connected).length, [connectors]);
 
   const filteredConnectors = useMemo(() => {
     if (activeFilter === "all") return connectors;
-    if (activeFilter === "connected") return connectors.filter((c) => c.hasToken);
+    if (activeFilter === "connected") return connectors.filter((c) => c.connected);
     return connectors.filter((c) => c.category === activeFilter);
   }, [connectors, activeFilter]);
 
@@ -187,7 +162,7 @@ export function ConnectorsView() {
     ];
   }, [connectors, connectedCount]);
 
-  if (loading) {
+  if (!loaded) {
     return (
       <div className="ConnectorsView ConnectorsView--loading">
         <p>Loading connectors…</p>
@@ -202,11 +177,12 @@ export function ConnectorsView() {
           <div className="ConnectorsView-titleRow">
             <h1 className="ConnectorsView-title">Integrations</h1>
             <span className="ConnectorsView-statusPill">
-              {connectedCount} of {connectors.length} active
+              {connectedCount} of {connectors.length} connected
             </span>
           </div>
           <p className="ConnectorsView-subtitle">
-            Connect external accounts to make documents, repos, and communications searchable across conversations.
+            Connect your accounts, then choose which apps the agent can use in each chat from the + menu in the
+            composer.
           </p>
           <nav className="ConnectorsView-filterBar" aria-label="Connector category filters">
             {filterTabs.map((tab) => (
@@ -236,9 +212,9 @@ export function ConnectorsView() {
             <ConnectorCard
               key={c.id}
               connector={c}
+              pending={pending}
               onConnect={handleConnect}
               onDisconnect={handleDisconnect}
-              loading={actionId === c.id}
             />
           ))}
         </div>

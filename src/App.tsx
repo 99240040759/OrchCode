@@ -10,13 +10,12 @@ import { ChatPanel } from "./components/ChatPanel";
 import { Greeting, Onboarding } from "./components/screens";
 import { WorkspacePicker } from "./components/WorkspacePicker";
 import { Sidebar } from "./components/Sidebar";
-import { LibraryView } from "./components/LibraryView";
 import { ConnectorsView } from "./components/ConnectorsView";
 import { Button } from "./components/ui/Button";
 import { Titlebar } from "./components/ui/Titlebar";
 import { TooltipProvider } from "./components/ui/Tooltip";
 
-export type AppView = "chat" | "library" | "connectors";
+export type AppView = "chat" | "connectors";
 
 function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -36,7 +35,6 @@ function AppShell() {
           <div className="Main-view" style={{ display: view === "chat" ? "contents" : "none" }}>
             <ChatPanel visible={view === "chat"} />
           </div>
-          {view === "library" && <LibraryView onOpenDocument={() => setView("chat")} />}
           {view === "connectors" && <ConnectorsView />}
         </div>
       </div>
@@ -81,7 +79,6 @@ function Root() {
   const startUpdater    = useUpdaterStore((s) => s.start);
 
   const workspaceStatus = useWorkspaceStore((s) => s.status);
-  const initWorkspace   = useWorkspaceStore((s) => s.initialize);
 
   useEffect(() => {
     const blockMiddleClick = (e: MouseEvent) => {
@@ -115,11 +112,6 @@ function Root() {
       void startUpdater();
     }
   }, [authStatus, startUpdater]);
-
-  useEffect(() => {
-    if (authStatus !== "signedIn") return;
-    void initWorkspace();
-  }, [authStatus, initWorkspace]);
 
   useEffect(() => {
     if (workspaceStatus !== "ready") return;

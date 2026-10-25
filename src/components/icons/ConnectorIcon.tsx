@@ -10,7 +10,7 @@ export function ConnectorIcon({ id, size = 28, className, ...props }: ConnectorI
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 
   switch (id) {
-    case "google_drive":
+    case "googledrive":
       return (
         <svg viewBox="0 0 87.3 78" width={s} height={s} className={className} aria-label="Google Drive" {...props}>
           <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>

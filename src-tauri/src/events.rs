@@ -12,6 +12,7 @@ pub struct ToolDisplayInfo {
     pub target_text: Option<String>,
     pub icon: ToolIcon,
     pub opens_artifact: bool,
+    pub connector: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -51,7 +52,8 @@ pub enum ChatEvent {
     #[serde(rename_all = "camelCase")]
     ToolResult {
         id: String,
-        output: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
         is_error: bool,
     },
     #[serde(rename_all = "camelCase")]
@@ -66,8 +68,6 @@ pub enum ChatEvent {
     Compacted {
         original_message_count: usize,
         ts: i64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after_message_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compaction_message_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

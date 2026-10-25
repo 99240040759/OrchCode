@@ -25,7 +25,7 @@ import "prismjs/components/prism-graphql";
 import "prismjs/components/prism-docker";
 import "prismjs/components/prism-ruby";
 
-import { looksLikePath, createMentionRegex, useCopy } from "../lib/api";
+import { looksLikePath, createMentionRegex, useCopy } from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 import { FileTag } from "./ChatPrimitives";
@@ -41,12 +41,13 @@ export function renderTextWithMentions(text: string): React.ReactNode {
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
-    const path = match[1] ?? match[2] ?? "";
+    const path = match[1] ?? match[3] ?? "";
+    const lineRange = match[2] ?? match[4] ?? "";
     if (!looksLikePath(path)) continue;
     matched = true;
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
     parts.push(
-      <FileTag key={`mention-${match.index}`} path={path} lineRange={match[3] ?? undefined} />
+      <FileTag key={`mention-${match.index}`} path={path} lineRange={lineRange || undefined} />
     );
     lastIndex = match.index + match[0].length;
   }

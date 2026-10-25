@@ -192,6 +192,8 @@ pub struct DocumentFileMeta {
     pub size_bytes: u64,
     pub extension: String,
     pub mime: String,
+    pub artifact_kind: Option<String>,
+    pub type_label: String,
     pub modified: Option<u64>,
 }
 
@@ -218,11 +220,14 @@ pub async fn read_document_metadata(
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs());
 
+    let (artifact_kind, type_label) = crate::document::document_type_info(&extension);
     Ok(DocumentFileMeta {
         name,
         size_bytes: meta.len(),
         extension,
         mime: file_mime(&resolved),
+        artifact_kind,
+        type_label,
         modified,
     })
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { errorMessage, getBasename, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
+import { errorMessage, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
+import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ViewerError, ViewerLoading, useZoom, ZoomControls } from "./ViewerChrome";
 

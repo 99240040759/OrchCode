@@ -8,17 +8,15 @@ import * as api from "./api";
 const IS_MAC =
   typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
-const LATEST_RELEASE_URL =
-  "https://github.com/sameer786ss/OrchCode/releases/latest";
-const MANIFEST_URL =
-  "https://github.com/sameer786ss/OrchCode/releases/latest/download/latest.json";
+const LATEST_RELEASE_URL = "https://github.com/sameer786ss/OrchCode/releases/latest";
+const MANIFEST_URL = `${LATEST_RELEASE_URL}/download/latest.json`;
 
 function isNewer(remote: string, current: string): boolean {
-  const r = remote.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  const c = current.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(r.length, c.length); i++) {
-    const diff = (r[i] ?? 0) - (c[i] ?? 0);
-    if (diff !== 0) return diff > 0;
+  const remoteParts = remote.replace(/^v/, "").split(".").map((part) => parseInt(part, 10) || 0);
+  const currentParts = current.replace(/^v/, "").split(".").map((part) => parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(remoteParts.length, currentParts.length); index += 1) {
+    const difference = (remoteParts[index] ?? 0) - (currentParts[index] ?? 0);
+    if (difference !== 0) return difference > 0;
   }
   return false;
 }
@@ -28,6 +26,7 @@ export type UpdateStatus =
   | "checking"
   | "none"
   | "downloading"
+  | "manualAvailable"
   | "readyToRestart"
   | "installing"
   | "failed";
@@ -59,21 +58,29 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
     if (currentStatus === "checking" || currentStatus === "downloading" || currentStatus === "installing") {
       return;
     }
-    set({ status: "checking", error: null });
+    set({ status: "checking", error: null, percent: 0, pendingUpdate: null });
 
     if (IS_MAC) {
       try {
-        const res = await fetch(MANIFEST_URL, { cache: "no-store" });
-        if (!res.ok) {
-          set({ status: "none", pendingUpdate: null });
-          return;
+        const response = await fetch(MANIFEST_URL, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Update manifest request failed (${response.status})`);
         }
-        const data = (await res.json()) as { version?: string };
+        const manifest = (await response.json()) as { version?: unknown };
+        if (typeof manifest.version !== "string" || manifest.version.trim() === "") {
+          throw new Error("Update manifest did not include a version");
+        }
+
         const currentVersion = await getVersion();
-        if (data.version && isNewer(data.version, currentVersion)) {
-          set({ status: "readyToRestart", version: data.version, pendingUpdate: null });
+        if (isNewer(manifest.version, currentVersion)) {
+          set({
+            status: "manualAvailable",
+            version: manifest.version,
+            percent: 0,
+            pendingUpdate: null,
+          });
         } else {
-          set({ status: "none", pendingUpdate: null });
+          set({ status: "none", version: currentVersion, percent: 0, pendingUpdate: null });
         }
       } catch (e) {
         set({ status: "failed", error: api.errorMessage(e), pendingUpdate: null });
@@ -120,12 +127,16 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   },
 
   apply: async () => {
-    if (IS_MAC) {
-      await openUrl(LATEST_RELEASE_URL).catch(() => undefined);
+    const { status, pendingUpdate } = get();
+    if (status === "manualAvailable") {
+      try {
+        await openUrl(LATEST_RELEASE_URL);
+      } catch (e) {
+        set({ status: "manualAvailable", error: api.errorMessage(e) });
+      }
       return;
     }
 
-    const { status, pendingUpdate } = get();
     if (status !== "readyToRestart" || !pendingUpdate) return;
     set({ status: "installing", error: null });
     try {

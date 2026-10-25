@@ -1,8 +1,8 @@
-import "../../lib/polyfills";
 import { useCallback, useEffect, useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
-import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
+import { errorMessage, readBinaryFile } from "../../lib/api";
+import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ViewerError, ViewerLoading, ZoomControls, PageControls, useZoom } from "./ViewerChrome";
 

@@ -27,6 +27,8 @@ use tauri::{Emitter, Manager};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
+const LEGACY_CONNECTOR_PURGE_KEY: &str = "legacy_connector_credentials_purged";
+
 fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.unminimize();
@@ -36,23 +38,8 @@ fn focus_main_window(app: &tauri::AppHandle) {
 }
 
 async fn handle_connector_callback(app: &tauri::AppHandle, rest: &str) {
-    let state = app.state::<AppState>();
-    let (connector_id, code, oauth_state, callback_error) = parse_connector_oauth_callback(rest);
-    let payload = if let Some(error) = callback_error {
-        serde_json::json!({ "connector": null, "error": error, "connectorId": connector_id })
-    } else if connector_id.is_empty() || code.is_empty() || oauth_state.is_empty() {
-        serde_json::json!({
-            "connector": null,
-            "error": "Invalid connector sign-in callback",
-            "connectorId": connector_id
-        })
-    } else {
-        match ipc::complete_connector_auth(&state, connector_id.clone(), code, oauth_state).await {
-            Ok(dto) => serde_json::json!({ "connector": dto, "error": null, "connectorId": connector_id }),
-            Err(err) => serde_json::json!({ "connector": null, "error": err, "connectorId": connector_id }),
-        }
-    };
-    let _ = app.emit("connector-changed", payload);
+    let error = connector_callback_error(rest);
+    let _ = app.emit("connector-changed", serde_json::json!({ "error": error }));
 }
 
 async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
@@ -103,38 +90,25 @@ async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     focus_main_window(app);
 }
 
-fn parse_connector_oauth_callback(rest: &str) -> (String, String, String, Option<String>) {
+const INVALID_CONNECTOR_CALLBACK: &str = "Invalid connector sign-in callback";
+
+fn connector_callback_error(rest: &str) -> Option<String> {
     let normalized = format!("http://localhost/{}", rest.trim_start_matches('/'));
     let Ok(url) = reqwest::Url::parse(&normalized) else {
-        let (connector_id, _) = rest.split_once('?').unwrap_or((rest, ""));
-        return (
-            connector_id.trim_end_matches('/').to_string(),
-            String::new(),
-            String::new(),
-            None,
-        );
+        return Some(INVALID_CONNECTOR_CALLBACK.to_string());
     };
-
-    let connector_id = url
-        .path()
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .to_string();
-    let mut code = String::new();
-    let mut state = String::new();
-    let mut error = None;
-
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
-            "code" => code = value.into_owned(),
-            "state" => state = value.into_owned(),
-            "error_description" => error = Some(value.into_owned()),
-            "error" if error.is_none() => error = Some(value.into_owned()),
-            _ => {}
-        }
+    if url.path().trim_matches('/') != "composio" {
+        return Some(INVALID_CONNECTOR_CALLBACK.to_string());
     }
-
-    (connector_id, code, state, error)
+    let status = url
+        .query_pairs()
+        .find(|(key, _)| key == "status")
+        .map(|(_, value)| value.into_owned());
+    match status.as_deref() {
+        Some("success") => None,
+        Some("failed") => Some("The connector sign-in was not completed".to_string()),
+        _ => Some(INVALID_CONNECTOR_CALLBACK.to_string()),
+    }
 }
 
 pub fn run() {
@@ -176,14 +150,17 @@ pub fn run() {
             skills::seed_bundled_skills(&data_dir);
 
             let app_state = AppState::new(&data_dir)?;
-            let init_memory = app_state.memory.clone();
-            let init_connectors = app_state.connector_manager.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = init_connectors.initialize(&init_memory).await {
-                    eprintln!("connector manager init failed: {e}");
-                }
-            });
             app.manage(app_state);
+
+            {
+                use tauri_plugin_store::StoreExt;
+                let prefs = app.store("prefs.json")?;
+                if prefs.get(LEGACY_CONNECTOR_PURGE_KEY).is_none() {
+                    connectors::purge_legacy_credentials();
+                    prefs.set(LEGACY_CONNECTOR_PURGE_KEY, true);
+                    prefs.save()?;
+                }
+            }
 
             AppState::spawn_background_loops(app.handle().clone());
 
@@ -255,11 +232,6 @@ pub fn run() {
             ipc::list_connectors,
             ipc::get_connector_auth_url,
             ipc::disconnect_connector,
-            ipc::ipc_ingest_document,
-            ipc::ipc_list_documents,
-            ipc::ipc_delete_document,
-            ipc::ipc_search_documents,
-            ipc::ipc_count_documents,
             ipc::report_error,
         ])
         .build(tauri::generate_context!())

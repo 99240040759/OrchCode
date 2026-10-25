@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PPTXViewer } from "pptxviewjs";
-import { errorMessage, getBasename, readBinaryFile } from "../../lib/api";
+import { errorMessage, readBinaryFile } from "../../lib/api";
+import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ZoomControls, PageControls, useZoom } from "./ViewerChrome";
 

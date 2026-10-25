@@ -93,6 +93,7 @@ pub async fn ingest_document(
             .into_owned()
     });
 
+    let (artifact_kind, type_label) = document_type_info(&file_type);
     let doc = DocumentRecord {
         id: doc_id.clone(),
         title: title.clone(),
@@ -100,6 +101,8 @@ pub async fn ingest_document(
         source: "local".to_string(),
         source_id: None,
         file_type: file_type.clone(),
+        artifact_kind,
+        type_label,
         size_bytes,
         page_count: parsed.page_count.map(|p| p as i64),
         word_count: Some(word_count as i64),
@@ -123,6 +126,34 @@ pub async fn ingest_document(
 }
 
 pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx"];
+
+pub fn document_type_info(file_type: &str) -> (Option<String>, String) {
+    let normalized = file_type.to_ascii_lowercase();
+    let artifact_kind = match normalized.as_str() {
+        "pdf" => Some("pdf"),
+        "docx" => Some("docx"),
+        "xlsx" | "xls" | "ods" => Some("xlsx"),
+        "pptx" => Some("pptx"),
+        _ => None,
+    }
+    .map(str::to_string);
+    let label = match normalized.as_str() {
+        "pdf" => "PDF",
+        "docx" => "Word",
+        "xlsx" | "xls" => "Excel",
+        "ods" => "Spreadsheet",
+        "pptx" => "PowerPoint",
+        "txt" | "text" => "Text",
+        "md" | "markdown" => "Markdown",
+        "csv" => "CSV",
+        "json" => "JSON",
+        "html" | "htm" => "HTML",
+        "xml" => "XML",
+        "rtf" => "RTF",
+        _ => return (artifact_kind, normalized.to_uppercase()),
+    };
+    (artifact_kind, label.to_string())
+}
 
 pub fn is_supported_document_extension(ext: &str) -> bool {
     SUPPORTED_DOCUMENT_EXTENSIONS.contains(&ext)

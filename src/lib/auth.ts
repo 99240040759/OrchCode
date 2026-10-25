@@ -6,6 +6,7 @@ import * as api from "./api";
 import type { UserDisplay } from "./api";
 import { useArtifactsStore } from "./artifacts";
 import { useChatStore } from "./store";
+import { useConnectorsStore } from "./connectors";
 import { useWorkspaceStore } from "./workspace";
 
 export type AuthStatus = "loading" | "signedOut" | "signedIn";
@@ -38,6 +39,7 @@ interface AuthChangedPayload {
 
 function clearWorkspaceState() {
   useChatStore.getState().reset();
+  useConnectorsStore.getState().reset();
   useArtifactsStore.getState().reset();
   useWorkspaceStore.getState().reset();
 }
@@ -56,6 +58,7 @@ export const useAuthStore = create(
     let signInTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let unlistenAuthChanged: UnlistenFn | null = null;
     let unlistenAuthError: UnlistenFn | null = null;
+    let authChangeVersion = 0;
 
     const cancelTimeout = () => {
       if (signInTimeoutId !== null) {
@@ -75,56 +78,81 @@ export const useAuthStore = create(
       initialize: async () => {
         if (initializing || get().initialized) return;
         initializing = true;
-        set((s) => {
-          s.initialized = true;
-        });
+        const initialAuthVersion = authChangeVersion;
 
-        if (unlistenAuthChanged) {
-          unlistenAuthChanged();
-          unlistenAuthChanged = null;
-        }
-        if (unlistenAuthError) {
-          unlistenAuthError();
-          unlistenAuthError = null;
-        }
+        try {
+          if (unlistenAuthChanged) {
+            unlistenAuthChanged();
+            unlistenAuthChanged = null;
+          }
+          if (unlistenAuthError) {
+            unlistenAuthError();
+            unlistenAuthError = null;
+          }
 
-        unlistenAuthChanged = await listen<AuthChangedPayload>("auth-changed", (event) => {
-          cancelTimeout();
-          const { user, error } = event.payload;
+          unlistenAuthChanged = await listen<AuthChangedPayload>("auth-changed", (event) => {
+            authChangeVersion += 1;
+            cancelTimeout();
+            const { user, error } = event.payload;
+            if (user) {
+              clearWorkspaceState();
+              set((s) => {
+                s.status = "signedIn";
+                s.user = user;
+                s.error = null;
+                s.justSignedIn = true;
+                s.signingIn = false;
+              });
+              void useWorkspaceStore.getState().initialize();
+              return;
+            }
+            clearWorkspaceState();
+            set((s) => applySignedOut(s, error));
+          });
+
+          unlistenAuthError = await listen<{ error: string }>("auth-error", (event) => {
+            cancelTimeout();
+            set((s) => {
+              s.signingIn = false;
+              s.error = event.payload.error;
+            });
+          });
+
+          const user = await api.getAuthUser();
+          if (initialAuthVersion !== authChangeVersion) {
+            set((s) => {
+              s.initialized = true;
+            });
+            return;
+          }
           if (user) {
             set((s) => {
               s.status = "signedIn";
               s.user = user;
               s.error = null;
-              s.justSignedIn = true;
-              s.signingIn = false;
             });
-            return;
+            await useWorkspaceStore.getState().initialize();
+          } else {
+            clearWorkspaceState();
+            set((s) => applySignedOut(s, null));
           }
-          clearWorkspaceState();
-          set((s) => applySignedOut(s, error));
-        });
-
-        unlistenAuthError = await listen<{ error: string }>("auth-error", (event) => {
-          cancelTimeout();
           set((s) => {
-            s.signingIn = false;
-            s.error = event.payload.error;
-          });
-        });
-
-        try {
-          const user = await api.getAuthUser();
-          set((s) => {
-            s.status = user ? "signedIn" : "signedOut";
-            s.user = user;
+            s.initialized = true;
           });
         } catch (e) {
+          unlistenAuthChanged?.();
+          unlistenAuthChanged = null;
+          unlistenAuthError?.();
+          unlistenAuthError = null;
+          clearWorkspaceState();
           set((s) => {
+            s.initialized = false;
             s.status = "signedOut";
             s.user = null;
             s.error = api.errorMessage(e);
           });
+        } finally {
+          initializing = false;
         }
       },
 
@@ -147,7 +175,7 @@ export const useAuthStore = create(
         });
 
         try {
-          const url = await api.getOAuthUrl("https://orch.live/auth-callback");
+          const url = await api.getOAuthUrl();
           await openUrl(url);
         } catch (e) {
           cancelTimeout();

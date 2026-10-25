@@ -27,7 +27,7 @@ const SCHEMA: &str = "
      ON sessions(workspace_path, user_id, updated_at DESC);
 
  CREATE TABLE reasoning_durations (
-     conversation_id  TEXT NOT NULL,
+     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
      item_id          TEXT NOT NULL,
      duration_seconds INTEGER NOT NULL,
      PRIMARY KEY (conversation_id, item_id)
@@ -97,12 +97,29 @@ const SCHEMA: &str = "
  END;
 ";
 
+const REASONING_DURATIONS_FK_MIGRATION: &str = "
+ CREATE TABLE reasoning_durations_v2 (
+     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+     item_id          TEXT NOT NULL,
+     duration_seconds INTEGER NOT NULL,
+     PRIMARY KEY (conversation_id, item_id)
+ );
+ INSERT INTO reasoning_durations_v2 (conversation_id, item_id, duration_seconds)
+     SELECT conversation_id, item_id, duration_seconds
+     FROM reasoning_durations
+     WHERE conversation_id IN (SELECT id FROM sessions);
+ DROP TABLE reasoning_durations;
+ ALTER TABLE reasoning_durations_v2 RENAME TO reasoning_durations;
+";
+
+const DROP_CONNECTORS_MIGRATION: &str = "DROP TABLE connectors;";
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionViewPage {
     pub messages: Vec<MessageView>,
     pub has_more: bool,
-    pub earliest_seq: Option<i64>,
+    pub earliest_message_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,6 +137,7 @@ pub struct SessionSummary {
 pub struct AttachmentView {
     pub name: String,
     pub is_image: bool,
+    pub path: Option<String>,
     pub data_url: Option<String>,
 }
 
@@ -183,6 +201,8 @@ impl SqliteMemory {
 
         let migration_list = vec![
             rusqlite_migration::M::up(SCHEMA),
+            rusqlite_migration::M::up(REASONING_DURATIONS_FK_MIGRATION),
+            rusqlite_migration::M::up(DROP_CONNECTORS_MIGRATION),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);
@@ -346,11 +366,6 @@ impl SqliteMemory {
         run_db_task(move || {
             let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-            tx.execute(
-                "DELETE FROM reasoning_durations WHERE conversation_id = ?1",
-                params![sid],
-            )
-            .map_err(sql_err)?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", params![sid])
                 .map_err(sql_err)?;
             tx.commit().map_err(sql_err)?;
@@ -365,11 +380,6 @@ impl SqliteMemory {
         run_db_task(move || {
             let mut c = pool.get().map_err(pool_err)?;
             let tx = c.transaction().map_err(sql_err)?;
-            tx.execute(
-                "DELETE FROM reasoning_durations WHERE conversation_id IN (SELECT id FROM sessions WHERE workspace_path = ?1)",
-                params![ws],
-            )
-            .map_err(sql_err)?;
             tx.execute("DELETE FROM sessions WHERE workspace_path = ?1", params![ws])
                 .map_err(sql_err)?;
             tx.commit().map_err(sql_err)?;
@@ -553,6 +563,8 @@ pub struct DocumentRecord {
     pub source: String,
     pub source_id: Option<String>,
     pub file_type: String,
+    pub artifact_kind: Option<String>,
+    pub type_label: String,
     pub size_bytes: i64,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
@@ -581,24 +593,13 @@ pub struct SearchHit {
     pub passage_id: String,
     pub document_title: String,
     pub file_type: String,
+    pub artifact_kind: Option<String>,
+    pub type_label: String,
     pub source: String,
     pub file_path: Option<String>,
     pub snippet: String,
     pub score: f64,
     pub page_number: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorRecord {
-    pub id: String,
-    pub name: String,
-    pub enabled: bool,
-    pub auth_kind: String,
-    pub has_token: bool,
-    pub token_expires_at: Option<i64>,
-    pub error: Option<String>,
-    pub updated_at: i64,
 }
 
 fn search_passages(
@@ -647,11 +648,15 @@ fn search_passages(
     let mut stmt = conn.prepare(&sql).map_err(sql_err)?;
     let rows = stmt
         .query_map(refs.as_slice(), |row| {
+            let file_type: String = row.get(3)?;
+            let (artifact_kind, type_label) = crate::document::document_type_info(&file_type);
             Ok(SearchHit {
                 document_id: row.get(0)?,
                 passage_id: row.get(1)?,
                 document_title: row.get(2)?,
-                file_type: row.get(3)?,
+                file_type,
+                artifact_kind,
+                type_label,
                 source: row.get(4)?,
                 file_path: row.get(5)?,
                 snippet: row.get(6)?,
@@ -861,152 +866,23 @@ impl SqliteMemory {
         })
         .await
     }
-
-    pub async fn upsert_connector(&self, rec: ConnectorRecord) -> AppResult<()> {
-        let pool = self.pool.clone();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "INSERT INTO connectors (id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
-                 ON CONFLICT(id) DO UPDATE SET
-                   name=excluded.name, enabled=excluded.enabled,
-                   auth_kind=excluded.auth_kind, has_token=excluded.has_token,
-                   token_expires_at=excluded.token_expires_at,
-                   error=excluded.error, updated_at=excluded.updated_at",
-                params![
-                    rec.id,
-                    rec.name,
-                    rec.enabled as i64,
-                    rec.auth_kind,
-                    rec.has_token as i64,
-                    rec.token_expires_at,
-                    rec.error,
-                    rec.updated_at
-                ],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn list_connectors(&self) -> AppResult<Vec<ConnectorRecord>> {
-        let pool = self.pool.clone();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c
-                .prepare(
-                    "SELECT id, name, enabled, auth_kind, has_token, token_expires_at, error, updated_at
-                     FROM connectors ORDER BY id",
-                )
-                .map_err(sql_err)?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(ConnectorRecord {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        enabled: row.get::<_, i64>(2)? != 0,
-                        auth_kind: row.get(3)?,
-                        has_token: row.get::<_, i64>(4)? != 0,
-                        token_expires_at: row.get(5)?,
-                        error: row.get(6)?,
-                        updated_at: row.get(7)?,
-                    })
-                })
-                .map_err(sql_err)?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r.map_err(sql_err)?);
-            }
-            Ok(out)
-        })
-        .await
-    }
-
-    pub async fn set_connector_enabled(&self, id: &str, enabled: bool) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let cid = id.to_string();
-        let ts = now_ms();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE connectors SET enabled=?1, updated_at=?2 WHERE id=?3",
-                params![enabled as i64, ts, cid],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn set_connector_token_state(
-        &self,
-        id: &str,
-        has_token: bool,
-        expires_at: Option<i64>,
-        error: Option<&str>,
-    ) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let cid = id.to_string();
-        let ts = now_ms();
-        let err = error.map(|s| s.to_string());
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE connectors SET has_token=?1, token_expires_at=?2, error=?3, updated_at=?4 WHERE id=?5",
-                params![has_token as i64, expires_at, err, ts, cid],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn set_connector_error(&self, id: &str, error: Option<&str>) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let cid = id.to_string();
-        let ts = now_ms();
-        let err = error.map(|s| s.to_string());
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE connectors SET error=?1, updated_at=?2 WHERE id=?3",
-                params![err, ts, cid],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn clear_all_connector_tokens(&self) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let ts = now_ms();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE connectors SET enabled=0, has_token=0, token_expires_at=NULL, error=NULL, updated_at=?1",
-                params![ts],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
-        .await
-    }
 }
 
 fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
     let meta_str: String = row.get(9)?;
     let metadata =
         serde_json::from_str(&meta_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    let file_type: String = row.get(5)?;
+    let (artifact_kind, type_label) = crate::document::document_type_info(&file_type);
     Ok(DocumentRecord {
         id: row.get(0)?,
         title: row.get(1)?,
         file_path: row.get(2)?,
         source: row.get(3)?,
         source_id: row.get(4)?,
-        file_type: row.get(5)?,
+        file_type,
+        artifact_kind,
+        type_label,
         size_bytes: row.get(6)?,
         page_count: row.get(7)?,
         word_count: row.get(8)?,

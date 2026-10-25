@@ -41,22 +41,29 @@ function UpdateBadge() {
     );
   }
 
-  if (status === "readyToRestart") {
+  if (status === "manualAvailable") {
     return (
-      <Tooltip
-        content={
-          IS_MAC
-            ? `v${version} available — click to download and update`
-            : `v${version} downloaded — restart to apply`
-        }
-        side="bottom"
-      >
+      <Tooltip content={`v${version} available — click to download`} side="bottom">
         <Button
           className="Titlebar-update-badge Titlebar-update-ready"
           onClick={() => void apply()}
         >
           <VscRefresh />
-          <span>{IS_MAC ? "Update available" : "Restart to update"}</span>
+          <span>Update available</span>
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  if (status === "readyToRestart") {
+    return (
+      <Tooltip content={`v${version} downloaded — restart to apply`} side="bottom">
+        <Button
+          className="Titlebar-update-badge Titlebar-update-ready"
+          onClick={() => void apply()}
+        >
+          <VscRefresh />
+          <span>Restart to update</span>
         </Button>
       </Tooltip>
     );

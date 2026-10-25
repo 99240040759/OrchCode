@@ -22,6 +22,7 @@ import type {
 import { Markdown, renderTextWithMentions } from "./Markdown";
 import { AttachmentCard, ExplorerIcon, FileTag, ThinkingShimmer } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
+import { ConnectorIcon } from "./icons/ConnectorIcon";
 
 type NonFileToolIcon = Exclude<ToolIcon, "file" | "folder">;
 
@@ -57,6 +58,14 @@ function CompactionDivider({ item }: { item: CompactionNoticeItem }) {
 
 function ToolTarget({ tool }: { tool: ToolCallItem }) {
   const info = tool.displayInfo;
+  if (info.connector) {
+    return (
+      <span className="ToolRow-target">
+        <ConnectorIcon id={info.connector} size={13} className="ToolRow-icon" />
+        {info.targetText && <span className="ToolRow-text">{info.targetText}</span>}
+      </span>
+    );
+  }
   const isFileAction = Boolean(info.filename);
   if (isFileAction) {
     return (

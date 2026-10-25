@@ -125,6 +125,7 @@ function randomProjectName(existingNames: Set<string>): string {
 export const useWorkspaceStore = create(
   immer<WorkspaceStore>((set, get) => {
     let inProgress = false;
+    let initializeEpoch = 0;
 
     const exclusive = async (task: () => Promise<void>) => {
       if (inProgress || get().busy) return;
@@ -163,6 +164,7 @@ export const useWorkspaceStore = create(
       ...INITIAL_STATE,
 
       initialize: async () => {
+        const epoch = ++initializeEpoch;
         set((s) => {
           s.status = "loading";
           s.error = null;
@@ -173,12 +175,14 @@ export const useWorkspaceStore = create(
         try {
           [all, lastId] = await Promise.all([loadAll(), loadLastId()]);
         } catch (e) {
+          if (epoch !== initializeEpoch) return;
           set((s) => {
             s.status = "needs_pick";
             s.error = `Could not load saved workspaces: ${errorMessage(e)}`;
           });
           return;
         }
+        if (epoch !== initializeEpoch) return;
 
         set((s) => {
           s.all = all;
@@ -195,8 +199,12 @@ export const useWorkspaceStore = create(
 
         try {
           const active = await activateWorkspace(last);
+          if (epoch !== initializeEpoch) return;
           const next = upsert(all, active);
-          if (active !== last) await saveAll(next);
+          if (active !== last) {
+            await saveAll(next);
+            if (epoch !== initializeEpoch) return;
+          }
           set((s) => {
             s.all = next;
             s.current = active;
@@ -204,6 +212,7 @@ export const useWorkspaceStore = create(
           });
           clearImageCache();
         } catch (e) {
+          if (epoch !== initializeEpoch) return;
           set((s) => {
             s.status = "needs_pick";
             s.error = `Last workspace "${last.name}" could not be opened: ${errorMessage(e)}`;
@@ -280,6 +289,7 @@ export const useWorkspaceStore = create(
       },
 
       reset: () => {
+        initializeEpoch += 1;
         set((s) => {
           Object.assign(s, INITIAL_STATE);
         });
