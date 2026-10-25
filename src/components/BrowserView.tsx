@@ -107,6 +107,15 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       }
     };
 
+    let rafId = 0;
+    const scheduleSync = () => {
+      if (disposed || rafId !== 0) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        syncPosition();
+      });
+    };
+
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
         visible = entries[entries.length - 1].intersectionRatio > 0;
@@ -116,21 +125,22 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
     );
     intersectionObserver.observe(host);
 
-    const resizeObserver = new ResizeObserver(syncPosition);
+    const resizeObserver = new ResizeObserver(scheduleSync);
     resizeObserver.observe(host);
     if (host.parentElement) resizeObserver.observe(host.parentElement);
 
-    window.addEventListener("resize", syncPosition);
+    window.addEventListener("resize", scheduleSync);
     syncRef.current = syncPosition;
     syncPosition();
 
     return () => {
       disposed = true;
+      if (rafId !== 0) cancelAnimationFrame(rafId);
       if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
       setReady(false);
       intersectionObserver.disconnect();
       resizeObserver.disconnect();
-      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("resize", scheduleSync);
       void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
       void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));

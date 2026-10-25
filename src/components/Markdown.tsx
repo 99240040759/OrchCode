@@ -85,7 +85,7 @@ function workspacePathFromHref(href: string): string {
   }
 }
 
-const PRISM_ALIASES: Record<string, string> = {
+export const PRISM_ALIASES: Record<string, string> = {
   js: "javascript",
   ts: "typescript",
   py: "python",
@@ -102,13 +102,13 @@ const PRISM_ALIASES: Record<string, string> = {
   golang: "go",
 };
 
-function getPrismGrammar(lang: string): { grammar: Prism.Grammar; name: string } | null {
+export function getPrismGrammar(lang: string): { grammar: Prism.Grammar; name: string } | null {
   const target = PRISM_ALIASES[lang] ?? lang;
   const grammar = Prism.languages[target];
   return grammar ? { grammar, name: target } : null;
 }
 
-function renderToken(token: Prism.Token | string, key: string): React.ReactNode {
+export function renderToken(token: Prism.Token | string, key: string): React.ReactNode {
   if (typeof token === "string") return token;
   const aliases = token.alias
     ? Array.isArray(token.alias) ? token.alias.join(" ") : token.alias

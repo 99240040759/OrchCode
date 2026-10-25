@@ -370,7 +370,7 @@ pub fn reasoning_keys(
 ) -> Vec<(String, u64)> {
     let mut pending = durations.into_iter();
     let mut out = Vec::new();
-    'messages: for entry in conversation.entries() {
+    for entry in conversation.entries() {
         if entry.id.get() < first_new_id {
             continue;
         }
@@ -382,9 +382,8 @@ pub fn reasoning_keys(
                     if r.text.is_empty() {
                         continue;
                     }
-                    match pending.next() {
-                        Some(secs) => out.push((reasoning_item_id(cid, entry.id, item_idx), secs)),
-                        None => break 'messages,
+                    if let Some(secs) = pending.next() {
+                        out.push((reasoning_item_id(cid, entry.id, item_idx), secs));
                     }
                     item_idx += 1;
                 }

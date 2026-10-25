@@ -182,7 +182,7 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
       </button>
       {isOpen && (
         <div className="Reasoning-body" ref={bodyRef}>
-          <Markdown>{item.text.replace(/\n{3,}/g, "\n\n")}</Markdown>
+          {item.text}
         </div>
       )}
     </div>
@@ -281,8 +281,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
       })}
       {message.notice && (
         <div className="Msg-notice" role="status">
-          <VscWarning aria-hidden="true" />
-          <span>{message.notice}</span>
+          <span className="Msg-notice-text">{message.notice}</span>
         </div>
       )}
       {isStreaming && message.items.length === 0 && <ThinkingShimmer />}

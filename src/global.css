@@ -109,7 +109,7 @@ svg { display:inline-block; vertical-align:middle; flex-shrink:0; pointer-events
 @keyframes greetAvatar { to{opacity:1;transform:scale(1)} }
 @keyframes greetText   { to{opacity:1;transform:translateY(0)} }
 @keyframes micWave     { 0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(1)} }
-@keyframes streamFadeIn { from{opacity:.65;transform:translateY(1px)} to{opacity:1;transform:translateY(0)} }
+@keyframes streamFadeIn { from{opacity:.4;filter:blur(4px)} to{opacity:1;filter:blur(0)} }
 @keyframes browserLoad { 0%{width:0;opacity:1} 85%{width:85%;opacity:1} 100%{width:100%;opacity:0} }
 
 /* ─── SHARED BASE RESETS & UTILITIES ─────────────────────────────────────── */
@@ -142,7 +142,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* 8. Common Scroll Containers (Disable Elastic Bounce / Rubber-Banding) */
 .MessageList, .Sidebar-threads, .Reasoning-body, .ToolRow-output, .Composer-input, .MentionPopover, .DropdownMenuContent, .ArtifactTabs, .FileViewerMarkdown, .FilePicker-list, .ConnectorsView, .LibraryView-content, .DocxViewer-scroll, .XlsxViewer-scroll, .PptxViewer-stage, .NativeMediaViewer, .PdfViewer-scroll { overscroll-behavior:none; -webkit-overflow-scrolling:auto; }
 
-.Msg-notice, .Composer-notice, .FileContent-trunc { background:rgba(241,180,103,.09); color:var(--md-warn); }
+.Composer-notice, .FileContent-trunc { background:rgba(241,180,103,.09); color:var(--md-warn); }
 
 /* 9. Common Empty State Alignment */
 .Sidebar-empty, .EmptyState, .MentionItem-empty, .ArtifactEmpty, .FileContent-msg, .FilePicker-empty, .LibraryView-empty, .DocViewer-empty { color:var(--md-on-dim); text-align:center; }
@@ -314,20 +314,14 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Msg-error { gap:8px; padding:8px 12px; font-size:13px; }
 .Msg-error svg { flex:0 0 auto; width:14px; height:14px; }
 
-.Msg-notice { display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border-radius:var(--r-md); border:1px solid rgba(241,180,103,.26); font-size:13px; white-space:pre-wrap; }
-.Msg-notice svg { flex:0 0 auto; width:14px; height:14px; margin-top:2px; }
+.Msg-notice { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:8px 0 0; }
+.Msg-notice-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, #7c5cff 0%, #4ea8ff 35%, #ffffff 50%, #4ea8ff 65%, #7c5cff 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
 /* ─── THINKING SHIMMER (GPU) ─────────────────────────────────────────────── */
 .ThinkingShimmer { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:0; }
 .ThinkingShimmer-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, var(--md-on-dim) 0%, var(--md-on) 35%, #ffffff 50%, var(--md-on) 65%, var(--md-on-dim) 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
-.Msg-streamingText { animation:streamFadeIn .18s var(--ease); }
-.Msg-streamingText > .Markdown > p:last-child,
-.Msg-streamingText > .Markdown > span:last-child,
-.Msg-streamingText > .Markdown > h1:last-child,
-.Msg-streamingText > .Markdown > h2:last-child,
-.Msg-streamingText > .Markdown > h3:last-child,
-.Msg-streamingText > .Markdown > li:last-child { background:linear-gradient(90deg, var(--md-on) 0%, var(--md-on) 65%, #ffffff 82%, var(--md-on-dim) 92%, var(--md-on) 100%); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.4s linear infinite; will-change:background-position; }
+.Msg-streamingText { animation:streamFadeIn .32s var(--ease); }
 
 /* ─── REASONING ──────────────────────────────────────────────────────────── */
 .Reasoning { display:flex; flex-direction:column; gap:4px; }
@@ -336,10 +330,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Reasoning-label { font-size:13px; line-height:22px; }
 .Reasoning-chevron { width:13px; height:13px; transition:transform var(--dur) var(--ease); opacity:.7; }
 .Reasoning-toggle[data-open='true'] .Reasoning-chevron { transform:rotate(90deg); }
-.Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); opacity:.68; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
-.Reasoning-body > :first-child { margin-top:0; }
-.Reasoning-body > :last-child { margin-bottom:0; }
-.Reasoning-body p { margin:0 0 6px; }
+.Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); opacity:.68; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
 
 /* ─── TOOL ROWS ──────────────────────────────────────────────────────────── */
 .ToolList { display:flex; flex-direction:column; gap:4px; }
@@ -563,6 +554,15 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .CodeBlock-copyIconDone { color:var(--md-success); }
 .CodeBlock-pre { margin:0; padding:12px 14px; font-family:var(--font-mono); font-size:13px; line-height:1.55; color:#f0f0f0; background:#181818; white-space:pre-wrap; word-break:break-word; tab-size:2; }
 .CodeBlock-pre code { font-family:inherit; font-size:inherit; color:inherit; background:transparent; }
+
+/* ─── CODE VIEWER (artifact panel, read-only) ───────────────────────────── */
+.CodeViewer { height:100%; overflow:auto; background:#181818; overscroll-behavior:none; --ln-gap:20px; }
+.CodeViewer-pre { margin:0; padding:12px 0; font-family:var(--font-mono); font-size:13px; line-height:1.55; color:#f0f0f0; background:transparent; tab-size:2; }
+.CodeViewer-pre code { font-family:inherit; font-size:inherit; color:inherit; background:transparent; display:block; }
+.CodeViewer-line { display:flex; align-items:flex-start; padding:0 14px 0 0; }
+.CodeViewer-line:hover { background:#262626; }
+.CodeViewer-ln { flex:none; box-sizing:content-box; width:calc(var(--gutter-ch, 2) * 1ch); padding-left:14px; margin-right:var(--ln-gap); text-align:right; color:#f0f0f05c; user-select:none; -webkit-user-select:none; white-space:pre; }
+.CodeViewer-code { flex:1; min-width:0; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
 
 /* ─── SYNTAX HIGHLIGHT (VS Code dark) ───────────────────────────────────── */
 .token.comment,.token.prolog,.token.doctype,.token.cdata { color:#6a9955; font-style:italic; }

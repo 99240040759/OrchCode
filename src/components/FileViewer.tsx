@@ -1,87 +1,15 @@
 import { useEffect, useState } from "react";
-import Editor, { loader } from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
 import { useDebouncedCallback } from "use-debounce";
 import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
-
-import editorWorker from "monaco-editor/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/language/json/json.worker?worker";
-import cssWorker from "monaco-editor/language/css/css.worker?worker";
-import htmlWorker from "monaco-editor/language/html/html.worker?worker";
-import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 
 import * as api from "../lib/api";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 import { Markdown } from "./Markdown";
+import { CodeViewer } from "./CodeViewer";
 import { ExplorerIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
-
-self.MonacoEnvironment = {
-  getWorker(_, label) {
-    if (label === "json") return new jsonWorker();
-    if (label === "css" || label === "scss" || label === "less") return new cssWorker();
-    if (label === "html" || label === "handlebars" || label === "razor") return new htmlWorker();
-    if (label === "typescript" || label === "javascript") return new tsWorker();
-    return new editorWorker();
-  },
-};
-
-loader.config({ monaco });
-
-let monacoThemeDefined = false;
-
-const handleBeforeMount = (m: Parameters<NonNullable<React.ComponentProps<typeof Editor>["beforeMount"]>>[0]) => {
-  if (monacoThemeDefined) return;
-  monacoThemeDefined = true;
-  m.editor.defineTheme("app-dark", {
-    base: "vs-dark",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editor.background": "#181818",
-      "editor.foreground": "#F0F0F0",
-      "editor.lineHighlightBackground": "#262626",
-      "editorLineNumber.foreground": "#F0F0F05C",
-      "editorLineNumber.activeForeground": "#F0F0F0",
-      "editorGutter.background": "#181818",
-      "editorIndentGuide.background": "#F0F0F013",
-      "editorIndentGuide.activeBackground": "#F0F0F030",
-      "editor.selectionBackground": "#40404099",
-      "editor.inactiveSelectionBackground": "#40404077",
-      "scrollbarSlider.background": "#F0F0F011",
-      "scrollbarSlider.hoverBackground": "#F0F0F01E",
-      "scrollbarSlider.activeBackground": "#F0F0F01E",
-      "minimap.background": "#181818",
-    },
-  });
-};
-
-const EDITOR_OPTIONS: React.ComponentProps<typeof Editor>["options"] = {
-  readOnly: true,
-  minimap: { enabled: true },
-  lineNumbers: "on",
-  lineNumbersMinChars: 4,
-  lineDecorationsWidth: 10,
-  padding: { top: 12, bottom: 12 },
-  scrollBeyondLastLine: false,
-  renderWhitespace: "none",
-  fontSize: 13,
-  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-  fontLigatures: true,
-  wordWrap: "on",
-  wrappingStrategy: "advanced",
-  scrollbar: { horizontal: "hidden", handleMouseWheel: true },
-  automaticLayout: true,
-  folding: true,
-  glyphMargin: false,
-  overviewRulerBorder: false,
-  renderLineHighlight: "gutter",
-  smoothScrolling: true,
-  cursorBlinking: "smooth",
-  contextmenu: false,
-};
 
 const LOADING_SPINNER = (
   <div className="FileViewerLoading">
@@ -423,16 +351,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
         ) : isMd && mode === "preview" ? (
           <div className="FileViewerMarkdown"><Markdown>{content}</Markdown></div>
         ) : (
-          <Editor
-            key={path}
-            height="100%"
-            path={path}
-            value={content}
-            theme="app-dark"
-            beforeMount={handleBeforeMount}
-            loading={LOADING_SPINNER}
-            options={EDITOR_OPTIONS}
-          />
+          <CodeViewer key={path} path={path} content={content} />
         )}
       </div>
     </div>

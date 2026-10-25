@@ -8,10 +8,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
 
-    optimizeDeps: {
-      include: ["monaco-editor"],
-    },
-
     worker: {
       format: "es",
     },
@@ -50,10 +46,6 @@ export default defineConfig(({ mode }) => {
             }
             if (pkgName === "prismjs") {
               return "vendor-prism";
-            }
-            if (pkgName === "monaco-editor" || pkgName === "@monaco-editor/react") {
-              if (normalized.includes("worker")) return undefined;
-              return "vendor-monaco";
             }
             if (pkgName === "pdfjs-dist") {
               if (normalized.includes("worker")) return undefined;

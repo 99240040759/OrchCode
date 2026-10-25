@@ -757,7 +757,7 @@ impl ReasoningClock {
         let Some(start) = self.started.take() else {
             return;
         };
-        let duration_seconds = start.elapsed().as_secs().max(1);
+        let duration_seconds = start.elapsed().as_secs_f64().round().max(1.0) as u64;
         self.durations.push(duration_seconds);
         let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
     }
