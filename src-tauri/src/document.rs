@@ -66,7 +66,6 @@ struct ParsedDocument {
     full_text: String,
     title: Option<String>,
     page_count: Option<usize>,
-    page_boundaries: Vec<(usize, usize)>,
 }
 
 fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
@@ -86,21 +85,18 @@ fn parse_pdf_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
     let pages = doc.get_pages();
     let page_count = pages.len();
     let mut full_text = String::new();
-    let mut page_boundaries = Vec::new();
 
     for (page_num, _page_id) in &pages {
         if let Ok(text) = doc.extract_text(&[*page_num]) {
             let cleaned = clean_pdf_text(&text);
             if !cleaned.trim().is_empty() {
-                let page_offset = full_text.len();
-                page_boundaries.push((page_offset, *page_num as usize));
                 full_text.push_str(&cleaned);
                 full_text.push('\n');
             }
         }
     }
 
-    Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count), page_boundaries })
+    Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count) })
 }
 
 fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
@@ -145,21 +141,18 @@ fn parse_office_zip_from_bytes(bytes: &[u8], kind: OfficeXmlKind) -> AppResult<P
         OfficeXmlKind::Word => {
             let xml_text = read_zip_entry(&mut zip, "word/document.xml")?;
             let text = extract_office_text(&xml_text)?;
-            Ok(ParsedDocument { full_text: text, title, page_count: None, page_boundaries: vec![] })
+            Ok(ParsedDocument { full_text: text, title, page_count: None })
         }
         OfficeXmlKind::Pptx => {
             let sorted_slides = ordered_pptx_slides(&mut zip);
             let slide_count = sorted_slides.len();
             let mut full_text = String::new();
-            let mut page_boundaries = Vec::new();
 
             for (idx, slide_name) in sorted_slides.iter().enumerate() {
                 let slide_num = idx + 1;
                 let xml = read_zip_entry(&mut zip, slide_name)?;
                 let slide_text = extract_office_text(&xml)?;
                 if !slide_text.trim().is_empty() {
-                    let offset = full_text.len();
-                    page_boundaries.push((offset, slide_num));
                     full_text.push_str(&format!("=== Slide {slide_num} ===\n{slide_text}\n\n"));
                 }
             }
@@ -168,7 +161,6 @@ fn parse_office_zip_from_bytes(bytes: &[u8], kind: OfficeXmlKind) -> AppResult<P
                 full_text,
                 title,
                 page_count: Some(slide_count),
-                page_boundaries,
             })
         }
     }
@@ -489,7 +481,6 @@ fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
         full_text,
         title: None,
         page_count: Some(sheets.len()),
-        page_boundaries: vec![],
     })
 }
 
@@ -499,7 +490,6 @@ fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
         full_text: cow.into_owned(),
         title: None,
         page_count: None,
-        page_boundaries: vec![],
     })
 }
 

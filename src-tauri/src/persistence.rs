@@ -34,21 +34,6 @@ const SCHEMA: &str = "
  );
 ";
 
-const REASONING_DURATIONS_FK_MIGRATION: &str = "
- CREATE TABLE reasoning_durations_v2 (
-     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-     item_id          TEXT NOT NULL,
-     duration_seconds INTEGER NOT NULL,
-     PRIMARY KEY (conversation_id, item_id)
- );
- INSERT INTO reasoning_durations_v2 (conversation_id, item_id, duration_seconds)
-     SELECT conversation_id, item_id, duration_seconds
-     FROM reasoning_durations
-     WHERE conversation_id IN (SELECT id FROM sessions);
- DROP TABLE reasoning_durations;
- ALTER TABLE reasoning_durations_v2 RENAME TO reasoning_durations;
-";
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionViewPage {
@@ -136,7 +121,6 @@ impl SqliteMemory {
 
         let migration_list = vec![
             rusqlite_migration::M::up(SCHEMA),
-            rusqlite_migration::M::up(REASONING_DURATIONS_FK_MIGRATION),
         ];
         let max_version = migration_list.len();
         let migrations = rusqlite_migration::Migrations::new(migration_list);

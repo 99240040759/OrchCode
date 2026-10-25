@@ -6,7 +6,7 @@ use rig::completion::Message;
 use rig::conversation::{Author, Conversation, MessageId};
 use rig::tool::Tool;
 use rig::message::{
-    AssistantContent, DocumentSourceKind, ToolResultContent, UserContent,
+    AssistantContent, DocumentData, DocumentSourceKind, MimeType, ToolResultContent, UserContent,
 };
 use rig_memory::{as_of, history, summary_in, Compacted, DirStore, LogRecord, SessionError, Store};
 
@@ -259,10 +259,10 @@ fn user_view(cid: &str, id: MessageId, content: &[UserContent]) -> Option<Messag
             }
             UserContent::Document(doc) => {
                 let data_url = match &doc.data {
-                    DocumentSourceKind::Base64(b64) => {
+                    DocumentData::File(DocumentSourceKind::Base64(b64)) => {
                         Some(format!("data:application/octet-stream;base64,{b64}"))
                     }
-                    DocumentSourceKind::Url(url) => Some(url.clone()),
+                    DocumentData::File(DocumentSourceKind::Url(url)) => Some(url.clone()),
                     _ => None,
                 };
                 attachments.push(AttachmentView {
