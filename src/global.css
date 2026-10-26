@@ -307,15 +307,17 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Msg-assistant > .Reasoning + .ToolList,
 .Msg-assistant > .ToolList + .ToolList,
 .Msg-assistant > .ToolList + .ThinkingShimmer,
-.Msg-assistant > .Reasoning + .ThinkingShimmer { margin-top:4px; }
+.Msg-assistant > .Reasoning + .ThinkingShimmer,
+.Msg-assistant > .ToolList + .Msg-notice,
+.Msg-assistant > .Reasoning + .Msg-notice { margin-top:4px; }
 
 .Msg-attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end; }
 
 .Msg-error { gap:8px; padding:8px 12px; font-size:13px; }
 .Msg-error svg { flex:0 0 auto; width:14px; height:14px; }
 
-.Msg-notice { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:8px 0 0; }
-.Msg-notice-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, #7c5cff 0%, #4ea8ff 35%, #ffffff 50%, #4ea8ff 65%, #7c5cff 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
+.Msg-notice { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:0; }
+.Msg-notice-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, var(--md-on-dim) 0%, var(--md-on) 35%, #ffffff 50%, var(--md-on) 65%, var(--md-on-dim) 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
 /* ─── THINKING SHIMMER (GPU) ─────────────────────────────────────────────── */
 .ThinkingShimmer { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:0; }
@@ -788,7 +790,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 /* ─── REDUCED MOTION ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .Greeting .Avatar, .Greeting-title, .Greeting-sub,
-  .ThinkingShimmer-text, .TooltipContent,
+  .ThinkingShimmer-text, .Msg-notice-text, .TooltipContent,
   .Msg-streamingText, .Msg-streamingText > .Markdown > *:last-child,
   .BrowserBar-progress, .BrowserBar-loadBar {
     animation:none; opacity:1; transform:none;

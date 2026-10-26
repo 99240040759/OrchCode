@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
+use sqlx::{Executor, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::events::ToolDisplayInfo;
 use crate::util::now_ms;
 
 const SCHEMA: &str = "
- CREATE TABLE sessions (
+ CREATE TABLE IF NOT EXISTS sessions (
      id                  TEXT PRIMARY KEY,
      title               TEXT,
      workspace_path      TEXT,
@@ -23,10 +24,10 @@ const SCHEMA: &str = "
      total_tokens        INTEGER NOT NULL DEFAULT 0,
      last_context_tokens INTEGER NOT NULL DEFAULT 0
  );
- CREATE INDEX idx_sessions_workspace_user
+ CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
      ON sessions(workspace_path, user_id, updated_at DESC);
 
- CREATE TABLE reasoning_durations (
+ CREATE TABLE IF NOT EXISTS reasoning_durations (
      conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
      item_id          TEXT NOT NULL,
      duration_seconds INTEGER NOT NULL,
@@ -102,8 +103,6 @@ pub struct MessageView {
 
 const POOL_SIZE: u32 = 6;
 
-pub(crate) type SqlitePool = Pool<SqliteConnectionManager>;
-
 #[derive(Clone)]
 pub struct SqliteMemory {
     pub(crate) pool: SqlitePool,
@@ -111,35 +110,25 @@ pub struct SqliteMemory {
 
 impl SqliteMemory {
     pub fn open(path: &Path) -> AppResult<Self> {
-        let manager = SqliteConnectionManager::file(path).with_init(configure_connection);
-        let pool = Pool::builder()
-            .max_size(POOL_SIZE)
-            .build(manager)
-            .map_err(|e| AppError::other(format!("sqlite pool build failed: {e}")))?;
+        tauri::async_runtime::block_on(Self::open_async(path))
+    }
 
-        let mut conn = pool.get().map_err(pool_err)?;
+    pub async fn open_async(path: &Path) -> AppResult<Self> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .busy_timeout(std::time::Duration::from_secs(10))
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true);
 
-        let migration_list = vec![
-            rusqlite_migration::M::up(SCHEMA),
-        ];
-        let max_version = migration_list.len();
-        let migrations = rusqlite_migration::Migrations::new(migration_list);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(POOL_SIZE)
+            .connect_with(options)
+            .await
+            .map_err(sql_err)?;
 
-        let current_version: usize = conn
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(|e| AppError::other(format!("sqlite user_version read failed: {e}")))?;
-
-        if current_version > max_version {
-            return Err(AppError::other(format!(
-                "database schema version {current_version} is newer than this build supports ({max_version})"
-            )));
-        }
-
-        migrations
-            .to_latest(&mut conn)
-            .map_err(|e| AppError::other(format!("sqlite schema migration failed: {e}")))?;
-
-        drop(conn);
+        pool.execute(SCHEMA).await.map_err(sql_err)?;
 
         Ok(Self { pool })
     }
@@ -150,26 +139,24 @@ impl SqliteMemory {
         workspace_path: &str,
         user_id: &str,
     ) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let sid = session_id.to_string();
-        let ws = workspace_path.to_string();
-        let uid = user_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let now = now_ms();
-            c.execute(
-                "INSERT INTO sessions (id, workspace_path, user_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)
-                 ON CONFLICT(id) DO UPDATE SET
-                     workspace_path = COALESCE(sessions.workspace_path, excluded.workspace_path),
-                     user_id = COALESCE(sessions.user_id, excluded.user_id),
-                     updated_at = excluded.updated_at",
-                params![sid, ws, uid, now],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
+        let now = now_ms();
+        sqlx::query(
+            "INSERT INTO sessions (id, workspace_path, user_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 workspace_path = COALESCE(sessions.workspace_path, excluded.workspace_path),
+                 user_id = COALESCE(sessions.user_id, excluded.user_id),
+                 updated_at = excluded.updated_at",
+        )
+        .bind(session_id)
+        .bind(workspace_path)
+        .bind(user_id)
+        .bind(now)
+        .execute(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        Ok(())
     }
 
     pub async fn record_usage(
@@ -179,45 +166,41 @@ impl SqliteMemory {
         input_tokens: u64,
         output_tokens: u64,
     ) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let sid = session_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE sessions SET
-                     last_context_tokens = ?2,
-                     total_input_tokens = total_input_tokens + ?3,
-                     total_output_tokens = total_output_tokens + ?4,
-                     total_tokens = total_tokens + ?3 + ?4,
-                     updated_at = ?5
-                 WHERE id = ?1",
-                params![
-                    sid,
-                    to_db_token(context_tokens),
-                    to_db_token(input_tokens),
-                    to_db_token(output_tokens),
-                    now_ms()
-                ],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
+        let now = now_ms();
+        sqlx::query(
+            "UPDATE sessions SET
+                 last_context_tokens = ?2,
+                 total_input_tokens = total_input_tokens + ?3,
+                 total_output_tokens = total_output_tokens + ?4,
+                 total_tokens = total_tokens + ?3 + ?4,
+                 updated_at = ?5
+             WHERE id = ?1",
+        )
+        .bind(session_id)
+        .bind(to_db_token(context_tokens))
+        .bind(to_db_token(input_tokens))
+        .bind(to_db_token(output_tokens))
+        .bind(now)
+        .execute(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        Ok(())
     }
 
     pub async fn set_context_tokens(&self, session_id: &str, context_tokens: u64) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let sid = session_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.execute(
-                "UPDATE sessions SET last_context_tokens = ?2, updated_at = ?3 WHERE id = ?1",
-                params![sid, to_db_token(context_tokens), now_ms()],
-            )
-            .map_err(sql_err)?;
-            Ok(())
-        })
+        let now = now_ms();
+        sqlx::query(
+            "UPDATE sessions SET last_context_tokens = ?2, updated_at = ?3 WHERE id = ?1",
+        )
+        .bind(session_id)
+        .bind(to_db_token(context_tokens))
+        .bind(now)
+        .execute(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        Ok(())
     }
 
     pub async fn list_sessions_for_workspace(
@@ -225,177 +208,125 @@ impl SqliteMemory {
         workspace_path: &str,
         user_id: &str,
     ) -> AppResult<Vec<SessionSummary>> {
-        let pool = self.pool.clone();
-        let ws = workspace_path.to_string();
-        let uid = user_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c
-                .prepare(
-                    "SELECT id, title, workspace_path, updated_at, last_context_tokens
-                     FROM sessions
-                     WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)
-                     ORDER BY updated_at DESC",
-                )
-                .map_err(sql_err)?;
-            let rows = stmt
-                .query_map(params![ws, uid], |row| {
-                    Ok(SessionSummary {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        workspace_path: row.get(2)?,
-                        updated_at: row.get(3)?,
-                        context_tokens: row.get(4)?,
-                    })
-                })
-                .map_err(sql_err)?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r.map_err(sql_err)?);
-            }
-            Ok(out)
-        })
+        let rows = sqlx::query(
+            "SELECT id, title, workspace_path, updated_at, last_context_tokens
+             FROM sessions
+             WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)
+             ORDER BY updated_at DESC",
+        )
+        .bind(workspace_path)
+        .bind(user_id)
+        .fetch_all(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        let summaries = rows
+            .into_iter()
+            .map(|row| SessionSummary {
+                id: row.get(0),
+                title: row.get(1),
+                workspace_path: row.get(2),
+                updated_at: row.get(3),
+                context_tokens: row.get(4),
+            })
+            .collect();
+
+        Ok(summaries)
     }
 
     pub async fn session_ids_for_workspace(&self, workspace_path: &str) -> AppResult<Vec<String>> {
-        let pool = self.pool.clone();
-        let ws = workspace_path.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c
-                .prepare("SELECT id FROM sessions WHERE workspace_path = ?1")
-                .map_err(sql_err)?;
-            let rows = stmt
-                .query_map(params![ws], |row| row.get::<_, String>(0))
-                .map_err(sql_err)?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r.map_err(sql_err)?);
-            }
-            Ok(out)
-        })
-        .await
+        let rows = sqlx::query("SELECT id FROM sessions WHERE workspace_path = ?1")
+            .bind(workspace_path)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        Ok(rows.into_iter().map(|row| row.get(0)).collect())
     }
 
     pub async fn delete_session(&self, session_id: &str) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let sid = session_id.to_string();
-        run_db_task(move || {
-            let mut c = pool.get().map_err(pool_err)?;
-            let tx = c.transaction().map_err(sql_err)?;
-            tx.execute("DELETE FROM sessions WHERE id = ?1", params![sid])
-                .map_err(sql_err)?;
-            tx.commit().map_err(sql_err)?;
-            Ok(())
-        })
-        .await
+        sqlx::query("DELETE FROM sessions WHERE id = ?1")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        Ok(())
     }
 
     pub async fn delete_sessions_for_workspace(&self, workspace_path: &str) -> AppResult<()> {
-        let pool = self.pool.clone();
-        let ws = workspace_path.to_string();
-        run_db_task(move || {
-            let mut c = pool.get().map_err(pool_err)?;
-            let tx = c.transaction().map_err(sql_err)?;
-            tx.execute("DELETE FROM sessions WHERE workspace_path = ?1", params![ws])
-                .map_err(sql_err)?;
-            tx.commit().map_err(sql_err)?;
-            Ok(())
-        })
-        .await
+        sqlx::query("DELETE FROM sessions WHERE workspace_path = ?1")
+            .bind(workspace_path)
+            .execute(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        Ok(())
     }
 
     pub async fn set_session_title(&self, conversation_id: &str, title: &str) -> AppResult<bool> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        let t = title.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let changed = c
-                .execute(
-                    "UPDATE sessions SET title = ?2 WHERE id = ?1 AND (title IS NULL OR title = '')",
-                    params![cid, t],
-                )
-                .map_err(sql_err)?;
-            Ok(changed > 0)
-        })
+        let res = sqlx::query(
+            "UPDATE sessions SET title = ?2 WHERE id = ?1 AND (title IS NULL OR title = '')",
+        )
+        .bind(conversation_id)
+        .bind(title)
+        .execute(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        Ok(res.rows_affected() > 0)
     }
 
     pub async fn session_has_title(&self, conversation_id: &str) -> AppResult<bool> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            c.query_row(
-                "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND title IS NOT NULL AND title != ''",
-                params![cid],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|n| n > 0)
-            .map_err(sql_err)
-        })
+        let row = sqlx::query(
+            "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND title IS NOT NULL AND title != ''",
+        )
+        .bind(conversation_id)
+        .fetch_one(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        let count: i64 = row.get(0);
+        Ok(count > 0)
     }
 
     pub async fn session_owner(&self, conversation_id: &str) -> AppResult<Option<String>> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let owner: Option<Option<String>> = c
-                .query_row(
-                    "SELECT user_id FROM sessions WHERE id = ?1",
-                    params![cid],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(sql_err)?;
-            Ok(owner.flatten())
-        })
-        .await
+        let opt_row = sqlx::query("SELECT user_id FROM sessions WHERE id = ?1")
+            .bind(conversation_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        Ok(opt_row.and_then(|row| row.get(0)))
     }
 
     pub async fn session_context_tokens(&self, conversation_id: &str) -> AppResult<u64> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let value: Option<i64> = c
-                .query_row(
-                    "SELECT last_context_tokens FROM sessions WHERE id = ?1",
-                    params![cid],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(sql_err)?;
-            Ok(value.unwrap_or(0).max(0) as u64)
-        })
-        .await
+        let opt_row = sqlx::query("SELECT last_context_tokens FROM sessions WHERE id = ?1")
+            .bind(conversation_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        let value: Option<i64> = opt_row.and_then(|row| row.get(0));
+        Ok(value.unwrap_or(0).max(0) as u64)
     }
 
     pub async fn reasoning_durations(&self, conversation_id: &str) -> AppResult<HashMap<String, u64>> {
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let c = pool.get().map_err(pool_err)?;
-            let mut stmt = c
-                .prepare("SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1")
-                .map_err(sql_err)?;
-            let iter = stmt
-                .query_map(params![cid], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                })
-                .map_err(sql_err)?;
-            let mut out = HashMap::new();
-            for row in iter {
-                let (item_id, secs) = row.map_err(sql_err)?;
-                out.insert(item_id, secs.max(0) as u64);
-            }
-            Ok(out)
-        })
+        let rows = sqlx::query(
+            "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool)
         .await
+        .map_err(sql_err)?;
+
+        let mut out = HashMap::new();
+        for row in rows {
+            let item_id: String = row.get(0);
+            let secs: i64 = row.get(1);
+            out.insert(item_id, secs.max(0) as u64);
+        }
+        Ok(out)
     }
 
     pub async fn save_reasoning_durations(
@@ -406,24 +337,22 @@ impl SqliteMemory {
         if durations.is_empty() {
             return Ok(());
         }
-        let pool = self.pool.clone();
-        let cid = conversation_id.to_string();
-        run_db_task(move || {
-            let mut c = pool.get().map_err(pool_err)?;
-            let tx = c.transaction().map_err(sql_err)?;
-            for (item_id, secs) in durations {
-                tx.execute(
-                    "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
-                    params![cid, item_id, to_db_token(secs)],
-                )
-                .map_err(sql_err)?;
-            }
-            tx.commit().map_err(sql_err)?;
-            Ok(())
-        })
-        .await
+        let mut tx = self.pool.begin().await.map_err(sql_err)?;
+        for (item_id, secs) in durations {
+            sqlx::query(
+                "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
+            )
+            .bind(conversation_id)
+            .bind(item_id)
+            .bind(to_db_token(secs))
+            .execute(&mut *tx)
+            .await
+            .map_err(sql_err)?;
+        }
+        tx.commit().await.map_err(sql_err)?;
+        Ok(())
     }
 }
 
@@ -431,35 +360,7 @@ fn to_db_token(value: u64) -> i64 {
     value.min(i64::MAX as u64) as i64
 }
 
-pub fn configure_connection(conn: &mut Connection) -> rusqlite::Result<()> {
-    conn.busy_timeout(std::time::Duration::from_secs(10))?;
-    conn.execute_batch("
-        PRAGMA foreign_keys = ON;
-        PRAGMA recursive_triggers = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA temp_store = MEMORY;
-        PRAGMA mmap_size = 268435456;
-        PRAGMA cache_size = -16384;
-    ")?;
-    Ok(())
-}
-
-
-pub(crate) async fn run_db_task<T, F>(f: F) -> AppResult<T>
-where
-    T: Send + 'static,
-    F: FnOnce() -> AppResult<T> + Send + 'static,
-{
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| AppError::other(format!("db task failed: {e}")))?
-}
-
-pub(crate) fn sql_err(e: rusqlite::Error) -> AppError {
+pub(crate) fn sql_err(e: sqlx::Error) -> AppError {
+    sentry::capture_error(&e);
     AppError::other(format!("sqlite error: {e}"))
-}
-
-pub(crate) fn pool_err(e: r2d2::Error) -> AppError {
-    AppError::other(format!("db pool error: {e}"))
 }

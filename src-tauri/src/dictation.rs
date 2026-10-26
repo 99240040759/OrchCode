@@ -47,6 +47,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let capture_finished = capture_finished.clone();
         std::thread::spawn(move || {
             if let Err(e) = capture_loop(&recording, &samples, &sample_rate) {
+                sentry::capture_error(&e);
                 recording.store(false, Ordering::SeqCst);
                 finished.store(true, Ordering::SeqCst);
                 let _ = channel.send(DictationEvent::Error {
@@ -105,7 +106,10 @@ fn capture_loop(
     let max_samples = (sr as usize).saturating_mul(MAX_SECONDS as usize);
 
     let config: cpal::StreamConfig = supported.config();
-    let err_fn = |err| eprintln!("[dictation] input stream error: {err}");
+    let err_fn = |err| {
+        eprintln!("[dictation] input stream error: {err}");
+        sentry::capture_message(&format!("dictation input stream error: {err}"), sentry::Level::Error);
+    };
 
     macro_rules! make_stream {
         ($t:ty, $to_i16:expr) => {{
@@ -204,9 +208,12 @@ async fn transcribe_when_stopped(
     } else {
         match transcribe(&gateway, &snapshot, sr).await {
             Ok(text) => DictationEvent::Final { text },
-            Err(e) => DictationEvent::Error {
-                message: e.to_string(),
-            },
+            Err(e) => {
+                sentry::capture_error(&e);
+                DictationEvent::Error {
+                    message: e.to_string(),
+                }
+            }
         }
     };
 

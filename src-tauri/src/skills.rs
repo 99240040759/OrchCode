@@ -31,6 +31,7 @@ pub fn seed_bundled_skills(data_dir: &Path) {
 
     if let Err(e) = std::fs::create_dir_all(&global_skills_dir) {
         eprintln!("failed to create skills dir: {e}");
+        sentry::capture_message(&format!("failed to create skills dir: {e}"), sentry::Level::Error);
         return;
     }
 

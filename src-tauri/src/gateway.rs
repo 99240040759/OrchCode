@@ -219,11 +219,27 @@ async fn check_status(resp: reqwest::Response) -> AppResult<reqwest::Response> {
     if status.is_success() {
         return Ok(resp);
     }
+    let url = resp.url().to_string();
+    let status_code = status.as_u16();
     let body = resp.text().await.unwrap_or_default();
-    Err(AppError::Gateway {
-        status: status.as_u16(),
+    let err = AppError::Gateway {
+        status: status_code,
         body,
-    })
+    };
+    sentry::add_breadcrumb(sentry::Breadcrumb {
+        category: Some("gateway".to_string()),
+        message: Some(format!("HTTP {status_code} on {url}")),
+        level: if status_code >= 500 {
+            sentry::Level::Error
+        } else {
+            sentry::Level::Warning
+        },
+        ..Default::default()
+    });
+    if status_code >= 500 || status_code == 429 {
+        sentry::capture_error(&err);
+    }
+    Err(err)
 }
 
 #[derive(Debug, Serialize)]

@@ -1,18 +1,22 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use circular_buffer::HeapCircularBuffer;
 use command_group::AsyncCommandGroup;
 use ignore::WalkBuilder;
 use path_clean::PathClean;
-use rig::tool::{Tool, ToolExecutionError};
+use rig::message::{ImageDetail, ToolResultContent};
+use rig::tool::{Tool, ToolExecutionError, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use similar::TextDiff;
 use tauri::Manager;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::error::{AppError, AppResult};
@@ -54,6 +58,12 @@ impl From<AppError> for ToolError {
 }
 
 pub fn tool_failure(error: ToolError) -> ToolExecutionError {
+    sentry::add_breadcrumb(sentry::Breadcrumb {
+        category: Some("tools".to_string()),
+        message: Some(format!("tool failed: {error}")),
+        level: sentry::Level::Warning,
+        ..Default::default()
+    });
     ToolExecutionError::other(error.to_string())
 }
 
@@ -406,8 +416,7 @@ struct InnerTask {
     exit_code: Option<i32>,
     output: RingBuffer,
     started_at: Instant,
-    pid: Option<u32>,
-    cancel_requested: bool,
+    cancel_token: CancellationToken,
 }
 
 impl InnerTask {
@@ -415,40 +424,36 @@ impl InnerTask {
         if self.status != "running" {
             return false;
         }
-        self.cancel_requested = true;
-        if let Some(pid) = self.pid {
-            crate::util::kill_process_tree(pid);
-        }
+        self.cancel_token.cancel();
         true
     }
 }
 
 struct RingBuffer {
-    data: VecDeque<u8>,
+    data: HeapCircularBuffer<u8>,
 }
 
 impl RingBuffer {
     fn new() -> Self {
         Self {
-            data: VecDeque::with_capacity(OUTPUT_RING_BYTES),
+            data: HeapCircularBuffer::with_capacity(OUTPUT_RING_BYTES),
         }
     }
 
     fn push(&mut self, bytes: &[u8]) {
-        if bytes.len() >= OUTPUT_RING_BYTES {
-            self.data.clear();
-            self.data.extend(bytes[bytes.len() - OUTPUT_RING_BYTES..].iter().copied());
-            return;
-        }
-        let overflow = (self.data.len() + bytes.len()).saturating_sub(OUTPUT_RING_BYTES);
-        if overflow > 0 {
-            self.data.drain(..overflow);
-        }
-        self.data.extend(bytes.iter().copied());
+        self.data.extend_from_slice(bytes);
     }
 
-    fn as_string(&mut self) -> String {
-        String::from_utf8_lossy(self.data.make_contiguous()).into_owned()
+    fn as_string(&self) -> String {
+        let (s1, s2) = self.data.as_slices();
+        if s2.is_empty() {
+            String::from_utf8_lossy(s1).into_owned()
+        } else {
+            let mut buf = Vec::with_capacity(s1.len() + s2.len());
+            buf.extend_from_slice(s1);
+            buf.extend_from_slice(s2);
+            String::from_utf8_lossy(&buf).into_owned()
+        }
     }
 }
 
@@ -484,6 +489,7 @@ impl CommandManager {
 
         let task_id = format!("task-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let done = Arc::new(Notify::new());
+        let cancel_token = CancellationToken::new();
         let inner = Arc::new(Mutex::new(InnerTask {
             task_id: task_id.clone(),
             run_id: run_id.to_string(),
@@ -493,8 +499,7 @@ impl CommandManager {
             exit_code: None,
             output: RingBuffer::new(),
             started_at: Instant::now(),
-            pid: None,
-            cancel_requested: false,
+            cancel_token: cancel_token.clone(),
         }));
 
         {
@@ -548,16 +553,8 @@ impl CommandManager {
 
             match spawn_result {
                 Ok(mut child) => {
-                    let pid = child.id();
-                    let killed_before_start = {
-                        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
-                        g.pid = pid;
-                        g.cancel_requested
-                    };
-                    if killed_before_start {
-                        if let Some(pid) = pid {
-                            crate::util::kill_process_tree(pid);
-                        }
+                    if cancel_token.is_cancelled() {
+                        let _ = child.start_kill();
                     }
 
                     let stdout_task = child.inner().stdout.take().map(|out| {
@@ -569,30 +566,41 @@ impl CommandManager {
                         tokio::spawn(async move { pump(err, inner_ref).await })
                     });
 
-                    let wait_result = child.wait().await;
+                    tokio::select! {
+                        biased;
+                        _ = cancel_token.cancelled() => {
+                            let _ = child.start_kill();
+                            let _ = child.wait().await;
+                            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            g.status = "cancelled".to_string();
+                        }
+                        wait_result = child.wait() => {
+                            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            if cancel_token.is_cancelled() {
+                                g.status = "cancelled".to_string();
+                            } else {
+                                match wait_result {
+                                    Ok(status) => {
+                                        g.exit_code = status.code();
+                                        g.status = if status.success() {
+                                            "completed".to_string()
+                                        } else {
+                                            "failed".to_string()
+                                        };
+                                    }
+                                    Err(e) => {
+                                        g.status = "failed".to_string();
+                                        g.output.push(format!("\nprocess wait error: {e}\n").as_bytes());
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     for handle in [stdout_task, stderr_task].into_iter().flatten() {
                         let abort = handle.abort_handle();
                         if tokio::time::timeout(PIPE_DRAIN_GRACE, handle).await.is_err() {
                             abort.abort();
-                        }
-                    }
-
-                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
-                    g.pid = None;
-                    match wait_result {
-                        Ok(_) if g.cancel_requested => g.status = "cancelled".to_string(),
-                        Ok(status) => {
-                            g.exit_code = status.code();
-                            g.status = if status.success() {
-                                "completed".to_string()
-                            } else {
-                                "failed".to_string()
-                            };
-                        }
-                        Err(e) => {
-                            g.status = "failed".to_string();
-                            g.output.push(format!("\nprocess wait error: {e}\n").as_bytes());
                         }
                     }
                 }
@@ -614,7 +622,7 @@ impl CommandManager {
             let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
             guard.get(task_id)?.clone()
         };
-        let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+        let g = task.lock().unwrap_or_else(|e| e.into_inner());
         let output = g.output.as_string();
         Some(TaskStatus {
             task_id: g.task_id.clone(),
@@ -700,6 +708,7 @@ pub struct ReadFileArgs {
 
 pub struct ReadFile {
     workspace: Option<PathBuf>,
+    supports_images: bool,
 }
 
 pub(crate) fn window_lines(content: &str, start: Option<usize>, end: Option<usize>) -> String {
@@ -742,14 +751,20 @@ impl Tool for ReadFile {
     const NAME: &'static str = "read_file";
     type Error = ToolError;
     type Args = ReadFileArgs;
-    type Output = String;
+    type Output = ToolOutput;
 
     fn description(&self) -> String {
-        "Read the contents of a file in the workspace. \
+        let image_note = if self.supports_images {
+            " Raster images (png, jpg, gif, webp) return the image directly."
+        } else {
+            " Raster images return file metadata only."
+        };
+        format!(
+            "Read the contents of a file in the workspace. \
 Returns text content for source code, config, markdown, JSON, SVG, PDF, Word, Excel and PowerPoint files. \
-Output is limited to about 2000 lines per call; pass start_line and end_line (1-based, inclusive) to read other sections. \
+Output is limited to about 2000 lines per call; pass start_line and end_line (1-based, inclusive) to read other sections.{image_note} \
 ALWAYS call this before editing any file."
-            .to_string()
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -785,15 +800,34 @@ ALWAYS call this before editing any file."
             let bytes = tokio::fs::read(&path)
                 .await
                 .map_err(|e| ToolError::msg(format!("cannot read image {rel}: {e}")))?;
+            if self.supports_images {
+                let ext_clone = ext.clone();
+                let (b64, media) = tokio::task::spawn_blocking(move || {
+                    crate::media::encode_for_model(
+                        &bytes,
+                        &ext_clone,
+                        crate::config::MAX_MODEL_IMAGE_DIMENSION,
+                        crate::config::MAX_MODEL_IMAGE_BYTES,
+                    )
+                })
+                .await
+                .map_err(|e| ToolError::msg(format!("image encode task failed: {e}")))?
+                .map_err(|e| ToolError::msg(format!("cannot prepare image {rel}: {e}")))?;
+                return Ok(ToolOutput::one(ToolResultContent::image_base64(
+                    b64,
+                    Some(media),
+                    Some(ImageDetail::Auto),
+                )));
+            }
             let dimensions = crate::media::image_dimensions(&bytes);
             let dim_str = match dimensions {
                 Some((w, h)) => format!("{w}x{h} px"),
                 None => "unknown dimensions".to_string(),
             };
-            return Ok(format!(
+            return Ok(ToolOutput::text(format!(
                 "[Image file: {rel} ({ext}), size: {} bytes, dimensions: {dim_str}]",
                 bytes.len()
-            ));
+            )));
         }
 
         if crate::document::is_parseable_document(&path) {
@@ -804,7 +838,7 @@ ALWAYS call this before editing any file."
             if parsed.full_text.trim().is_empty() {
                 return Err(ToolError::msg(format!("{rel} contains no extractable text")));
             }
-            return Ok(window_lines(&parsed.full_text, args.start_line, args.end_line));
+            return Ok(ToolOutput::text(window_lines(&parsed.full_text, args.start_line, args.end_line)));
         }
 
         let bytes = tokio::fs::read(&path)
@@ -817,7 +851,7 @@ ALWAYS call this before editing any file."
             )));
         }
         let text = String::from_utf8_lossy(&bytes);
-        Ok(window_lines(&text, args.start_line, args.end_line))
+        Ok(ToolOutput::text(window_lines(&text, args.start_line, args.end_line)))
     }
 }
 
@@ -912,8 +946,86 @@ pub struct MultiReplaceFileContent {
     app: tauri::AppHandle,
 }
 
-fn to_crlf(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\n', "\r\n")
+enum ReplacementError {
+    Ambiguous(usize),
+    NotFound(Option<String>),
+}
+
+fn find_diff_hint(content: &str, target: &str) -> Option<String> {
+    let diff = TextDiff::from_lines(content, target);
+    let mut best_op = None;
+    let mut max_equal = 0;
+    for op in diff.ops() {
+        if let similar::DiffOp::Equal { len, .. } = op {
+            if *len > max_equal {
+                max_equal = *len;
+                best_op = Some(*op);
+            }
+        }
+    }
+
+    if let Some(similar::DiffOp::Equal { old_index, .. }) = best_op {
+        let content_lines: Vec<&str> = content.lines().collect();
+        let target_line_count = target.lines().count().max(1);
+        let start = old_index.saturating_sub(2);
+        let end = (old_index + target_line_count + 2).min(content_lines.len());
+        if start < end {
+            let actual_chunk = content_lines[start..end].join("\n");
+            let hunk_diff = TextDiff::from_lines(&actual_chunk, target);
+            let unified = hunk_diff
+                .unified_diff()
+                .context_radius(2)
+                .header("file", "replacement")
+                .to_string();
+            if !unified.trim().is_empty() {
+                return Some(format!(
+                    "Closest matching section in file (around line {}):\n{}",
+                    start + 1,
+                    unified
+                ));
+            }
+        }
+    }
+    None
+}
+
+fn apply_single_replacement(
+    content: &str,
+    old_str: &str,
+    new_str: &str,
+) -> Result<String, ReplacementError> {
+    let count = content.matches(old_str).count();
+    if count == 1 {
+        return Ok(content.replacen(old_str, new_str, 1));
+    }
+    if count > 1 {
+        return Err(ReplacementError::Ambiguous(count));
+    }
+
+    let is_crlf = content.contains("\r\n");
+    let normalized_old = if is_crlf {
+        old_str.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        old_str.replace("\r\n", "\n")
+    };
+    let normalized_new = if is_crlf {
+        new_str.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        new_str.replace("\r\n", "\n")
+    };
+
+    if normalized_old != old_str {
+        let norm_count = content.matches(&normalized_old).count();
+        if norm_count == 1 {
+            return Ok(content.replacen(&normalized_old, &normalized_new, 1));
+        }
+        if norm_count > 1 {
+            return Err(ReplacementError::Ambiguous(norm_count));
+        }
+    }
+
+    let hint = find_diff_hint(content, old_str);
+    Err(ReplacementError::NotFound(hint))
 }
 
 impl Tool for MultiReplaceFileContent {
@@ -969,51 +1081,28 @@ Each old_string must match exactly one location. Line endings are normalized aut
                 )));
             }
 
-            let lf_old = r.old_string.replace("\r\n", "\n");
-            let lf_new = r.new_string.replace("\r\n", "\n");
-            let crlf_old = to_crlf(&r.old_string);
-            let crlf_new = to_crlf(&r.new_string);
-
-            let mut candidates = vec![(r.old_string.as_str(), r.new_string.as_str())];
-            if lf_old != r.old_string {
-                candidates.push((lf_old.as_str(), lf_new.as_str()));
-            }
-            if crlf_old != r.old_string && crlf_old != lf_old {
-                candidates.push((crlf_old.as_str(), crlf_new.as_str()));
-            }
-
-            let mut matched = None;
-            let mut first_count = 0;
-            for (idx, &(old, new)) in candidates.iter().enumerate() {
-                let count = content.matches(old).count();
-                if idx == 0 {
-                    first_count = count;
+            content = match apply_single_replacement(&content, &r.old_string, &r.new_string) {
+                Ok(new_content) => new_content,
+                Err(ReplacementError::Ambiguous(count)) => {
+                    return Err(ToolError::msg(format!(
+                        "replacement #{} is ambiguous: old_string matches {count} locations in {}. Include more surrounding context.",
+                        i + 1,
+                        args.path
+                    )));
                 }
-                if count == 1 {
-                    matched = Some((old, new));
-                    break;
-                }
-            }
-
-            let (target, replacement) = match matched {
-                Some(pair) => pair,
-                None => {
-                    if first_count == 0 {
-                        return Err(ToolError::msg(format!(
-                            "replacement #{} not applied: old_string not found in {}. Re-read the file and copy the exact text.",
-                            i + 1,
-                            args.path
-                        )));
-                    } else {
-                        return Err(ToolError::msg(format!(
-                            "replacement #{} is ambiguous: old_string matches {first_count} locations in {}. Include more surrounding context.",
-                            i + 1,
-                            args.path
-                        )));
+                Err(ReplacementError::NotFound(hint)) => {
+                    let mut msg = format!(
+                        "replacement #{} not applied: old_string not found in {}. Re-read the file and copy the exact text.",
+                        i + 1,
+                        args.path
+                    );
+                    if let Some(hint_text) = hint {
+                        msg.push_str("\n\n");
+                        msg.push_str(&hint_text);
                     }
+                    return Err(ToolError::msg(msg));
                 }
             };
-            content = content.replacen(target, replacement, 1);
         }
 
         fs_util::atomic_write(&path, content.as_bytes()).await?;
@@ -1568,6 +1657,7 @@ pub struct ToolContext {
     pub app_handle: tauri::AppHandle,
     pub command_manager: CommandManager,
     pub data_dir: PathBuf,
+    pub supports_images: bool,
 }
 
 impl ToolContext {
@@ -1579,6 +1669,7 @@ impl ToolContext {
     pub fn read_file(&self) -> ReadFile {
         ReadFile {
             workspace: self.workspace.clone(),
+            supports_images: self.supports_images,
         }
     }
     pub fn read_skill(&self) -> ReadSkill {

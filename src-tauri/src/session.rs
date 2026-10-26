@@ -29,6 +29,7 @@ pub fn is_safe_session_id(id: &str) -> bool {
 }
 
 fn session_error(error: SessionError) -> AppError {
+    sentry::capture_error(&error);
     AppError::other(format!("conversation log: {error}"))
 }
 
@@ -47,7 +48,10 @@ pub async fn load(data_dir: &Path, session_id: &str) -> AppResult<Conversation> 
     let store = open_store(data_dir, session_id)?;
     tokio::task::spawn_blocking(move || rig_memory::load(&store, LOG).map_err(session_error))
         .await
-        .map_err(|e| AppError::other(format!("conversation load task failed: {e}")))?
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            AppError::other(format!("conversation load task failed: {e}"))
+        })?
 }
 
 pub async fn destroy(data_dir: &Path, session_id: &str) -> AppResult<()> {
@@ -61,7 +65,10 @@ pub async fn destroy(data_dir: &Path, session_id: &str) -> AppResult<()> {
         Ok(())
     })
     .await
-    .map_err(|e| AppError::other(format!("conversation delete task failed: {e}")))?
+    .map_err(|e| {
+        sentry::capture_error(&e);
+        AppError::other(format!("conversation delete task failed: {e}"))
+    })?
 }
 
 fn stable_id(cid: &str, message: u64, item_idx: usize, kind: Option<&str>) -> String {

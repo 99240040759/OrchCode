@@ -189,7 +189,9 @@ impl ConnectorManager {
             specs.push(spec);
         }
         if specs.is_empty() {
-            return Err(AppError::Connector(format!("No tools are available for {}", def.name)));
+            let err = AppError::Connector(format!("No tools are available for {}", def.name));
+            sentry::capture_error(&err);
+            return Err(err);
         }
         let specs = Arc::new(specs);
         self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(

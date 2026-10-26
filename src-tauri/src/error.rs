@@ -60,6 +60,7 @@ impl AppError {
 
 impl From<AppError> for tauri::ipc::InvokeError {
     fn from(err: AppError) -> Self {
+        sentry::capture_error(&err);
         tauri::ipc::InvokeError::from(err.to_string())
     }
 }

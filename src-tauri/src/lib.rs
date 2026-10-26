@@ -37,6 +37,9 @@ fn focus_main_window(app: &tauri::AppHandle) {
 
 async fn handle_connector_callback(app: &tauri::AppHandle, rest: &str) {
     let error = connector_callback_error(rest);
+    if let Some(ref err) = error {
+        sentry::capture_message(&format!("connector callback error: {err}"), sentry::Level::Warning);
+    }
     let _ = app.emit("connector-changed", serde_json::json!({ "error": error }));
 }
 
@@ -44,6 +47,7 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
     let state = app.state::<AppState>();
     let Some(session_id) = state.consume_sign_in_window() else {
         if state.current_user_id().is_none() {
+            sentry::capture_message("sign-in link expired or consumed", sentry::Level::Warning);
             let _ = app.emit(
                 "auth-error",
                 serde_json::json!({
@@ -68,6 +72,7 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
             );
         }
         Err(err) => {
+            sentry::capture_message(&format!("auth callback error: {err}"), sentry::Level::Error);
             let _ = app.emit("auth-error", serde_json::json!({ "error": err }));
         }
     }
@@ -142,6 +147,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            sentry::add_breadcrumb(sentry::Breadcrumb {
+                category: Some("lifecycle".to_string()),
+                message: Some("app setup initialized".to_string()),
+                level: sentry::Level::Info,
+                ..Default::default()
+            });
             util::warm_login_shell_path();
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;

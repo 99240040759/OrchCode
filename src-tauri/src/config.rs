@@ -7,7 +7,14 @@ pub fn firebase_api_key() -> &'static str {
 }
 
 pub fn sentry_dsn() -> &'static str {
-    option_env!("SENTRY_DSN").unwrap_or("")
+    static DSN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DSN.get_or_init(|| {
+        std::env::var("SENTRY_DSN")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| option_env!("SENTRY_DSN").unwrap_or("").to_string())
+    })
+    .as_str()
 }
 
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";

@@ -31,6 +31,9 @@ pub fn delete(account: &str) {
     };
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => {}
-        Err(e) => eprintln!("[credentials] could not delete {account} from the credential store: {e}"),
+        Err(e) => {
+            eprintln!("[credentials] could not delete {account} from the credential store: {e}");
+            sentry::capture_message(&format!("credential delete failed for {account}: {e}"), sentry::Level::Warning);
+        }
     }
 }

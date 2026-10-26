@@ -263,6 +263,10 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
 
   const groups = groupItems(message.items);
   const isStreaming = Boolean(message.streaming);
+  const lastItem = message.items[message.items.length - 1];
+  const hasRunningTool = message.items.some((i) => i.type === "toolCall" && i.status === "running");
+  const isReasoningActive = lastItem?.type === "reasoning" && Boolean(lastItem.active);
+  const showThinking = !message.notice && isStreaming && !hasRunningTool && !isReasoningActive && lastItem?.type !== "text";
 
   return (
     <div className="Msg Msg-assistant" data-streaming={isStreaming || undefined}>
@@ -293,7 +297,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
           <span className="Msg-notice-text">{message.notice}</span>
         </div>
       )}
-      {isStreaming && message.items.length === 0 && <ThinkingShimmer />}
+      {showThinking && <ThinkingShimmer />}
       {message.error && (
         <div className="Msg-error" role="alert">
           <VscWarning aria-hidden="true" />

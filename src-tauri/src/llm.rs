@@ -113,7 +113,7 @@ pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient>
         token,
     };
     let config = rig::providers::openai::OpenAIConfig::with_key(
-        &rig::providers::openai::wire::DEEPSEEK,
+        &rig::providers::openai::wire::OPENAI,
         initial.as_str(),
     )
     .with_base_url(&config::inference_base_url(provider))
@@ -209,7 +209,7 @@ Do not narrate what you are about to do and then stop. Do not ask for permission
 ## HOW TO INTERPRET TOOL RESULTS
 
 - **list_dir** lists folder entries.
-- **read_file** returns file text (about 2000 lines per call; use start_line/end_line for more). PDF, Word, Excel and PowerPoint files are returned as extracted text. Raster images return a data URL.
+- **read_file** returns file text (about 2000 lines per call; use start_line/end_line for more). PDF, Word, Excel and PowerPoint files are returned as extracted text. Raster images return the image directly when the model supports vision, otherwise return file metadata.
 - **read_skill** returns procedural instructions for engineering workflows.
 - **write_file / multi_replace_file_content** return a confirmation or an error. If multi_replace fails with "not found", the file content differs — read it again and retry with exact text.
 - **run_command** returns output for foreground commands, or a task_id for background or long-running processes. Commands run with the user's login PATH and no interactive stdin.
@@ -299,12 +299,14 @@ pub struct OutputClip;
 impl AgentHook for OutputClip {
     async fn on_outcome(&self, _ctx: &HookContext, event: OutcomeEvent<'_>) -> OutcomeAction {
         if let Some(result) = event.tool_result() {
-            let rendered = result.output().render();
-            if rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
-                return OutcomeAction::rewrite_tool_result(
-                    &event,
-                    clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS),
-                );
+            if result.output().as_text().is_some() || result.output().as_json().is_some() {
+                let rendered = result.output().render();
+                if rendered.chars().count() > config::MAX_TOOL_OUTPUT_CHARS {
+                    return OutcomeAction::rewrite_tool_result(
+                        &event,
+                        clip_middle(&rendered, config::MAX_TOOL_OUTPUT_CHARS),
+                    );
+                }
             }
         }
         OutcomeAction::proceed()
@@ -572,6 +574,7 @@ impl ChatRun {
             .await
         {
             eprintln!("[chat] failed to persist reasoning durations: {error}");
+            sentry::capture_error(&error);
         }
         saved
     }
@@ -601,13 +604,14 @@ impl SessionHook {
             }
             Err(error) => {
                 eprintln!("[chat] compaction could not be planned: {error}");
+                sentry::capture_error(&error);
                 session.back_off(12);
                 return;
             }
         };
 
         let _ = deps.channel.send(ChatEvent::Notice {
-            message: "Compacting context…".to_string(),
+            message: "Compacting…".to_string(),
         });
         let system = plan.request.system_instructions().unwrap_or_default().to_string();
         let prompt = request_text(&plan.request.chat_history);
@@ -626,11 +630,13 @@ impl SessionHook {
             Some(Ok(text)) if !text.trim().is_empty() => text.trim().to_string(),
             Some(Ok(_)) => {
                 eprintln!("[chat] compaction produced an empty summary");
+                sentry::capture_message("compaction produced an empty summary", sentry::Level::Warning);
                 session.back_off(6);
                 return;
             }
             Some(Err(error)) => {
                 eprintln!("[chat] compaction summary failed: {error}");
+                sentry::capture_error(&error);
                 session.back_off(6);
                 return;
             }
@@ -662,6 +668,7 @@ impl SessionHook {
             .saturating_add(estimate_tokens(session.conversation.messages()));
         if let Err(error) = session.save().await {
             eprintln!("[chat] {error}");
+            sentry::capture_error(&error);
         }
         if let Err(error) = deps
             .memory
@@ -669,6 +676,7 @@ impl SessionHook {
             .await
         {
             eprintln!("[chat] failed to persist context size: {error}");
+            sentry::capture_error(&error);
         }
 
         let (compaction_message_id, compaction_item_id) = match spliced.changed.first() {
@@ -710,6 +718,7 @@ impl AgentHook for SessionHook {
         }
         if let Err(error) = session.save().await {
             eprintln!("[chat] {error}");
+            sentry::capture_error(&error);
         }
 
         if session.compactions == 0 {
@@ -744,6 +753,7 @@ impl AgentHook for SessionHook {
         session.adopt(messages.iter().cloned(), messages.len());
         if let Err(error) = session.save().await {
             eprintln!("[chat] {error}");
+            sentry::capture_error(&error);
         }
     }
 }
@@ -895,6 +905,7 @@ pub async fn run_chat(
                         .await
                     {
                         eprintln!("[chat] failed to persist token usage: {error}");
+                        sentry::capture_error(&error);
                     }
                     let _ = channel.send(ChatEvent::Usage {
                         context_tokens: context,
@@ -915,15 +926,17 @@ pub async fn run_chat(
                 }
                 let raw = error.to_string();
                 overflowed = is_context_overflow(&raw);
-                finish!(RunOutcome::Failed(humanize_llm_error(&raw)));
+                let reason = humanize_llm_error(&raw);
+                sentry::capture_message(&format!("chat stream error: {reason}"), sentry::Level::Error);
+                finish!(RunOutcome::Failed(reason));
             }
         }
     }
 
     if !saw_final_response {
-        finish!(RunOutcome::Failed(
-            "model stream ended before a final response".to_string()
-        ));
+        let reason = "model stream ended before a final response".to_string();
+        sentry::capture_message(&reason, sentry::Level::Error);
+        finish!(RunOutcome::Failed(reason));
     }
     finish!(RunOutcome::Completed)
 }

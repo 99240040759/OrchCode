@@ -114,6 +114,15 @@ impl AppState {
     }
 
     pub fn reset_session_memory(&self) {
+        sentry::configure_scope(|scope| {
+            scope.set_user(None);
+        });
+        sentry::add_breadcrumb(sentry::Breadcrumb {
+            category: Some("auth".to_string()),
+            message: Some("session memory reset".to_string()),
+            level: sentry::Level::Info,
+            ..Default::default()
+        });
         self.set_token(None);
         *self.current_user_id.write().unwrap_or_else(|e| e.into_inner()) = None;
         *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = None;
@@ -121,6 +130,15 @@ impl AppState {
     }
 
     pub async fn sign_out(&self) {
+        sentry::configure_scope(|scope| {
+            scope.set_user(None);
+        });
+        sentry::add_breadcrumb(sentry::Breadcrumb {
+            category: Some("auth".to_string()),
+            message: Some("user signed out".to_string()),
+            level: sentry::Level::Info,
+            ..Default::default()
+        });
         self.cancel_all_runs();
         self.close_all_terminals();
         self.reset_session_memory();
@@ -135,6 +153,18 @@ impl AppState {
     }
 
     pub fn set_authenticated_user(&self, user_id: &str) {
+        sentry::configure_scope(|scope| {
+            scope.set_user(Some(sentry::User {
+                id: Some(user_id.to_string()),
+                ..Default::default()
+            }));
+        });
+        sentry::add_breadcrumb(sentry::Breadcrumb {
+            category: Some("auth".to_string()),
+            message: Some("user authenticated".to_string()),
+            level: sentry::Level::Info,
+            ..Default::default()
+        });
         let changed = {
             let mut guard = self.current_user_id.write().unwrap_or_else(|e| e.into_inner());
             let changed = guard.as_deref() != Some(user_id);
@@ -163,6 +193,16 @@ impl AppState {
     }
 
     pub fn set_workspace(&self, path: Option<PathBuf>) {
+        sentry::configure_scope(|scope| match &path {
+            Some(p) => scope.set_tag("workspace", p.to_string_lossy().to_string()),
+            None => scope.remove_tag("workspace"),
+        });
+        sentry::add_breadcrumb(sentry::Breadcrumb {
+            category: Some("workspace".to_string()),
+            message: Some(format!("workspace updated: {:?}", path.as_deref())),
+            level: sentry::Level::Info,
+            ..Default::default()
+        });
         *self.workspace.write().unwrap_or_else(|e| e.into_inner()) = path;
         self.invalidate_file_index();
     }
@@ -294,7 +334,10 @@ impl AppState {
                     Ok(_) => {
                         let _ = catalog_app.emit("models-updated", ());
                     }
-                    Err(e) => eprintln!("[models] background refresh failed: {e}"),
+                    Err(e) => {
+                        eprintln!("[models] background refresh failed: {e}");
+                        sentry::capture_error(&e);
+                    }
                 }
             }
         });
@@ -309,6 +352,7 @@ impl AppState {
                 }
                 if let Err(e) = state.ensure_fresh_token().await {
                     if e.is_fatal_auth() {
+                        sentry::capture_error(&e);
                         state.sign_out().await;
                         let _ = app.emit(
                             "auth-changed",
@@ -316,6 +360,7 @@ impl AppState {
                         );
                     } else {
                         eprintln!("[auth] token refresh failed (retryable): {e}");
+                        sentry::capture_error(&e);
                     }
                 }
             }
@@ -337,6 +382,12 @@ impl AppState {
                 workspace,
             },
         );
+        sentry::add_breadcrumb(sentry::Breadcrumb {
+            category: Some("chat".to_string()),
+            message: Some(format!("started run {run_id} for session {session_id}")),
+            level: sentry::Level::Info,
+            ..Default::default()
+        });
         Ok((run_id, cancel))
     }
 
@@ -355,6 +406,12 @@ impl AppState {
             .unwrap_or(false)
         {
             guard.remove(session_id);
+            sentry::add_breadcrumb(sentry::Breadcrumb {
+                category: Some("chat".to_string()),
+                message: Some(format!("finished run {run_id} for session {session_id}")),
+                level: sentry::Level::Info,
+                ..Default::default()
+            });
         }
     }
 

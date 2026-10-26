@@ -218,6 +218,7 @@ pub async fn forget_workspace(
         for id in &session_ids {
             if let Err(error) = session::destroy(&state.data_dir, id).await {
                 eprintln!("[sessions] could not delete the conversation of {id}: {error}");
+                sentry::capture_error(&error);
             }
         }
         state
@@ -345,6 +346,7 @@ pub async fn start_chat(
         Ok(ready) => ready,
         Err(error) => {
             state.finish_run(&session_id, &run_id);
+            sentry::capture_message(&format!("chat preflight failed: {error}"), sentry::Level::Error);
             return Err(error);
         }
     };
@@ -358,6 +360,7 @@ pub async fn start_chat(
         Ok(connectors) => connectors,
         Err(error) => {
             state.finish_run(&session_id, &run_id);
+            sentry::capture_message(&format!("connectors prepare failed: {error}"), sentry::Level::Error);
             return Err(error);
         }
     };
@@ -373,6 +376,7 @@ pub async fn start_chat(
         Ok(built) => built,
         Err(error) => {
             state.finish_run(&session_id, &run_id);
+            sentry::capture_message(&format!("build_user_message failed: {error}"), sentry::Level::Error);
             return Err(error);
         }
     };
@@ -388,6 +392,7 @@ pub async fn start_chat(
         .await
     {
         state.finish_run(&session_id, &run_id);
+        sentry::capture_error(&error);
         return Err(format!("failed to save the chat request: {error}"));
     }
     let _ = app.emit("sessions-updated", ());
@@ -410,6 +415,7 @@ pub async fn start_chat(
         Ok(chat) => chat,
         Err(error) => {
             state.finish_run(&session_id, &run_id);
+            sentry::capture_error(&error);
             return Err(format!("failed to open the conversation: {error}"));
         }
     };
@@ -421,6 +427,7 @@ pub async fn start_chat(
         app_handle: app.clone(),
         command_manager: (*state.command_manager).clone(),
         data_dir: state.data_dir.clone(),
+        supports_images: model_info.supports_images(),
     };
     let agent = build_agent(AgentInputs {
         client: &client,
@@ -444,6 +451,7 @@ pub async fn start_chat(
 
     if let Err(error) = chat.finish(&built.message, &result).await {
         eprintln!("[chat] failed to save the conversation: {error}");
+        sentry::capture_error(&error);
     }
     if result.overflowed {
         let _ = state
@@ -457,7 +465,10 @@ pub async fn start_chat(
     let event = match result.outcome {
         RunOutcome::Completed => ChatEvent::Done,
         RunOutcome::Cancelled => ChatEvent::Cancelled,
-        RunOutcome::Failed(message) => ChatEvent::Error { message },
+        RunOutcome::Failed(message) => {
+            sentry::capture_message(&format!("chat run failed: {message}"), sentry::Level::Error);
+            ChatEvent::Error { message }
+        }
     };
     let _ = on_event.send(event);
     Ok(())
@@ -505,12 +516,18 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
         .await;
     session::destroy(&state.data_dir, &session_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })?;
     state
         .memory
         .delete_session(&session_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })?;
     let _ = app.emit("sessions-updated", ());
     Ok(())
 }
@@ -594,7 +611,10 @@ pub fn start_dictation(state: State<'_, AppState>, on_event: Channel<DictationEv
     if let Some(existing) = guard.take() {
         existing.cancel();
     }
-    let handle = dictation::start(state.gateway.clone(), on_event).map_err(|e| e.to_string())?;
+    let handle = dictation::start(state.gateway.clone(), on_event).map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })?;
     *guard = Some(handle);
     Ok(())
 }
@@ -647,8 +667,14 @@ pub async fn terminal_open(
         )
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        sentry::capture_message(&format!("terminal spawn task failed: {e}"), sentry::Level::Error);
+        e.to_string()
+    })?
+    .map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })?;
     let previous = {
         let mut guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(id, session)
@@ -708,12 +734,18 @@ pub struct ConnectorDto {
 
 #[tauri::command]
 pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<ConnectorDto>, String> {
-    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    state.ensure_fresh_token().await.map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })?;
     let connected = state
         .connector_manager
         .connected_ids()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })?;
     Ok(CONNECTOR_DEFS
         .iter()
         .map(|def| ConnectorDto {
@@ -729,27 +761,37 @@ pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<Connector
 
 #[tauri::command]
 pub async fn get_connector_auth_url(state: State<'_, AppState>, connector_id: String) -> Result<String, String> {
-    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    state.ensure_fresh_token().await.map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })?;
     state
         .connector_manager
         .begin_connect(&connector_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })
 }
 
 #[tauri::command]
 pub async fn disconnect_connector(state: State<'_, AppState>, connector_id: String) -> Result<(), String> {
-    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    state.ensure_fresh_token().await.map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })?;
     state
         .connector_manager
         .disconnect(&connector_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })
 }
 
 #[tauri::command]
 pub fn report_error(message: String) {
-    if !cfg!(debug_assertions) {
-        sentry::capture_message(&message, sentry::Level::Error);
-    }
+    sentry::capture_message(&message, sentry::Level::Error);
 }
