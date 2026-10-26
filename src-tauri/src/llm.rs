@@ -1,10 +1,8 @@
 use std::collections::HashSet;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
 use futures::StreamExt;
 use rig::agent::{
     Agent, AgentBuilder, AgentHook, CompletionCallAction, CompletionCallEvent, HookContext,
@@ -14,14 +12,10 @@ use rig::agent::{
 use rig::catalog::ModelSpec;
 use rig::completion::{Message, Section, SystemPrompt};
 use rig::conversation::{Conversation, Halt};
-use rig::http_client::{
-    self, HeaderValue, HttpClientExt, LazyBody, MultipartForm, Request, ReqwestClient, Response,
-    StreamingResponse,
-};
 use rig::message::{ImageDetail, UserContent};
-use rig::tool::{DynamicTool, Tool};
 use rig::providers::registry::ProviderId;
-use rig::wasm_compat::WasmCompatSend;
+use rig::rig_reqwest::ReqwestMiddlewareClient;
+use rig::tool::{DynamicTool, Tool};
 use rig_memory::{
     apply_summary, estimate_tokens, save_async, summary_state, CompactReason, CompactionPolicy,
     DirStore, TrackArgument,
@@ -41,65 +35,32 @@ use crate::session;
 use crate::tools::{parse_display_info, window_lines, RunCommand, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
 
-#[derive(Clone, Default)]
-pub struct AuthedHttp {
-    inner: ReqwestClient,
+#[derive(Clone, Debug)]
+pub struct AuthMiddleware {
     token: TokenHandle,
 }
 
-impl std::fmt::Debug for AuthedHttp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthedHttp").finish_non_exhaustive()
+impl AuthMiddleware {
+    pub fn new(token: TokenHandle) -> Self {
+        Self { token }
     }
 }
 
-impl AuthedHttp {
-    fn authorize<T>(&self, req: &mut Request<T>) {
+#[async_trait::async_trait]
+impl reqwest_middleware::Middleware for AuthMiddleware {
+    async fn handle(
+        &self,
+        mut req: reqwest::Request,
+        extensions: &mut http::Extensions,
+        next: reqwest_middleware::Next<'_>,
+    ) -> reqwest_middleware::Result<reqwest::Response> {
         let token = self.token.read().ok().and_then(|g| g.clone());
         if let Some(token) = token.filter(|t| !t.is_empty()) {
-            if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
-                req.headers_mut().insert("authorization", value);
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+                req.headers_mut().insert(reqwest::header::AUTHORIZATION, value);
             }
         }
-    }
-}
-
-impl HttpClientExt for AuthedHttp {
-    fn send<T, U>(
-        &self,
-        mut req: Request<T>,
-    ) -> impl Future<Output = http_client::Result<Response<LazyBody<U>>>> + WasmCompatSend + 'static
-    where
-        T: Into<Bytes>,
-        T: WasmCompatSend,
-        U: From<Bytes>,
-        U: WasmCompatSend + 'static,
-    {
-        self.authorize(&mut req);
-        HttpClientExt::send(&self.inner, req)
-    }
-
-    fn send_multipart<U>(
-        &self,
-        mut req: Request<MultipartForm>,
-    ) -> impl Future<Output = http_client::Result<Response<LazyBody<U>>>> + WasmCompatSend + 'static
-    where
-        U: From<Bytes>,
-        U: WasmCompatSend + 'static,
-    {
-        self.authorize(&mut req);
-        HttpClientExt::send_multipart(&self.inner, req)
-    }
-
-    fn send_streaming<T>(
-        &self,
-        mut req: Request<T>,
-    ) -> impl Future<Output = http_client::Result<StreamingResponse>> + WasmCompatSend
-    where
-        T: Into<Bytes> + WasmCompatSend,
-    {
-        self.authorize(&mut req);
-        HttpClientExt::send_streaming(&self.inner, req)
+        next.run(req, extensions).await
     }
 }
 
@@ -108,10 +69,14 @@ pub type ChatAgent = Agent;
 
 pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient> {
     let initial = token.read().ok().and_then(|g| g.clone()).unwrap_or_default();
-    let http = AuthedHttp {
-        inner: ReqwestClient::from(crate::util::streaming_http_client()),
-        token,
-    };
+    let retry_policy = reqwest_retry::policies::ExponentialBackoff::builder()
+        .build_with_max_retries(3);
+    let client = reqwest_middleware::ClientBuilder::new(crate::util::streaming_http_client())
+        .with(AuthMiddleware::new(token))
+        .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(retry_policy))
+        .build();
+
+    let http = ReqwestMiddlewareClient::from(client);
     let config = rig::providers::openai::OpenAIConfig::with_key(
         &rig::providers::openai::wire::OPENAI,
         initial.as_str(),

@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
+use oauth2::basic::BasicClient;
+use oauth2::{AccessToken, AuthorizationCode, ClientId, RefreshToken, TokenResponse, TokenUrl};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -256,39 +258,37 @@ impl FirebaseAuthClient {
     }
 
     pub async fn refresh_session(&self, refresh_token: &str) -> AppResult<AuthSession> {
-        let url = format!(
+        let token_url = TokenUrl::new(format!(
             "https://securetoken.googleapis.com/v1/token?key={}",
             config::firebase_api_key()
-        );
-        let body_str = format!(
-            "grant_type=refresh_token&refresh_token={}",
-            urlencoding::encode(refresh_token)
-        );
-        let resp = self
-            .client
-            .post(&url)
+        ))
+        .map_err(|e| AppError::other(format!("invalid token url: {e}")))?;
+
+        let oauth_client = BasicClient::new(ClientId::new("firebase".to_string()))
+            .set_token_uri(token_url);
+
+        let http_client = oauth2::reqwest::Client::builder()
             .timeout(request_timeout())
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body_str)
-            .send()
+            .build()
+            .unwrap_or_default();
+
+        let token_resp = oauth_client
+            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
+            .request_async(&http_client)
             .await
-            .map_err(|e| network_error("session refresh failed", e))?;
-        let body = check_status_text(resp, "token refresh").await?;
+            .map_err(|e| AppError::Gateway {
+                status: 401,
+                body: format!("token refresh failed: {e}"),
+            })?;
 
-        #[derive(Deserialize)]
-        struct FirebaseTokenResponse {
-            id_token: String,
-            refresh_token: Option<String>,
-        }
-
-        let token_resp: FirebaseTokenResponse = serde_json::from_str(&body)
-            .map_err(|e| AppError::other(format!("refresh parse error: {e}")))?;
+        let access_token = token_resp.access_token().secret().to_string();
         let new_refresh = token_resp
-            .refresh_token
+            .refresh_token()
+            .map(|r| r.secret().to_string())
             .or_else(|| Some(refresh_token.to_string()));
 
         Ok(AuthSession {
-            access_token: token_resp.id_token,
+            access_token,
             refresh_token: new_refresh,
             user: None,
         })
@@ -372,10 +372,10 @@ pub fn jwt_user_id(token: &str) -> Option<String> {
 
 #[derive(Default)]
 pub struct AuthCallbackParams {
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
+    pub access_token: Option<AccessToken>,
+    pub refresh_token: Option<RefreshToken>,
+    pub code: Option<AuthorizationCode>,
     pub error: Option<String>,
-    pub is_code: bool,
 }
 
 fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
@@ -383,12 +383,14 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
         return;
     }
     match key {
-        "code" | "id_token" | "access_token" if params.access_token.is_none() => {
-            params.access_token = Some(value.to_string());
-            params.is_code = key == "code";
+        "code" if params.code.is_none() => {
+            params.code = Some(AuthorizationCode::new(value.to_string()));
+        }
+        "id_token" | "access_token" if params.access_token.is_none() => {
+            params.access_token = Some(AccessToken::new(value.to_string()));
         }
         "refresh_token" if params.refresh_token.is_none() => {
-            params.refresh_token = Some(value.to_string());
+            params.refresh_token = Some(RefreshToken::new(value.to_string()));
         }
         "error_description" | "error" if params.error.is_none() => {
             params.error = Some(value.to_string());
@@ -439,27 +441,26 @@ pub async fn handle_auth_callback(
         return Err(err);
     }
 
-    let id_or_access_token = params
-        .access_token
-        .ok_or_else(|| "No token found in sign-in callback".to_string())?;
-
     let client = FirebaseAuthClient::new();
 
     let completed = if let Some(rt) = params.refresh_token {
+        let access_token = params
+            .access_token
+            .ok_or_else(|| "No token found in sign-in callback".to_string())?;
         let profile = client
-            .get_user(&id_or_access_token)
+            .get_user(access_token.secret())
             .await
             .map_err(|e| e.to_string())?;
         CompletedSignIn {
-            id_token: id_or_access_token,
-            refresh_token: Some(rt),
+            id_token: access_token.secret().to_string(),
+            refresh_token: Some(rt.secret().to_string()),
             profile,
         }
-    } else {
+    } else if let Some(code) = params.code {
         let (session, profile) = client
             .sign_in_with_idp(
-                &id_or_access_token,
-                params.is_code,
+                code.secret(),
+                true,
                 config::AUTH_REDIRECT_URL,
                 session_id,
             )
@@ -470,6 +471,23 @@ pub async fn handle_auth_callback(
             refresh_token: session.refresh_token,
             profile,
         }
+    } else if let Some(access_token) = params.access_token {
+        let (session, profile) = client
+            .sign_in_with_idp(
+                access_token.secret(),
+                false,
+                config::AUTH_REDIRECT_URL,
+                session_id,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        CompletedSignIn {
+            id_token: session.access_token,
+            refresh_token: session.refresh_token,
+            profile,
+        }
+    } else {
+        return Err("No token or code found in sign-in callback".to_string());
     };
 
     if let Some(rt) = completed.refresh_token.as_deref() {

@@ -69,8 +69,7 @@ struct ParsedDocument {
 fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
     match file_type {
         "pdf" => parse_pdf(path),
-        "docx" | "doc" | "pptx" | "ppt" => parse_office_doc(path),
-        "xlsx" => parse_xlsx(path),
+        "docx" | "doc" | "pptx" | "ppt" | "xlsx" | "xls" => parse_office_doc(path),
         _ => parse_plain_text(path),
     }
 }
@@ -78,11 +77,20 @@ fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
 fn parse_office_doc(path: &Path) -> AppResult<ParsedDocument> {
     let doc = office_oxide::Document::open(path)
         .map_err(|e| AppError::DocumentParseError(format!("Office document parse failed: {e}")))?;
+
+    let page_count = if let Some(pptx) = doc.as_pptx() {
+        Some(pptx.presentation.slides.len())
+    } else if let Some(xlsx) = doc.as_xlsx() {
+        Some(xlsx.workbook.sheets.len())
+    } else {
+        None
+    };
+
     let full_text = doc.plain_text();
     Ok(ParsedDocument {
         full_text,
         title: None,
-        page_count: None,
+        page_count,
     })
 }
 
@@ -194,27 +202,6 @@ pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppRes
         });
     }
     Ok(sheets)
-}
-
-fn parse_xlsx(path: &Path) -> AppResult<ParsedDocument> {
-    let sheets = read_spreadsheet(path, usize::MAX, usize::MAX)?;
-    let mut full_text = String::new();
-    for sheet in &sheets {
-        full_text.push_str(&format!("=== Sheet: {} ===\n", sheet.name));
-        for row in &sheet.rows {
-            let non_empty: Vec<&str> = row.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
-            if !non_empty.is_empty() {
-                full_text.push_str(&non_empty.join("\t"));
-                full_text.push('\n');
-            }
-        }
-        full_text.push('\n');
-    }
-    Ok(ParsedDocument {
-        full_text,
-        title: None,
-        page_count: Some(sheets.len()),
-    })
 }
 
 fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {

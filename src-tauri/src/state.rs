@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use dashmap::DashMap;
+use moka::future::Cache;
 use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 
@@ -30,12 +32,6 @@ struct SignInAttempt {
     session_id: Option<String>,
 }
 
-struct FileIndex {
-    root: PathBuf,
-    built_at: Instant,
-    entries: Arc<Vec<FileEntry>>,
-}
-
 pub struct AppState {
     pub token: TokenHandle,
     pub workspace: WorkspaceHandle,
@@ -43,7 +39,7 @@ pub struct AppState {
     pub gateway: Arc<Gateway>,
     pub catalog: RwLock<Option<ModelCatalog>>,
     pub memory: SqliteMemory,
-    pub runs: Mutex<HashMap<String, RunHandle>>,
+    pub runs: DashMap<String, RunHandle>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Arc<Mutex<HashMap<String, crate::terminal::TerminalSession>>>,
     pub command_manager: Arc<CommandManager>,
@@ -52,8 +48,8 @@ pub struct AppState {
     sign_in: Mutex<Option<SignInAttempt>>,
     token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
     catalog_fetch_lock: Arc<tokio::sync::Mutex<()>>,
-    clients: Mutex<HashMap<String, ChatClient>>,
-    file_index: Mutex<Option<FileIndex>>,
+    clients: DashMap<String, ChatClient>,
+    file_cache: Cache<PathBuf, Arc<Vec<FileEntry>>>,
 }
 
 impl AppState {
@@ -67,6 +63,10 @@ impl AppState {
         let quick_projects_dir = data_dir.join("quick-projects");
         std::fs::create_dir_all(&quick_projects_dir)?;
 
+        let file_cache = Cache::builder()
+            .time_to_live(Duration::from_secs(config::FILE_INDEX_TTL_SECS))
+            .build();
+
         Ok(Self {
             token,
             workspace: Arc::new(RwLock::new(None)),
@@ -74,7 +74,7 @@ impl AppState {
             gateway,
             catalog: RwLock::new(None),
             memory,
-            runs: Mutex::new(HashMap::new()),
+            runs: DashMap::new(),
             dictation: Mutex::new(None),
             terminals: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
@@ -83,8 +83,8 @@ impl AppState {
             sign_in: Mutex::new(None),
             token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             catalog_fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
-            clients: Mutex::new(HashMap::new()),
-            file_index: Mutex::new(None),
+            clients: DashMap::new(),
+            file_cache,
         })
     }
 
@@ -126,7 +126,7 @@ impl AppState {
         self.set_token(None);
         *self.current_user_id.write().unwrap_or_else(|e| e.into_inner()) = None;
         *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = None;
-        self.clients.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.clients.clear();
     }
 
     pub async fn sign_out(&self) {
@@ -224,40 +224,28 @@ impl AppState {
     }
 
     pub fn invalidate_file_index(&self) {
-        *self.file_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.file_cache.invalidate_all();
     }
 
     pub async fn file_index(&self, root: &Path) -> Result<Arc<Vec<FileEntry>>, String> {
-        {
-            let guard = self.file_index.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(index) = guard.as_ref() {
-                if index.root == root
-                    && index.built_at.elapsed() < Duration::from_secs(config::FILE_INDEX_TTL_SECS)
-                {
-                    return Ok(index.entries.clone());
-                }
-            }
-        }
         let root_buf = root.to_path_buf();
-        let entries = tokio::task::spawn_blocking(move || crate::fsapi::build_file_index(&root_buf))
+        self.file_cache
+            .try_get_with(root_buf.clone(), async {
+                tokio::task::spawn_blocking(move || crate::fsapi::build_file_index(&root_buf))
+                    .await
+                    .map(Arc::new)
+                    .map_err(|e| format!("file index task failed: {e}"))
+            })
             .await
-            .map_err(|e| format!("file index task failed: {e}"))?;
-        let entries = Arc::new(entries);
-        *self.file_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(FileIndex {
-            root: root.to_path_buf(),
-            built_at: Instant::now(),
-            entries: entries.clone(),
-        });
-        Ok(entries)
+            .map_err(|e| e.to_string())
     }
 
     pub fn chat_client(&self, provider: &str) -> AppResult<ChatClient> {
-        let mut clients = self.clients.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(client) = clients.get(provider) {
+        if let Some(client) = self.clients.get(provider) {
             return Ok(client.clone());
         }
         let client = crate::llm::build_client(self.token.clone(), provider)?;
-        clients.insert(provider.to_string(), client.clone());
+        self.clients.insert(provider.to_string(), client.clone());
         Ok(client)
     }
 
@@ -368,13 +356,12 @@ impl AppState {
     }
 
     pub fn start_run(&self, session_id: &str, workspace: Option<PathBuf>) -> AppResult<(String, CancellationToken)> {
-        let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.contains_key(session_id) {
+        if self.runs.contains_key(session_id) {
             return Err(AppError::RunConflict);
         }
         let run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
         let cancel = CancellationToken::new();
-        guard.insert(
+        self.runs.insert(
             session_id.to_string(),
             RunHandle {
                 run_id: run_id.clone(),
@@ -392,20 +379,13 @@ impl AppState {
     }
 
     pub fn update_run_id(&self, session_id: &str, new_run_id: &str) {
-        let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(handle) = guard.get_mut(session_id) {
+        if let Some(mut handle) = self.runs.get_mut(session_id) {
             handle.run_id = new_run_id.to_string();
         }
     }
 
     pub fn finish_run(&self, session_id: &str, run_id: &str) {
-        let mut guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-        if guard
-            .get(session_id)
-            .map(|r| r.run_id == run_id)
-            .unwrap_or(false)
-        {
-            guard.remove(session_id);
+        if self.runs.remove_if(session_id, |_, r| r.run_id == run_id).is_some() {
             sentry::add_breadcrumb(sentry::Breadcrumb {
                 category: Some("chat".to_string()),
                 message: Some(format!("finished run {run_id} for session {session_id}")),
@@ -416,27 +396,22 @@ impl AppState {
     }
 
     pub fn cancel_run(&self, session_id: &str) {
-        let run_id = {
-            let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-            guard.get(session_id).map(|run| {
-                run.cancel.cancel();
-                run.run_id.clone()
-            })
-        };
+        let run_id = self.runs.get(session_id).map(|run| {
+            run.cancel.cancel();
+            run.run_id.clone()
+        });
         if let Some(run_id) = run_id {
             self.command_manager.kill_for_run(&run_id);
         }
     }
 
     pub fn cancel_runs_matching(&self, predicate: impl Fn(&RunHandle) -> bool) -> Vec<String> {
-        let targets: Vec<String> = {
-            let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-            guard
-                .iter()
-                .filter(|(_, run)| predicate(run))
-                .map(|(session, _)| session.clone())
-                .collect()
-        };
+        let targets: Vec<String> = self
+            .runs
+            .iter()
+            .filter(|entry| predicate(entry.value()))
+            .map(|entry| entry.key().clone())
+            .collect();
         for session in &targets {
             self.cancel_run(session);
         }
@@ -454,10 +429,7 @@ impl AppState {
     pub async fn wait_for_runs(&self, sessions: &[String], timeout: Duration) {
         let deadline = Instant::now() + timeout;
         loop {
-            let active = {
-                let guard = self.runs.lock().unwrap_or_else(|e| e.into_inner());
-                sessions.iter().any(|s| guard.contains_key(s))
-            };
+            let active = sessions.iter().any(|s| self.runs.contains_key(s));
             if !active || Instant::now() >= deadline {
                 return;
             }
@@ -474,11 +446,8 @@ impl AppState {
     }
 
     pub fn shutdown(&self) {
-        {
-            let runs = self.runs.lock().unwrap_or_else(|error| error.into_inner());
-            for run in runs.values() {
-                run.cancel.cancel();
-            }
+        for entry in self.runs.iter() {
+            entry.value().cancel.cancel();
         }
         self.command_manager.kill_all();
         self.close_all_terminals();
