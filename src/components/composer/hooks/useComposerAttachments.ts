@@ -49,15 +49,23 @@ export function useComposerAttachments({
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void getCurrentWebview()
       .onDragDropEvent((event) => {
         if (event.payload.type !== "drop") return;
         addAttachments(event.payload.paths ?? []);
       })
       .then((fn) => {
-        unlisten = fn;
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
       });
-    return () => unlisten?.();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [addAttachments]);
 
   const pickFiles = useCallback(

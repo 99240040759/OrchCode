@@ -86,6 +86,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
     : "Ask anything, @ to mention a file, / for actions";
 
   const editor = useEditor({
+    shouldRerenderOnTransaction: false,
     extensions: [
       StarterKit.configure({
         heading: false,
@@ -111,12 +112,10 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       handleKeyDown: (_view, event) => {
         if (event.isComposing || event.keyCode === 229) return false;
 
-        // Suggestions intercept navigation when active
         if (suggestionsRef.current.isOpen && suggestionsRef.current.handleKeyDown(event)) {
           return true;
         }
 
-        // Enter sends message
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
           if (dictationRef.current.recording) {
@@ -130,7 +129,8 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       },
     },
     onUpdate: ({ editor: ed }) => {
-      setHasContent(!ed.isEmpty);
+      const next = !ed.isEmpty;
+      setHasContent((prev) => (prev === next ? prev : next));
       suggestionsRef.current.checkToken(ed);
     },
     onSelectionUpdate: ({ editor: ed, transaction }) => {

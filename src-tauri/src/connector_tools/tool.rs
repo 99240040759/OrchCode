@@ -32,8 +32,8 @@ impl ToolSpec {
     pub fn into_tool(self, client: ComposioClient) -> AppResult<DynamicTool> {
         let name = ToolName::new(self.slug.clone())
             .map_err(|_| AppError::Connector("a connector tool has an empty name".to_string()))?;
-        let slug = self.slug;
-        let version = self.version;
+        let slug: std::sync::Arc<str> = self.slug.into();
+        let version: std::sync::Arc<str> = self.version.into();
         let tool = DynamicTool::new(name, self.description, self.parameters, move |arguments| {
             let client = client.clone();
             let slug = slug.clone();

@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, SyncSender};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use tauri::ipc::Channel;
@@ -11,7 +11,7 @@ use crate::events::TerminalEvent;
 pub struct TerminalSession {
     instance_id: uuid::Uuid,
     master: Box<dyn MasterPty + Send>,
-    input: Sender<Vec<u8>>,
+    input: SyncSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     pid: Option<u32>,
 }
@@ -97,7 +97,7 @@ pub fn open(
         .take_writer()
         .map_err(|e| AppError::other(format!("failed to take pty writer: {e}")))?;
 
-    let (input, input_rx) = mpsc::channel::<Vec<u8>>();
+    let (input, input_rx) = mpsc::sync_channel::<Vec<u8>>(256);
     std::thread::spawn(move || {
         for chunk in input_rx {
             if writer.write_all(&chunk).is_err() {
@@ -138,8 +138,8 @@ pub fn open(
             }
             let _ = channel.send(TerminalEvent::Exit);
             on_exit(instance_id);
-            let _ = child.wait();
             let _ = killer_for_wait.kill();
+            let _ = child.wait();
         });
     }
 

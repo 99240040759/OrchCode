@@ -14,13 +14,10 @@ import {
 import { useArtifactsStore } from "../../lib/artifacts";
 import { useUpdaterStore } from "../../lib/updater";
 import { useChatStore } from "../../lib/store";
-import { cn } from "../../lib/utils";
+import { cn, IS_MAC } from "../../lib/utils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
 import type { AppView } from "../../App";
-
-export const IS_MAC =
-  typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 function UpdateBadge() {
   const status  = useUpdaterStore((s) => s.status);
@@ -97,11 +94,11 @@ function UpdateBadge() {
   return null;
 }
 
-export function WindowControls() {
+function WindowControls() {
   const [isMaximized, setIsMaximized] = useState(false);
+  const appWindow = getCurrentWindow();
 
   useEffect(() => {
-    const appWindow = getCurrentWindow();
     let disposed = false;
     let unlisten: (() => void) | undefined;
     const sync = () => {
@@ -118,9 +115,7 @@ export function WindowControls() {
       disposed = true;
       unlisten?.();
     };
-  }, []);
-
-  const appWindow = getCurrentWindow();
+  }, [appWindow]);
 
   return (
     <div className="WinControls">

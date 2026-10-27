@@ -16,7 +16,7 @@ import type {
   ToolDisplayInfo,
 } from "./api";
 
-export interface MessageAttachment {
+interface MessageAttachment {
   name: string;
   isImage: boolean;
   path?: string;
@@ -57,7 +57,7 @@ export interface CompactionNoticeItem {
 
 export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNoticeItem;
 
-export interface TokenUsage {
+interface TokenUsage {
   contextTokens: number;
   inputTokens?: number;
   cachedTokens?: number;
@@ -166,7 +166,7 @@ interface ChatActions {
   dismissError: () => void;
 }
 
-export type ChatStore = ChatState & ChatActions;
+type ChatStore = ChatState & ChatActions;
 
 const NO_CONNECTORS: string[] = [];
 
@@ -232,6 +232,7 @@ function pickModel(models: ModelDto[], key: string | null | undefined): ModelDto
   return (key ? models.find((m) => m.key === key) : undefined) ?? models[0] ?? null;
 }
 
+let cancelActiveStreamFlush: (() => void) | null = null;
 
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
@@ -279,6 +280,10 @@ export const useChatStore = create(
     },
 
     reloadForWorkspace: async () => {
+      if (cancelActiveStreamFlush) {
+        cancelActiveStreamFlush();
+        cancelActiveStreamFlush = null;
+      }
       const running = get().streamingSessionId;
       if (running) await api.cancelChat(running).catch(() => undefined);
       const wsPath = useWorkspaceStore.getState().current?.path ?? null;
@@ -301,6 +306,10 @@ export const useChatStore = create(
     },
 
     reset: () => {
+      if (cancelActiveStreamFlush) {
+        cancelActiveStreamFlush();
+        cancelActiveStreamFlush = null;
+      }
       const running = get().streamingSessionId;
       if (running) void api.cancelChat(running).catch(() => undefined);
       initEpoch += 1;
@@ -536,6 +545,19 @@ export const useChatStore = create(
         flush();
       };
 
+      cancelActiveStreamFlush = () => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        if (flushTimeoutId !== null) {
+          clearTimeout(flushTimeoutId);
+          flushTimeoutId = null;
+        }
+        textBuffer = "";
+        reasoningBuffer = "";
+      };
+
       const handleEvent = (event: ChatStreamEvent) => {
         receivedEvents = true;
         switch (event.type) {
@@ -568,8 +590,14 @@ export const useChatStore = create(
             break;
           case "toolResult":
             patch((m) => {
-              const item = m.items.find((i): i is ToolCallItem => i.type === "toolCall" && i.id === event.id);
-              if (item) { item.output = event.output; item.status = event.isError ? "error" : "done"; }
+              for (let i = m.items.length - 1; i >= 0; i--) {
+                const item = m.items[i];
+                if (item.type === "toolCall" && item.id === event.id) {
+                  item.output = event.output;
+                  item.status = event.isError ? "error" : "done";
+                  break;
+                }
+              }
             });
             break;
           case "usage":
@@ -668,6 +696,8 @@ export const useChatStore = create(
           if (s.currentSessionId === sessionId) s.error = message;
         });
         return true;
+      } finally {
+        cancelActiveStreamFlush = null;
       }
     },
 

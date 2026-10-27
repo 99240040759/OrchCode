@@ -2,9 +2,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
-use oauth2::basic::BasicClient;
-use oauth2::{AccessToken, AuthorizationCode, ClientId, RefreshToken, TokenResponse, TokenUrl};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
@@ -81,7 +78,7 @@ pub struct OAuthStart {
 }
 
 pub struct FirebaseAuthClient {
-    client: Client,
+    client: reqwest::Client,
 }
 
 impl Default for FirebaseAuthClient {
@@ -201,11 +198,12 @@ impl FirebaseAuthClient {
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key={}",
             config::firebase_api_key()
         );
-        let encoded_token = urlencoding::encode(token_or_code);
-        let post_body = if is_code {
-            format!("code={encoded_token}&providerId=google.com")
-        } else {
-            format!("id_token={encoded_token}&providerId=google.com")
+        let post_body = {
+            let key = if is_code { "code" } else { "id_token" };
+            url::form_urlencoded::Serializer::new(String::new())
+                .append_pair(key, token_or_code)
+                .append_pair("providerId", "google.com")
+                .finish()
         };
         let mut payload = serde_json::json!({
             "postBody": post_body,
@@ -258,33 +256,41 @@ impl FirebaseAuthClient {
     }
 
     pub async fn refresh_session(&self, refresh_token: &str) -> AppResult<AuthSession> {
-        let token_url = TokenUrl::new(format!(
+        let url = format!(
             "https://securetoken.googleapis.com/v1/token?key={}",
             config::firebase_api_key()
-        ))
-        .map_err(|e| AppError::other(format!("invalid token url: {e}")))?;
+        );
 
-        let oauth_client = BasicClient::new(ClientId::new("firebase".to_string()))
-            .set_token_uri(token_url);
-
-        let http_client = oauth2::reqwest::Client::builder()
+        let resp = self
+            .client
+            .post(&url)
             .timeout(request_timeout())
-            .build()
-            .unwrap_or_default();
-
-        let token_resp = oauth_client
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.to_string()))
-            .request_async(&http_client)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ])
+            .send()
             .await
-            .map_err(|e| AppError::Gateway {
-                status: 401,
-                body: format!("token refresh failed: {e}"),
-            })?;
+            .map_err(|e| AppError::Network(format!("token refresh network error: {e}")))?;
 
-        let access_token = token_resp.access_token().secret().to_string();
-        let new_refresh = token_resp
-            .refresh_token()
-            .map(|r| r.secret().to_string())
+        let body = check_status_text(resp, "token refresh").await?;
+
+        #[derive(Deserialize)]
+        struct TokenResp {
+            id_token: Option<String>,
+            access_token: Option<String>,
+            refresh_token: Option<String>,
+        }
+        let parsed: TokenResp = serde_json::from_str(&body)
+            .map_err(|e| AppError::other(format!("token refresh parse error: {e}")))?;
+
+        let access_token = parsed
+            .id_token
+            .or(parsed.access_token)
+            .ok_or_else(|| AppError::other("token refresh: no id_token in response"))?;
+        let new_refresh = parsed
+            .refresh_token
+            .filter(|r| !r.is_empty())
             .or_else(|| Some(refresh_token.to_string()));
 
         Ok(AuthSession {
@@ -311,15 +317,15 @@ async fn check_status_text(resp: reqwest::Response, context: &str) -> AppResult<
     }
 }
 
-pub fn save_refresh_token(token: &str) -> AppResult<()> {
+pub async fn save_refresh_token_async(token: &str) -> AppResult<()> {
     if token.is_empty() {
         return Ok(());
     }
-    crate::credentials::save(KEYRING_REFRESH_ACCOUNT, token)
+    crate::credentials::save_async(KEYRING_REFRESH_ACCOUNT, token).await
 }
 
-pub fn load_refresh_token() -> AppResult<Option<String>> {
-    crate::credentials::load(KEYRING_REFRESH_ACCOUNT)
+pub async fn load_refresh_token_async() -> AppResult<Option<String>> {
+    crate::credentials::load_async(KEYRING_REFRESH_ACCOUNT).await
 }
 
 pub fn clear_tokens() {
@@ -333,9 +339,11 @@ fn cached_user_path(data_dir: &Path) -> PathBuf {
 pub fn save_cached_user(data_dir: &Path, profile: &UserProfile) {
     if let Ok(json) = serde_json::to_vec(profile) {
         let path = cached_user_path(data_dir);
-        let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
-        if std::fs::write(&tmp, &json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+        if let Ok(mut tmp) = tempfile::NamedTempFile::new_in(data_dir) {
+            use std::io::Write;
+            if tmp.write_all(&json).is_ok() {
+                let _ = tmp.persist(&path);
+            }
         }
     }
 }
@@ -372,9 +380,9 @@ pub fn jwt_user_id(token: &str) -> Option<String> {
 
 #[derive(Default)]
 pub struct AuthCallbackParams {
-    pub access_token: Option<AccessToken>,
-    pub refresh_token: Option<RefreshToken>,
-    pub code: Option<AuthorizationCode>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub code: Option<String>,
     pub error: Option<String>,
 }
 
@@ -384,13 +392,13 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
     }
     match key {
         "code" if params.code.is_none() => {
-            params.code = Some(AuthorizationCode::new(value.to_string()));
+            params.code = Some(value.to_string());
         }
         "id_token" | "access_token" if params.access_token.is_none() => {
-            params.access_token = Some(AccessToken::new(value.to_string()));
+            params.access_token = Some(value.to_string());
         }
         "refresh_token" if params.refresh_token.is_none() => {
-            params.refresh_token = Some(RefreshToken::new(value.to_string()));
+            params.refresh_token = Some(value.to_string());
         }
         "error_description" | "error" if params.error.is_none() => {
             params.error = Some(value.to_string());
@@ -411,13 +419,8 @@ pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
             assign_param(&mut params, k.as_ref(), v.as_ref());
         }
         if let Some(fragment) = url.fragment() {
-            for pair in fragment.split('&') {
-                if let Some((k, v)) = pair.split_once('=') {
-                    let decoded = urlencoding::decode(v)
-                        .map(|c| c.into_owned())
-                        .unwrap_or_else(|_| v.to_string());
-                    assign_param(&mut params, k, &decoded);
-                }
+            for (k, v) in url::form_urlencoded::parse(fragment.as_bytes()) {
+                assign_param(&mut params, k.as_ref(), v.as_ref());
             }
         }
     }
@@ -448,18 +451,18 @@ pub async fn handle_auth_callback(
             .access_token
             .ok_or_else(|| "No token found in sign-in callback".to_string())?;
         let profile = client
-            .get_user(access_token.secret())
+            .get_user(&access_token)
             .await
             .map_err(|e| e.to_string())?;
         CompletedSignIn {
-            id_token: access_token.secret().to_string(),
-            refresh_token: Some(rt.secret().to_string()),
+            id_token: access_token,
+            refresh_token: Some(rt),
             profile,
         }
     } else if let Some(code) = params.code {
         let (session, profile) = client
             .sign_in_with_idp(
-                code.secret(),
+                &code,
                 true,
                 config::AUTH_REDIRECT_URL,
                 session_id,
@@ -474,7 +477,7 @@ pub async fn handle_auth_callback(
     } else if let Some(access_token) = params.access_token {
         let (session, profile) = client
             .sign_in_with_idp(
-                access_token.secret(),
+                &access_token,
                 false,
                 config::AUTH_REDIRECT_URL,
                 session_id,
@@ -491,7 +494,7 @@ pub async fn handle_auth_callback(
     };
 
     if let Some(rt) = completed.refresh_token.as_deref() {
-        save_refresh_token(rt).map_err(|e| e.to_string())?;
+        save_refresh_token_async(rt).await.map_err(|e| e.to_string())?;
     }
 
     Ok(completed)

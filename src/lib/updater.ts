@@ -4,9 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
 import * as api from "./api";
-
-const IS_MAC =
-  typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+import { IS_MAC } from "./utils";
 
 const LATEST_RELEASE_URL = "https://github.com/sameer786ss/OrchCode/releases/latest";
 const MANIFEST_URL = `${LATEST_RELEASE_URL}/download/latest.json`;
@@ -21,7 +19,7 @@ function isNewer(remote: string, current: string): boolean {
   return false;
 }
 
-export type UpdateStatus =
+type UpdateStatus =
   | "idle"
   | "checking"
   | "none"
@@ -44,7 +42,7 @@ interface UpdaterActions {
   apply: () => Promise<void>;
 }
 
-export type UpdaterStore = UpdaterState & UpdaterActions;
+type UpdaterStore = UpdaterState & UpdaterActions;
 
 export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   status: "idle",
@@ -114,7 +112,10 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
         } else if (event.event === "Progress") {
           received += event.data.chunkLength;
           if (contentLength > 0) {
-            set({ percent: Math.min(99, Math.round((received / contentLength) * 100)) });
+            const nextPercent = Math.min(99, Math.round((received / contentLength) * 100));
+            if (nextPercent !== get().percent) {
+              set({ percent: nextPercent });
+            }
           }
         } else if (event.event === "Finished") {
           set({ percent: 100 });

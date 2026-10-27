@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { newId, readDocumentMetadata, type DocumentArtifactKind } from "./api";
+import { newId, type DocumentArtifactKind } from "./api";
 import { useWorkspaceStore } from "./workspace";
-import { toRelativeWorkspacePath } from "./utils";
+import { toRelativeWorkspacePath, getExt } from "./utils";
 
 function normalizeWorkspacePath(path: string): string {
   return toRelativeWorkspacePath(path, useWorkspaceStore.getState().current?.path);
@@ -10,9 +10,13 @@ function normalizeWorkspacePath(path: string): string {
 
 export type ArtifactKind = "file" | "browser" | "terminal" | DocumentArtifactKind;
 
-async function resolveArtifactKind(path: string): Promise<ArtifactKind> {
-  const metadata = await readDocumentMetadata(path);
-  return metadata.artifactKind ?? "file";
+function resolveArtifactKind(path: string): ArtifactKind {
+  const ext = getExt(path);
+  if (ext === "pdf") return "pdf";
+  if (ext === "docx" || ext === "doc") return "docx";
+  if (ext === "xlsx" || ext === "xls" || ext === "ods" || ext === "csv") return "xlsx";
+  if (ext === "pptx" || ext === "ppt") return "pptx";
+  return "file";
 }
 
 export const DEFAULT_BROWSER_URL = "https://www.google.com";
@@ -49,7 +53,7 @@ interface ArtifactsActions {
   reset: () => void;
 }
 
-export type ArtifactsStore = ArtifactsState & ArtifactsActions;
+type ArtifactsStore = ArtifactsState & ArtifactsActions;
 
 const INITIAL_STATE: ArtifactsState = {
   tabs: [],
@@ -87,20 +91,19 @@ export const useArtifactsStore = create(
         return;
       }
 
-      void resolveArtifactKind(path).catch(() => "file" as const).then((kind) => {
-        set((s) => {
-          const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
-          if (existing) {
-            existing.preview = false;
-            s.activeId = existing.id;
-            s.panelOpen = true;
-            return;
-          }
-          const tab: ArtifactTab = { id: newId(), kind, path };
-          s.tabs.push(tab);
-          s.activeId = tab.id;
+      const kind = resolveArtifactKind(path);
+      set((s) => {
+        const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
+        if (existing) {
+          existing.preview = false;
+          s.activeId = existing.id;
           s.panelOpen = true;
-        });
+          return;
+        }
+        const tab: ArtifactTab = { id: newId(), kind, path };
+        s.tabs.push(tab);
+        s.activeId = tab.id;
+        s.panelOpen = true;
       });
     },
 
@@ -171,42 +174,40 @@ export const useArtifactsStore = create(
 
     fileWritten: (rawPath: string) => {
       const path = normalizeWorkspacePath(rawPath);
-      void resolveArtifactKind(path).catch(() => "file" as const).then((kind) => {
-        set((s) => {
-          s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1;
-          if (s.tabs.some((t) => t.path === path)) return;
-          const active = s.tabs.find((t) => t.id === s.activeId);
-          const userBusy = active?.kind === "terminal" || active?.kind === "browser";
-          const preview = s.tabs.find((t) => t.preview);
-          if (preview) {
-            preview.path = path;
-            preview.kind = kind;
-            if (!userBusy) {
-              s.activeId = preview.id;
-              s.panelOpen = true;
-            }
-            return;
-          }
-          const tab: ArtifactTab = { id: newId(), kind, path, preview: true };
-          s.tabs.push(tab);
+      const kind = resolveArtifactKind(path);
+      set((s) => {
+        s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1;
+        if (s.tabs.some((t) => t.path === path)) return;
+        const active = s.tabs.find((t) => t.id === s.activeId);
+        const userBusy = active?.kind === "terminal" || active?.kind === "browser";
+        const preview = s.tabs.find((t) => t.preview);
+        if (preview) {
+          preview.path = path;
+          preview.kind = kind;
           if (!userBusy) {
-            s.activeId = tab.id;
+            s.activeId = preview.id;
             s.panelOpen = true;
           }
-        });
+          return;
+        }
+        const tab: ArtifactTab = { id: newId(), kind, path, preview: true };
+        s.tabs.push(tab);
+        if (!userBusy) {
+          s.activeId = tab.id;
+          s.panelOpen = true;
+        }
       });
     },
 
     setTabPath: (id: string, rawPath: string) => {
       const path = normalizeWorkspacePath(rawPath);
-      void resolveArtifactKind(path).catch(() => "file" as const).then((kind) => {
-        set((s) => {
-          const tab = s.tabs.find((t) => t.id === id);
-          if (tab) {
-            tab.kind = kind;
-            tab.path = path;
-          }
-        });
+      const kind = resolveArtifactKind(path);
+      set((s) => {
+        const tab = s.tabs.find((t) => t.id === id);
+        if (tab) {
+          tab.kind = kind;
+          tab.path = path;
+        }
       });
     },
 

@@ -1,7 +1,8 @@
+import React from "react";
 import * as utils from "../../lib/utils";
 import { Tooltip } from "../ui/Tooltip";
 
-export interface ContextBarProps {
+interface ContextBarProps {
   contextWindow?: number;
   sessionTokens: {
     contextTokens: number;
@@ -10,7 +11,7 @@ export interface ContextBarProps {
   };
 }
 
-export function ContextBar({ contextWindow, sessionTokens }: ContextBarProps) {
+export const ContextBar = React.memo(function ContextBar({ contextWindow, sessionTokens }: ContextBarProps) {
   const maxContext = contextWindow || 262144;
   const { contextTokens, cachedTokens, inputTokens } = sessionTokens;
   const fillPct = Math.min(
@@ -46,4 +47,4 @@ export function ContextBar({ contextWindow, sessionTokens }: ContextBarProps) {
       </div>
     </Tooltip>
   );
-}
+});

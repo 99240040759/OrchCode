@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
   VscBook,
   VscChevronRight,
@@ -261,7 +261,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
     );
   }
 
-  const groups = groupItems(message.items);
+  const groups = useMemo(() => groupItems(message.items), [message.items]);
   const isStreaming = Boolean(message.streaming);
   const lastItem = message.items[message.items.length - 1];
   const hasRunningTool = message.items.some((i) => i.type === "toolCall" && i.status === "running");

@@ -26,6 +26,7 @@ fn load_dotenv_for_compile() {
     for key in REQUIRED_HTTPS {
         let value = std::env::var(key)
             .unwrap_or_else(|_| panic!("{key} is not set: define it in .env or the build environment"));
+        let value = value.trim();
         if !value.starts_with("https://") {
             panic!("{key} must be an https:// URL, got: {value}");
         }
@@ -36,16 +37,22 @@ fn load_dotenv_for_compile() {
     for key in REQUIRED_VARS {
         let value = std::env::var(key)
             .unwrap_or_else(|_| panic!("{key} is not set: define it in .env or the build environment"));
+        let value = value.trim().to_string();
         println!("cargo:rustc-env={key}={value}");
         println!("cargo:rerun-if-env-changed={key}");
     }
 
     for key in OPTIONAL_VARS {
         let value = std::env::var(key).unwrap_or_default();
+        let value = value.trim().to_string();
         println!("cargo:rustc-env={key}={value}");
         println!("cargo:rerun-if-env-changed={key}");
     }
 
-    println!("cargo:rerun-if-changed=../.env");
-    println!("cargo:rerun-if-changed=.env");
+    if std::path::Path::new("../.env").exists() {
+        println!("cargo:rerun-if-changed=../.env");
+    }
+    if std::path::Path::new(".env").exists() {
+        println!("cargo:rerun-if-changed=.env");
+    }
 }

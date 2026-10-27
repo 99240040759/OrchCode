@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
 
 import * as api from "../lib/api";
 import * as utils from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
-import { useImageDataUrl } from "../lib/images";
 import { Markdown } from "./Markdown";
 import { CodeViewer } from "./CodeViewer";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -20,32 +20,21 @@ const LOADING_SPINNER = (
 
 type FileKind = "image" | "video" | "audio" | "binary" | "text";
 
-const TEXT_EXTENSIONS = new Set([
-  "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs",
-  "py", "rs", "go", "java", "kt", "swift", "c", "cpp", "cc", "h", "hpp",
-  "cs", "rb", "php", "scala", "r", "dart", "lua", "ex", "exs", "erl", "hrl",
-  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
-  "html", "htm", "css", "scss", "sass", "less",
-  "json", "yaml", "yml", "toml", "xml", "ini", "env", "conf", "config",
-  "md", "mdx", "txt", "csv", "log", "sql", "graphql", "gql",
-  "vue", "svelte", "astro",
-  "tf", "hcl", "dockerfile", "makefile",
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogg", "mov", "avi", "mkv", "m4v"]);
+const AUDIO_EXTENSIONS = new Set(["mp3", "wav", "flac", "aac", "ogg", "m4a", "opus"]);
+
+const BINARY_EXTENSIONS = new Set([
+  "zip", "tar", "gz", "bz2", "7z", "rar",
+  "wasm", "ttf", "otf", "woff", "woff2",
+  "db", "sqlite", "sqlite3", "bin", "exe", "dll", "so", "dylib",
 ]);
 
-const BINARY_MIMES = new Set([
-  "application/zip", "application/x-tar", "application/gzip",
-  "application/x-bzip2", "application/x-7z-compressed", "application/x-rar-compressed",
-  "application/octet-stream", "application/wasm",
-  "font/ttf", "font/otf", "font/woff", "font/woff2",
-  "application/x-sqlite3", "application/vnd.sqlite3",
-]);
-
-function classifyFile(mime: string, ext: string): FileKind {
-  if (TEXT_EXTENSIONS.has(ext)) return "text";
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (BINARY_MIMES.has(mime)) return "binary";
+function classifyByExtension(path: string): FileKind {
+  const ext = utils.getExt(path);
+  if (utils.isImagePath(path)) return "image";
+  if (VIDEO_EXTENSIONS.has(ext)) return "video";
+  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
+  if (BINARY_EXTENSIONS.has(ext)) return "binary";
   return "text";
 }
 
@@ -100,7 +89,24 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
   }, 120);
 
   useEffect(() => {
+    if (query === "") {
+      search.cancel();
+      setLoading(true);
+      void api
+        .listWorkspaceFiles("", 200)
+        .then((res) => {
+          setHits(res);
+          setError(null);
+        })
+        .catch((e) => {
+          setHits([]);
+          setError(api.errorMessage(e));
+        })
+        .finally(() => setLoading(false));
+      return () => search.cancel();
+    }
     void search(query);
+    return () => search.cancel();
   }, [query, search]);
 
   return (
@@ -145,9 +151,7 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
 }
 
 function ImagePreview({ path, version }: { path: string; version: number }) {
-  const { src, error, loading } = useImageDataUrl(path, version);
-  if (loading) return LOADING_SPINNER;
-  if (error || !src) return <div className="FileContent-msg">{error ?? "Image could not be loaded"}</div>;
+  const src = `${convertFileSrc(path)}?v=${version}`;
   return (
     <div className="NativeMediaViewer">
       <img src={src} alt={utils.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
@@ -156,33 +160,8 @@ function ImagePreview({ path, version }: { path: string; version: number }) {
 }
 
 function MediaPreview({ path, kind }: { path: string; kind: "video" | "audio" }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const mime = mediaMime(kind, path);
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    setSrc(null);
-    setError(null);
-    api.readBinaryFile(path).then(
-      (buffer) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([buffer], { type: mime }));
-        setSrc(objectUrl);
-      },
-      (e) => {
-        if (!cancelled) setError(api.errorMessage(e));
-      }
-    );
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [path, mime]);
-
-  if (error) return <div className="FileContent-msg">{error}</div>;
-  if (!src) return LOADING_SPINNER;
+  const src = convertFileSrc(path);
 
   return (
     <div className={kind === "audio" ? "NativeMediaViewer NativeMediaViewer--audio" : "NativeMediaViewer"}>
@@ -220,8 +199,7 @@ interface LoadedFile {
 }
 
 async function loadFile(path: string): Promise<LoadedFile> {
-  const meta = await api.readDocumentMetadata(path);
-  const kind = classifyFile(meta.mime, meta.extension);
+  const kind = classifyByExtension(path);
   if (kind !== "text") return { path, kind, content: "", truncated: false };
   const file = await api.readTextFile(path);
   return { path, kind, content: file.content, truncated: file.truncated };

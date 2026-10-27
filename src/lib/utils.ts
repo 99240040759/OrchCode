@@ -1,23 +1,43 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { clsx, type ClassValue } from "clsx";
-import { normalize, basename, dirname, extname, relative, isAbsolute } from "pathe";
+
+export const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Macintosh|Mac OS X|iPhone|iPad|iPod/.test(navigator.userAgent);
 
 export function cn(...inputs: ClassValue[]): string {
   return clsx(inputs);
 }
 
-function normalizePath(pathStr: string): string {
+export function normalizePath(pathStr: string): string {
   if (!pathStr) return "";
-  return normalize(pathStr);
+  const normalized = pathStr.replace(/\\/g, "/");
+  const isAbs = normalized.startsWith("/");
+  const parts = normalized.split("/").filter((p) => p && p !== ".");
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part === "..") {
+      if (stack.length && stack[stack.length - 1] !== "..") {
+        stack.pop();
+      } else if (!isAbs) {
+        stack.push("..");
+      }
+    } else {
+      stack.push(part);
+    }
+  }
+  const res = stack.join("/");
+  return isAbs ? "/" + res : res || (isAbs ? "/" : ".");
 }
 
 export function toRelativeWorkspacePath(path: string, workspaceRoot?: string | null): string {
   const clean = normalizePath(path);
   if (!workspaceRoot) return clean;
   const root = normalizePath(workspaceRoot);
-  const rel = relative(root, clean);
-  if (!rel.startsWith("..") && !isAbsolute(rel)) {
-    return rel;
+  if (clean === root) return "";
+  const prefix = root.endsWith("/") ? root : root + "/";
+  if (clean.startsWith(prefix)) {
+    return clean.slice(prefix.length);
   }
   return clean;
 }
@@ -29,18 +49,26 @@ export function splitPathParts(pathStr: string): string[] {
 
 export function getBasename(pathStr: string): string {
   if (!pathStr) return "";
-  return basename(pathStr);
+  const clean = pathStr.replace(/\\/g, "/").replace(/\/+$/, "");
+  const idx = clean.lastIndexOf("/");
+  return idx === -1 ? clean : clean.slice(idx + 1);
 }
 
 export function getDirname(pathStr: string): string {
   if (!pathStr) return "";
-  return dirname(pathStr);
+  const clean = pathStr.replace(/\\/g, "/").replace(/\/+$/, "");
+  const idx = clean.lastIndexOf("/");
+  if (idx === -1) return ".";
+  if (idx === 0) return "/";
+  return clean.slice(0, idx);
 }
 
 export function getExt(pathStr: string): string {
   if (!pathStr) return "";
-  const ext = extname(pathStr);
-  return ext.startsWith(".") ? ext.slice(1).toLowerCase() : ext.toLowerCase();
+  const base = getBasename(pathStr);
+  const idx = base.lastIndexOf(".");
+  if (idx <= 0) return "";
+  return base.slice(idx + 1).toLowerCase();
 }
 
 export const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);

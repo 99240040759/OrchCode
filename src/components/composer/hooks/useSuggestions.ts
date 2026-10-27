@@ -102,12 +102,12 @@ export function useSuggestions({
     (ed: Editor) => {
       const token = detectActiveToken(ed);
       if (token.trigger) {
-        setTrigger(token.trigger);
-        setQuery(token.query);
+        setTrigger((prev) => (prev === token.trigger ? prev : token.trigger));
+        setQuery((prev) => (prev === token.query ? prev : token.query));
         tokenRangeRef.current = { from: token.from, to: token.to };
       } else {
-        setTrigger(null);
-        setQuery("");
+        setTrigger((prev) => (prev === null ? prev : null));
+        setQuery((prev) => (prev === "" ? prev : ""));
         tokenRangeRef.current = null;
       }
     },

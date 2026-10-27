@@ -86,7 +86,7 @@ function workspacePathFromHref(href: string): string {
   }
 }
 
-export const PRISM_ALIASES: Record<string, string> = {
+const PRISM_ALIASES: Record<string, string> = {
   js: "javascript",
   ts: "typescript",
   py: "python",
@@ -256,6 +256,35 @@ const MARKDOWN_COMPONENTS: Components = {
 
 const REMARK_PLUGINS = [remarkGfm];
 
+function splitBlocks(text: string): string[] {
+  const lines = text.split("\n");
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let inCode = false;
+
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      inCode = !inCode;
+      current.push(line);
+      if (!inCode) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
+      continue;
+    }
+    if (!inCode && line.trim() === "" && current.length > 0) {
+      blocks.push(current.join("\n"));
+      current = [];
+      continue;
+    }
+    current.push(line);
+  }
+  if (current.length > 0) {
+    blocks.push(current.join("\n"));
+  }
+  return blocks.length > 0 ? blocks : [text];
+}
+
 const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
   return (
     <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
@@ -266,9 +295,12 @@ const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string
 
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
   if (!children || !children.trim()) return null;
+  const blocks = React.useMemo(() => splitBlocks(children), [children]);
   return (
     <div className="Markdown">
-      <MarkdownBlock text={children} />
+      {blocks.map((block, i) => (
+        <MarkdownBlock key={i} text={block} />
+      ))}
     </div>
   );
 });

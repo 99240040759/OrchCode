@@ -119,6 +119,11 @@ pub mod fs_util {
                     break out;
                 }
                 Err(_) => {
+                    if let Ok(meta) = std::fs::symlink_metadata(&existing) {
+                        if meta.file_type().is_symlink() {
+                            return Err(AppError::PathEscapesWorkspace(input.to_string()));
+                        }
+                    }
                     let Some(name) = existing.file_name().map(|n| n.to_os_string()) else {
                         return Err(AppError::PathEscapesWorkspace(input.to_string()));
                     };
@@ -147,6 +152,22 @@ pub mod fs_util {
 
     pub fn resolve_readable_file(root: Option<&Path>, input: &str) -> AppResult<PathBuf> {
         let p = Path::new(input);
+        if let Some(ws) = root {
+            let canonical_root = dunce::canonicalize(ws)?;
+            let candidate = if p.is_absolute() {
+                dunce::canonicalize(p)?
+            } else {
+                resolve_existing_file(ws, input)?
+            };
+            if !candidate.starts_with(&canonical_root) {
+                return Err(AppError::PathEscapesWorkspace(input.to_string()));
+            }
+            if !candidate.is_file() {
+                return Err(AppError::Other(format!("not a file: {input}")));
+            }
+            return Ok(candidate);
+        }
+
         if p.is_absolute() {
             let canonical = dunce::canonicalize(p)?;
             if !canonical.is_file() {
@@ -154,8 +175,7 @@ pub mod fs_util {
             }
             return Ok(canonical);
         }
-        let ws = root.ok_or_else(|| AppError::Other("no workspace folder set".to_string()))?;
-        resolve_existing_file(ws, input)
+        Err(AppError::NoWorkspace)
     }
 
     pub use crate::util::display_relative;
@@ -354,30 +374,6 @@ pub fn parse_display_info(name: &str, args_json: &str) -> ToolDisplayInfo {
             label: "Listed".to_string(),
             target_text: str_arg(&args, "path"),
             full_path: str_arg(&args, "path"),
-            icon: ToolIcon::Folder,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
-        "connector_search" => ToolDisplayInfo {
-            label: format!("{}: Search", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
-            target_text: str_arg(&args, "query"),
-            icon: ToolIcon::Search,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
-        "connector_read" => ToolDisplayInfo {
-            label: format!("{}: Read", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
-            target_text: str_arg(&args, "target"),
-            icon: ToolIcon::File,
-            opens_artifact: false,
-            ..Default::default()
-        },
-
-        "connector_list" => ToolDisplayInfo {
-            label: format!("{}: List", str_arg(&args, "provider").unwrap_or_else(|| "Connector".to_string())),
-            target_text: str_arg(&args, "container"),
             icon: ToolIcon::Folder,
             opens_artifact: false,
             ..Default::default()
@@ -1174,15 +1170,19 @@ fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) ->
         .build(query)
         .map_err(|e| ToolError::msg(format!("invalid search pattern: {e}")))?;
 
-    let mut results: Vec<String> = Vec::new();
-    let mut total_chars = 0usize;
+    let mut results = Vec::new();
+    let mut total_chars = 0;
+    let mut truncated = false;
     let mut searcher = grep_searcher::SearcherBuilder::new()
         .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
         .line_number(true)
         .build();
-    let mut truncated = false;
 
-    for entry in fs_util::workspace_walker(search_path).build().flatten() {
+    for result in fs_util::workspace_walker(search_path).build() {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         if results.len() >= max_hits || total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
             truncated = true;
             break;
@@ -1197,16 +1197,19 @@ fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) ->
 
         let file_path = entry.path();
         let rel_path = fs_util::display_relative(root, file_path);
-        let results_ref = &mut results;
-        let chars_ref = &mut total_chars;
+
         let sink = grep_searcher::sinks::UTF8(|line_num, line| {
+            if results.len() >= max_hits || total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
+                truncated = true;
+                return Ok(false);
+            }
             let trimmed = line.trim();
             let shown = crate::util::truncate_chars(trimmed, config::MAX_SEARCH_LINE_CHARS);
             let suffix = if shown.len() < trimmed.len() { " …" } else { "" };
             let entry = format!("{rel_path}:{line_num}: {shown}{suffix}");
-            *chars_ref += entry.len() + 1;
-            results_ref.push(entry);
-            Ok(results_ref.len() < max_hits && *chars_ref < config::MAX_SEARCH_OUTPUT_CHARS)
+            total_chars += entry.chars().count() + 1;
+            results.push(entry);
+            Ok(results.len() < max_hits && total_chars < config::MAX_SEARCH_OUTPUT_CHARS)
         });
         let _ = searcher.search_path(&matcher, file_path, sink);
     }
@@ -1307,32 +1310,22 @@ Set background=true for servers and watchers."
         }
 
         let handoff = Duration::from_secs(config::COMMAND_FOREGROUND_HANDOFF_SECS);
-        let started = Instant::now();
+        let notified = done.notified();
+        tokio::pin!(notified);
 
-        loop {
-            let status = self
-                .manager
-                .get_status(&task_id)
-                .ok_or_else(|| ToolError::msg("command task disappeared unexpectedly"))?;
-            if status.status != "running" {
-                return Ok(format_completed(&status));
-            }
-
-            let remaining = handoff.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
-                self.manager.mark_background(&task_id);
-                return Ok(format!(
-                    "Command still running after {}s and is now tracked as task_id: '{task_id}'. Use get_command_status to check it.",
-                    config::COMMAND_FOREGROUND_HANDOFF_SECS
-                ));
-            }
-
-            let tick = remaining.min(Duration::from_millis(250));
-            tokio::select! {
-                _ = done.notified() => {}
-                _ = tokio::time::sleep(tick) => {}
-            }
+        if tokio::time::timeout(handoff, notified).await.is_err() {
+            self.manager.mark_background(&task_id);
+            return Ok(format!(
+                "Command still running after {}s and is now tracked as task_id: '{task_id}'. Use get_command_status to check it.",
+                config::COMMAND_FOREGROUND_HANDOFF_SECS
+            ));
         }
+
+        let status = self
+            .manager
+            .get_status(&task_id)
+            .ok_or_else(|| ToolError::msg("command task disappeared unexpectedly"))?;
+        Ok(format_completed(&status))
     }
 }
 
@@ -1478,7 +1471,7 @@ impl Tool for ReadSkill {
         let skills = load_all_skills(&self.data_dir);
         let target = args.name.trim().to_lowercase();
         let skill = skills
-            .into_iter()
+            .iter()
             .find(|s| s.name.to_lowercase() == target)
             .ok_or_else(|| ToolError::msg(format!("no skill named '{}'", args.name)))?;
         tokio::fs::read_to_string(&skill.file_path)

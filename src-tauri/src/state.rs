@@ -46,6 +46,9 @@ pub struct AppState {
     pub connector_manager: Arc<ConnectorManager>,
     current_user_id: RwLock<Option<String>>,
     sign_in: Mutex<Option<SignInAttempt>>,
+    pub sign_in_lock: Arc<tokio::sync::Mutex<()>>,
+    last_callback: Mutex<Option<(String, Instant)>>,
+    run_finished_notify: Arc<tokio::sync::Notify>,
     token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
     catalog_fetch_lock: Arc<tokio::sync::Mutex<()>>,
     clients: DashMap<String, ChatClient>,
@@ -81,6 +84,9 @@ impl AppState {
             connector_manager,
             current_user_id: RwLock::new(None),
             sign_in: Mutex::new(None),
+            sign_in_lock: Arc::new(tokio::sync::Mutex::new(())),
+            last_callback: Mutex::new(None),
+            run_finished_notify: Arc::new(tokio::sync::Notify::new()),
             token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             catalog_fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
             clients: DashMap::new(),
@@ -192,6 +198,21 @@ impl AppState {
         }
     }
 
+    pub fn is_recent_auth_callback(&self, raw_url: &str) -> bool {
+        let guard = self.last_callback.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((last_url, instant)) = guard.as_ref() {
+            if last_url == raw_url && instant.elapsed().as_secs() < 30 {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn mark_recent_auth_callback(&self, raw_url: &str) {
+        let mut guard = self.last_callback.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some((raw_url.to_string(), Instant::now()));
+    }
+
     pub fn set_workspace(&self, path: Option<PathBuf>) {
         sentry::configure_scope(|scope| match &path {
             Some(p) => scope.set_tag("workspace", p.to_string_lossy().to_string()),
@@ -241,11 +262,16 @@ impl AppState {
     }
 
     pub fn chat_client(&self, provider: &str) -> AppResult<ChatClient> {
-        if let Some(client) = self.clients.get(provider) {
+        let key = if provider.trim().is_empty() {
+            "vertex"
+        } else {
+            provider.trim()
+        };
+        if let Some(client) = self.clients.get(key) {
             return Ok(client.clone());
         }
-        let client = crate::llm::build_client(self.token.clone(), provider)?;
-        self.clients.insert(provider.to_string(), client.clone());
+        let client = crate::llm::build_client(self.token.clone(), key)?;
+        self.clients.insert(key.to_string(), client.clone());
         Ok(client)
     }
 
@@ -289,12 +315,12 @@ impl AppState {
             return Ok(());
         }
 
-        let refresh_token = auth::load_refresh_token()?.ok_or(AppError::NoToken)?;
+        let refresh_token = auth::load_refresh_token_async().await?.ok_or(AppError::NoToken)?;
         let client = auth::FirebaseAuthClient::new();
         let session = client.refresh_session(&refresh_token).await?;
         if let Some(rt) = session.refresh_token.as_deref() {
             if rt != refresh_token {
-                auth::save_refresh_token(rt)?;
+                auth::save_refresh_token_async(rt).await?;
             }
         }
         self.set_token(Some(session.access_token.clone()));
@@ -356,19 +382,19 @@ impl AppState {
     }
 
     pub fn start_run(&self, session_id: &str, workspace: Option<PathBuf>) -> AppResult<(String, CancellationToken)> {
-        if self.runs.contains_key(session_id) {
-            return Err(AppError::RunConflict);
-        }
+        use dashmap::mapref::entry::Entry;
         let run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
         let cancel = CancellationToken::new();
-        self.runs.insert(
-            session_id.to_string(),
-            RunHandle {
-                run_id: run_id.clone(),
-                cancel: cancel.clone(),
-                workspace,
-            },
-        );
+        match self.runs.entry(session_id.to_string()) {
+            Entry::Occupied(_) => return Err(AppError::RunConflict),
+            Entry::Vacant(slot) => {
+                slot.insert(RunHandle {
+                    run_id: run_id.clone(),
+                    cancel: cancel.clone(),
+                    workspace,
+                });
+            }
+        }
         sentry::add_breadcrumb(sentry::Breadcrumb {
             category: Some("chat".to_string()),
             message: Some(format!("started run {run_id} for session {session_id}")),
@@ -378,14 +404,9 @@ impl AppState {
         Ok((run_id, cancel))
     }
 
-    pub fn update_run_id(&self, session_id: &str, new_run_id: &str) {
-        if let Some(mut handle) = self.runs.get_mut(session_id) {
-            handle.run_id = new_run_id.to_string();
-        }
-    }
-
     pub fn finish_run(&self, session_id: &str, run_id: &str) {
         if self.runs.remove_if(session_id, |_, r| r.run_id == run_id).is_some() {
+            self.run_finished_notify.notify_waiters();
             sentry::add_breadcrumb(sentry::Breadcrumb {
                 category: Some("chat".to_string()),
                 message: Some(format!("finished run {run_id} for session {session_id}")),
@@ -430,10 +451,15 @@ impl AppState {
         let deadline = Instant::now() + timeout;
         loop {
             let active = sessions.iter().any(|s| self.runs.contains_key(s));
-            if !active || Instant::now() >= deadline {
+            if !active {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            let notified = self.run_finished_notify.notified();
+            let _ = tokio::time::timeout(remaining, notified).await;
         }
     }
 

@@ -16,9 +16,12 @@ export function MessageList() {
   const [showJump, setShowJump] = useState(false);
   const pinnedRef = useRef(true);
   const lastCountRef = useRef(0);
+  const prevScrollHeightRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
     pinnedRef.current = true;
     setShowJump(false);
   }, []);
@@ -32,20 +35,33 @@ export function MessageList() {
   }, []);
 
   useLayoutEffect(() => {
-    const grew = messages.length > lastCountRef.current;
-    const lastIsUser = messages[messages.length - 1]?.role === "user" || messages[messages.length - 2]?.role === "user";
+    const el = containerRef.current;
+    if (!el || messages.length === 0) return;
+
+    const countDelta = messages.length - lastCountRef.current;
     lastCountRef.current = messages.length;
-    if (messages.length === 0) return;
-    if (grew && lastIsUser && streaming) {
-      scrollToBottom();
+
+    if (countDelta > 0 && !pinnedRef.current && prevScrollHeightRef.current > 0) {
+      const heightDelta = el.scrollHeight - prevScrollHeightRef.current;
+      el.scrollTop += heightDelta;
+      prevScrollHeightRef.current = 0;
       return;
     }
+
+    const lastIsUser = messages[messages.length - 1]?.role === "user" || messages[messages.length - 2]?.role === "user";
+    if (countDelta > 0 && lastIsUser && streaming) {
+      el.scrollTop = el.scrollHeight;
+      pinnedRef.current = true;
+      setShowJump(false);
+      return;
+    }
+
     if (pinnedRef.current) {
-      bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+      el.scrollTop = el.scrollHeight;
     } else if (streaming) {
       setShowJump(true);
     }
-  }, [messages, scrollToBottom, streaming]);
+  }, [messages, streaming]);
 
   return (
     <div className="MessageListWrap">
@@ -60,7 +76,12 @@ export function MessageList() {
               <button
                 type="button"
                 disabled={loadingEarlier}
-                onClick={() => void loadEarlier()}
+                onClick={() => {
+                  if (containerRef.current) {
+                    prevScrollHeightRef.current = containerRef.current.scrollHeight;
+                  }
+                  void loadEarlier();
+                }}
                 style={{
                   background: "transparent",
                   border: "1px solid var(--border, rgba(255,255,255,0.12))",

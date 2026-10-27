@@ -43,12 +43,16 @@ reqwest-retry = "0.9.1"
 cpal = "0.15"
 hound = "3"
 
-bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 thiserror = "2"
 dunce = "1"
 sha2 = "0.10"
+libc = "0.2"
+url = "2"
+dirs = "6"
+rubato = "0.15"
+ringbuf = "0.4"
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
 
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
@@ -58,37 +62,30 @@ grep-searcher = "0.1"
 portable-pty = "0.8"
 ignore = "0.4"
 regex = "1.11"
-urlencoding = "2.1"
 sentry = { version = "0.36", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 nucleo-matcher = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 include_dir = { version = "0.7", features = ["glob"] }
 gray_matter = "0.2"
 command-group = { version = "5.0", features = ["with-tokio"] }
-chrono = "0.4"
-nanohtml2text = "0.2"
 path-clean = "1.0"
 
 calamine = { version = "0.26", features = ["dates"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
-quick-xml = { version = "0.37", features = ["serialize"] }
 lopdf = "0.34"
 encoding_rs = "0.8"
 mime_guess = "2"
 
-text-splitter = "0.33.0"
 circular-buffer = "2.0.1"
 similar = "3.2.1"
 office_oxide = "0.1.15"
 dashmap = "6.2.1"
-moka = { version = "0.12.16", features = ["future"] }
-oauth2 = "5.0.0"
+moka = { version = "0.12.16", features = ["future", "sync"] }
+envvars = "0.1.10"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSView", "NSButton"] }
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry"] }
 

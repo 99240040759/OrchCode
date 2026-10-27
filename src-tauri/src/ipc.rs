@@ -88,7 +88,7 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
         }
     }
 
-    let refresh_token = match auth::load_refresh_token() {
+    let refresh_token = match auth::load_refresh_token_async().await {
         Ok(Some(token)) => token,
         Ok(None) => {
             state.reset_session_memory();
@@ -106,7 +106,7 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
         Ok(session) => {
             if let Some(rt) = session.refresh_token.as_deref() {
                 if rt != refresh_token {
-                    auth::save_refresh_token(rt).map_err(|e| e.to_string())?;
+                    auth::save_refresh_token_async(rt).await.map_err(|e| e.to_string())?;
                 }
             }
             state.set_token(Some(session.access_token.clone()));
@@ -200,18 +200,22 @@ pub async fn forget_workspace(
     let canonical = canonical_string(&workspace_path);
     let workspace = PathBuf::from(&canonical);
 
+    // Capture whether this is the active workspace before clearing it.
+    let was_active_workspace = state.workspace().as_deref() == Some(workspace.as_path());
+
     let sessions = state.cancel_runs_in_workspace(&workspace);
     state.wait_for_runs(&sessions, Duration::from_secs(10)).await;
 
-    if state.workspace().as_deref() == Some(workspace.as_path()) {
+    if was_active_workspace {
         state.set_workspace(None);
     }
 
     if delete_project {
         let root = dunce::canonicalize(state.quick_projects_root()).map_err(|e| e.to_string())?;
+        let user_id = state.current_user_id().unwrap_or_default();
         let session_ids = state
             .memory
-            .session_ids_for_workspace(&canonical)
+            .session_ids_for_workspace(&canonical, &user_id)
             .await
             .map_err(|e| e.to_string())?;
         state.wait_for_runs(&session_ids, Duration::from_secs(5)).await;
@@ -223,11 +227,13 @@ pub async fn forget_workspace(
         }
         state
             .memory
-            .delete_sessions_for_workspace(&canonical)
+            .delete_sessions_for_workspace(&canonical, &user_id)
             .await
             .map_err(|e| e.to_string())?;
 
-        if state.workspace().as_deref() == Some(workspace.as_path()) {
+        // Close terminals in this workspace before attempting directory removal
+        // (open PTYs lock the directory on Windows).
+        if was_active_workspace {
             state.close_all_terminals();
         }
 
@@ -350,6 +356,13 @@ pub async fn start_chat(
             return Err(error);
         }
     };
+
+    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+        if owner != user_id {
+            state.finish_run(&session_id, &run_id);
+            return Err("session does not belong to the current user".to_string());
+        }
+    }
 
     let prepared = tokio::select! {
         biased;
@@ -497,17 +510,26 @@ fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: 
 }
 
 #[tauri::command]
-pub fn cancel_chat(state: State<'_, AppState>, session_id: String) {
+pub async fn cancel_chat(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    if let Some(user_id) = state.current_user_id() {
+        if let Ok(Some(owner)) = state.memory.session_owner(&session_id).await {
+            if owner != user_id {
+                return Err("session does not belong to the current user".to_string());
+            }
+        }
+    }
     state.cancel_run(&session_id);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    if let Some(user_id) = state.current_user_id() {
-        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-            if owner != user_id {
-                return Err("session does not belong to the current user".to_string());
-            }
+    let user_id = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required".to_string())?;
+    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+        if owner != user_id {
+            return Err("session does not belong to the current user".to_string());
         }
     }
     state.cancel_run(&session_id);
@@ -539,11 +561,12 @@ pub async fn get_session_messages_page(
     limit: Option<usize>,
     before_message_id: Option<i64>,
 ) -> Result<SessionViewPage, String> {
-    if let Some(user_id) = state.current_user_id() {
-        if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-            if owner != user_id {
-                return Err("session does not belong to the current user".to_string());
-            }
+    let user_id = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required".to_string())?;
+    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
+        if owner != user_id {
+            return Err("session does not belong to the current user".to_string());
         }
     }
     let durations = state
@@ -793,5 +816,6 @@ pub async fn disconnect_connector(state: State<'_, AppState>, connector_id: Stri
 
 #[tauri::command]
 pub fn report_error(message: String) {
-    sentry::capture_message(&message, sentry::Level::Error);
+    let truncated = crate::util::truncate_chars(&message, 2000);
+    sentry::capture_message(truncated, sentry::Level::Error);
 }

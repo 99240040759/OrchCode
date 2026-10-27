@@ -56,7 +56,7 @@ export function SuggestionPopover({
                 : "No workspace files found"}
             </div>
           ) : (
-            fileHits.map((file, index) => {
+            fileHits.slice(0, 50).map((file, index) => {
               const filename = utils.getBasename(file.path) || file.name;
               const dir = utils.getDirname(file.path);
               const isActive = index === activeIndex;

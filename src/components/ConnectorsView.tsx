@@ -92,13 +92,18 @@ export function ConnectorsView() {
 
   useEffect(() => {
     if (pending?.kind !== "connect") return;
+    let focusTimer = 0;
     const onFocus = () => {
-      void refresh();
+      if (focusTimer) window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        void refresh();
+      }, 300);
     };
     const timeout = window.setTimeout(() => setPending(null), CONNECT_WAIT_MS);
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
+      if (focusTimer) window.clearTimeout(focusTimer);
       window.clearTimeout(timeout);
     };
   }, [pending, refresh]);

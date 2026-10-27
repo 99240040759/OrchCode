@@ -26,10 +26,8 @@
     "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "date-fns": "^4.1.0",
     "docx-preview": "^0.4.0",
     "immer": "^10.1.1",
-    "pathe": "^2.0.3",
     "pdfjs-dist": "^6.3.289",
     "pptxviewjs": "^1.1.9",
     "prismjs": "^1.30.0",
@@ -40,7 +38,6 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.9",
     "remark-gfm": "^4.0.1",
-    "unique-names-generator": "^4.7.1",
     "use-debounce": "^10.0.4",
     "zustand": "^5.0.3"
   },

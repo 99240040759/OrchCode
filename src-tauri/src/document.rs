@@ -2,25 +2,27 @@ use std::path::Path;
 
 use crate::error::{AppError, AppResult};
 
-pub const MAX_DECOMPRESSED_ENTRY_BYTES: u64 = 25 * 1024 * 1024;
-pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "doc", "xlsx", "xls", "ods", "pptx", "ppt"];
+// Supported document extensions for parse_document_file.
+// Legacy binary OLE2 formats (.doc, .ppt, .xls, .ods) are NOT listed here because
+// office_oxide only handles OpenXML; spreadsheets go through calamine instead.
+pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx"];
 
 pub fn document_type_info(file_type: &str) -> (Option<String>, String) {
     let normalized = file_type.to_ascii_lowercase();
     let artifact_kind = match normalized.as_str() {
         "pdf" => Some("pdf"),
-        "docx" | "doc" => Some("docx"),
+        "docx" => Some("docx"),
         "xlsx" | "xls" | "ods" => Some("xlsx"),
-        "pptx" | "ppt" => Some("pptx"),
+        "pptx" => Some("pptx"),
         _ => None,
     }
     .map(str::to_string);
     let label = match normalized.as_str() {
         "pdf" => "PDF",
-        "docx" | "doc" => "Word",
+        "docx" => "Word",
         "xlsx" | "xls" => "Excel",
         "ods" => "Spreadsheet",
-        "pptx" | "ppt" => "PowerPoint",
+        "pptx" => "PowerPoint",
         "txt" | "text" => "Text",
         "md" | "markdown" => "Markdown",
         "csv" => "CSV",
@@ -41,13 +43,7 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
     let ext = crate::util::lowercase_extension(path);
 
     if is_supported_document_extension(&ext) {
-        let canonical = match ext.as_str() {
-            "xls" | "ods" => "xlsx",
-            "doc" => "docx",
-            "ppt" => "pptx",
-            other => other,
-        };
-        return Ok(canonical.to_string());
+        return Ok(ext);
     }
 
     match ext.as_str() {
@@ -55,21 +51,22 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
             Ok(ext)
         }
         _ => Err(AppError::UnsupportedFileType(format!(
-            "'.{ext}' files are not supported. Supported: pdf, docx, doc, xlsx, pptx, ppt, txt, md, csv, json, html"
+            "'.{ext}' files are not supported. Supported: pdf, docx, xlsx, xls, ods, pptx, txt, md, csv, json, html"
         ))),
     }
 }
 
+/// Internal parsed representation — only `full_text` is used by callers.
 struct ParsedDocument {
     full_text: String,
-    title: Option<String>,
-    page_count: Option<usize>,
 }
 
 fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
     match file_type {
         "pdf" => parse_pdf(path),
-        "docx" | "doc" | "pptx" | "ppt" | "xlsx" | "xls" => parse_office_doc(path),
+        "docx" | "pptx" => parse_office_doc(path),
+        // Spreadsheets: use calamine which handles xlsx, xls, and ods natively.
+        "xlsx" | "xls" | "ods" => parse_spreadsheet_as_text(path),
         _ => parse_plain_text(path),
     }
 }
@@ -78,19 +75,36 @@ fn parse_office_doc(path: &Path) -> AppResult<ParsedDocument> {
     let doc = office_oxide::Document::open(path)
         .map_err(|e| AppError::DocumentParseError(format!("Office document parse failed: {e}")))?;
 
-    let page_count = if let Some(pptx) = doc.as_pptx() {
-        Some(pptx.presentation.slides.len())
-    } else if let Some(xlsx) = doc.as_xlsx() {
-        Some(xlsx.workbook.sheets.len())
-    } else {
-        None
-    };
-
     let full_text = doc.plain_text();
+    Ok(ParsedDocument { full_text })
+}
+
+/// Use calamine to extract spreadsheet text for parse_document_file callers.
+fn parse_spreadsheet_as_text(path: &Path) -> AppResult<ParsedDocument> {
+    use calamine::{open_workbook_auto, Reader};
+
+    let mut workbook = open_workbook_auto(path)
+        .map_err(|e| AppError::DocumentParseError(format!("spreadsheet open failed: {e}")))?;
+    let names = workbook.sheet_names().to_vec();
+    let mut sections: Vec<String> = Vec::with_capacity(names.len());
+    for name in names {
+        let Ok(range) = workbook.worksheet_range(&name) else {
+            continue;
+        };
+        let mut rows: Vec<String> = Vec::new();
+        for row in range.rows() {
+            let cells: Vec<String> = row.iter().map(format_calamine_cell).collect();
+            if cells.iter().all(|c| c.is_empty()) {
+                continue;
+            }
+            rows.push(cells.join("\t"));
+        }
+        if !rows.is_empty() {
+            sections.push(format!("## {name}\n{}", rows.join("\n")));
+        }
+    }
     Ok(ParsedDocument {
-        full_text,
-        title: None,
-        page_count,
+        full_text: sections.join("\n\n"),
     })
 }
 
@@ -99,20 +113,18 @@ fn parse_pdf_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
         .map_err(|e| AppError::DocumentParseError(format!("PDF load failed: {e}")))?;
 
     let pages = doc.get_pages();
-    let page_count = pages.len();
     let mut full_text = String::new();
 
-    for (page_num, _page_id) in &pages {
-        if let Ok(text) = doc.extract_text(&[*page_num]) {
-            let cleaned = clean_pdf_text(&text);
-            if !cleaned.trim().is_empty() {
-                full_text.push_str(&cleaned);
-                full_text.push('\n');
-            }
+    // Extract all pages in a single call (O(P) instead of O(P²)).
+    let page_nums: Vec<u32> = pages.keys().copied().collect();
+    if let Ok(text) = doc.extract_text(&page_nums) {
+        let cleaned = clean_pdf_text(&text);
+        if !cleaned.trim().is_empty() {
+            full_text.push_str(&cleaned);
         }
     }
 
-    Ok(ParsedDocument { full_text, title: None, page_count: Some(page_count) })
+    Ok(ParsedDocument { full_text })
 }
 
 fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
@@ -158,8 +170,7 @@ fn format_calamine_cell(cell: &calamine::Data) -> String {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpreadsheetSheet {
     pub name: String,
     pub rows: Vec<Vec<String>>,
@@ -208,8 +219,6 @@ fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
     let (cow, _, _) = encoding_rs::UTF_8.decode(bytes);
     Ok(ParsedDocument {
         full_text: cow.into_owned(),
-        title: None,
-        page_count: None,
     })
 }
 
@@ -218,17 +227,8 @@ fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
     parse_plain_text_from_bytes(&raw)
 }
 
-fn file_stem_title(path: &Path) -> String {
-    path.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Untitled".to_string())
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ParsedDocumentDto {
-    pub title: Option<String>,
-    pub file_type: String,
-    pub page_count: Option<usize>,
     pub full_text: String,
 }
 
@@ -238,9 +238,6 @@ pub fn parse_document_file(path: &Path) -> AppResult<ParsedDocumentDto> {
     let file_type = detect_file_type(&canonical)?;
     let parsed = parse_document(&canonical, &file_type)?;
     Ok(ParsedDocumentDto {
-        title: parsed.title.or_else(|| Some(file_stem_title(&canonical))),
-        file_type,
-        page_count: parsed.page_count,
         full_text: parsed.full_text,
     })
 }

@@ -20,7 +20,7 @@ function applyCanvasSize(canvas: HTMLCanvasElement, zoom: number) {
 
 type RenderTask = (viewer: PPTXViewer, canvas: HTMLCanvasElement) => Promise<void>;
 
-export function PptxViewer({ path }: { path: string }) {
+export function PptxViewer({ path, active = true }: { path: string; active?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<PPTXViewer | null>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
@@ -103,7 +103,7 @@ export function PptxViewer({ path }: { path: string }) {
   }, [slideIndex, slideCount, goTo]);
 
   useEffect(() => {
-    if (!readyRef.current) return;
+    if (!active || !readyRef.current) return;
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -121,7 +121,7 @@ export function PptxViewer({ path }: { path: string }) {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [goToPrev, goToNext]);
+  }, [active, goToPrev, goToNext]);
 
   const ready = !loading && !error;
 

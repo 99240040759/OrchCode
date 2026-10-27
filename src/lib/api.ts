@@ -1,5 +1,4 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import { formatDistanceToNowStrict } from "date-fns";
 export interface ModelDto {
   key: string;
   id: string;
@@ -64,7 +63,7 @@ export type MessageItemView =
     }
   | { type: "compactionNotice"; id: string; originalMessageCount: number; ts: number };
 
-export interface AttachmentView {
+interface AttachmentView {
   name: string;
   isImage: boolean;
   path?: string | null;
@@ -127,11 +126,11 @@ export type ChatStreamEvent =
   | { type: "cancelled" }
   | { type: "error"; message: string };
 
-export type DictationEvent =
+type DictationEvent =
   | { type: "final"; text: string }
   | { type: "error"; message: string };
 
-export type TerminalEvent = { type: "data"; data: string } | { type: "exit" };
+type TerminalEvent = { type: "data"; data: string } | { type: "exit" };
 
 export type HistoryAction = "back" | "forward" | "reload" | "stop";
 
@@ -171,7 +170,7 @@ export function getBudget(): Promise<Budget> {
   return invoke("get_budget");
 }
 
-export interface SessionViewPage {
+interface SessionViewPage {
   messages: MessageView[];
   hasMore: boolean;
   earliestMessageId: number | null;
@@ -252,7 +251,7 @@ export function readSpreadsheet(path: string): Promise<SpreadsheetSheet[]> {
   return invoke("read_spreadsheet", { path });
 }
 
-export interface DocumentFileMeta {
+interface DocumentFileMeta {
   name: string;
   sizeBytes: number;
   extension: string;
@@ -321,9 +320,18 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
+const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
 export function formatRelativeTime(ts?: number): string {
   if (!ts) return "now";
-  return formatDistanceToNowStrict(new Date(ts), { addSuffix: true });
+  const diffSec = Math.round((ts - Date.now()) / 1000);
+  const absSec = Math.abs(diffSec);
+  if (absSec < 45) return "just now";
+  if (absSec < 3600) return rtf.format(Math.round(diffSec / 60), "minute");
+  if (absSec < 86400) return rtf.format(Math.round(diffSec / 3600), "hour");
+  if (absSec < 2592000) return rtf.format(Math.round(diffSec / 86400), "day");
+  if (absSec < 31536000) return rtf.format(Math.round(diffSec / 2592000), "month");
+  return rtf.format(Math.round(diffSec / 31536000), "year");
 }
 
 export interface ConnectorDto {

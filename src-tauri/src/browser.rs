@@ -5,9 +5,7 @@ fn browser_webview(app: &tauri::AppHandle, label: &str) -> Result<tauri::Webview
         return Err("invalid browser tab".to_string());
     }
 
-    app.webviews()
-        .into_values()
-        .find(|webview| webview.label() == label)
+    app.get_webview(label)
         .ok_or_else(|| format!("browser tab not found: {label}"))
 }
 

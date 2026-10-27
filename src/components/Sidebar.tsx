@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   VscCheck,
   VscChevronDown,
@@ -48,6 +48,15 @@ const SessionItem = React.memo(function SessionItem({
   onDelete: (id: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [relativeTime, setRelativeTime] = useState(() => formatRelativeTime(session.updatedAt));
+
+  useEffect(() => {
+    setRelativeTime(formatRelativeTime(session.updatedAt));
+    const interval = setInterval(() => {
+      setRelativeTime(formatRelativeTime(session.updatedAt));
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [session.updatedAt]);
 
   return (
     <div
@@ -66,7 +75,7 @@ const SessionItem = React.memo(function SessionItem({
           onClick={() => onSelect(session.id)}
         >
           <span className="ThreadItem-title" title={session.title || "New chat"}>{session.title || "New chat"}</span>
-          <span className="ThreadItem-time">{formatRelativeTime(session.updatedAt)}</span>
+          <span className="ThreadItem-time">{relativeTime}</span>
         </button>
       </Tooltip>
 
@@ -140,6 +149,21 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     setWsMenuOpen(open);
     if (!open) setPendingWsDelete(null);
   };
+
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      void selectSession(id);
+      onViewChange("chat");
+    },
+    [selectSession, onViewChange]
+  );
+
+  const handleDeleteSession = useCallback(
+    (id: string) => {
+      void deleteSession(id);
+    },
+    [deleteSession]
+  );
 
   const usedPct =
     budget && budget.limitUsd > 0
@@ -270,8 +294,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
             session={session}
             isActive={session.id === currentSessionId}
             streaming={streaming}
-            onSelect={(id) => { void selectSession(id); onViewChange("chat"); }}
-            onDelete={(id) => void deleteSession(id)}
+            onSelect={handleSelectSession}
+            onDelete={handleDeleteSession}
           />
         ))}
       </nav>

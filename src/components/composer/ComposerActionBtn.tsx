@@ -1,8 +1,9 @@
+import React from "react";
 import { VscArrowUp, VscDebugStop, VscMic } from "react-icons/vsc";
 import { Button } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
 
-export interface ComposerActionBtnProps {
+interface ComposerActionBtnProps {
   streaming: boolean;
   recording: boolean;
   canSend: boolean;
@@ -11,7 +12,7 @@ export interface ComposerActionBtnProps {
   onToggleDictation: () => void;
 }
 
-export function ComposerActionBtn({
+export const ComposerActionBtn = React.memo(function ComposerActionBtn({
   streaming,
   recording,
   canSend,
@@ -74,4 +75,4 @@ export function ComposerActionBtn({
       </Button>
     </Tooltip>
   );
-}
+});

@@ -21,9 +21,18 @@ export function MentionNodeView(props: ReactNodeViewProps) {
       className="FileTag FileTag-clickable"
       data-path={path}
       title={path}
+      role="button"
+      tabIndex={0}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation();
         if (path) openFile(path);
+      }}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (path) openFile(path);
+        }
       }}
     >
       <ExplorerIcon

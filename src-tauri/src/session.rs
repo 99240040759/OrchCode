@@ -241,6 +241,9 @@ fn user_view(cid: &str, id: MessageId, content: &[UserContent]) -> Option<Messag
                     }
                 } else if text.is_empty() {
                     text = t.text.clone();
+                } else {
+                    text.push_str("\n\n");
+                    text.push_str(&t.text);
                 }
             }
             UserContent::Image(img) => {
@@ -330,7 +333,8 @@ fn assistant_view(
                 let entry = outputs.get(&tc.id.to_string());
                 let status = match entry {
                     Some((_, false)) => "done",
-                    _ => "error",
+                    Some((_, true)) => "error",
+                    None => "pending",
                 };
                 items.push(MessageItemView::ToolCall {
                     id: stable_id(cid, id.get(), item_idx, Some("tool")),
@@ -378,58 +382,13 @@ pub fn replaced_message_count(conversation: &Conversation, end: usize) -> usize 
         .count()
 }
 
-struct ViewEntry {
-    seq: i64,
-    view: MessageView,
-}
-
 fn persistent_seq(id: MessageId) -> i64 {
     i64::try_from(id.get()).unwrap_or(i64::MAX)
 }
 
-fn build_views(
-    cid: &str,
-    store: &DirStore,
-    conversation: &Conversation,
-    durations: &HashMap<String, u64>,
-) -> Result<Vec<ViewEntry>, SessionError> {
-    let items = shown(store, conversation)?;
-    let outputs = tool_outputs(&items);
-    let mut views = Vec::with_capacity(items.len());
-    for item in &items {
-        match item {
-            Shown::Compaction { summary, replaced, ts } => views.push(ViewEntry {
-                seq: persistent_seq(*summary),
-                view: MessageView {
-                    id: compaction_message_id(cid, *summary),
-                    role: "system".to_string(),
-                    items: vec![MessageItemView::CompactionNotice {
-                        id: compaction_item_id(cid, *summary),
-                        original_message_count: *replaced,
-                        ts: *ts,
-                    }],
-                    attachments: Vec::new(),
-                },
-            }),
-            Shown::Message { author: Some(_), .. } => {}
-            Shown::Message { id, message, author: None } => {
-                let view = match &**message {
-                    Message::User { content } => user_view(cid, *id, content),
-                    Message::Assistant(assistant) => {
-                        assistant_view(cid, *id, &assistant.content, &outputs, durations)
-                    }
-                    _ => None,
-                };
-                if let Some(view) = view {
-                    views.push(ViewEntry {
-                        seq: persistent_seq(*id),
-                        view,
-                    });
-                }
-            }
-        }
-    }
-    Ok(views)
+struct ShownEntry<'a> {
+    seq: i64,
+    item: &'a Shown,
 }
 
 pub async fn view_page(
@@ -443,19 +402,70 @@ pub async fn view_page(
     let cid = session_id.to_string();
     tokio::task::spawn_blocking(move || -> AppResult<SessionViewPage> {
         let conversation = rig_memory::load(&store, LOG).map_err(session_error)?;
-        let views = build_views(&cid, &store, &conversation, &durations).map_err(session_error)?;
-        let end = before
-            .and_then(|cursor| views.iter().position(|entry| entry.seq >= cursor))
-            .unwrap_or(views.len());
-        let start = end.saturating_sub(limit);
-        let messages = views[start..end]
+        let items = shown(&store, &conversation).map_err(session_error)?;
+
+        // Filter visible items and collect sequence numbers without decoding message contents
+        let visible: Vec<ShownEntry> = items
             .iter()
-            .map(|entry| entry.view.clone())
+            .filter_map(|item| match item {
+                Shown::Compaction { summary, .. } => Some(ShownEntry {
+                    seq: persistent_seq(*summary),
+                    item,
+                }),
+                Shown::Message { id, message, author: None } => match &**message {
+                    Message::User { .. } | Message::Assistant(_) => Some(ShownEntry {
+                        seq: persistent_seq(*id),
+                        item,
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            })
             .collect();
+
+        let end = before
+            .and_then(|cursor| visible.iter().position(|entry| entry.seq >= cursor))
+            .unwrap_or(visible.len());
+        let start = end.saturating_sub(limit);
+        let page_entries = &visible[start..end];
+
+        // Only build MessageViews (and decode/resize images) for the paginated slice
+        let outputs = tool_outputs(&items);
+        let mut messages = Vec::with_capacity(page_entries.len());
+        for entry in page_entries {
+            match entry.item {
+                Shown::Compaction { summary, replaced, ts } => {
+                    messages.push(MessageView {
+                        id: compaction_message_id(&cid, *summary),
+                        role: "system".to_string(),
+                        items: vec![MessageItemView::CompactionNotice {
+                            id: compaction_item_id(&cid, *summary),
+                            original_message_count: *replaced,
+                            ts: *ts,
+                        }],
+                        attachments: Vec::new(),
+                    });
+                }
+                Shown::Message { id, message, author: None } => {
+                    let view = match &**message {
+                        Message::User { content } => user_view(&cid, *id, content),
+                        Message::Assistant(assistant) => {
+                            assistant_view(&cid, *id, &assistant.content, &outputs, &durations)
+                        }
+                        _ => None,
+                    };
+                    if let Some(view) = view {
+                        messages.push(view);
+                    }
+                }
+                _ => {}
+            }
+        }
+
         Ok(SessionViewPage {
             messages,
             has_more: start > 0,
-            earliest_message_id: (start > 0).then(|| views[start].seq),
+            earliest_message_id: (start > 0).then(|| visible[start].seq),
         })
     })
     .await

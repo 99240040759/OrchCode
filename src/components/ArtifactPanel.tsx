@@ -74,7 +74,7 @@ function useFileWrittenListener() {
   }, [fileWritten]);
 }
 
-export function ArtifactPanelHeader() {
+function ArtifactPanelHeader() {
   const tabs          = useArtifactsStore((s) => s.tabs);
   const active        = useArtifactsStore(activeTabId);
   const maximized     = useArtifactsStore((s) => s.maximized);
@@ -101,8 +101,17 @@ export function ArtifactPanelHeader() {
             <div
               key={tab.id}
               className="ArtifactTab"
+              role="tab"
+              tabIndex={0}
+              aria-selected={tab.id === active}
               data-active={tab.id === active}
               onClick={() => setActive(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActive(tab.id);
+                }
+              }}
             >
               <Tooltip content={`Close ${tabName}`} side="bottom">
                 <button
@@ -164,13 +173,13 @@ export function ArtifactPanelHeader() {
   );
 }
 
-function DocumentViewer({ kind, path }: { kind: ArtifactTab["kind"]; path: string }) {
+function DocumentViewer({ kind, path, active }: { kind: ArtifactTab["kind"]; path: string; active: boolean }) {
   const version = useArtifactsStore((s) => s.fileVersions[path] ?? 0);
   const key = `${path}:${version}`;
-  if (kind === "pdf") return <PdfViewer key={key} path={path} />;
+  if (kind === "pdf") return <PdfViewer key={key} path={path} active={active} />;
   if (kind === "docx") return <DocxViewer key={key} path={path} />;
   if (kind === "xlsx") return <XlsxViewer key={key} path={path} />;
-  if (kind === "pptx") return <PptxViewer key={key} path={path} />;
+  if (kind === "pptx") return <PptxViewer key={key} path={path} active={active} />;
   return null;
 }
 
@@ -187,13 +196,13 @@ function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
       aria-hidden={!active}
     >
       {tab.kind === "terminal" && <TerminalView id={tab.id} />}
-      {tab.kind === "browser" && <BrowserView initialUrl={tab.url} />}
+      {tab.kind === "browser" && <BrowserView initialUrl={tab.url} active={active} />}
       {!stateful && (
         <Suspense fallback={VIEWER_FALLBACK}>
           {tab.kind === "file" ? (
             <FileViewer tabId={tab.id} path={tab.path} />
           ) : (
-            tab.path && <DocumentViewer kind={tab.kind} path={tab.path} />
+            tab.path && <DocumentViewer kind={tab.kind} path={tab.path} active={active} />
           )}
         </Suspense>
       )}
@@ -201,7 +210,7 @@ function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
   );
 }
 
-export function ArtifactPanel() {
+export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
   const tabs      = useArtifactsStore((s) => s.tabs);
   const active    = useArtifactsStore(activeTabId);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
@@ -210,6 +219,8 @@ export function ArtifactPanel() {
   const openTerminal = useArtifactsStore((s) => s.openTerminal);
 
   useFileWrittenListener();
+
+  const isPanelActive = panelOpen && visible;
 
   return (
     <aside className="ArtifactPanel">
@@ -242,7 +253,7 @@ export function ArtifactPanel() {
             <TabContent
               key={tab.id}
               tab={tab}
-              active={panelOpen && tab.id === active}
+              active={isPanelActive && tab.id === active}
             />
           ))
         )}

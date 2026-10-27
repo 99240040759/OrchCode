@@ -1,43 +1,27 @@
-/* ─── FONTS ──────────────────────────────────────────────────────────────── */
-@font-face { font-family:"SF Pro"; src:url("/fonts/SF-Pro-Text-Regular.otf") format("opentype"); font-weight:400; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro"; src:url("/fonts/SF-Pro-Text-Medium.otf") format("opentype"); font-weight:500; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro"; src:url("/fonts/SF-Pro-Text-Semibold.otf") format("opentype"); font-weight:600; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro"; src:url("/fonts/SF-Pro-Text-Bold.otf") format("opentype"); font-weight:700; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro Display"; src:url("/fonts/SF-Pro-Display-Regular.otf") format("opentype"); font-weight:400; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro Display"; src:url("/fonts/SF-Pro-Display-Medium.otf") format("opentype"); font-weight:500; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro Display"; src:url("/fonts/SF-Pro-Display-Semibold.otf") format("opentype"); font-weight:600; font-style:normal; font-display:block; }
-@font-face { font-family:"SF Pro Display"; src:url("/fonts/SF-Pro-Display-Bold.otf") format("opentype"); font-weight:700; font-style:normal; font-display:block; }
-
-/* ─── MATERIAL DARK DESIGN TOKENS ────────────────────────────────────────── */
 :root {
   color-scheme: dark;
-  /* Surface hierarchy — MD3 dark baseline */
-  --md-bg:          #0f0f0f;   /* app background / scrim   */
-  --md-s0:          #141414;   /* surface level 0          */
-  --md-s1:          #1a1a1a;   /* surface level 1 (cards)  */
-  --md-s2:          #212121;   /* surface level 2 (raised) */
-  --md-s3:          #191919;   /* surface level 3 (tooltip/menu) */
+  --md-bg:          #0f0f0f;
+  --md-s0:          #141414;
+  --md-s1:          #1a1a1a;
+  --md-s2:          #212121;
+  --md-s3:          #191919;
   --md-overlay:     rgba(0,0,0,.32);
 
-  /* State layers (white alpha per MD3) */
   --md-hover:       rgba(255,255,255,.08);
   --md-pressed:     rgba(255,255,255,.12);
   --md-focus:       rgba(255,255,255,.10);
   --md-drag:        rgba(255,255,255,.16);
   --md-selected:    rgba(255,255,255,.14);
 
-  /* On-surface text roles */
-  --md-on:          #e8e8e8;        /* on-surface           */
-  --md-on-var:      rgba(232,232,232,.74); /* on-surface-variant  */
-  --md-on-dim:      rgba(232,232,232,.38); /* disabled / muted    */
+  --md-on:          #e8e8e8;
+  --md-on-var:      rgba(232,232,232,.74);
+  --md-on-dim:      rgba(232,232,232,.38);
 
-  /* Borders / outlines (MD3 outline-variant) */
   --md-outline:     rgba(232,232,232,.12);
   --md-outline-var: rgba(232,232,232,.06);
   --md-outline-hi:  rgba(232,232,232,.22);
   --md-outline-in:  rgba(232,232,232,.10);
 
-  /* Semantic colours */
   --md-primary:   #c8c8c8;
   --md-secondary: #a0a0a0;
   --md-error:     #e34671;
@@ -45,11 +29,9 @@
   --md-warn:      #f1b467;
   --md-success:   #70b489;
 
-  /* Input surface */
   --md-input-bg:  rgba(255,255,255,.04);
 
-  /* Typography */
-  --font:      "SF Pro","SF Pro Display",system-ui,sans-serif;
+  --font:      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono","Fira Code","Cascadia Code",Consolas,monospace;
 
   /* Layout */
@@ -91,7 +73,7 @@
 
 ::selection { background:rgba(255,255,255,.18); color:inherit; }
 
-input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .Composer-input *, .selectable, .selectable *, .Message, .Message *, .Markdown, .Markdown *, .CodeBlock, .CodeBlock *, .ToolRow-body, .ToolRow-body *, .DocViewer-render, .DocViewer-render * { -webkit-user-select:text; user-select:text; }
+input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .Composer-input *, .Msg, .Msg *, .Markdown, .Markdown *, .CodeViewer, .CodeViewer *, .CodeBlock, .CodeBlock *, .ToolRow-output, .ToolRow-output *, .Reasoning-body, .Reasoning-body *, .XlsxViewer-table, .XlsxViewer-table *, .DocViewer-render, .DocViewer-render * { -webkit-user-select:text; user-select:text; }
 input, textarea, [contenteditable], [contenteditable='true'], .Composer-input, .DocViewer-pageInput { cursor:text; }
 
 img, a { -webkit-user-drag:none; }
@@ -294,7 +276,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .MessageList-jump svg { width:15px; height:15px; }
 
 /* ─── EMPTY STATE ────────────────────────────────────────────────────────── */
-.EmptyState { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-height:0; padding:var(--sp-2); overflow-x:hidden; }
+.EmptyState { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-height:0; padding:var(--sp-2); padding-bottom:12vh; overflow-x:hidden; }
 
 /* ─── MESSAGES ───────────────────────────────────────────────────────────── */
 .Msg { display:flex; flex-direction:column; width:100%; }
@@ -432,15 +414,11 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Composer-mic-send:hover:not(:disabled) { background:rgba(252,107,131,.28); }
 
 .ContextBar { display:inline-flex; align-items:center; gap:6px; padding:0 4px; height:20px; user-select:none; cursor:pointer; }
-.ContextBar:hover .ContextBar-label { color:var(--md-on); }
 .ContextBar-track { position:relative; width:60px; height:4px; background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden; flex-shrink:0; }
 .ContextBar-mark { position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,.55); }
 .ContextBar-fill { height:100%; border-radius:2px; background:var(--md-on-var); transition:width .2s ease; }
 .ContextBar[data-level='warn'] .ContextBar-fill { background:var(--md-warn); }
 .ContextBar[data-level='danger'] .ContextBar-fill { background:var(--md-error); }
-.ContextBar-label { font-size:11px; font-family:inherit; color:var(--md-on-dim); font-weight:500; line-height:1; }
-.ContextBar[data-level='warn'] .ContextBar-label { color:var(--md-warn); }
-.ContextBar[data-level='danger'] .ContextBar-label { color:var(--md-error); }
 
 /* ─── ATTACHMENT CARD ────────────────────────────────────────────────────── */
 .AttachmentCard { position:relative; display:inline-flex; align-items:center; gap:8px; padding:4px 8px; border:1px solid var(--md-outline); border-radius:var(--r-md); background:rgba(255,255,255,.04); max-width:240px; }
@@ -568,7 +546,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .CodeViewer { height:100%; overflow:auto; background:#181818; overscroll-behavior:none; --ln-gap:20px; }
 .CodeViewer-pre { margin:0; padding:12px 0; font-family:var(--font-mono); font-size:13px; line-height:1.55; color:#f0f0f0; background:transparent; tab-size:2; }
 .CodeViewer-pre code { font-family:inherit; font-size:inherit; color:inherit; background:transparent; display:block; }
-.CodeViewer-line { display:flex; align-items:flex-start; padding:0 14px 0 0; }
+.CodeViewer-line { display:flex; align-items:flex-start; padding:0 14px 0 0; content-visibility:auto; contain-intrinsic-size:0 20px; }
 .CodeViewer-line:hover { background:#262626; }
 .CodeViewer-ln { flex:none; box-sizing:content-box; width:calc(var(--gutter-ch, 2) * 1ch); padding-left:14px; margin-right:var(--ln-gap); text-align:right; color:#f0f0f05c; user-select:none; -webkit-user-select:none; white-space:pre; }
 .CodeViewer-code { flex:1; min-width:0; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; }
@@ -744,6 +722,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .XlsxViewer-tab.active { background:var(--md-s1); border-color:var(--md-outline); border-bottom-color:var(--md-s1); color:var(--md-on); font-weight:500; }
 .XlsxViewer-scroll { flex:1; overflow:auto; padding:12px; }
 .XlsxViewer-table { border-collapse:collapse; white-space:nowrap; width:max-content; }
+.XlsxViewer-table tr { content-visibility:auto; contain-intrinsic-size:0 28px; }
 .XlsxViewer-row-num { padding:3px 8px 3px 4px; color:var(--md-on-dim); border-right:1px solid var(--md-outline); text-align:right; background:var(--md-bg); position:sticky; left:0; }
 .XlsxViewer-cell { padding:4px 12px; border:1px solid var(--md-outline-var); color:var(--md-on); max-width:320px; overflow:hidden; text-overflow:ellipsis; }
 .XlsxViewer-trunc { padding:6px 12px; margin:0 0 8px; }
@@ -792,7 +771,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 @media (prefers-reduced-motion: reduce) {
   .Greeting .Avatar, .Greeting-title, .Greeting-sub,
   .ThinkingShimmer-text, .Msg-notice-text, .TooltipContent,
-  .Msg-streamingText, .Msg-streamingText > .Markdown > *:last-child,
+  .Msg-streamingText,
   .BrowserBar-progress, .BrowserBar-loadBar {
     animation:none; opacity:1; transform:none;
   }

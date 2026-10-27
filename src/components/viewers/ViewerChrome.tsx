@@ -74,7 +74,7 @@ export function ZoomControls({
   );
 }
 
-export interface PageControlsProps {
+interface PageControlsProps {
   page: number;
   total: number;
   onPrev: () => void;

@@ -36,11 +36,17 @@ impl ModelInfo {
 #[derive(Debug, Clone, Default)]
 pub struct ModelCatalog {
     entries: HashMap<String, ModelInfo>,
+    sorted_list: Vec<(String, ModelInfo)>,
 }
 
 impl ModelCatalog {
     pub fn from_map(entries: HashMap<String, ModelInfo>) -> Self {
-        Self { entries }
+        let mut sorted_list: Vec<(String, ModelInfo)> = entries
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        sorted_list.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.0.cmp(&b.0)));
+        Self { entries, sorted_list }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -54,13 +60,7 @@ impl ModelCatalog {
     }
 
     pub fn list(&self) -> Vec<(String, ModelInfo)> {
-        let mut out: Vec<(String, ModelInfo)> = self
-            .entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        out.sort_by(|a, b| a.1.name.cmp(&b.1.name).then_with(|| a.0.cmp(&b.0)));
-        out
+        self.sorted_list.clone()
     }
 }
 
@@ -112,6 +112,7 @@ impl Gateway {
             .http
             .get(config::models_url())
             .bearer_auth(token)
+            .timeout(Duration::from_secs(20))
             .send()
             .await?;
         let resp = check_status(resp).await?;
@@ -125,6 +126,7 @@ impl Gateway {
             .http
             .get(config::budget_url())
             .bearer_auth(token)
+            .timeout(Duration::from_secs(15))
             .send()
             .await?;
         let resp = check_status(resp).await?;
@@ -159,6 +161,7 @@ impl Gateway {
             .http
             .post(config::tavily_url())
             .bearer_auth(token)
+            .timeout(Duration::from_secs(30))
             .json(req)
             .send()
             .await?;
@@ -172,6 +175,7 @@ impl Gateway {
             .http
             .post(config::title_url())
             .bearer_auth(token)
+            .timeout(Duration::from_secs(20))
             .json(&json!({ "prompt": prompt }))
             .send()
             .await?;

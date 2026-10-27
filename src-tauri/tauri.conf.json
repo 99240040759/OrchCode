@@ -33,7 +33,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' https: ipc: http://ipc.localhost; font-src 'self' data: blob:; frame-src 'none'; object-src 'self' blob:; worker-src 'self' blob:",
+      "csp": "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob: https:; media-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' https: ipc: http://ipc.localhost; font-src 'self' data: blob:; frame-src 'none'; object-src 'self' blob:; worker-src 'self' blob:",
       "dangerousDisableAssetCspModification": ["style-src"]
     }
   },

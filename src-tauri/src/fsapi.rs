@@ -36,11 +36,19 @@ pub fn build_file_index(root: &Path) -> Vec<FileEntry> {
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
-        entries.push(FileEntry {
-            path: fs_util::display_relative(root, entry.path()),
-            name: entry.file_name().to_string_lossy().to_string(),
-        });
+        let rel = fs_util::display_relative(root, entry.path());
+        let name = entry.file_name().to_string_lossy().to_string();
+        entries.push(FileEntry { path: rel, name });
     }
+
+    // Pre-sort the index once so empty queries can take directly without sorting.
+    entries.sort_by(|a, b| {
+        a.path
+            .matches('/')
+            .count()
+            .cmp(&b.path.matches('/').count())
+            .then_with(|| a.path.bytes().map(|b| b.to_ascii_lowercase()).cmp(b.path.bytes().map(|b| b.to_ascii_lowercase())))
+    });
     entries
 }
 
@@ -57,15 +65,8 @@ pub async fn list_workspace_files(
 
     tokio::task::spawn_blocking(move || {
         if query_str.is_empty() {
-            let mut sorted: Vec<&FileEntry> = index.iter().collect();
-            sorted.sort_by(|a, b| {
-                a.path
-                    .matches('/')
-                    .count()
-                    .cmp(&b.path.matches('/').count())
-                    .then_with(|| a.path.to_lowercase().cmp(&b.path.to_lowercase()))
-            });
-            return sorted.into_iter().take(limit).cloned().collect();
+            // Index is pre-sorted; return top `limit` directly in O(limit) time.
+            return index.iter().take(limit).cloned().collect();
         }
 
         let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
@@ -79,12 +80,24 @@ pub async fn list_workspace_files(
                     .map(|score| (score, entry.path.matches('/').count(), entry))
             })
             .collect();
-        scored.sort_by(|a, b| {
+
+        let cmp = |a: &(u32, usize, &FileEntry), b: &(u32, usize, &FileEntry)| {
             b.0.cmp(&a.0)
                 .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| a.2.path.to_lowercase().cmp(&b.2.path.to_lowercase()))
-        });
-        scored.into_iter().take(limit).map(|(_, _, e)| e.clone()).collect()
+                .then_with(|| {
+                    a.2.path
+                        .bytes()
+                        .map(|b| b.to_ascii_lowercase())
+                        .cmp(b.2.path.bytes().map(|b| b.to_ascii_lowercase()))
+                })
+        };
+
+        if scored.len() > limit {
+            scored.select_nth_unstable_by(limit, cmp);
+            scored.truncate(limit);
+        }
+        scored.sort_by(cmp);
+        scored.into_iter().map(|(_, _, e)| e.clone()).collect()
     })
     .await
     .map_err(|e| e.to_string())
@@ -92,8 +105,8 @@ pub async fn list_workspace_files(
 
 #[tauri::command]
 pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<FileContent, String> {
-    let workspace = state.workspace();
-    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
 
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(&resolved)
@@ -118,7 +131,7 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
     }
 
     Ok(FileContent {
-        path: display_path(workspace.as_deref(), &resolved),
+        path: display_path(Some(&workspace), &resolved),
         content: String::from_utf8_lossy(&buf).into_owned(),
         truncated,
     })
@@ -133,8 +146,8 @@ fn file_mime(path: &Path) -> String {
 
 #[tauri::command]
 pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    let workspace = state.workspace();
-    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("cannot stat {path}: {e}"))?;
@@ -167,8 +180,8 @@ pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Re
 
 #[tauri::command]
 pub async fn read_binary_file(state: State<'_, AppState>, path: String) -> Result<tauri::ipc::Response, String> {
-    let workspace = state.workspace();
-    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("cannot stat {path}: {e}"))?;
@@ -198,8 +211,8 @@ pub async fn read_document_metadata(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<DocumentFileMeta, String> {
-    let workspace = state.workspace();
-    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
 
     let meta = tokio::fs::metadata(&resolved)
         .await
@@ -233,8 +246,8 @@ pub async fn read_spreadsheet(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Vec<crate::document::SpreadsheetSheet>, String> {
-    let workspace = state.workspace();
-    let resolved = fs_util::resolve_readable_file(workspace.as_deref(), &path).map_err(|e| e.to_string())?;
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || {
         crate::document::read_spreadsheet(&resolved, config::MAX_SPREADSHEET_ROWS, config::MAX_SPREADSHEET_COLS)
     })

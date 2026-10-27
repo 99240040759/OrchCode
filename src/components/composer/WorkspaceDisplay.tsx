@@ -1,12 +1,13 @@
+import React from "react";
 import { VscFolderOpened } from "react-icons/vsc";
 import { Tooltip } from "../ui/Tooltip";
 
-export interface WorkspaceDisplayProps {
+interface WorkspaceDisplayProps {
   currentName: string | undefined;
   currentPath?: string;
 }
 
-export function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayProps) {
+export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayProps) {
   return (
     <Tooltip
       content={currentPath ? `Workspace: ${currentPath}` : "Current workspace"}
@@ -18,4 +19,4 @@ export function WorkspaceDisplay({ currentName, currentPath }: WorkspaceDisplayP
       </div>
     </Tooltip>
   );
-}
+});

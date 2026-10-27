@@ -30,7 +30,7 @@ interface AuthActions {
   dismissError: () => void;
 }
 
-export type AuthStore = AuthState & AuthActions;
+type AuthStore = AuthState & AuthActions;
 
 interface AuthChangedPayload {
   user: UserDisplay | null;

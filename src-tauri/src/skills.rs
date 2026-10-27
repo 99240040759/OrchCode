@@ -1,11 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use gray_matter::engine::YAML;
 use gray_matter::Matter;
 use include_dir::{include_dir, Dir};
+use moka::sync::Cache;
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -35,60 +36,43 @@ pub fn seed_bundled_skills(data_dir: &Path) {
         return;
     }
 
-    for file in EMBEDDED_SKILLS_DIR.find("**/*").unwrap() {
-        if let include_dir::DirEntry::File(f) = file {
-            let target_path = global_skills_dir.join(f.path());
-            if let Some(parent) = target_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+    if let Ok(files) = EMBEDDED_SKILLS_DIR.find("**/*") {
+        for file in files {
+            if let include_dir::DirEntry::File(f) = file {
+                let target_path = global_skills_dir.join(f.path());
+                if let Some(parent) = target_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&target_path, f.contents());
             }
-            let _ = std::fs::write(&target_path, f.contents());
         }
     }
 
     let _ = std::fs::write(&version_file, BUNDLED_VERSION);
 }
 
-struct CachedSkills {
-    cached_at: Instant,
-    skills: Vec<Skill>,
-}
-
 const SKILLS_CACHE_TTL: Duration = Duration::from_secs(10);
 
-fn skills_cache() -> &'static Mutex<HashMap<PathBuf, CachedSkills>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSkills>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn skills_cache() -> &'static Cache<PathBuf, Arc<[Skill]>> {
+    static CACHE: OnceLock<Cache<PathBuf, Arc<[Skill]>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Cache::builder()
+            .time_to_live(SKILLS_CACHE_TTL)
+            .build()
+    })
 }
 
-pub fn load_all_skills(data_dir: &Path) -> Vec<Skill> {
+pub fn load_all_skills(data_dir: &Path) -> Arc<[Skill]> {
     let skills_dir = data_dir.join("skills");
+    skills_cache().get_with(skills_dir.clone(), || {
+        let mut skills = Vec::new();
+        let mut seen = HashSet::new();
 
-    {
-        let cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(cached) = cache.get(&skills_dir) {
-            if cached.cached_at.elapsed() < SKILLS_CACHE_TTL {
-                return cached.skills.clone();
-            }
-        }
-    }
+        scan_skills_directory(&skills_dir, &mut skills, &mut seen);
 
-    let mut skills = Vec::new();
-    let mut seen = HashSet::new();
-
-    scan_skills_directory(&skills_dir, &mut skills, &mut seen);
-
-    skills.sort_by(|a, b| a.name.cmp(&b.name));
-
-    let mut cache = skills_cache().lock().unwrap_or_else(|e| e.into_inner());
-    cache.insert(
-        skills_dir,
-        CachedSkills {
-            cached_at: Instant::now(),
-            skills: skills.clone(),
-        },
-    );
-
-    skills
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
+        skills.into()
+    })
 }
 
 fn scan_skills_directory(dir: &Path, out: &mut Vec<Skill>, seen: &mut HashSet<String>) {
@@ -119,7 +103,7 @@ fn scan_skills_directory(dir: &Path, out: &mut Vec<Skill>, seen: &mut HashSet<St
         let Some(skill) = parse_skill_markdown(&raw, &skill_file) else {
             continue;
         };
-        if seen.insert(skill.name.clone()) {
+        if seen.insert(skill.name.to_lowercase()) {
             out.push(skill);
         }
     }

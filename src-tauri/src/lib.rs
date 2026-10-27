@@ -45,6 +45,13 @@ async fn handle_connector_callback(app: &tauri::AppHandle, rest: &str) {
 
 async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
     let state = app.state::<AppState>();
+    let _guard = state.sign_in_lock.lock().await;
+
+    if state.is_recent_auth_callback(raw_url) {
+        return;
+    }
+    state.mark_recent_auth_callback(raw_url);
+
     let Some(session_id) = state.consume_sign_in_window() else {
         if state.current_user_id().is_none() {
             sentry::capture_message("sign-in link expired or consumed", sentry::Level::Warning);
@@ -81,12 +88,8 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(rest) = util::strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
         handle_connector_callback(app, rest).await;
-    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth/").is_some()
-        || util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth").is_some()
+    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth").is_some()
         || util::strip_prefix_ignore_ascii_case(raw_url, "orch://login").is_some()
-        || raw_url.contains("code=")
-        || raw_url.contains("id_token=")
-        || raw_url.contains("access_token=")
     {
         handle_sign_in_callback(app, raw_url).await;
     }
@@ -244,6 +247,10 @@ pub fn run() {
                 }
             }
             handle.state::<AppState>().shutdown();
+            // Flush Sentry before the process exits (macOS never unwinds main).
+            if let Some(client) = sentry::Hub::current().client() {
+                client.close(Some(std::time::Duration::from_secs(2)));
+            }
         }
     });
 }

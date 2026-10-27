@@ -38,6 +38,9 @@ export default defineConfig(({ mode }) => {
             if (pkgName.startsWith("@radix-ui")) {
               return "vendor-radix";
             }
+            if (pkgName.startsWith("@tiptap")) {
+              return "vendor-tiptap";
+            }
             if (pkgName.startsWith("@xterm")) {
               return "vendor-xterm";
             }
@@ -50,6 +53,15 @@ export default defineConfig(({ mode }) => {
             if (pkgName === "pdfjs-dist") {
               if (normalized.includes("worker")) return undefined;
               return "vendor-pdf";
+            }
+            if (pkgName === "docx-preview") {
+              return "vendor-docx";
+            }
+            if (pkgName === "pptxviewjs") {
+              return "vendor-pptx";
+            }
+            if (pkgName === "react-markdown" || pkgName === "remark-gfm") {
+              return "vendor-markdown";
             }
             return undefined;
           },

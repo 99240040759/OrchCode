@@ -10,7 +10,7 @@ pub fn display_info(name: &str, args: &Value) -> Option<ToolDisplayInfo> {
     let def = connectors::def_for_slug(name)?;
     let (label, target_text) = match def.actions.iter().find(|action| action.slug == name) {
         Some(action) => (action.label.to_string(), target_text(action.target, args)),
-        None => (humanize(&name[def.slug_prefix.len()..]), None),
+        None => (humanize(name.strip_prefix(def.slug_prefix).unwrap_or(name)), None),
     };
     Some(ToolDisplayInfo {
         label,

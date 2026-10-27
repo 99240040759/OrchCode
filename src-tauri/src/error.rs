@@ -20,8 +20,6 @@ pub enum AppError {
     Audio(String),
     #[error("a run is already active for this session")]
     RunConflict,
-    #[error("file too large to process: {0}")]
-    FileTooLarge(String),
     #[error("connector not found: {0}")]
     ConnectorNotFound(String),
     #[error("{0} is not connected. Connect it in Integrations and try again.")]
@@ -55,13 +53,6 @@ impl AppError {
             AppError::Gateway { status, .. } => *status == 429 || *status >= 500,
             _ => false,
         }
-    }
-}
-
-impl From<AppError> for tauri::ipc::InvokeError {
-    fn from(err: AppError) -> Self {
-        sentry::capture_error(&err);
-        tauri::ipc::InvokeError::from(err.to_string())
     }
 }
 

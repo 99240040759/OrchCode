@@ -54,7 +54,7 @@ impl reqwest_middleware::Middleware for AuthMiddleware {
         extensions: &mut http::Extensions,
         next: reqwest_middleware::Next<'_>,
     ) -> reqwest_middleware::Result<reqwest::Response> {
-        let token = self.token.read().ok().and_then(|g| g.clone());
+        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(token) = token.filter(|t| !t.is_empty()) {
             if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
                 req.headers_mut().insert(reqwest::header::AUTHORIZATION, value);
@@ -72,8 +72,8 @@ pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient>
     let retry_policy = reqwest_retry::policies::ExponentialBackoff::builder()
         .build_with_max_retries(3);
     let client = reqwest_middleware::ClientBuilder::new(crate::util::streaming_http_client())
-        .with(AuthMiddleware::new(token))
         .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(retry_policy))
+        .with(AuthMiddleware::new(token))
         .build();
 
     let http = ReqwestMiddlewareClient::from(client);
@@ -227,7 +227,7 @@ fn build_preamble(data_dir: &Path, workspace: Option<&Path>, connectors: &[&'sta
 When your current task matches a skill name, call read_skill with that name BEFORE starting work. \
 The skill content gives you a proven sequence of steps, tool calls, and checks — follow it.\n\n",
         );
-        for skill in &skills {
+        for skill in skills.iter() {
             text.push_str(&format!("- **{}** — {}\n", skill.name, skill.description));
         }
         sections.push(Section::new("skills", text));
@@ -629,6 +629,8 @@ impl SessionHook {
         session.compactions += 1;
         session.anchor = None;
         session.cooldown = None;
+        session.synced = session.conversation.messages().len();
+        session.input_len = session.synced;
         let tokens_after = config::PREAMBLE_TOKEN_RESERVE
             .saturating_add(estimate_tokens(session.conversation.messages()));
         if let Err(error) = session.save().await {
@@ -910,7 +912,7 @@ pub async fn run_chat(
 fn mention_regex() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        regex::Regex::new(r"@\[(?P<bracket>[^\]]+)\](?:(?P<brange>#L\d+(?:-\d+)?))?|@(?P<plain>[^\s@,;:!?#]+)(?:(?P<prange>#L\d+(?:-\d+)?))?")
+        regex::Regex::new(r"(?:^|[\s(])(?:@\[(?P<bracket>[^\]]+)\](?:(?P<brange>#L\d+(?:-\d+)?))?|@(?P<plain>[^\s@,;:!?#)]+)(?:(?P<prange>#L\d+(?:-\d+)?))?)")
             .expect("mention regex is a valid pattern")
     })
 }
@@ -1107,11 +1109,7 @@ pub async fn build_user_message(
 
 pub fn is_context_overflow(raw: &str) -> bool {
     let lower = raw.to_lowercase();
-    lower.contains("error decoding response")
-        || lower.contains("response body was not valid")
-        || lower.contains("unexpected end of input")
-        || lower.contains("failed to parse response")
-        || lower.contains("context length")
+    lower.contains("context length")
         || lower.contains("context_length")
         || lower.contains("maximum context")
         || (lower.contains("status: 400") && lower.contains("token"))

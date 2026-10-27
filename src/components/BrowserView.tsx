@@ -28,7 +28,7 @@ function normalizeUrl(input: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
-export function BrowserView({ initialUrl }: { initialUrl?: string }) {
+export function BrowserView({ initialUrl, active = true }: { initialUrl?: string; active?: boolean }) {
   const [label, setLabel] = useState("");
   const startUrl = normalizeUrl(initialUrl ?? DEFAULT_BROWSER_URL);
 
@@ -43,6 +43,8 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const overlayOpen = useOverlayStore((s) => s.count > 0);
   const overlayRef = useRef(overlayOpen);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const syncRef = useRef<() => void>(() => {});
   const initialUrlRef = useRef(startUrl);
   const initialLoadedRef = useRef(false);
@@ -70,8 +72,6 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
 
     void webview.once("tauri://created", () => {
       if (disposed) {
-        void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
-        void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
         void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));
         return;
       }
@@ -87,6 +87,7 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       if (disposed) return;
       const bounds = host.getBoundingClientRect();
       const isValid =
+        activeRef.current &&
         visible &&
         !overlayRef.current &&
         bounds.width > 20 &&
@@ -141,11 +142,13 @@ export function BrowserView({ initialUrl }: { initialUrl?: string }) {
       intersectionObserver.disconnect();
       resizeObserver.disconnect();
       window.removeEventListener("resize", scheduleSync);
-      void webview.setPosition(new LogicalPosition(OFFSCREEN, OFFSCREEN)).catch(() => {});
-      void webview.setSize(new LogicalSize(0, 0)).catch(() => {});
       void webview.close().catch(() => api.webviewClose(currentLabel).catch(() => {}));
     };
   }, []);
+
+  useEffect(() => {
+    syncRef.current();
+  }, [active]);
 
   useEffect(() => {
     overlayRef.current = overlayOpen;

@@ -1,8 +1,10 @@
 use std::io::Cursor;
+use std::time::Duration;
 
 use base64::Engine;
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView, ImageFormat};
+use moka::sync::Cache;
 use rig::message::ImageMediaType;
 
 use crate::error::{AppError, AppResult};
@@ -19,15 +21,23 @@ fn flatten_to_rgb(image: &DynamicImage) -> DynamicImage {
     }
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    let mut rgb = image::RgbImage::new(width, height);
-    for (x, y, pixel) in rgba.enumerate_pixels() {
-        let alpha = pixel[3] as f32 / 255.0;
-        let r = ((1.0 - alpha) * 255.0 + alpha * (pixel[0] as f32)).round() as u8;
-        let g = ((1.0 - alpha) * 255.0 + alpha * (pixel[1] as f32)).round() as u8;
-        let b = ((1.0 - alpha) * 255.0 + alpha * (pixel[2] as f32)).round() as u8;
-        rgb.put_pixel(x, y, image::Rgb([r, g, b]));
+    let raw_rgba = rgba.as_raw();
+    let mut rgb_raw = Vec::with_capacity((width * height * 3) as usize);
+    for chunk in raw_rgba.chunks_exact(4) {
+        let alpha = chunk[3] as u32;
+        let inv_alpha = 255 - alpha;
+        let r = ((chunk[0] as u32 * alpha + 255 * inv_alpha + 127) / 255) as u8;
+        let g = ((chunk[1] as u32 * alpha + 255 * inv_alpha + 127) / 255) as u8;
+        let b = ((chunk[2] as u32 * alpha + 255 * inv_alpha + 127) / 255) as u8;
+        rgb_raw.push(r);
+        rgb_raw.push(g);
+        rgb_raw.push(b);
     }
-    DynamicImage::ImageRgb8(rgb)
+    if let Some(rgb) = image::RgbImage::from_raw(width, height, rgb_raw) {
+        DynamicImage::ImageRgb8(rgb)
+    } else {
+        DynamicImage::ImageRgb8(image.to_rgb8())
+    }
 }
 
 fn encode_jpeg(image: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
@@ -59,7 +69,13 @@ fn media_for_extension(ext: &str) -> Option<ImageMediaType> {
 pub fn encode_for_model(bytes: &[u8], ext: &str, max_dimension: u32, max_bytes: usize) -> AppResult<(String, ImageMediaType)> {
     if let Some(media) = media_for_extension(ext) {
         if bytes.len() <= max_bytes {
-            return Ok((base64::engine::general_purpose::STANDARD.encode(bytes), media));
+            // Only skip resizing if dimensions are also within limits.
+            let dims_ok = image_dimensions(bytes)
+                .map(|(w, h)| w <= max_dimension && h <= max_dimension)
+                .unwrap_or(false);
+            if dims_ok {
+                return Ok((base64::engine::general_purpose::STANDARD.encode(bytes), media));
+            }
         }
     }
     let image = image::load_from_memory(bytes)
@@ -70,14 +86,24 @@ pub fn encode_for_model(bytes: &[u8], ext: &str, max_dimension: u32, max_bytes: 
     } else {
         image
     };
-    let mut cursor = Cursor::new(Vec::new());
-    resized
-        .write_to(&mut cursor, ImageFormat::Png)
-        .map_err(|e| AppError::other(format!("image encode failed: {e}")))?;
-    Ok((base64::engine::general_purpose::STANDARD.encode(cursor.into_inner()), ImageMediaType::PNG))
+    // Prefer JPEG for opaque images (smaller output); PNG only when alpha is needed.
+    if resized.color().has_alpha() {
+        let encoded = encode_png(&resized)?;
+        Ok((base64::engine::general_purpose::STANDARD.encode(encoded), ImageMediaType::PNG))
+    } else {
+        let encoded = encode_jpeg(&resized, 85)?;
+        Ok((base64::engine::general_purpose::STANDARD.encode(encoded), ImageMediaType::JPEG))
+    }
 }
 
 pub fn preview_data_url(bytes: &[u8], mime: &str, max_dimension: u32) -> AppResult<String> {
+    // Fast header-only dimension check — avoid full pixel decode when not needed.
+    if let Some((width, height)) = image_dimensions(bytes) {
+        if width <= max_dimension && height <= max_dimension {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            return Ok(format!("data:{mime};base64,{b64}"));
+        }
+    }
     let image = image::load_from_memory(bytes)
         .map_err(|e| AppError::other(format!("cannot decode image: {e}")))?;
     let (width, height) = image.dimensions();
@@ -95,19 +121,45 @@ pub fn preview_data_url(bytes: &[u8], mime: &str, max_dimension: u32) -> AppResu
     Ok(format!("data:{out_mime};base64,{b64}"))
 }
 
+fn thumbnail_cache() -> &'static Cache<String, String> {
+    static CACHE: std::sync::OnceLock<Cache<String, String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        Cache::builder()
+            .max_capacity(256)
+            .time_to_idle(Duration::from_secs(300))
+            .build()
+    })
+}
+
 pub fn thumbnail_data_url_from_base64(b64: &str, mime: &str, max_dimension: u32) -> Option<String> {
+    let key = crate::util::stable_hash_hex(b64);
+    if let Some(cached) = thumbnail_cache().get(&key) {
+        return Some(cached);
+    }
+
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64.as_bytes()).ok()?;
+    if let Some((width, height)) = image_dimensions(&bytes) {
+        if width <= max_dimension && height <= max_dimension && b64.len() <= 200_000 {
+            let res = format!("data:{mime};base64,{b64}");
+            thumbnail_cache().insert(key, res.clone());
+            return Some(res);
+        }
+    }
     let image = image::load_from_memory(&bytes).ok()?;
     let (width, height) = image.dimensions();
     if width <= max_dimension && height <= max_dimension && b64.len() <= 200_000 {
-        return Some(format!("data:{mime};base64,{b64}"));
+        let res = format!("data:{mime};base64,{b64}");
+        thumbnail_cache().insert(key, res.clone());
+        return Some(res);
     }
     let thumb = image.thumbnail(max_dimension, max_dimension);
     let encoded = encode_jpeg(&thumb, 75).ok()?;
-    Some(format!(
+    let res = format!(
         "data:image/jpeg;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(encoded)
-    ))
+    );
+    thumbnail_cache().insert(key, res.clone());
+    Some(res)
 }
 
 pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {

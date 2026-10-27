@@ -33,28 +33,34 @@ pub fn inference_base_url(provider: &str) -> String {
     format!("{}/{}/v1", clean_base_url(), clean)
 }
 
-pub fn models_url() -> String {
-    format!("{}/models", clean_base_url())
+pub fn models_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/models", clean_base_url())).as_str()
 }
 
-pub fn title_url() -> String {
-    format!("{}/title", clean_base_url())
+pub fn title_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/title", clean_base_url())).as_str()
 }
 
-pub fn summarize_url() -> String {
-    format!("{}/summarize", clean_base_url())
+pub fn summarize_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/summarize", clean_base_url())).as_str()
 }
 
-pub fn budget_url() -> String {
-    format!("{}/budget", clean_base_url())
+pub fn budget_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/budget", clean_base_url())).as_str()
 }
 
-pub fn transcribe_url() -> String {
-    format!("{}/transcribe", clean_base_url())
+pub fn transcribe_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/transcribe", clean_base_url())).as_str()
 }
 
-pub fn tavily_url() -> String {
-    format!("{}/tavily", clean_base_url())
+pub fn tavily_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| format!("{}/tavily", clean_base_url())).as_str()
 }
 
 pub fn composio_url(path: &str) -> String {

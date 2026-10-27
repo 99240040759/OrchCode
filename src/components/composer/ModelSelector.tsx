@@ -1,3 +1,4 @@
+import React from "react";
 import * as api from "../../lib/api";
 import { Button } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
@@ -8,14 +9,14 @@ import {
   DropdownMenuTrigger,
 } from "../ui/DropdownMenu";
 
-export interface ModelSelectorProps {
+interface ModelSelectorProps {
   models: api.ModelDto[];
   selectedModel: api.ModelDto | null;
   setSelectedModel: (key: string) => void;
   align?: "start" | "end";
 }
 
-export function ModelSelector({
+export const ModelSelector = React.memo(function ModelSelector({
   models,
   selectedModel,
   setSelectedModel,
@@ -51,4 +52,4 @@ export function ModelSelector({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
+});

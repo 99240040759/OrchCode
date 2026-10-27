@@ -31,14 +31,18 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
 
 #[cfg(target_os = "macos")]
 pub fn setup_native_window(window: &tauri::WebviewWindow) {
+    use tauri::Manager;
     position_traffic_lights(window);
-    let win = window.clone();
+    let app_handle = window.app_handle().clone();
+    let label = window.label().to_string();
     window.on_window_event(move |event| {
         match event {
             tauri::WindowEvent::Resized(_)
             | tauri::WindowEvent::ScaleFactorChanged { .. }
             | tauri::WindowEvent::Focused(true) => {
-                position_traffic_lights(&win);
+                if let Some(win) = app_handle.get_webview_window(&label) {
+                    position_traffic_lights(&win);
+                }
             }
             _ => {}
         }
@@ -52,7 +56,11 @@ fn position_traffic_lights(window: &tauri::WebviewWindow) {
     }
 
     use objc2_app_kit::{NSWindow, NSWindowButton};
-    use objc2_foundation::NSPoint;
+    use objc2_foundation::{MainThreadMarker, NSPoint};
+
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
 
     let ns_win_ptr = match window.ns_window() {
         Ok(ptr) => ptr,

@@ -82,14 +82,28 @@ export function TerminalView({ id }: { id: string }) {
       void api.terminalWrite(sessionId, data).catch(() => undefined);
     });
 
+    let prevCols = term.cols;
+    let prevRows = term.rows;
+    let resizeRaf = 0;
+
     const observer = new ResizeObserver(() => {
-      if (disposed || !safeFit()) return;
-      void api.terminalResize(sessionId, term.cols, term.rows).catch(() => undefined);
+      if (disposed) return;
+      if (resizeRaf !== 0) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        if (disposed || !safeFit()) return;
+        if (term.cols !== prevCols || term.rows !== prevRows) {
+          prevCols = term.cols;
+          prevRows = term.rows;
+          void api.terminalResize(sessionId, term.cols, term.rows).catch(() => undefined);
+        }
+      });
     });
     observer.observe(container);
 
     return () => {
       disposed = true;
+      if (resizeRaf !== 0) cancelAnimationFrame(resizeRaf);
       dataSubscription.dispose();
       observer.disconnect();
       if (opened) void api.terminalClose(sessionId).catch(() => undefined);

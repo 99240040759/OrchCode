@@ -68,7 +68,7 @@ function loadImageDataUrl(path: string, version = 0): Promise<string> {
   return request;
 }
 
-export interface ImageDataUrlState {
+interface ImageDataUrlState {
   src: string | null;
   error: string | null;
   loading: boolean;

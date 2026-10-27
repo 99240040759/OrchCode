@@ -1,10 +1,8 @@
-import { forwardRef } from "react";
+import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
 
-export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
+type ButtonProps = ComponentProps<"button">;
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({ className, type = "button", ...props }, ref) => (
-  <button ref={ref} type={type} className={cn("Button", className)} {...props} />
-));
-
-Button.displayName = "Button";
+export function Button({ className, type = "button", ...props }: ButtonProps) {
+  return <button type={type} className={cn("Button", className)} {...props} />;
+}

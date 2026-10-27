@@ -19,9 +19,6 @@ const SCHEMA: &str = "
      user_id             TEXT,
      created_at          INTEGER NOT NULL,
      updated_at          INTEGER NOT NULL,
-     total_input_tokens  INTEGER NOT NULL DEFAULT 0,
-     total_output_tokens INTEGER NOT NULL DEFAULT 0,
-     total_tokens        INTEGER NOT NULL DEFAULT 0,
      last_context_tokens INTEGER NOT NULL DEFAULT 0
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
@@ -146,7 +143,8 @@ impl SqliteMemory {
              ON CONFLICT(id) DO UPDATE SET
                  workspace_path = COALESCE(sessions.workspace_path, excluded.workspace_path),
                  user_id = COALESCE(sessions.user_id, excluded.user_id),
-                 updated_at = excluded.updated_at",
+                 updated_at = excluded.updated_at
+             WHERE sessions.user_id = ?3 OR sessions.user_id IS NULL",
         )
         .bind(session_id)
         .bind(workspace_path)
@@ -163,23 +161,18 @@ impl SqliteMemory {
         &self,
         session_id: &str,
         context_tokens: u64,
-        input_tokens: u64,
-        output_tokens: u64,
+        _input_tokens: u64,
+        _output_tokens: u64,
     ) -> AppResult<()> {
         let now = now_ms();
         sqlx::query(
             "UPDATE sessions SET
                  last_context_tokens = ?2,
-                 total_input_tokens = total_input_tokens + ?3,
-                 total_output_tokens = total_output_tokens + ?4,
-                 total_tokens = total_tokens + ?3 + ?4,
-                 updated_at = ?5
+                 updated_at = ?3
              WHERE id = ?1",
         )
         .bind(session_id)
         .bind(to_db_token(context_tokens))
-        .bind(to_db_token(input_tokens))
-        .bind(to_db_token(output_tokens))
         .bind(now)
         .execute(&self.pool)
         .await
@@ -234,9 +227,10 @@ impl SqliteMemory {
         Ok(summaries)
     }
 
-    pub async fn session_ids_for_workspace(&self, workspace_path: &str) -> AppResult<Vec<String>> {
-        let rows = sqlx::query("SELECT id FROM sessions WHERE workspace_path = ?1")
+    pub async fn session_ids_for_workspace(&self, workspace_path: &str, user_id: &str) -> AppResult<Vec<String>> {
+        let rows = sqlx::query("SELECT id FROM sessions WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)")
             .bind(workspace_path)
+            .bind(user_id)
             .fetch_all(&self.pool)
             .await
             .map_err(sql_err)?;
@@ -254,9 +248,10 @@ impl SqliteMemory {
         Ok(())
     }
 
-    pub async fn delete_sessions_for_workspace(&self, workspace_path: &str) -> AppResult<()> {
-        sqlx::query("DELETE FROM sessions WHERE workspace_path = ?1")
+    pub async fn delete_sessions_for_workspace(&self, workspace_path: &str, user_id: &str) -> AppResult<()> {
+        sqlx::query("DELETE FROM sessions WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)")
             .bind(workspace_path)
+            .bind(user_id)
             .execute(&self.pool)
             .await
             .map_err(sql_err)?;
@@ -337,21 +332,16 @@ impl SqliteMemory {
         if durations.is_empty() {
             return Ok(());
         }
-        let mut tx = self.pool.begin().await.map_err(sql_err)?;
-        for (item_id, secs) in durations {
-            sqlx::query(
-                "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = ?3",
-            )
-            .bind(conversation_id)
-            .bind(item_id)
-            .bind(to_db_token(secs))
-            .execute(&mut *tx)
-            .await
-            .map_err(sql_err)?;
-        }
-        tx.commit().await.map_err(sql_err)?;
+        let mut builder: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+            "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds) ",
+        );
+        builder.push_values(durations, |mut b, (item_id, secs)| {
+            b.push_bind(conversation_id)
+                .push_bind(item_id)
+                .push_bind(to_db_token(secs));
+        });
+        builder.push(" ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = excluded.duration_seconds");
+        builder.build().execute(&self.pool).await.map_err(sql_err)?;
         Ok(())
     }
 }

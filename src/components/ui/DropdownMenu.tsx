@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect } from "react";
+import React, { useEffect } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { VscCheck } from "react-icons/vsc";
 import { create } from "zustand";
@@ -9,7 +9,7 @@ export const useOverlayStore = create<{ count: number; change: (delta: number) =
   change: (delta) => set((s) => ({ count: Math.max(0, s.count + delta) })),
 }));
 
-export function OverlayPresence() {
+function OverlayPresence() {
   const change = useOverlayStore((s) => s.change);
   useEffect(() => {
     change(1);
@@ -21,87 +21,90 @@ export function OverlayPresence() {
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 
-export const DropdownMenuContent = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn("DropdownMenuContent", className)}
-      {...props}
-    >
-      <OverlayPresence />
-      {children}
-    </DropdownMenuPrimitive.Content>
-  </DropdownMenuPrimitive.Portal>
-));
-DropdownMenuContent.displayName = "DropdownMenuContent";
+export function DropdownMenuContent({
+  className,
+  sideOffset = 4,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.Content
+        sideOffset={sideOffset}
+        className={cn("DropdownMenuContent", className)}
+        {...props}
+      >
+        <OverlayPresence />
+        {children}
+      </DropdownMenuPrimitive.Content>
+    </DropdownMenuPrimitive.Portal>
+  );
+}
 
-export const DropdownMenuItem = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Item ref={ref} className={cn("DropdownMenuItem", className)} {...props} />
-));
-DropdownMenuItem.displayName = "DropdownMenuItem";
+export function DropdownMenuItem({
+  className,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
+  return <DropdownMenuPrimitive.Item className={cn("DropdownMenuItem", className)} {...props} />;
+}
 
-export const DropdownMenuSeparator = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.Separator>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Separator ref={ref} className={cn("DropdownMenu-separator", className)} {...props} />
-));
-DropdownMenuSeparator.displayName = "DropdownMenuSeparator";
+export function DropdownMenuSeparator({
+  className,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
+  return <DropdownMenuPrimitive.Separator className={cn("DropdownMenu-separator", className)} {...props} />;
+}
 
 export const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
-export const DropdownMenuSubTrigger = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.SubTrigger>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubTrigger
-    ref={ref}
-    className={cn("DropdownMenuItem DropdownMenuSubTrigger", className)}
-    {...props}
-  />
-));
-DropdownMenuSubTrigger.displayName = "DropdownMenuSubTrigger";
+export function DropdownMenuSubTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger>) {
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      className={cn("DropdownMenuItem DropdownMenuSubTrigger", className)}
+      {...props}
+    />
+  );
+}
 
-export const DropdownMenuSubContent = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, sideOffset = 6, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.SubContent
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn("DropdownMenuContent", className)}
+export function DropdownMenuSubContent({
+  className,
+  sideOffset = 6,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        sideOffset={sideOffset}
+        className={cn("DropdownMenuContent", className)}
+        {...props}
+      >
+        <OverlayPresence />
+        {children}
+      </DropdownMenuPrimitive.SubContent>
+    </DropdownMenuPrimitive.Portal>
+  );
+}
+
+export function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+  return (
+    <DropdownMenuPrimitive.CheckboxItem
+      className={cn("DropdownMenuItem DropdownMenuCheckboxItem", className)}
       {...props}
     >
-      <OverlayPresence />
       {children}
-    </DropdownMenuPrimitive.SubContent>
-  </DropdownMenuPrimitive.Portal>
-));
-DropdownMenuSubContent.displayName = "DropdownMenuSubContent";
-
-export const DropdownMenuCheckboxItem = forwardRef<
-  React.ComponentRef<typeof DropdownMenuPrimitive.CheckboxItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
->(({ className, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.CheckboxItem
-    ref={ref}
-    className={cn("DropdownMenuItem DropdownMenuCheckboxItem", className)}
-    {...props}
-  >
-    {children}
-    <span className="DropdownMenuCheckboxItem-check">
-      <DropdownMenuPrimitive.ItemIndicator>
-        <VscCheck />
-      </DropdownMenuPrimitive.ItemIndicator>
-    </span>
-  </DropdownMenuPrimitive.CheckboxItem>
-));
-DropdownMenuCheckboxItem.displayName = "DropdownMenuCheckboxItem";
+      <span className="DropdownMenuCheckboxItem-check">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <VscCheck />
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+    </DropdownMenuPrimitive.CheckboxItem>
+  );
+}

@@ -10,7 +10,7 @@ if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
 
-export function PdfViewer({ path }: { path: string }) {
+export function PdfViewer({ path, active = true }: { path: string; active?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const loadingTaskRef = useRef<pdfjsLib.PDFDocumentLoadingTask | null>(null);
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -133,6 +133,7 @@ export function PdfViewer({ path }: { path: string }) {
   );
 
   useEffect(() => {
+    if (!active) return;
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -150,7 +151,7 @@ export function PdfViewer({ path }: { path: string }) {
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [goToPrev, goToNext]);
+  }, [active, goToPrev, goToNext]);
 
   const ready = !loading && !error;
 

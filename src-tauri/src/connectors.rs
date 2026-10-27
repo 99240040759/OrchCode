@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
+use moka::future::Cache;
 use rig::tool::DynamicTool;
 
 use crate::connector_tools::actions::{self, ActionDef};
@@ -92,11 +92,6 @@ pub fn def_for_slug(slug: &str) -> Option<&'static ConnectorDef> {
     CONNECTOR_DEFS.iter().find(|def| slug.starts_with(def.slug_prefix))
 }
 
-struct CachedSpecs {
-    fetched: Instant,
-    specs: Arc<Vec<ToolSpec>>,
-}
-
 pub struct PreparedConnectors {
     pub tools: Vec<DynamicTool>,
     pub defs: Vec<&'static ConnectorDef>,
@@ -104,19 +99,37 @@ pub struct PreparedConnectors {
 
 pub struct ConnectorManager {
     client: ComposioClient,
-    cache: Mutex<HashMap<&'static str, CachedSpecs>>,
+    specs_cache: Cache<&'static str, Arc<Vec<ToolSpec>>>,
+    accounts_cache: Cache<(), Arc<Vec<AccountWire>>>,
 }
 
 impl ConnectorManager {
     pub fn new(token: TokenHandle) -> Self {
+        let specs_cache = Cache::builder()
+            .time_to_live(DEFINITIONS_TTL)
+            .build();
+        let accounts_cache = Cache::builder()
+            .time_to_live(Duration::from_secs(30))
+            .build();
         Self {
             client: ComposioClient::new(token),
-            cache: Mutex::new(HashMap::new()),
+            specs_cache,
+            accounts_cache,
         }
     }
 
+    async fn get_accounts(&self) -> AppResult<Arc<Vec<AccountWire>>> {
+        let client = self.client.clone();
+        self.accounts_cache
+            .try_get_with((), async move {
+                client.accounts().await.map(Arc::new).map_err(AppError::from)
+            })
+            .await
+            .map_err(|e| AppError::Connector(e.to_string()))
+    }
+
     pub async fn connected_ids(&self) -> AppResult<Vec<&'static str>> {
-        let accounts = self.client.accounts().await?;
+        let accounts = self.get_accounts().await?;
         Ok(CONNECTOR_DEFS
             .iter()
             .filter(|def| is_connected(&accounts, def))
@@ -126,6 +139,7 @@ impl ConnectorManager {
 
     pub async fn begin_connect(&self, id: &str) -> AppResult<String> {
         let def = find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.to_string()))?;
+        self.accounts_cache.invalidate_all();
         Ok(self.client.connect(def.id).await?)
     }
 
@@ -136,6 +150,7 @@ impl ConnectorManager {
             .iter()
             .find(|account| account.toolkit == def.id && account.status == ACTIVE_STATUS)
             .ok_or_else(|| AppError::ConnectorNotConnected(def.name.to_string()))?;
+        self.accounts_cache.invalidate_all();
         Ok(self.client.disconnect(&account.id).await?)
     }
 
@@ -145,7 +160,7 @@ impl ConnectorManager {
             return Ok(PreparedConnectors { tools: Vec::new(), defs });
         }
 
-        let accounts = self.client.accounts().await?;
+        let accounts = self.get_accounts().await?;
         if let Some(missing) = defs.iter().find(|def| !is_connected(&accounts, def)) {
             return Err(AppError::ConnectorNotConnected(missing.name.to_string()));
         }
@@ -160,48 +175,35 @@ impl ConnectorManager {
         Ok(PreparedConnectors { tools, defs })
     }
 
-    fn cached(&self, id: &'static str) -> Option<Arc<Vec<ToolSpec>>> {
-        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache
-            .get(id)
-            .filter(|entry| entry.fetched.elapsed() < DEFINITIONS_TTL)
-            .map(|entry| entry.specs.clone())
-    }
-
     async fn specs(&self, def: &'static ConnectorDef) -> AppResult<Arc<Vec<ToolSpec>>> {
-        if let Some(hit) = self.cached(def.id) {
-            return Ok(hit);
-        }
-        let slugs: Vec<&str> = def.actions.iter().map(|action| action.slug).collect();
-        let wires = self.client.tools(&slugs).await?;
-        let mut specs = Vec::with_capacity(slugs.len());
-        for action in def.actions {
-            let Some(wire) = wires.iter().find(|wire| wire.slug == action.slug) else {
-                eprintln!("[connectors] {} is not in the connector catalog and was skipped", action.slug);
-                continue;
-            };
-            if wire.is_deprecated {
-                eprintln!("[connectors] {} is deprecated and was skipped", action.slug);
-                continue;
-            }
-            let spec = ToolSpec::from_wire(wire.clone())
-                .map_err(|reason| AppError::Connector(format!("{}: {reason}", action.slug)))?;
-            specs.push(spec);
-        }
-        if specs.is_empty() {
-            let err = AppError::Connector(format!("No tools are available for {}", def.name));
-            sentry::capture_error(&err);
-            return Err(err);
-        }
-        let specs = Arc::new(specs);
-        self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            def.id,
-            CachedSpecs {
-                fetched: Instant::now(),
-                specs: specs.clone(),
-            },
-        );
-        Ok(specs)
+        let client = self.client.clone();
+        self.specs_cache
+            .try_get_with(def.id, async move {
+                let slugs: Vec<&str> = def.actions.iter().map(|action| action.slug).collect();
+                let wires = client.tools(&slugs).await?;
+                let mut specs = Vec::with_capacity(slugs.len());
+                for action in def.actions {
+                    let Some(wire) = wires.iter().find(|wire| wire.slug == action.slug) else {
+                        eprintln!("[connectors] {} is not in the connector catalog and was skipped", action.slug);
+                        continue;
+                    };
+                    if wire.is_deprecated {
+                        eprintln!("[connectors] {} is deprecated and was skipped", action.slug);
+                        continue;
+                    }
+                    let spec = ToolSpec::from_wire(wire.clone())
+                        .map_err(|reason| AppError::Connector(format!("{}: {reason}", action.slug)))?;
+                    specs.push(spec);
+                }
+                if specs.is_empty() {
+                    let err = AppError::Connector(format!("No tools are available for {}", def.name));
+                    sentry::capture_error(&err);
+                    return Err(err);
+                }
+                Ok(Arc::new(specs))
+            })
+            .await
+            .map_err(|e| AppError::Connector(e.to_string()))
     }
 }
 

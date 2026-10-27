@@ -16,8 +16,10 @@ pub fn trim_parameters(schema: Value) -> Result<Value, String> {
     if root.get("type").and_then(Value::as_str) != Some("object") {
         return Err("tool input schema does not describe an object".to_string());
     }
+    // Allow parameterless tools that emit `{"type": "object"}` without a "properties" map.
     if !matches!(root.get("properties"), Some(Value::Object(_))) {
-        return Err("tool input schema has no properties map".to_string());
+        root.entry("properties")
+            .or_insert_with(|| Value::Object(Map::new()));
     }
     root.remove("description");
     Ok(trim_schema(Value::Object(root)))
@@ -83,22 +85,18 @@ fn contains_file_upload(value: &Value) -> bool {
 }
 
 fn drop_file_uploads(map: &mut Map<String, Value>) {
-    let dropped: Vec<String> = match map.get("properties") {
-        Some(Value::Object(properties)) => properties
-            .iter()
-            .filter(|(_, schema)| contains_file_upload(schema))
-            .map(|(name, _)| name.clone())
-            .collect(),
-        _ => return,
+    let Some(Value::Object(properties)) = map.get_mut("properties") else {
+        return;
     };
+    let dropped: Vec<String> = properties
+        .iter()
+        .filter(|(_, schema)| contains_file_upload(schema))
+        .map(|(name, _)| name.clone())
+        .collect();
     if dropped.is_empty() {
         return;
     }
-    if let Some(Value::Object(properties)) = map.get_mut("properties") {
-        for name in &dropped {
-            properties.remove(name);
-        }
-    }
+    properties.retain(|name, _| !dropped.contains(name));
     if let Some(Value::Array(required)) = map.get_mut("required") {
         required.retain(|entry| entry.as_str().is_none_or(|name| !dropped.iter().any(|d| d == name)));
     }

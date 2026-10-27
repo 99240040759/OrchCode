@@ -68,11 +68,9 @@ pub fn lowercase_extension(path: &Path) -> String {
 }
 
 pub fn display_relative(root: &Path, path: &Path) -> String {
-    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    match path.strip_prefix(&canonical_root) {
-        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
-        Err(_) => path.to_string_lossy().replace('\\', "/"),
-    }
+    path.strip_prefix(root)
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
 }
 
 pub fn display_path(root: Option<&Path>, path: &Path) -> String {
@@ -89,31 +87,31 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
     }
 }
 
-pub fn truncate_text(text: &str, limit: usize, suffix: &str) -> String {
-    let truncated = truncate_chars(text, limit);
-    if truncated.len() < text.len() {
-        format!("{truncated}{suffix}")
-    } else {
-        text.to_string()
-    }
-}
-
 pub fn clip_middle(text: &str, max_chars: usize) -> String {
-    let total = text.chars().count();
-    if total <= max_chars {
+    if text.len() <= max_chars {
         return text.to_string();
     }
     let head_chars = max_chars * 7 / 10;
     let tail_chars = max_chars - head_chars;
-    let head = truncate_chars(text, head_chars);
-    let tail_start = text
-        .char_indices()
-        .nth(total - tail_chars)
-        .map(|(i, _)| i)
-        .unwrap_or(text.len());
+    let head_end = match text.char_indices().nth(head_chars) {
+        Some((idx, _)) => idx,
+        None => return text.to_string(),
+    };
+    let tail_start = match text.char_indices().rev().nth(tail_chars.saturating_sub(1)) {
+        Some((idx, _)) => idx,
+        None => return text.to_string(),
+    };
+    if head_end >= tail_start {
+        return text.to_string();
+    }
+    let omitted = if text.is_ascii() {
+        tail_start - head_end
+    } else {
+        text[head_end..tail_start].chars().count()
+    };
     format!(
-        "{head}\n\n[... {} characters omitted ...]\n\n{}",
-        total - head_chars - tail_chars,
+        "{}\n\n[... {omitted} characters omitted ...]\n\n{}",
+        &text[..head_end],
         &text[tail_start..]
     )
 }
@@ -142,126 +140,28 @@ pub fn warm_login_shell_path() {
     });
 }
 
-#[cfg(unix)]
 fn resolve_login_path() -> Option<String> {
-    use std::collections::HashSet;
-
-    let shell = std::env::var("SHELL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "/bin/zsh".to_string());
-    let discovered = query_shell_path(&shell, "-ilc").or_else(|| query_shell_path(&shell, "-lc"));
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut entries: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut push = |value: &str| {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
-            entries.push(trimmed.to_string());
-        }
-    };
-    if let Some(found) = discovered.as_deref() {
-        for part in found.split(':') {
-            push(part);
+    if let Ok(mut profiles) = envvars::get_profiles() {
+        for profile in &mut profiles {
+            if profile.load().is_ok() {
+                if let Some(ref vars) = profile.envvars {
+                    for (key, value) in vars {
+                        if key.eq_ignore_ascii_case("PATH") && !value.trim().is_empty() {
+                            return Some(value.clone());
+                        }
+                    }
+                }
+            }
         }
     }
-    if let Ok(current) = std::env::var("PATH") {
-        for part in current.split(':') {
-            push(part);
-        }
-    }
-    let extra = [
-        "/opt/homebrew/bin".to_string(),
-        "/opt/homebrew/sbin".to_string(),
-        "/opt/local/bin".to_string(),
-        "/opt/local/sbin".to_string(),
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-        "/bin".to_string(),
-        "/usr/sbin".to_string(),
-        "/sbin".to_string(),
-        format!("{home}/.cargo/bin"),
-        format!("{home}/.local/bin"),
-        format!("{home}/.bun/bin"),
-        format!("{home}/.deno/bin"),
-    ];
-    for part in &extra {
-        if std::path::Path::new(part).is_dir() {
-            push(part);
-        }
-    }
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries.join(":"))
-    }
-}
-
-#[cfg(unix)]
-fn query_shell_path(shell: &str, flags: &str) -> Option<String> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-
-    const MARKER: &str = "__ORCH_LOGIN_PATH__";
-    let mut child = Command::new(shell)
-        .arg(flags)
-        .arg(format!("printf '{MARKER}%s{MARKER}' \"$PATH\""))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        let _ = tx.send(buf);
-    });
-    let raw_bytes = match rx.recv_timeout(Duration::from_secs(6)) {
-        Ok(out) => {
-            let _ = child.wait();
-            out
-        }
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-    };
-    let output = String::from_utf8_lossy(&raw_bytes);
-    let start = output.find(MARKER)? + MARKER.len();
-    let rest = &output[start..];
-    let end = rest.find(MARKER)?;
-    let value = rest[..end].trim().to_string();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-#[cfg(not(unix))]
-fn resolve_login_path() -> Option<String> {
-    None
+    std::env::var("PATH").ok().filter(|s| !s.trim().is_empty())
 }
 
 pub fn kill_process_tree(pid: u32) {
     #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", "--", &format!("-{pid}")])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        let _ = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+    unsafe {
+        let _ = libc::kill(-(pid as i32), libc::SIGKILL);
+        let _ = libc::kill(pid as i32, libc::SIGKILL);
     }
     #[cfg(windows)]
     {

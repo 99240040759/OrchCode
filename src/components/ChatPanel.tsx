@@ -122,7 +122,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
           onCollapse={onArtifactsCollapse}
         >
           <div ref={artifactPanelRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
-            <ArtifactPanel />
+            <ArtifactPanel visible={visible} />
           </div>
         </Panel>
       </PanelGroup>

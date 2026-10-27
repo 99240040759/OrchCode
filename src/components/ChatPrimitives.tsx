@@ -7,7 +7,7 @@ import {
   BsFileEarmarkPptFill,
 } from "react-icons/bs";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
-import { cn, getBasename } from "../lib/utils";
+import { cn, getBasename, getExt } from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 
@@ -37,9 +37,9 @@ export function Avatar({
   );
 }
 
-export type ExplorerIconType = "file" | "folder";
+type ExplorerIconType = "file" | "folder";
 
-export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
+interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
   type: ExplorerIconType;
   name: string;
 }
@@ -47,7 +47,7 @@ export interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
 export function ExplorerIcon({ type, name, className, style, ...svgProps }: ExplorerIconProps) {
   if (type === "folder") return <FolderIcon folderName={name} className={className} style={style} {...svgProps} />;
 
-  const ext = name.split(".").pop()?.toLowerCase();
+  const ext = getExt(name);
   if (ext === "pdf") {
     return <BsFileEarmarkPdfFill className={className} style={{ color: "#e2574c", ...style }} {...svgProps} />;
   }
@@ -75,7 +75,7 @@ export function ChromeIcon({ className, style }: { className?: string; style?: R
   );
 }
 
-export interface AttachmentCardProps {
+interface AttachmentCardProps {
   name: string;
   isImage: boolean;
   path?: string;
@@ -119,7 +119,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
   );
 }
 
-export interface FileTagProps {
+interface FileTagProps {
   path: string;
   name?: string;
   lineRange?: string;

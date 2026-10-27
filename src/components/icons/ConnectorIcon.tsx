@@ -5,9 +5,31 @@ interface ConnectorIconProps extends SVGProps<SVGSVGElement> {
   size?: number;
 }
 
+function JiraIcon({ size, className, ...props }: SVGProps<SVGSVGElement> & { size: number }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const gradA = `jira-icon-a-${uid}`;
+  const gradB = `jira-icon-b-${uid}`;
+  return (
+    <svg viewBox="0 0 128 128" width={size} height={size} className={className} aria-label="Jira" {...props}>
+      <defs>
+        <linearGradient id={gradA} x1="22.034" y1="9.773" x2="17.118" y2="14.842" gradientTransform="scale(4)" gradientUnits="userSpaceOnUse">
+          <stop offset=".176" stopColor="#0052cc"/>
+          <stop offset="1" stopColor="#2684ff"/>
+        </linearGradient>
+        <linearGradient id={gradB} x1="16.641" y1="15.564" x2="10.957" y2="21.094" gradientTransform="scale(4)" gradientUnits="userSpaceOnUse">
+          <stop offset=".176" stopColor="#0052cc"/>
+          <stop offset="1" stopColor="#2684ff"/>
+        </linearGradient>
+      </defs>
+      <path fill={`url(#${gradA})`} d="M125.7 60.3L67.8 2.4C66.2.8 64 0 61.8 0c-2.2 0-4.4.8-6 2.4L33.3 24.9l40.4 40.4 52-4.9z"/>
+      <path fill="#2684ff" d="M64 64L33.3 33.3 2.4 64.2C.8 65.8 0 68 0 70.2c0 2.2.8 4.4 2.4 6L60.3 125.7c1.6 1.6 3.8 2.3 6 2.3 2.2 0 4.4-.8 6-2.4l22.5-22.5L64 64z"/>
+      <path fill={`url(#${gradB})`} d="M64 64l30.7 30.7 30.9-30.9c1.6-1.6 2.4-3.8 2.4-6 0-2.2-.8-4.4-2.4-6L94.7 20.9 64 64z"/>
+    </svg>
+  );
+}
+
 export function ConnectorIcon({ id, size = 28, className, ...props }: ConnectorIconProps) {
   const s = size;
-  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 
   switch (id) {
     case "googledrive":
@@ -57,27 +79,8 @@ export function ConnectorIcon({ id, size = 28, className, ...props }: ConnectorI
         </svg>
       );
 
-    case "jira": {
-      const gradA = `jira-icon-a-${uid}`;
-      const gradB = `jira-icon-b-${uid}`;
-      return (
-        <svg viewBox="0 0 128 128" width={s} height={s} className={className} aria-label="Jira" {...props}>
-          <defs>
-            <linearGradient id={gradA} x1="22.034" y1="9.773" x2="17.118" y2="14.842" gradientTransform="scale(4)" gradientUnits="userSpaceOnUse">
-              <stop offset=".176" stopColor="#0052cc"/>
-              <stop offset="1" stopColor="#2684ff"/>
-            </linearGradient>
-            <linearGradient id={gradB} x1="16.641" y1="15.564" x2="10.957" y2="21.094" gradientTransform="scale(4)" gradientUnits="userSpaceOnUse">
-              <stop offset=".176" stopColor="#0052cc"/>
-              <stop offset="1" stopColor="#2684ff"/>
-            </linearGradient>
-          </defs>
-          <path fill={`url(#${gradA})`} d="M125.7 60.3L67.8 2.4C66.2.8 64 0 61.8 0c-2.2 0-4.4.8-6 2.4L33.3 24.9l40.4 40.4 52-4.9z"/>
-          <path fill="#2684ff" d="M64 64L33.3 33.3 2.4 64.2C.8 65.8 0 68 0 70.2c0 2.2.8 4.4 2.4 6L60.3 125.7c1.6 1.6 3.8 2.3 6 2.3 2.2 0 4.4-.8 6-2.4l22.5-22.5L64 64z"/>
-          <path fill={`url(#${gradB})`} d="M64 64l30.7 30.7 30.9-30.9c1.6-1.6 2.4-3.8 2.4-6 0-2.2-.8-4.4-2.4-6L94.7 20.9 64 64z"/>
-        </svg>
-      );
-    }
+    case "jira":
+      return <JiraIcon size={s} className={className} {...props} />;
 
     default:
       return (

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
-import { uniqueNamesGenerator, adjectives, animals } from "unique-names-generator";
+import { getBasename } from "./utils";
 import { clearImageCache } from "./images";
 import {
   getUserPref,
@@ -21,7 +21,7 @@ export interface WorkspaceMeta {
   createdAt: number;
 }
 
-export type WorkspacePickStatus =
+type WorkspacePickStatus =
   | "idle"
   | "loading"
   | "needs_pick"
@@ -46,7 +46,7 @@ interface WorkspaceActions {
   reset: () => void;
 }
 
-export type WorkspaceStore = WorkspaceState & WorkspaceActions;
+type WorkspaceStore = WorkspaceState & WorkspaceActions;
 
 const PREF_LAST_WORKSPACE = "lastWorkspaceId";
 const PREF_ALL_WORKSPACES = "allWorkspaces";
@@ -58,6 +58,27 @@ const INITIAL_STATE: WorkspaceState = {
   busy: false,
   error: null,
 };
+
+const ADJECTIVES = [
+  "swift", "bright", "calm", "bold", "clear", "cool", "daring", "eager",
+  "fair", "gentle", "happy", "keen", "lively", "noble", "proud", "quick",
+  "quiet", "radiant", "sharp", "silent", "smooth", "sparkling", "steady", "strong",
+  "tidy", "valiant", "vibrant", "warm", "wise", "agile", "clever", "cosmic"
+];
+
+const ANIMALS = [
+  "falcon", "otter", "tiger", "lynx", "orca", "sparrow", "fox", "badger",
+  "crane", "dolphin", "eagle", "hawk", "koala", "lemur", "panda", "raven",
+  "seal", "wolf", "zebra", "panther", "cheetah", "bison", "jaguar", "gecko",
+  "finch", "heron", "robin", "beaver", "elk", "bear", "hare", "salmon"
+];
+
+function randomProjectName(existingNames: Set<string>): string {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+  const name = `${adj}-${animal}`;
+  return existingNames.has(name) ? `${name}-${newId().slice(0, 4)}` : name;
+}
 
 function parseList(raw: string | null): WorkspaceMeta[] {
   if (!raw) return [];
@@ -101,16 +122,6 @@ function upsert(list: WorkspaceMeta[], meta: WorkspaceMeta): WorkspaceMeta[] {
 
 function failureStatus(current: WorkspaceMeta | null): WorkspacePickStatus {
   return current ? "ready" : "error";
-}
-
-function randomProjectName(existingNames: Set<string>): string {
-  const name = uniqueNamesGenerator({
-    dictionaries: [adjectives, animals],
-    separator: "-",
-    length: 2,
-    style: "lowerCase",
-  });
-  return existingNames.has(name) ? `${name}-${newId().slice(0, 4)}` : name;
 }
 
 export const useWorkspaceStore = create(
@@ -216,7 +227,7 @@ export const useWorkspaceStore = create(
           const selected = await open({ directory: true, multiple: false });
           if (typeof selected !== "string") return;
 
-          const name = selected.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? selected;
+          const name = getBasename(selected) || selected;
           const activated = await activateWorkspace({
             id: newId(),
             name,
