@@ -14,12 +14,11 @@ pub fn now_secs() -> i64 {
 }
 
 pub fn stable_hash_hex(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(input.as_bytes());
-    format!(
-        "{:016x}",
-        u64::from_be_bytes(hash[..8].try_into().unwrap_or([0u8; 8]))
-    )
+    fast_hash_hex(input)
+}
+
+pub fn fast_hash_hex(input: &str) -> String {
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(input.as_bytes()))
 }
 
 pub const USER_AGENT: &str = concat!("Orch/", env!("CARGO_PKG_VERSION"));
@@ -48,6 +47,19 @@ pub fn streaming_http_client() -> reqwest::Client {
                 .tcp_nodelay(true)
                 .build()
                 .expect("failed to build streaming http client")
+        })
+        .clone()
+}
+
+pub fn retry_http_client() -> reqwest_middleware::ClientWithMiddleware {
+    static CLIENT: OnceLock<reqwest_middleware::ClientWithMiddleware> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            let policy = reqwest_retry::policies::ExponentialBackoff::builder()
+                .build_with_max_retries(3);
+            reqwest_middleware::ClientBuilder::new(http_client())
+                .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(policy))
+                .build()
         })
         .clone()
 }
@@ -88,11 +100,22 @@ pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
 }
 
 pub fn clip_middle(text: &str, max_chars: usize) -> String {
-    if text.len() <= max_chars {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
         return text.to_string();
     }
-    let head_chars = max_chars * 7 / 10;
-    let tail_chars = max_chars - head_chars;
+    if max_chars == 0 {
+        return String::new();
+    }
+    let marker = "\n\n[... omitted ...]\n\n";
+    let marker_chars = marker.chars().count();
+    if max_chars <= marker_chars {
+        return truncate_chars(text, max_chars).to_string();
+    }
+    let content_chars = max_chars - marker_chars;
+    let head_chars = max_chars.saturating_mul(7) / 10;
+    let head_chars = head_chars.min(content_chars);
+    let tail_chars = content_chars - head_chars;
     let head_end = match text.char_indices().nth(head_chars) {
         Some((idx, _)) => idx,
         None => return text.to_string(),
@@ -104,14 +127,10 @@ pub fn clip_middle(text: &str, max_chars: usize) -> String {
     if head_end >= tail_start {
         return text.to_string();
     }
-    let omitted = if text.is_ascii() {
-        tail_start - head_end
-    } else {
-        text[head_end..tail_start].chars().count()
-    };
     format!(
-        "{}\n\n[... {omitted} characters omitted ...]\n\n{}",
+        "{}{}{}",
         &text[..head_end],
+        marker,
         &text[tail_start..]
     )
 }
@@ -141,6 +160,18 @@ pub fn warm_login_shell_path() {
 }
 
 fn resolve_login_path() -> Option<String> {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(resolve_login_path_from_profiles());
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(3))
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("PATH").ok().filter(|path| !path.trim().is_empty()))
+}
+
+fn resolve_login_path_from_profiles() -> Option<String> {
     if let Ok(mut profiles) = envvars::get_profiles() {
         for profile in &mut profiles {
             if profile.load().is_ok() {
@@ -154,24 +185,6 @@ fn resolve_login_path() -> Option<String> {
             }
         }
     }
-    std::env::var("PATH").ok().filter(|s| !s.trim().is_empty())
+    None
 }
 
-pub fn kill_process_tree(pid: u32) {
-    #[cfg(unix)]
-    unsafe {
-        let _ = libc::kill(-(pid as i32), libc::SIGKILL);
-        let _ = libc::kill(pid as i32, libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(0x08000000)
-            .status();
-    }
-}

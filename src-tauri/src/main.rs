@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    use tracing_subscriber::prelude::*;
+
     let dsn = orch_lib::config::sentry_dsn();
     let _guard = if !dsn.is_empty() {
         Some(sentry::init((
@@ -21,6 +23,11 @@ fn main() {
     } else {
         None
     };
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_ansi(false))
+        .with(sentry_tracing::layer())
+        .init();
 
     orch_lib::run();
 }

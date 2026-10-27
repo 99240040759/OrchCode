@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arc_swap::ArcSwapOption;
 use dashmap::DashMap;
 use moka::future::Cache;
+use parking_lot::Mutex;
+use secrecy::{ExposeSecret, SecretString};
 use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 
@@ -19,12 +22,13 @@ use crate::llm::ChatClient;
 use crate::persistence::SqliteMemory;
 use crate::tools::CommandManager;
 
-pub type WorkspaceHandle = Arc<RwLock<Option<PathBuf>>>;
+pub type WorkspaceHandle = Arc<ArcSwapOption<PathBuf>>;
 
 pub struct RunHandle {
     pub run_id: String,
     pub cancel: CancellationToken,
     pub workspace: Option<PathBuf>,
+    pub owner_id: String,
 }
 
 struct SignInAttempt {
@@ -37,14 +41,14 @@ pub struct AppState {
     pub workspace: WorkspaceHandle,
     pub data_dir: PathBuf,
     pub gateway: Arc<Gateway>,
-    pub catalog: RwLock<Option<ModelCatalog>>,
+    pub catalog: ArcSwapOption<ModelCatalog>,
     pub memory: SqliteMemory,
     pub runs: DashMap<String, RunHandle>,
     pub dictation: Mutex<Option<DictationHandle>>,
     pub terminals: Arc<Mutex<HashMap<String, crate::terminal::TerminalSession>>>,
     pub command_manager: Arc<CommandManager>,
     pub connector_manager: Arc<ConnectorManager>,
-    current_user_id: RwLock<Option<String>>,
+    current_user_id: ArcSwapOption<String>,
     sign_in: Mutex<Option<SignInAttempt>>,
     pub sign_in_lock: Arc<tokio::sync::Mutex<()>>,
     last_callback: Mutex<Option<(String, Instant)>>,
@@ -58,7 +62,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(data_dir: &Path) -> AppResult<Self> {
         let db_path = data_dir.join("Orch.db");
-        let token: TokenHandle = Arc::new(RwLock::new(None));
+        let token: TokenHandle = Arc::new(ArcSwapOption::empty());
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
         let connector_manager = Arc::new(ConnectorManager::new(token.clone()));
@@ -72,17 +76,17 @@ impl AppState {
 
         Ok(Self {
             token,
-            workspace: Arc::new(RwLock::new(None)),
+            workspace: Arc::new(ArcSwapOption::empty()),
             data_dir: data_dir.to_path_buf(),
             gateway,
-            catalog: RwLock::new(None),
+            catalog: ArcSwapOption::empty(),
             memory,
             runs: DashMap::new(),
             dictation: Mutex::new(None),
             terminals: Arc::new(Mutex::new(HashMap::new())),
             command_manager: Arc::new(CommandManager::new()),
             connector_manager,
-            current_user_id: RwLock::new(None),
+            current_user_id: ArcSwapOption::empty(),
             sign_in: Mutex::new(None),
             sign_in_lock: Arc::new(tokio::sync::Mutex::new(())),
             last_callback: Mutex::new(None),
@@ -95,17 +99,22 @@ impl AppState {
     }
 
     pub fn set_token(&self, token: Option<String>) {
-        let clean = token.filter(|t| !t.is_empty());
-        let mut guard = self.token.write().unwrap_or_else(|e| e.into_inner());
-        *guard = clean;
+        self.set_secret_token(token.filter(|t| !t.is_empty()).map(SecretString::from));
     }
 
-    pub fn access_token(&self) -> Option<String> {
+    pub fn set_secret_token(&self, token: Option<SecretString>) {
+        self.token.store(
+            token
+                .filter(|token| !token.expose_secret().is_empty())
+                .map(Arc::new),
+        );
+    }
+
+    pub fn access_token(&self) -> Option<SecretString> {
         self.token
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .filter(|t| !t.is_empty())
+            .load_full()
+            .map(|token| token.as_ref().clone())
+            .filter(|token| !token.expose_secret().is_empty())
     }
 
     pub fn has_token(&self) -> bool {
@@ -114,9 +123,8 @@ impl AppState {
 
     pub fn current_user_id(&self) -> Option<String> {
         self.current_user_id
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .load_full()
+            .map(|id| id.as_ref().clone())
     }
 
     pub fn reset_session_memory(&self) {
@@ -130,8 +138,8 @@ impl AppState {
             ..Default::default()
         });
         self.set_token(None);
-        *self.current_user_id.write().unwrap_or_else(|e| e.into_inner()) = None;
-        *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = None;
+        self.current_user_id.store(None);
+        self.catalog.store(None);
         self.clients.clear();
     }
 
@@ -148,14 +156,14 @@ impl AppState {
         self.cancel_all_runs();
         self.close_all_terminals();
         self.reset_session_memory();
-        auth::clear_tokens();
-        auth::clear_cached_user(&self.data_dir);
+        auth::clear_tokens_async().await;
+        auth::clear_cached_user_async(self.data_dir.clone()).await;
     }
 
-    pub async fn complete_sign_in(&self, id_token: String, profile: &auth::UserProfile) {
-        self.set_token(Some(id_token));
+    pub async fn complete_sign_in(&self, id_token: SecretString, profile: &auth::UserProfile) {
+        self.set_secret_token(Some(id_token));
         self.set_authenticated_user(&profile.id);
-        auth::save_cached_user(&self.data_dir, profile);
+        auth::save_cached_user_async(self.data_dir.clone(), profile.clone()).await;
     }
 
     pub fn set_authenticated_user(&self, user_id: &str) {
@@ -171,26 +179,22 @@ impl AppState {
             level: sentry::Level::Info,
             ..Default::default()
         });
-        let changed = {
-            let mut guard = self.current_user_id.write().unwrap_or_else(|e| e.into_inner());
-            let changed = guard.as_deref() != Some(user_id);
-            *guard = Some(user_id.to_string());
-            changed
-        };
+        let changed = self.current_user_id.load().as_deref().map(|id| id.as_str()) != Some(user_id);
+        self.current_user_id.store(Some(Arc::new(user_id.to_string())));
         if changed {
-            *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = None;
+            self.catalog.store(None);
         }
     }
 
     pub fn mark_sign_in_started(&self, session_id: Option<String>) {
-        *self.sign_in.lock().unwrap_or_else(|e| e.into_inner()) = Some(SignInAttempt {
+        *self.sign_in.lock() = Some(SignInAttempt {
             started: Instant::now(),
             session_id,
         });
     }
 
     pub fn consume_sign_in_window(&self) -> Option<Option<String>> {
-        let attempt = self.sign_in.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        let attempt = self.sign_in.lock().take()?;
         if attempt.started.elapsed().as_secs() <= config::SIGN_IN_WINDOW_SECS {
             Some(attempt.session_id)
         } else {
@@ -199,7 +203,7 @@ impl AppState {
     }
 
     pub fn is_recent_auth_callback(&self, raw_url: &str) -> bool {
-        let guard = self.last_callback.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = self.last_callback.lock();
         if let Some((last_url, instant)) = guard.as_ref() {
             if last_url == raw_url && instant.elapsed().as_secs() < 30 {
                 return true;
@@ -209,11 +213,14 @@ impl AppState {
     }
 
     pub fn mark_recent_auth_callback(&self, raw_url: &str) {
-        let mut guard = self.last_callback.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.last_callback.lock();
         *guard = Some((raw_url.to_string(), Instant::now()));
     }
 
     pub fn set_workspace(&self, path: Option<PathBuf>) {
+        if self.workspace() != path {
+            self.cancel_all_runs();
+        }
         sentry::configure_scope(|scope| match &path {
             Some(p) => scope.set_tag("workspace", p.to_string_lossy().to_string()),
             None => scope.remove_tag("workspace"),
@@ -224,12 +231,12 @@ impl AppState {
             level: sentry::Level::Info,
             ..Default::default()
         });
-        *self.workspace.write().unwrap_or_else(|e| e.into_inner()) = path;
+        self.workspace.store(path.map(Arc::new));
         self.invalidate_file_index();
     }
 
     pub fn workspace(&self) -> Option<PathBuf> {
-        self.workspace.read().ok().and_then(|g| g.clone())
+        self.workspace.load_full().map(|path| path.as_ref().clone())
     }
 
     pub fn require_workspace(&self) -> AppResult<PathBuf> {
@@ -287,14 +294,16 @@ impl AppState {
     }
 
     fn cached_catalog(&self) -> Option<ModelCatalog> {
-        let guard = self.catalog.read().unwrap_or_else(|e| e.into_inner());
-        guard.as_ref().filter(|cat| !cat.is_empty()).cloned()
+        self.catalog
+            .load_full()
+            .filter(|catalog| !catalog.is_empty())
+            .map(|catalog| catalog.as_ref().clone())
     }
 
     pub async fn refresh_catalog(&self) -> AppResult<ModelCatalog> {
         self.ensure_fresh_token().await?;
         let fresh = self.gateway.models().await?;
-        *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = Some(fresh.clone());
+        self.catalog.store(Some(Arc::new(fresh.clone())));
         Ok(fresh)
     }
 
@@ -306,29 +315,29 @@ impl AppState {
     }
 
     pub async fn ensure_fresh_token(&self) -> AppResult<()> {
-        if self.access_token().is_some_and(|t| Self::token_is_fresh(&t)) {
+        if self.access_token().is_some_and(|t| Self::token_is_fresh(t.expose_secret())) {
             return Ok(());
         }
 
         let _guard = self.token_refresh_lock.lock().await;
-        if self.access_token().is_some_and(|t| Self::token_is_fresh(&t)) {
+        if self.access_token().is_some_and(|t| Self::token_is_fresh(t.expose_secret())) {
             return Ok(());
         }
 
         let refresh_token = auth::load_refresh_token_async().await?.ok_or(AppError::NoToken)?;
         let client = auth::FirebaseAuthClient::new();
-        let session = client.refresh_session(&refresh_token).await?;
-        if let Some(rt) = session.refresh_token.as_deref() {
-            if rt != refresh_token {
-                auth::save_refresh_token_async(rt).await?;
+        let session = client.refresh_session(refresh_token.expose_secret()).await?;
+        if let Some(rt) = session.refresh_token.as_ref() {
+            if rt.expose_secret() != refresh_token.expose_secret() {
+                auth::save_refresh_token_async(rt.expose_secret()).await?;
             }
         }
-        self.set_token(Some(session.access_token.clone()));
+        self.set_secret_token(Some(session.access_token.clone()));
         if let Some(user) = session.user.as_ref() {
             self.set_authenticated_user(&user.id);
-        } else if let Some(uid) = auth::jwt_user_id(&session.access_token) {
+        } else if let Some(uid) = auth::jwt_user_id(session.access_token.expose_secret()) {
             self.set_authenticated_user(&uid);
-        } else if let Some(cached) = auth::load_cached_user(&self.data_dir) {
+        } else if let Some(cached) = auth::load_cached_user_async(self.data_dir.clone()).await {
             self.set_authenticated_user(&cached.id);
         }
         Ok(())
@@ -349,7 +358,7 @@ impl AppState {
                         let _ = catalog_app.emit("models-updated", ());
                     }
                     Err(e) => {
-                        eprintln!("[models] background refresh failed: {e}");
+                        tracing::warn!(error = %e, "background model refresh failed");
                         sentry::capture_error(&e);
                     }
                 }
@@ -373,7 +382,7 @@ impl AppState {
                             serde_json::json!({ "user": null, "error": "Your session expired. Sign in again to continue." }),
                         );
                     } else {
-                        eprintln!("[auth] token refresh failed (retryable): {e}");
+                        tracing::warn!(error = %e, "token refresh failed and will be retried");
                         sentry::capture_error(&e);
                     }
                 }
@@ -381,7 +390,12 @@ impl AppState {
         });
     }
 
-    pub fn start_run(&self, session_id: &str, workspace: Option<PathBuf>) -> AppResult<(String, CancellationToken)> {
+    pub fn start_run(
+        &self,
+        session_id: &str,
+        workspace: Option<PathBuf>,
+        owner_id: String,
+    ) -> AppResult<(String, CancellationToken)> {
         use dashmap::mapref::entry::Entry;
         let run_id = format!("{}-{}", session_id, uuid::Uuid::new_v4().simple());
         let cancel = CancellationToken::new();
@@ -392,6 +406,7 @@ impl AppState {
                     run_id: run_id.clone(),
                     cancel: cancel.clone(),
                     workspace,
+                    owner_id,
                 });
             }
         }
@@ -426,6 +441,10 @@ impl AppState {
         }
     }
 
+    pub fn run_owner(&self, session_id: &str) -> Option<String> {
+        self.runs.get(session_id).map(|run| run.owner_id.clone())
+    }
+
     pub fn cancel_runs_matching(&self, predicate: impl Fn(&RunHandle) -> bool) -> Vec<String> {
         let targets: Vec<String> = self
             .runs
@@ -450,6 +469,9 @@ impl AppState {
     pub async fn wait_for_runs(&self, sessions: &[String], timeout: Duration) {
         let deadline = Instant::now() + timeout;
         loop {
+            let notified = self.run_finished_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             let active = sessions.iter().any(|s| self.runs.contains_key(s));
             if !active {
                 return;
@@ -458,13 +480,12 @@ impl AppState {
             if remaining.is_zero() {
                 return;
             }
-            let notified = self.run_finished_notify.notified();
             let _ = tokio::time::timeout(remaining, notified).await;
         }
     }
 
     pub fn close_all_terminals(&self) {
-        let mut guard = self.terminals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.terminals.lock();
         for (_, session) in guard.iter_mut() {
             session.kill();
         }
@@ -477,10 +498,8 @@ impl AppState {
         }
         self.command_manager.kill_all();
         self.close_all_terminals();
-        if let Ok(mut dictation) = self.dictation.lock() {
-            if let Some(handle) = dictation.take() {
-                handle.cancel();
-            }
+        if let Some(handle) = self.dictation.lock().take() {
+            handle.cancel();
         }
     }
 }

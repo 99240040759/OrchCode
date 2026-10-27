@@ -1,14 +1,15 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::config;
 use crate::error::{AppError, AppResult};
 
-pub type TokenHandle = Arc<RwLock<Option<String>>>;
+pub type TokenHandle = Arc<arc_swap::ArcSwapOption<SecretString>>;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelInfo {
@@ -85,24 +86,23 @@ pub struct Budget {
 
 #[derive(Clone)]
 pub struct Gateway {
-    http: reqwest::Client,
+    http: reqwest_middleware::ClientWithMiddleware,
     token: TokenHandle,
 }
 
 impl Gateway {
     pub fn new(token: TokenHandle) -> AppResult<Self> {
         Ok(Self {
-            http: crate::util::http_client(),
+            http: crate::util::retry_http_client(),
             token,
         })
     }
 
-    fn require_token(&self) -> AppResult<String> {
+    fn require_token(&self) -> AppResult<SecretString> {
         self.token
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .filter(|t| !t.is_empty())
+            .load_full()
+            .filter(|token| !token.expose_secret().is_empty())
+            .map(|token| token.as_ref().clone())
             .ok_or(AppError::NoToken)
     }
 
@@ -111,7 +111,7 @@ impl Gateway {
         let resp = self
             .http
             .get(config::models_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(20))
             .send()
             .await?;
@@ -125,7 +125,7 @@ impl Gateway {
         let resp = self
             .http
             .get(config::budget_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(15))
             .send()
             .await?;
@@ -138,7 +138,7 @@ impl Gateway {
         let resp = self
             .http
             .post(config::transcribe_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(300))
             .json(&json!({ "audio": audio_base64 }))
             .send()
@@ -160,7 +160,7 @@ impl Gateway {
         let resp = self
             .http
             .post(config::tavily_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(30))
             .json(req)
             .send()
@@ -174,7 +174,7 @@ impl Gateway {
         let resp = self
             .http
             .post(config::title_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(20))
             .json(&json!({ "prompt": prompt }))
             .send()
@@ -196,7 +196,7 @@ impl Gateway {
         let resp = self
             .http
             .post(config::summarize_url())
-            .bearer_auth(token)
+            .bearer_auth(token.expose_secret())
             .timeout(Duration::from_secs(config::SUMMARY_REQUEST_TIMEOUT_SECS))
             .json(&json!({
                 "system": system,

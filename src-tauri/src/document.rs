@@ -46,14 +46,9 @@ fn detect_file_type(path: &Path) -> AppResult<String> {
         return Ok(ext);
     }
 
-    match ext.as_str() {
-        "txt" | "text" | "md" | "markdown" | "csv" | "json" | "html" | "htm" | "xml" | "rtf" => {
-            Ok(ext)
-        }
-        _ => Err(AppError::UnsupportedFileType(format!(
-            "'.{ext}' files are not supported. Supported: pdf, docx, xlsx, xls, ods, pptx, txt, md, csv, json, html"
-        ))),
-    }
+    Err(AppError::UnsupportedFileType(format!(
+        "'.{ext}' files are not supported. Supported: pdf, docx, xlsx, xls, ods, pptx"
+    )))
 }
 
 /// Internal parsed representation — only `full_text` is used by callers.
@@ -67,7 +62,9 @@ fn parse_document(path: &Path, file_type: &str) -> AppResult<ParsedDocument> {
         "docx" | "pptx" => parse_office_doc(path),
         // Spreadsheets: use calamine which handles xlsx, xls, and ods natively.
         "xlsx" | "xls" | "ods" => parse_spreadsheet_as_text(path),
-        _ => parse_plain_text(path),
+        _ => Err(AppError::UnsupportedFileType(format!(
+            "'.{file_type}' files are not supported. Supported: pdf, docx, xlsx, xls, ods, pptx"
+        ))),
     }
 }
 
@@ -108,28 +105,16 @@ fn parse_spreadsheet_as_text(path: &Path) -> AppResult<ParsedDocument> {
     })
 }
 
-fn parse_pdf_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
-    let doc = lopdf::Document::load_mem(bytes)
-        .map_err(|e| AppError::DocumentParseError(format!("PDF load failed: {e}")))?;
-
-    let pages = doc.get_pages();
-    let mut full_text = String::new();
-
-    // Extract all pages in a single call (O(P) instead of O(P²)).
-    let page_nums: Vec<u32> = pages.keys().copied().collect();
-    if let Ok(text) = doc.extract_text(&page_nums) {
-        let cleaned = clean_pdf_text(&text);
-        if !cleaned.trim().is_empty() {
-            full_text.push_str(&cleaned);
-        }
-    }
-
-    Ok(ParsedDocument { full_text })
-}
-
 fn parse_pdf(path: &Path) -> AppResult<ParsedDocument> {
-    let bytes = std::fs::read(path).map_err(AppError::Io)?;
-    parse_pdf_from_bytes(&bytes)
+    let pages = pdf_extract::extract_text_by_pages(path)
+        .map_err(|e| AppError::DocumentParseError(format!("PDF text extraction failed: {e}")))?;
+    let full_text = pages
+        .iter()
+        .map(|page| clean_pdf_text(page))
+        .filter(|page| !page.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    Ok(ParsedDocument { full_text })
 }
 
 fn clean_pdf_text(text: &str) -> String {
@@ -213,18 +198,6 @@ pub fn read_spreadsheet(path: &Path, max_rows: usize, max_cols: usize) -> AppRes
         });
     }
     Ok(sheets)
-}
-
-fn parse_plain_text_from_bytes(bytes: &[u8]) -> AppResult<ParsedDocument> {
-    let (cow, _, _) = encoding_rs::UTF_8.decode(bytes);
-    Ok(ParsedDocument {
-        full_text: cow.into_owned(),
-    })
-}
-
-fn parse_plain_text(path: &Path) -> AppResult<ParsedDocument> {
-    let raw = std::fs::read(path).map_err(AppError::Io)?;
-    parse_plain_text_from_bytes(&raw)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

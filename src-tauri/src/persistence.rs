@@ -19,7 +19,9 @@ const SCHEMA: &str = "
      user_id             TEXT,
      created_at          INTEGER NOT NULL,
      updated_at          INTEGER NOT NULL,
-     last_context_tokens INTEGER NOT NULL DEFAULT 0
+     last_context_tokens INTEGER NOT NULL DEFAULT 0,
+     last_input_tokens   INTEGER NOT NULL DEFAULT 0,
+     last_output_tokens  INTEGER NOT NULL DEFAULT 0
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
      ON sessions(workspace_path, user_id, updated_at DESC);
@@ -126,6 +128,23 @@ impl SqliteMemory {
             .map_err(sql_err)?;
 
         pool.execute(SCHEMA).await.map_err(sql_err)?;
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&pool)
+            .await
+            .map_err(sql_err)?
+            .into_iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect::<std::collections::HashSet<_>>();
+        if !columns.contains("last_input_tokens") {
+            pool.execute("ALTER TABLE sessions ADD COLUMN last_input_tokens INTEGER NOT NULL DEFAULT 0")
+                .await
+                .map_err(sql_err)?;
+        }
+        if !columns.contains("last_output_tokens") {
+            pool.execute("ALTER TABLE sessions ADD COLUMN last_output_tokens INTEGER NOT NULL DEFAULT 0")
+                .await
+                .map_err(sql_err)?;
+        }
 
         Ok(Self { pool })
     }
@@ -161,23 +180,21 @@ impl SqliteMemory {
         &self,
         session_id: &str,
         context_tokens: u64,
-        _input_tokens: u64,
-        _output_tokens: u64,
+        input_tokens: u64,
+        output_tokens: u64,
     ) -> AppResult<()> {
-        let now = now_ms();
         sqlx::query(
-            "UPDATE sessions SET
-                 last_context_tokens = ?2,
-                 updated_at = ?3
-             WHERE id = ?1",
+            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = ?3,
+             last_output_tokens = ?4, updated_at = ?5 WHERE id = ?1",
         )
         .bind(session_id)
         .bind(to_db_token(context_tokens))
-        .bind(now)
+        .bind(to_db_token(input_tokens))
+        .bind(to_db_token(output_tokens))
+        .bind(now_ms())
         .execute(&self.pool)
         .await
         .map_err(sql_err)?;
-
         Ok(())
     }
 

@@ -184,11 +184,11 @@ impl ConnectorManager {
                 let mut specs = Vec::with_capacity(slugs.len());
                 for action in def.actions {
                     let Some(wire) = wires.iter().find(|wire| wire.slug == action.slug) else {
-                        eprintln!("[connectors] {} is not in the connector catalog and was skipped", action.slug);
+                        tracing::warn!(slug = %action.slug, "connector action is missing from the catalog and was skipped");
                         continue;
                     };
                     if wire.is_deprecated {
-                        eprintln!("[connectors] {} is deprecated and was skipped", action.slug);
+                        tracing::warn!(slug = %action.slug, "deprecated connector action was skipped");
                         continue;
                     }
                     let spec = ToolSpec::from_wire(wire.clone())

@@ -26,7 +26,7 @@ fn load_dotenv_for_compile() {
     for key in REQUIRED_HTTPS {
         let value = std::env::var(key)
             .unwrap_or_else(|_| panic!("{key} is not set: define it in .env or the build environment"));
-        let value = value.trim();
+        let value = value.trim().trim_end_matches('/');
         if !value.starts_with("https://") {
             panic!("{key} must be an https:// URL, got: {value}");
         }
@@ -49,10 +49,6 @@ fn load_dotenv_for_compile() {
         println!("cargo:rerun-if-env-changed={key}");
     }
 
-    if std::path::Path::new("../.env").exists() {
-        println!("cargo:rerun-if-changed=../.env");
-    }
-    if std::path::Path::new(".env").exists() {
-        println!("cargo:rerun-if-changed=.env");
-    }
+    println!("cargo:rerun-if-changed=../.env");
+    println!("cargo:rerun-if-changed=.env");
 }

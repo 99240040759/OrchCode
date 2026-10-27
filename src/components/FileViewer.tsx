@@ -6,6 +6,7 @@ import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } f
 import * as api from "../lib/api";
 import * as utils from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
+import { useImageDataUrl } from "../lib/images";
 import { Markdown } from "./Markdown";
 import { CodeViewer } from "./CodeViewer";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -151,10 +152,16 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
 }
 
 function ImagePreview({ path, version }: { path: string; version: number }) {
-  const src = `${convertFileSrc(path)}?v=${version}`;
+  const { src, error, loading } = useImageDataUrl(path, version);
   return (
     <div className="NativeMediaViewer">
-      <img src={src} alt={utils.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+      {src ? (
+        <img src={src} alt={utils.getBasename(path)} className="NativeMediaViewer-img" draggable={false} />
+      ) : error ? (
+        <div className="FileContent-msg">{error}</div>
+      ) : loading ? (
+        LOADING_SPINNER
+      ) : null}
     </div>
   );
 }

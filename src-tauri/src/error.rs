@@ -42,7 +42,18 @@ impl AppError {
     pub fn is_fatal_auth(&self) -> bool {
         match self {
             AppError::NoToken => true,
-            AppError::Gateway { status, .. } => matches!(status, 401 | 403),
+            AppError::Gateway { status, body } => {
+                matches!(status, 401 | 403)
+                    || (*status == 400
+                        && [
+                            "INVALID_REFRESH_TOKEN",
+                            "TOKEN_EXPIRED",
+                            "USER_DISABLED",
+                            "USER_NOT_FOUND",
+                        ]
+                        .iter()
+                        .any(|code| body.contains(*code)))
+            }
             _ => false,
         }
     }
@@ -53,6 +64,21 @@ impl AppError {
             AppError::Gateway { status, .. } => *status == 429 || *status >= 500,
             _ => false,
         }
+    }
+}
+
+impl serde::Serialize for AppError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl From<reqwest_middleware::Error> for AppError {
+    fn from(error: reqwest_middleware::Error) -> Self {
+        AppError::Network(error.to_string())
     }
 }
 

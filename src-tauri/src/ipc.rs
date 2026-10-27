@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Serialize;
+use secrecy::ExposeSecret;
 use tauri::ipc::Channel;
 use tauri::{Emitter, State};
 
@@ -62,8 +63,8 @@ impl ModelDto {
     }
 }
 
-fn cached_display(state: &AppState) -> Option<UserDisplay> {
-    let profile = auth::load_cached_user(&state.data_dir)?;
+async fn cached_display(state: &AppState) -> Option<UserDisplay> {
+    let profile = auth::load_cached_user_async(state.data_dir.clone()).await?;
     state.set_authenticated_user(&profile.id);
     Some(UserDisplay::from_profile(&profile))
 }
@@ -73,14 +74,14 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
     let client = auth::FirebaseAuthClient::new();
 
     if let Some(token) = state.access_token() {
-        match client.get_user(&token).await {
+        match client.get_user(token.expose_secret()).await {
             Ok(profile) => {
                 state.set_authenticated_user(&profile.id);
-                auth::save_cached_user(&state.data_dir, &profile);
+                auth::save_cached_user_async(state.data_dir.clone(), profile.clone()).await;
                 return Ok(Some(UserDisplay::from_profile(&profile)));
             }
             Err(error) if error.is_transient() => {
-                if let Some(display) = cached_display(&state) {
+                if let Some(display) = cached_display(&state).await {
                     return Ok(Some(display));
                 }
             }
@@ -95,40 +96,40 @@ pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisp
             return Ok(None);
         }
         Err(error) => {
-            return match cached_display(&state) {
+            return match cached_display(&state).await {
                 Some(display) => Ok(Some(display)),
                 None => Err(format!("Could not access the system keychain: {error}")),
             };
         }
     };
 
-    match client.refresh_session(&refresh_token).await {
+    match client.refresh_session(refresh_token.expose_secret()).await {
         Ok(session) => {
-            if let Some(rt) = session.refresh_token.as_deref() {
-                if rt != refresh_token {
-                    auth::save_refresh_token_async(rt).await.map_err(|e| e.to_string())?;
+            if let Some(rt) = session.refresh_token.as_ref() {
+                if rt.expose_secret() != refresh_token.expose_secret() {
+                    auth::save_refresh_token_async(rt.expose_secret()).await.map_err(|e| e.to_string())?;
                 }
             }
-            state.set_token(Some(session.access_token.clone()));
+            state.set_secret_token(Some(session.access_token.clone()));
             let profile = match session.user {
                 Some(u) => u,
-                None => match client.get_user(&session.access_token).await {
+                None => match client.get_user(session.access_token.expose_secret()).await {
                     Ok(profile) => profile,
                     Err(error) if error.is_transient() => {
-                        return Ok(cached_display(&state));
+                        return Ok(cached_display(&state).await);
                     }
                     Err(error) => return Err(error.to_string()),
                 },
             };
             state.set_authenticated_user(&profile.id);
-            auth::save_cached_user(&state.data_dir, &profile);
+            auth::save_cached_user_async(state.data_dir.clone(), profile.clone()).await;
             Ok(Some(UserDisplay::from_profile(&profile)))
         }
         Err(error) if error.is_fatal_auth() => {
             state.sign_out().await;
             Ok(None)
         }
-        Err(error) => match cached_display(&state) {
+        Err(error) => match cached_display(&state).await {
             Some(display) => Ok(Some(display)),
             None => Err(format!("Could not reach the sign-in service: {error}")),
         },
@@ -221,7 +222,7 @@ pub async fn forget_workspace(
         state.wait_for_runs(&session_ids, Duration::from_secs(5)).await;
         for id in &session_ids {
             if let Err(error) = session::destroy(&state.data_dir, id).await {
-                eprintln!("[sessions] could not delete the conversation of {id}: {error}");
+                tracing::error!(session_id = %id, error = %error, "could not delete conversation");
                 sentry::capture_error(&error);
             }
         }
@@ -334,9 +335,12 @@ pub async fn start_chat(
     let workspace = state
         .workspace()
         .ok_or_else(|| "Open a workspace folder before starting a chat".to_string())?;
+    let run_owner = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required".to_string())?;
     let workspace_string = workspace.to_string_lossy().to_string();
     let (run_id, cancel) = state
-        .start_run(&session_id, Some(workspace.clone()))
+        .start_run(&session_id, Some(workspace.clone()), run_owner.clone())
         .map_err(|error| error.to_string())?;
 
     let ready = tokio::select! {
@@ -362,6 +366,9 @@ pub async fn start_chat(
             state.finish_run(&session_id, &run_id);
             return Err("session does not belong to the current user".to_string());
         }
+    } else if user_id != run_owner {
+        state.finish_run(&session_id, &run_id);
+        return Err("session does not belong to the current user".to_string());
     }
 
     let prepared = tokio::select! {
@@ -463,7 +470,7 @@ pub async fn start_chat(
     state.command_manager.kill_foreground_for_run(&run_id);
 
     if let Err(error) = chat.finish(&built.message, &result).await {
-        eprintln!("[chat] failed to save the conversation: {error}");
+        tracing::error!(error = %error, "failed to save conversation");
         sentry::capture_error(&error);
     }
     if result.overflowed {
@@ -511,12 +518,18 @@ fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: 
 
 #[tauri::command]
 pub async fn cancel_chat(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
-    if let Some(user_id) = state.current_user_id() {
-        if let Ok(Some(owner)) = state.memory.session_owner(&session_id).await {
-            if owner != user_id {
-                return Err("session does not belong to the current user".to_string());
-            }
-        }
+    let user_id = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required".to_string())?;
+    let owner = state
+        .memory
+        .session_owner(&session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let owner = owner.or_else(|| state.run_owner(&session_id));
+    let owner = owner.ok_or_else(|| "session not found".to_string())?;
+    if owner != user_id {
+        return Err("session does not belong to the current user".to_string());
     }
     state.cancel_run(&session_id);
     Ok(())
@@ -587,6 +600,9 @@ pub async fn get_session_messages_page(
 
 fn prefs_key(state: &AppState, key: &str, scoped: bool) -> Result<String, String> {
     if !scoped {
+        if key.starts_with("user:") {
+            return Err("user-scoped preference keys are reserved".to_string());
+        }
         return Ok(key.to_string());
     }
     let user = state
@@ -611,7 +627,7 @@ pub fn get_user_pref(
 }
 
 #[tauri::command]
-pub fn set_user_pref(
+pub async fn set_user_pref(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     key: String,
@@ -622,7 +638,10 @@ pub fn set_user_pref(
     let store = app.store("prefs.json").map_err(|e| e.to_string())?;
     let full_key = prefs_key(&state, &key, scoped.unwrap_or(false))?;
     store.set(full_key, serde_json::Value::String(value));
-    store.save().map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || store.save())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -630,7 +649,7 @@ pub fn start_dictation(state: State<'_, AppState>, on_event: Channel<DictationEv
     if !state.has_token() {
         return Err("not authenticated".to_string());
     }
-    let mut guard = state.dictation.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = state.dictation.lock();
     if let Some(existing) = guard.take() {
         existing.cancel();
     }
@@ -647,7 +666,6 @@ pub fn stop_dictation(state: State<'_, AppState>) -> Result<(), String> {
     let handle = state
         .dictation
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
         .take();
     if let Some(h) = handle {
         h.stop();
@@ -680,7 +698,7 @@ pub async fn terminal_open(
             on_event,
             instance_id,
             Box::new(move |exited_id| {
-                let mut guard = terminals.lock().unwrap_or_else(|e| e.into_inner());
+                let mut guard = terminals.lock();
                 if let Some(entry) = guard.get(&id_cleanup) {
                     if entry.instance_id() == exited_id {
                         guard.remove(&id_cleanup);
@@ -699,7 +717,7 @@ pub async fn terminal_open(
         e.to_string()
     })?;
     let previous = {
-        let mut guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state.terminals.lock();
         guard.insert(id, session)
     };
     if let Some(mut old) = previous {
@@ -710,7 +728,7 @@ pub async fn terminal_open(
 
 #[tauri::command]
 pub async fn terminal_write(state: State<'_, AppState>, id: String, data: String) -> Result<(), String> {
-    let guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = state.terminals.lock();
     match guard.get(&id) {
         Some(s) if s.write(&data) => Ok(()),
         Some(_) => Err(format!("terminal session closed: {id}")),
@@ -720,7 +738,7 @@ pub async fn terminal_write(state: State<'_, AppState>, id: String, data: String
 
 #[tauri::command]
 pub async fn terminal_resize(state: State<'_, AppState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
-    let guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = state.terminals.lock();
     match guard.get(&id) {
         Some(s) => {
             s.resize(cols.max(1), rows.max(1));
@@ -733,7 +751,7 @@ pub async fn terminal_resize(state: State<'_, AppState>, id: String, cols: u16, 
 #[tauri::command]
 pub async fn terminal_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let session = {
-        let mut guard = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state.terminals.lock();
         guard.remove(&id)
     };
     if let Some(mut session) = session {

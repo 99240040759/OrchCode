@@ -62,6 +62,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   });
 
   const editorRef = useRef<Editor | null>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const doSendRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const insertMentionRef = useRef<(filePath: string) => void>(() => {});
   const runCommandRef = useRef<(command: CommandItem) => void>(() => {});
@@ -206,8 +207,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const canSend = hasContent || attachments.length > 0;
 
   return (
-    <div className="Composer" data-recording={dictation.recording || undefined}>
+    <div ref={composerRef} className="Composer" data-recording={dictation.recording || undefined}>
       <SuggestionPopover
+        anchorRef={composerRef}
         trigger={suggestions.trigger}
         query={suggestions.query}
         fileHits={suggestions.fileHits}

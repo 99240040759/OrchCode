@@ -21,6 +21,7 @@ use rig_memory::{
     DirStore, TrackArgument,
 };
 use serde::Deserialize;
+use secrecy::ExposeSecret;
 use tauri::ipc::Channel;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -54,9 +55,10 @@ impl reqwest_middleware::Middleware for AuthMiddleware {
         extensions: &mut http::Extensions,
         next: reqwest_middleware::Next<'_>,
     ) -> reqwest_middleware::Result<reqwest::Response> {
-        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).clone();
-        if let Some(token) = token.filter(|t| !t.is_empty()) {
-            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+        req.headers_mut().remove(reqwest::header::AUTHORIZATION);
+        let token = self.token.load_full();
+        if let Some(token) = token.filter(|token| !token.expose_secret().is_empty()) {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token.expose_secret())) {
                 req.headers_mut().insert(reqwest::header::AUTHORIZATION, value);
             }
         }
@@ -68,7 +70,6 @@ pub type ChatClient = rig::providers::openai::OpenAI;
 pub type ChatAgent = Agent;
 
 pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient> {
-    let initial = token.read().ok().and_then(|g| g.clone()).unwrap_or_default();
     let retry_policy = reqwest_retry::policies::ExponentialBackoff::builder()
         .build_with_max_retries(3);
     let client = reqwest_middleware::ClientBuilder::new(crate::util::streaming_http_client())
@@ -79,7 +80,7 @@ pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient>
     let http = ReqwestMiddlewareClient::from(client);
     let config = rig::providers::openai::OpenAIConfig::with_key(
         &rig::providers::openai::wire::OPENAI,
-        initial.as_str(),
+        "",
     )
     .with_base_url(&config::inference_base_url(provider))
     .with_route(rig::providers::openai::Route::Chat);
@@ -538,7 +539,7 @@ impl ChatRun {
             .save_reasoning_durations(&self.deps.session_id, keys)
             .await
         {
-            eprintln!("[chat] failed to persist reasoning durations: {error}");
+            tracing::error!(error = %error, "failed to persist reasoning durations");
             sentry::capture_error(&error);
         }
         saved
@@ -568,7 +569,7 @@ impl SessionHook {
                 return;
             }
             Err(error) => {
-                eprintln!("[chat] compaction could not be planned: {error}");
+                tracing::warn!(error = %error, "conversation compaction could not be planned");
                 sentry::capture_error(&error);
                 session.back_off(12);
                 return;
@@ -594,13 +595,13 @@ impl SessionHook {
             None => return,
             Some(Ok(text)) if !text.trim().is_empty() => text.trim().to_string(),
             Some(Ok(_)) => {
-                eprintln!("[chat] compaction produced an empty summary");
+                tracing::warn!("conversation compaction produced an empty summary");
                 sentry::capture_message("compaction produced an empty summary", sentry::Level::Warning);
                 session.back_off(6);
                 return;
             }
             Some(Err(error)) => {
-                eprintln!("[chat] compaction summary failed: {error}");
+                tracing::error!(error = %error, "conversation compaction summary failed");
                 sentry::capture_error(&error);
                 session.back_off(6);
                 return;
@@ -634,7 +635,7 @@ impl SessionHook {
         let tokens_after = config::PREAMBLE_TOKEN_RESERVE
             .saturating_add(estimate_tokens(session.conversation.messages()));
         if let Err(error) = session.save().await {
-            eprintln!("[chat] {error}");
+            tracing::error!(error = %error, "conversation save failed");
             sentry::capture_error(&error);
         }
         if let Err(error) = deps
@@ -642,7 +643,7 @@ impl SessionHook {
             .set_context_tokens(&deps.session_id, tokens_after)
             .await
         {
-            eprintln!("[chat] failed to persist context size: {error}");
+            tracing::error!(error = %error, "failed to persist context size");
             sentry::capture_error(&error);
         }
 
@@ -684,7 +685,7 @@ impl AgentHook for SessionHook {
             self.compact(&mut session).await;
         }
         if let Err(error) = session.save().await {
-            eprintln!("[chat] {error}");
+            tracing::error!(error = %error, "conversation hook failed");
             sentry::capture_error(&error);
         }
 
@@ -719,7 +720,7 @@ impl AgentHook for SessionHook {
         let mut session = self.shared.lock().await;
         session.adopt(messages.iter().cloned(), messages.len());
         if let Err(error) = session.save().await {
-            eprintln!("[chat] {error}");
+            tracing::error!(error = %error, "conversation turn failed");
             sentry::capture_error(&error);
         }
     }
@@ -824,7 +825,7 @@ pub async fn run_chat(
                             let _ = channel.send(ChatEvent::Text { delta: text });
                         }
                         rig::streaming::StreamEvent::Reasoning { text, .. } => {
-                            if reasoning.started.is_none() {
+                            if !text.is_empty() && reasoning.started.is_none() {
                                 reasoning.started = Some(Instant::now());
                             }
                             let _ = channel.send(ChatEvent::Reasoning { delta: text });
@@ -871,7 +872,7 @@ pub async fn run_chat(
                         )
                         .await
                     {
-                        eprintln!("[chat] failed to persist token usage: {error}");
+                        tracing::error!(error = %error, "failed to persist token usage");
                         sentry::capture_error(&error);
                     }
                     let _ = channel.send(ChatEvent::Usage {

@@ -19,52 +19,41 @@ pub fn sentry_dsn() -> &'static str {
 
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
 
-fn clean_base_url() -> &'static str {
-    static BASE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    BASE.get_or_init(|| gcp_functions_url().trim_end_matches('/'))
-}
-
 pub fn inference_base_url(provider: &str) -> String {
     let clean = if provider.trim().is_empty() {
         DEFAULT_INFERENCE_PROVIDER
     } else {
         provider.trim()
     };
-    format!("{}/{}/v1", clean_base_url(), clean)
+    format!("{}/{}/v1", gcp_functions_url(), clean)
 }
 
 pub fn models_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/models", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/models")
 }
 
 pub fn title_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/title", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/title")
 }
 
 pub fn summarize_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/summarize", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/summarize")
 }
 
 pub fn budget_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/budget", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/budget")
 }
 
 pub fn transcribe_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/transcribe", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/transcribe")
 }
 
 pub fn tavily_url() -> &'static str {
-    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URL.get_or_init(|| format!("{}/tavily", clean_base_url())).as_str()
+    concat!(env!("GCP_FUNCTIONS_URL"), "/tavily")
 }
 
 pub fn composio_url(path: &str) -> String {
-    format!("{}/composio{}", clean_base_url(), path)
+    format!("{}/composio{}", gcp_functions_url(), path)
 }
 
 const DEFAULT_INFERENCE_PROVIDER: &str = "vertex";

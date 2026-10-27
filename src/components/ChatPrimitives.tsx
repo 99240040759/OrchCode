@@ -80,17 +80,35 @@ interface AttachmentCardProps {
   isImage: boolean;
   path?: string;
   dataUrl?: string;
+  onOpen?: () => void;
   onRemove?: () => void;
 }
 
-export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: AttachmentCardProps) {
+export function AttachmentCard({ name, isImage, path, dataUrl, onOpen, onRemove }: AttachmentCardProps) {
   const fetched = useImageDataUrl(isImage && !dataUrl ? path : null);
   const src = dataUrl ?? fetched.src;
   const title = path ?? name;
   const showThumb = isImage && Boolean(src);
 
   return (
-    <div className="AttachmentCard" title={title}>
+    <div
+      className="AttachmentCard"
+      title={title}
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen}
+      onKeyDown={
+        onOpen
+          ? (event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen();
+              }
+            }
+          : undefined
+      }
+    >
       {showThumb ? (
         <span className="AttachmentCard-thumbWrap">
           <img src={src ?? undefined} alt={name} className="AttachmentCard-thumb" />
@@ -110,7 +128,10 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onRemove }: Attac
           type="button"
           className="AttachmentCard-remove"
           aria-label={`Remove ${name}`}
-          onClick={onRemove}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
         >
           <VscClose />
         </button>

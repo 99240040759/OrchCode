@@ -13,7 +13,6 @@ pub struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     input: SyncSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    pid: Option<u32>,
 }
 
 impl TerminalSession {
@@ -35,9 +34,6 @@ impl TerminalSession {
     }
 
     pub fn kill(&mut self) {
-        if let Some(pid) = self.pid {
-            crate::util::kill_process_tree(pid);
-        }
         let _ = self.killer.kill();
     }
 }
@@ -84,7 +80,6 @@ pub fn open(
         .slave
         .spawn_command(shell_command(cwd))
         .map_err(|e| AppError::other(format!("failed to spawn shell: {e}")))?;
-    let pid = child.process_id();
     let killer = child.clone_killer();
     drop(pair.slave);
 
@@ -148,6 +143,5 @@ pub fn open(
         master: pair.master,
         input,
         killer,
-        pid,
     })
 }

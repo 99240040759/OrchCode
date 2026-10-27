@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::config;
 use crate::error::AppError;
@@ -86,34 +87,35 @@ struct FailureWire {
 
 #[derive(Clone)]
 pub struct ComposioClient {
-    http: reqwest::Client,
+    http: reqwest_middleware::ClientWithMiddleware,
+    http_without_retries: reqwest_middleware::ClientWithMiddleware,
     token: TokenHandle,
 }
 
 impl ComposioClient {
     pub fn new(token: TokenHandle) -> Self {
         Self {
-            http: crate::util::http_client(),
+            http: crate::util::retry_http_client(),
+            http_without_retries: reqwest_middleware::ClientBuilder::new(crate::util::http_client()).build(),
             token,
         }
     }
 
-    fn bearer(&self) -> Result<String, ComposioError> {
+    fn bearer(&self) -> Result<SecretString, ComposioError> {
         self.token
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .filter(|t| !t.is_empty())
+            .load_full()
+            .filter(|token| !token.expose_secret().is_empty())
+            .map(|token| token.as_ref().clone())
             .ok_or(ComposioError::NoToken)
     }
 
     async fn send<T: for<'de> Deserialize<'de>>(
         &self,
-        request: reqwest::RequestBuilder,
+        request: reqwest_middleware::RequestBuilder,
         timeout: Duration,
     ) -> Result<T, ComposioError> {
         let response = request
-            .bearer_auth(self.bearer()?)
+            .bearer_auth(self.bearer()?.expose_secret().to_string())
             .timeout(timeout)
             .send()
             .await
@@ -159,7 +161,7 @@ impl ComposioClient {
     pub async fn connect(&self, toolkit: &str) -> Result<String, ComposioError> {
         let wire: ConnectWire = self
             .send(
-                self.http
+                self.http_without_retries
                     .post(config::composio_url("/connect"))
                     .json(&json!({ "toolkit": toolkit })),
                 CONNECT_TIMEOUT,
@@ -172,7 +174,11 @@ impl ComposioClient {
         let account_param: String = url::form_urlencoded::byte_serialize(account_id.as_bytes()).collect();
         let path = format!("/accounts/{account_param}");
         let _: Value = self
-            .send(self.http.delete(config::composio_url(&path)), ACCOUNTS_TIMEOUT)
+            .send(
+                self.http_without_retries
+                    .delete(config::composio_url(&path)),
+                ACCOUNTS_TIMEOUT,
+            )
             .await?;
         Ok(())
     }
@@ -193,7 +199,7 @@ impl ComposioClient {
         arguments: Value,
     ) -> Result<ExecuteWire, ComposioError> {
         self.send(
-            self.http
+            self.http_without_retries
                 .post(config::composio_url("/execute"))
                 .json(&json!({ "slug": slug, "version": version, "arguments": arguments })),
             EXECUTE_TIMEOUT,

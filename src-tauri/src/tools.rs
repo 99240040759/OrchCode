@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use circular_buffer::HeapCircularBuffer;
+use parking_lot::Mutex;
 use command_group::AsyncCommandGroup;
-use ignore::WalkBuilder;
+use ignore::{WalkBuilder, WalkState};
 use path_clean::PathClean;
 use rig::message::{ImageDetail, ToolResultContent};
 use rig::tool::{Tool, ToolExecutionError, ToolOutput};
@@ -151,31 +151,8 @@ pub mod fs_util {
     }
 
     pub fn resolve_readable_file(root: Option<&Path>, input: &str) -> AppResult<PathBuf> {
-        let p = Path::new(input);
-        if let Some(ws) = root {
-            let canonical_root = dunce::canonicalize(ws)?;
-            let candidate = if p.is_absolute() {
-                dunce::canonicalize(p)?
-            } else {
-                resolve_existing_file(ws, input)?
-            };
-            if !candidate.starts_with(&canonical_root) {
-                return Err(AppError::PathEscapesWorkspace(input.to_string()));
-            }
-            if !candidate.is_file() {
-                return Err(AppError::Other(format!("not a file: {input}")));
-            }
-            return Ok(candidate);
-        }
-
-        if p.is_absolute() {
-            let canonical = dunce::canonicalize(p)?;
-            if !canonical.is_file() {
-                return Err(AppError::Other(format!("not a file: {input}")));
-            }
-            return Ok(canonical);
-        }
-        Err(AppError::NoWorkspace)
+        let root = root.ok_or(AppError::NoWorkspace)?;
+        resolve_existing_file(root, input)
     }
 
     pub use crate::util::display_relative;
@@ -183,7 +160,7 @@ pub mod fs_util {
     pub fn file_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
         static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
         let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = locks.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = locks.lock();
         guard.retain(|_, lock| Arc::strong_count(lock) > 1);
         guard
             .entry(path.to_path_buf())
@@ -426,29 +403,34 @@ impl InnerTask {
 }
 
 struct RingBuffer {
-    data: HeapCircularBuffer<u8>,
+    data: VecDeque<u8>,
 }
 
 impl RingBuffer {
     fn new() -> Self {
         Self {
-            data: HeapCircularBuffer::with_capacity(OUTPUT_RING_BYTES),
+            data: VecDeque::with_capacity(OUTPUT_RING_BYTES),
         }
     }
 
     fn push(&mut self, bytes: &[u8]) {
-        self.data.extend_from_slice(bytes);
+        for &byte in bytes {
+            if self.data.len() == OUTPUT_RING_BYTES {
+                self.data.pop_front();
+            }
+            self.data.push_back(byte);
+        }
     }
 
     fn as_string(&self) -> String {
-        let (s1, s2) = self.data.as_slices();
-        if s2.is_empty() {
-            String::from_utf8_lossy(s1).into_owned()
+        let (first, second) = self.data.as_slices();
+        if second.is_empty() {
+            String::from_utf8_lossy(first).into_owned()
         } else {
-            let mut buf = Vec::with_capacity(s1.len() + s2.len());
-            buf.extend_from_slice(s1);
-            buf.extend_from_slice(s2);
-            String::from_utf8_lossy(&buf).into_owned()
+            let mut bytes = Vec::with_capacity(first.len() + second.len());
+            bytes.extend_from_slice(first);
+            bytes.extend_from_slice(second);
+            String::from_utf8_lossy(&bytes).into_owned()
         }
     }
 }
@@ -465,11 +447,11 @@ impl CommandManager {
 
     pub fn mark_background(&self, task_id: &str) {
         let task = {
-            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.tasks.lock();
             guard.get(task_id).cloned()
         };
         if let Some(task) = task {
-            let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = task.lock();
             g.background = true;
         }
     }
@@ -499,7 +481,7 @@ impl CommandManager {
         }));
 
         {
-            let mut guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self.tasks.lock();
             guard.insert(task_id.clone(), inner.clone());
         }
 
@@ -566,12 +548,15 @@ impl CommandManager {
                         biased;
                         _ = cancel_token.cancelled() => {
                             let _ = child.start_kill();
-                            let _ = child.wait().await;
-                            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            if tokio::time::timeout(PIPE_DRAIN_GRACE, child.wait()).await.is_err() {
+                                let _ = child.start_kill();
+                                let _ = tokio::time::timeout(PIPE_DRAIN_GRACE, child.wait()).await;
+                            }
+                            let mut g = inner.lock();
                             g.status = "cancelled".to_string();
                         }
                         wait_result = child.wait() => {
-                            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut g = inner.lock();
                             if cancel_token.is_cancelled() {
                                 g.status = "cancelled".to_string();
                             } else {
@@ -593,15 +578,27 @@ impl CommandManager {
                         }
                     }
 
-                    for handle in [stdout_task, stderr_task].into_iter().flatten() {
-                        let abort = handle.abort_handle();
-                        if tokio::time::timeout(PIPE_DRAIN_GRACE, handle).await.is_err() {
-                            abort.abort();
+                    let stdout_abort = stdout_task.as_ref().map(|handle| handle.abort_handle());
+                    let stderr_abort = stderr_task.as_ref().map(|handle| handle.abort_handle());
+                    let drain = async {
+                        if let Some(handle) = stdout_task {
+                            let _ = handle.await;
+                        }
+                        if let Some(handle) = stderr_task {
+                            let _ = handle.await;
+                        }
+                    };
+                    if tokio::time::timeout(PIPE_DRAIN_GRACE, drain).await.is_err() {
+                        if let Some(handle) = stdout_abort {
+                            handle.abort();
+                        }
+                        if let Some(handle) = stderr_abort {
+                            handle.abort();
                         }
                     }
                 }
                 Err(e) => {
-                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut g = inner.lock();
                     g.status = "failed".to_string();
                     g.output.push(format!("spawn error: {e}").as_bytes());
                 }
@@ -615,10 +612,10 @@ impl CommandManager {
 
     pub fn get_status(&self, task_id: &str) -> Option<TaskStatus> {
         let task = {
-            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.tasks.lock();
             guard.get(task_id)?.clone()
         };
-        let g = task.lock().unwrap_or_else(|e| e.into_inner());
+        let g = task.lock();
         let output = g.output.as_string();
         Some(TaskStatus {
             task_id: g.task_id.clone(),
@@ -632,13 +629,13 @@ impl CommandManager {
 
     pub fn kill_task(&self, task_id: &str) -> bool {
         let task = {
-            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.tasks.lock();
             match guard.get(task_id) {
                 Some(task) => task.clone(),
                 None => return false,
             }
         };
-        let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = task.lock();
         g.request_kill()
     }
 
@@ -656,11 +653,11 @@ impl CommandManager {
 
     fn kill_matching(&self, predicate: impl Fn(&InnerTask) -> bool) {
         let tasks: Vec<Arc<Mutex<InnerTask>>> = {
-            let guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self.tasks.lock();
             guard.values().cloned().collect()
         };
         for task in tasks {
-            let mut g = task.lock().unwrap_or_else(|e| e.into_inner());
+            let mut g = task.lock();
             if predicate(&g) {
                 g.request_kill();
             }
@@ -668,9 +665,9 @@ impl CommandManager {
     }
 
     fn prune_old_tasks(&self) {
-        let mut guard = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.tasks.lock();
         guard.retain(|_, task| {
-            let g = task.lock().unwrap_or_else(|e| e.into_inner());
+            let g = task.lock();
             g.status == "running" || g.started_at.elapsed() < TASK_MAX_AGE
         });
     }
@@ -685,7 +682,7 @@ where
         match reader.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
-                let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                let mut g = inner.lock();
                 g.output.push(&buf[..n]);
             }
             Err(_) => break,
@@ -1169,56 +1166,82 @@ fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) ->
         .case_insensitive(true)
         .build(query)
         .map_err(|e| ToolError::msg(format!("invalid search pattern: {e}")))?;
+    let results = Arc::new(Mutex::new(Vec::<(String, u64, String)>::new()));
+    let total_chars = Arc::new(Mutex::new(0usize));
+    let truncated = Arc::new(Mutex::new(false));
+    let matcher = Arc::new(matcher);
 
-    let mut results = Vec::new();
-    let mut total_chars = 0;
-    let mut truncated = false;
-    let mut searcher = grep_searcher::SearcherBuilder::new()
-        .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
-        .line_number(true)
-        .build();
+    fs_util::workspace_walker(search_path)
+        .build_parallel()
+        .run(|| {
+            let matcher = matcher.clone();
+            let results = results.clone();
+            let total_chars = total_chars.clone();
+            let truncated = truncated.clone();
+            let mut searcher = grep_searcher::SearcherBuilder::new()
+                .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
+                .line_number(true)
+                .build();
+            Box::new(move |entry| {
+                let Ok(entry) = entry else {
+                    return WalkState::Continue;
+                };
+                if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
+                    || entry
+                        .metadata()
+                        .map(|metadata| metadata.len() > MAX_SEARCHABLE_FILE_BYTES)
+                        .unwrap_or(true)
+                {
+                    return WalkState::Continue;
+                }
+                if results.lock().len() >= max_hits
+                    || *total_chars.lock() >= config::MAX_SEARCH_OUTPUT_CHARS
+                {
+                    *truncated.lock() = true;
+                    return WalkState::Quit;
+                }
 
-    for result in fs_util::workspace_walker(search_path).build() {
-        let entry = match result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        if results.len() >= max_hits || total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
-            truncated = true;
-            break;
-        }
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            continue;
-        }
-        match entry.metadata() {
-            Ok(meta) if meta.len() <= MAX_SEARCHABLE_FILE_BYTES => {}
-            _ => continue,
-        }
-
-        let file_path = entry.path();
-        let rel_path = fs_util::display_relative(root, file_path);
-
-        let sink = grep_searcher::sinks::UTF8(|line_num, line| {
-            if results.len() >= max_hits || total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
-                truncated = true;
-                return Ok(false);
-            }
-            let trimmed = line.trim();
-            let shown = crate::util::truncate_chars(trimmed, config::MAX_SEARCH_LINE_CHARS);
-            let suffix = if shown.len() < trimmed.len() { " …" } else { "" };
-            let entry = format!("{rel_path}:{line_num}: {shown}{suffix}");
-            total_chars += entry.chars().count() + 1;
-            results.push(entry);
-            Ok(results.len() < max_hits && total_chars < config::MAX_SEARCH_OUTPUT_CHARS)
+                let file_path = entry.path().to_path_buf();
+                let rel_path = fs_util::display_relative(root, &file_path);
+                let results = results.clone();
+                let total_chars = total_chars.clone();
+                let truncated = truncated.clone();
+                let sink = grep_searcher::sinks::UTF8(move |line_num, line| {
+                    let mut result_guard = results.lock();
+                    let mut char_guard = total_chars.lock();
+                    if result_guard.len() >= max_hits
+                        || *char_guard >= config::MAX_SEARCH_OUTPUT_CHARS
+                    {
+                        *truncated.lock() = true;
+                        return Ok(false);
+                    }
+                    let trimmed = line.trim();
+                    let shown = crate::util::truncate_chars(trimmed, config::MAX_SEARCH_LINE_CHARS);
+                    let suffix = if shown.len() < trimmed.len() { " …" } else { "" };
+                    let output = format!("{rel_path}:{line_num}: {shown}{suffix}");
+                    *char_guard += output.chars().count() + 1;
+                    result_guard.push((rel_path.clone(), line_num, output));
+                    Ok(result_guard.len() < max_hits
+                        && *char_guard < config::MAX_SEARCH_OUTPUT_CHARS)
+                });
+                let _ = searcher.search_path(matcher.as_ref(), &file_path, sink);
+                WalkState::Continue
+            })
         });
-        let _ = searcher.search_path(&matcher, file_path, sink);
-    }
 
+    let mut results = Arc::try_unwrap(results).unwrap().into_inner();
+    results.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+    let truncated = *truncated.lock();
     if results.is_empty() {
         Ok(format!("No matches found for pattern: '{query}'"))
     } else {
-        let mut out = results.join("\n");
-        if truncated || results.len() >= max_hits {
+        let result_count = results.len();
+        let mut out = results
+            .into_iter()
+            .map(|(_, _, line)| line)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if truncated || result_count >= max_hits {
             out.push_str("\n\n[results limited; narrow the pattern or pass path to search a subdirectory]");
         }
         Ok(out)

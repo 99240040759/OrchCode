@@ -16,6 +16,14 @@ const MAX_PREVIEW_BYTES: usize = 512 * 1024;
 pub struct FileEntry {
     pub path: String,
     pub name: String,
+    #[serde(skip)]
+    depth: u16,
+}
+
+fn compare_ascii_case_insensitive(left: &str, right: &str) -> std::cmp::Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
 #[derive(Serialize)]
@@ -38,16 +46,15 @@ pub fn build_file_index(root: &Path) -> Vec<FileEntry> {
         }
         let rel = fs_util::display_relative(root, entry.path());
         let name = entry.file_name().to_string_lossy().to_string();
-        entries.push(FileEntry { path: rel, name });
+        let depth = rel.matches('/').count().min(u16::MAX as usize) as u16;
+        entries.push(FileEntry { path: rel, name, depth });
     }
 
     // Pre-sort the index once so empty queries can take directly without sorting.
     entries.sort_by(|a, b| {
-        a.path
-            .matches('/')
-            .count()
-            .cmp(&b.path.matches('/').count())
-            .then_with(|| a.path.bytes().map(|b| b.to_ascii_lowercase()).cmp(b.path.bytes().map(|b| b.to_ascii_lowercase())))
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| compare_ascii_case_insensitive(&a.path, &b.path))
     });
     entries
 }
@@ -72,24 +79,19 @@ pub async fn list_workspace_files(
         let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
         let pattern = Pattern::parse(&query_str, CaseMatching::Ignore, Normalization::Smart);
         let mut buf = Vec::new();
-        let mut scored: Vec<(u32, usize, &FileEntry)> = index
+        let mut scored: Vec<(u32, u16, &FileEntry)> = index
             .iter()
             .filter_map(|entry| {
                 pattern
                     .score(Utf32Str::new(&entry.path, &mut buf), &mut matcher)
-                    .map(|score| (score, entry.path.matches('/').count(), entry))
+                    .map(|score| (score, entry.depth, entry))
             })
             .collect();
 
-        let cmp = |a: &(u32, usize, &FileEntry), b: &(u32, usize, &FileEntry)| {
+        let cmp = |a: &(u32, u16, &FileEntry), b: &(u32, u16, &FileEntry)| {
             b.0.cmp(&a.0)
                 .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| {
-                    a.2.path
-                        .bytes()
-                        .map(|b| b.to_ascii_lowercase())
-                        .cmp(b.2.path.bytes().map(|b| b.to_ascii_lowercase()))
-                })
+                .then_with(|| compare_ascii_case_insensitive(&a.2.path, &b.2.path))
         };
 
         if scored.len() > limit {

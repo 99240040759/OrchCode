@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Command } from "cmdk";
 import * as api from "../../lib/api";
 import * as utils from "../../lib/utils";
@@ -6,6 +7,7 @@ import { ExplorerIcon } from "../ChatPrimitives";
 import type { CommandItem, Trigger } from "./types";
 
 interface SuggestionPopoverProps {
+  anchorRef: { current: HTMLDivElement | null };
   trigger: Trigger;
   query: string;
   fileHits: api.FileEntry[];
@@ -18,6 +20,7 @@ interface SuggestionPopoverProps {
 }
 
 export function SuggestionPopover({
+  anchorRef,
   trigger,
   query,
   fileHits,
@@ -29,6 +32,34 @@ export function SuggestionPopover({
   onHighlight,
 }: SuggestionPopoverProps) {
   const listRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<CSSProperties>();
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (!trigger || !anchor) return;
+
+    const updatePosition = () => {
+      const rect = anchor.getBoundingClientRect();
+      const titlebarBottom = document.querySelector<HTMLElement>(".Titlebar")?.getBoundingClientRect().bottom ?? 0;
+      setPosition({
+        position: "fixed",
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + 6,
+        width: rect.width,
+        maxHeight: Math.max(0, Math.min(280, rect.top - titlebarBottom - 14)),
+      });
+    };
+
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(anchor);
+    window.addEventListener("resize", updatePosition);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [anchorRef, trigger]);
 
   // Auto-scroll the active item into view
   useEffect(() => {
@@ -39,10 +70,10 @@ export function SuggestionPopover({
     }
   }, [activeIndex]);
 
-  if (!trigger) return null;
+  if (!trigger || !position) return null;
 
-  return (
-    <Command className="MentionPopover" label="Suggestions" shouldFilter={false}>
+  return createPortal((
+    <Command className="MentionPopover" label="Suggestions" shouldFilter={false} style={position}>
       <Command.List ref={listRef} className="MentionPopover-list">
         {trigger === "@" ? (
           loadingFiles ? (
@@ -109,5 +140,5 @@ export function SuggestionPopover({
         )}
       </Command.List>
     </Command>
-  );
+  ), document.body);
 }

@@ -1,9 +1,10 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use parking_lot::Mutex;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
@@ -26,13 +27,13 @@ pub struct DictationHandle {
 impl DictationHandle {
     pub fn stop(&self) {
         self.recording.store(false, Ordering::SeqCst);
-        self.stop_notify.notify_waiters();
+        self.stop_notify.notify_one();
     }
 
     pub fn cancel(&self) {
         self.finished.store(true, Ordering::SeqCst);
         self.recording.store(false, Ordering::SeqCst);
-        self.stop_notify.notify_waiters();
+        self.stop_notify.notify_one();
     }
 }
 
@@ -53,6 +54,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let finished = finished.clone();
         let capture_finished = capture_finished.clone();
         let capture_notify = capture_notify.clone();
+        let stop_notify = stop_notify.clone();
         std::thread::spawn(move || {
             if let Err(e) = capture_loop(&recording, &samples, &sample_rate) {
                 sentry::capture_error(&e);
@@ -63,6 +65,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
                 });
             }
             capture_finished.store(true, Ordering::SeqCst);
+            stop_notify.notify_one();
             capture_notify.notify_waiters();
         });
     }
@@ -121,7 +124,7 @@ fn capture_loop(
 
     let config: cpal::StreamConfig = supported.config();
     let err_fn = |err| {
-        eprintln!("[dictation] input stream error: {err}");
+        tracing::error!(error = %err, "dictation input stream error");
         sentry::capture_message(&format!("dictation input stream error: {err}"), sentry::Level::Error);
     };
 
@@ -131,13 +134,13 @@ fn capture_loop(
     let rec_collector = recording.clone();
     let collector_thread = std::thread::spawn(move || {
         let mut collector = Vec::with_capacity(65536);
-        while rec_collector.load(Ordering::SeqCst) || !cons.is_empty() {
+        'collect: while rec_collector.load(Ordering::SeqCst) || !cons.is_empty() {
             let mut had_samples = false;
             while let Some(sample) = cons.try_pop() {
                 had_samples = true;
                 if collector.len() >= max_samples {
                     rec_collector.store(false, Ordering::SeqCst);
-                    break;
+                    break 'collect;
                 }
                 collector.push(sample);
             }
@@ -145,9 +148,7 @@ fn capture_loop(
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
-        if let Ok(mut guard) = samples_clone.lock() {
-            *guard = collector;
-        }
+        *samples_clone.lock() = collector;
     });
 
     let stream = match supported.sample_format() {
@@ -245,12 +246,24 @@ async fn transcribe_when_stopped(
     samples: Samples,
     sample_rate: Arc<AtomicU32>,
 ) {
-    if recording.load(Ordering::SeqCst) {
-        stop_notify.notified().await;
+    loop {
+        let notified = stop_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !recording.load(Ordering::SeqCst) || finished.load(Ordering::SeqCst) {
+            break;
+        }
+        notified.await;
     }
 
-    if !capture_finished.load(Ordering::SeqCst) && !finished.load(Ordering::SeqCst) {
-        let _ = tokio::time::timeout(Duration::from_secs(3), capture_notify.notified()).await;
+    loop {
+        let notified = capture_notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if capture_finished.load(Ordering::SeqCst) || finished.load(Ordering::SeqCst) {
+            break;
+        }
+        notified.await;
     }
 
     if finished.load(Ordering::SeqCst) {
@@ -258,10 +271,7 @@ async fn transcribe_when_stopped(
     }
 
     let sr = sample_rate.load(Ordering::SeqCst);
-    let snapshot: Vec<i16> = samples
-        .lock()
-        .map(|mut b| std::mem::take(&mut *b))
-        .unwrap_or_default();
+    let snapshot: Vec<i16> = std::mem::take(&mut *samples.lock());
 
     let event = if sr == 0 || snapshot.is_empty() {
         DictationEvent::Final {

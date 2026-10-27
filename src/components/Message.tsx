@@ -19,6 +19,7 @@ import type {
   TextItem,
   ToolCallItem,
 } from "../lib/store";
+import { useArtifactsStore } from "../lib/artifacts";
 import { Markdown, renderTextWithMentions } from "./Markdown";
 import { AttachmentCard, ExplorerIcon, FileTag, ThinkingShimmer } from "./ChatPrimitives";
 import { Tooltip } from "./ui/Tooltip";
@@ -252,6 +253,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
                 isImage={attachment.isImage}
                 path={attachment.path}
                 dataUrl={attachment.dataUrl}
+                onOpen={attachment.isImage && attachment.path ? () => useArtifactsStore.getState().openFile(attachment.path) : undefined}
               />
             ))}
           </div>
