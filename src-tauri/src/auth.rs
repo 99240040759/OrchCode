@@ -191,8 +191,6 @@ impl FirebaseAuthClient {
 
     pub async fn sign_in_with_idp(
         &self,
-        token_or_code: &str,
-        is_code: bool,
         request_uri: &str,
         session_id: Option<&str>,
     ) -> AppResult<(AuthSession, UserProfile)> {
@@ -200,15 +198,7 @@ impl FirebaseAuthClient {
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key={}",
             config::firebase_api_key()
         );
-        let post_body = {
-            let key = if is_code { "code" } else { "id_token" };
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair(key, token_or_code)
-                .append_pair("providerId", "google.com")
-                .finish()
-        };
         let mut payload = serde_json::json!({
-            "postBody": post_body,
             "requestUri": request_uri,
             "returnIdpCredential": true,
             "returnSecureToken": true
@@ -435,6 +425,15 @@ pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
     params
 }
 
+fn auth_callback_request_uri(raw: &str) -> Result<String, String> {
+    let callback = reqwest::Url::parse(raw)
+        .map_err(|e| format!("Invalid sign-in callback URL: {e}"))?;
+    let mut request_uri = reqwest::Url::parse(config::AUTH_REDIRECT_URL)
+        .map_err(|e| format!("Invalid configured sign-in redirect URL: {e}"))?;
+    request_uri.set_query(callback.query());
+    Ok(request_uri.to_string())
+}
+
 pub struct CompletedSignIn {
     pub id_token: SecretString,
     pub refresh_token: Option<SecretString>,
@@ -452,17 +451,13 @@ pub async fn handle_auth_callback(
     }
 
     let session_id = session_id.ok_or_else(|| "Missing sign-in session".to_string())?;
-    let code = params
+    params
         .code
         .ok_or_else(|| "No authorization code found in sign-in callback".to_string())?;
+    let request_uri = auth_callback_request_uri(raw_url)?;
     let client = FirebaseAuthClient::new();
     let (session, profile) = client
-        .sign_in_with_idp(
-            &code,
-            true,
-            config::AUTH_REDIRECT_URL,
-            Some(session_id),
-        )
+        .sign_in_with_idp(&request_uri, Some(session_id))
         .await
         .map_err(|e| e.to_string())?;
     let completed = CompletedSignIn {
