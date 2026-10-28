@@ -323,6 +323,21 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Reasoning-chevron { width:13px; height:13px; transition:transform var(--dur) var(--ease); opacity:.7; }
 .Reasoning-toggle[data-open='true'] .Reasoning-chevron { transform:rotate(90deg); }
 .Reasoning-body { padding:4px 8px 6px 18px; margin-left:5px; font-size:12px; line-height:1.5; color:var(--md-on-var); opacity:.68; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; border-left:1px solid var(--md-outline-in); }
+.Reasoning-body .Markdown { font-size:inherit; line-height:inherit; color:inherit; }
+.Reasoning-body .Markdown p,
+.Reasoning-body .Markdown h1,
+.Reasoning-body .Markdown h2,
+.Reasoning-body .Markdown h3,
+.Reasoning-body .Markdown ul,
+.Reasoning-body .Markdown ol,
+.Reasoning-body .Markdown blockquote { margin:0; }
+.Reasoning-body .Markdown h1,
+.Reasoning-body .Markdown h2,
+.Reasoning-body .Markdown h3,
+.Reasoning-body .Markdown code:not(.CodeBlock code) { font-size:inherit; }
+.Reasoning-body .Markdown ul,
+.Reasoning-body .Markdown ol { padding-left:18px; }
+.Reasoning-body .Markdown li { margin:0; }
 
 /* ─── TOOL ROWS ──────────────────────────────────────────────────────────── */
 .ToolList { display:flex; flex-direction:column; gap:4px; }
@@ -538,6 +553,10 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Markdown-imgThumb { max-width:100%; max-height:260px; border-radius:var(--r-sm); object-fit:contain; background:var(--md-s2); border:1px solid rgba(255,255,255,.08); display:block; }
 .Markdown-imgCaption { font-size:11.5px; color:var(--md-on-var); padding:2px 4px; word-break:break-word; }
 .Markdown-remoteImg { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:var(--r-md); border:1px dashed rgba(255,255,255,.18); color:inherit; cursor:pointer; font-size:12px; }
+.Markdown .katex { font-size:1.05em; line-height:normal; color:var(--md-on); }
+.Markdown .katex-display { margin:10px 0; overflow-x:auto; overflow-y:hidden; padding:4px 0; overscroll-behavior-x:contain; }
+.Markdown .katex-display > .katex { max-width:100%; text-align:center; }
+.Markdown .katex-error { color:var(--md-error-c); font-family:var(--font-mono); font-size:12px; }
 
 /* ─── CODE BLOCK ─────────────────────────────────────────────────────────── */
 .CodeBlock { margin:12px 0; border:1px solid rgba(255,255,255,.08); border-radius:var(--r-md); overflow:hidden; background:#181818; }

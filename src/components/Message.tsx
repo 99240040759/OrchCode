@@ -192,7 +192,7 @@ function ThinkingBlock({ item }: { item: ReasoningItem }) {
       </button>
       {isOpen && (
         <div className="Reasoning-body" ref={bodyRef}>
-          {item.text}
+          <Markdown>{item.text.trim()}</Markdown>
         </div>
       )}
     </div>

@@ -21,7 +21,9 @@ const SCHEMA: &str = "
      updated_at          INTEGER NOT NULL,
      last_context_tokens INTEGER NOT NULL DEFAULT 0,
      last_input_tokens   INTEGER NOT NULL DEFAULT 0,
-     last_output_tokens  INTEGER NOT NULL DEFAULT 0
+     last_output_tokens  INTEGER NOT NULL DEFAULT 0,
+     last_cached_tokens  INTEGER NOT NULL DEFAULT 0,
+     last_reasoning_tokens INTEGER NOT NULL DEFAULT 0
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
      ON sessions(workspace_path, user_id, updated_at DESC);
@@ -50,6 +52,19 @@ pub struct SessionSummary {
     pub workspace_path: Option<String>,
     pub updated_at: i64,
     pub context_tokens: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cached_tokens: i64,
+    pub reasoning_tokens: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TurnUsage {
+    pub context_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub reasoning_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,15 +150,17 @@ impl SqliteMemory {
             .into_iter()
             .map(|row| row.get::<String, _>("name"))
             .collect::<std::collections::HashSet<_>>();
-        if !columns.contains("last_input_tokens") {
-            pool.execute("ALTER TABLE sessions ADD COLUMN last_input_tokens INTEGER NOT NULL DEFAULT 0")
-                .await
-                .map_err(sql_err)?;
-        }
-        if !columns.contains("last_output_tokens") {
-            pool.execute("ALTER TABLE sessions ADD COLUMN last_output_tokens INTEGER NOT NULL DEFAULT 0")
-                .await
-                .map_err(sql_err)?;
+        for (column, ddl) in [
+            ("last_input_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_output_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_cached_tokens", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_reasoning_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            if !columns.contains(column) {
+                pool.execute(format!("ALTER TABLE sessions ADD COLUMN {column} {ddl}").as_str())
+                    .await
+                    .map_err(sql_err)?;
+            }
         }
 
         Ok(Self { pool })
@@ -176,21 +193,18 @@ impl SqliteMemory {
         Ok(())
     }
 
-    pub async fn record_usage(
-        &self,
-        session_id: &str,
-        context_tokens: u64,
-        input_tokens: u64,
-        output_tokens: u64,
-    ) -> AppResult<()> {
+    pub async fn record_usage(&self, session_id: &str, usage: &TurnUsage) -> AppResult<()> {
         sqlx::query(
             "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = ?3,
-             last_output_tokens = ?4, updated_at = ?5 WHERE id = ?1",
+             last_output_tokens = ?4, last_cached_tokens = ?5, last_reasoning_tokens = ?6,
+             updated_at = ?7 WHERE id = ?1",
         )
         .bind(session_id)
-        .bind(to_db_token(context_tokens))
-        .bind(to_db_token(input_tokens))
-        .bind(to_db_token(output_tokens))
+        .bind(to_db_token(usage.context_tokens))
+        .bind(to_db_token(usage.input_tokens))
+        .bind(to_db_token(usage.output_tokens))
+        .bind(to_db_token(usage.cached_tokens))
+        .bind(to_db_token(usage.reasoning_tokens))
         .bind(now_ms())
         .execute(&self.pool)
         .await
@@ -201,7 +215,9 @@ impl SqliteMemory {
     pub async fn set_context_tokens(&self, session_id: &str, context_tokens: u64) -> AppResult<()> {
         let now = now_ms();
         sqlx::query(
-            "UPDATE sessions SET last_context_tokens = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = 0,
+             last_output_tokens = 0, last_cached_tokens = 0, last_reasoning_tokens = 0,
+             updated_at = ?3 WHERE id = ?1",
         )
         .bind(session_id)
         .bind(to_db_token(context_tokens))
@@ -219,7 +235,9 @@ impl SqliteMemory {
         user_id: &str,
     ) -> AppResult<Vec<SessionSummary>> {
         let rows = sqlx::query(
-            "SELECT id, title, workspace_path, updated_at, last_context_tokens
+            "SELECT id, title, workspace_path, updated_at, last_context_tokens,
+                    last_input_tokens, last_output_tokens, last_cached_tokens,
+                    last_reasoning_tokens
              FROM sessions
              WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)
              ORDER BY updated_at DESC",
@@ -238,6 +256,10 @@ impl SqliteMemory {
                 workspace_path: row.get(2),
                 updated_at: row.get(3),
                 context_tokens: row.get(4),
+                input_tokens: row.get(5),
+                output_tokens: row.get(6),
+                cached_tokens: row.get(7),
+                reasoning_tokens: row.get(8),
             })
             .collect();
 

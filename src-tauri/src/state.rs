@@ -55,7 +55,7 @@ pub struct AppState {
     run_finished_notify: Arc<tokio::sync::Notify>,
     token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
     catalog_fetch_lock: Arc<tokio::sync::Mutex<()>>,
-    clients: DashMap<String, ChatClient>,
+    client: Mutex<Option<ChatClient>>,
     file_cache: Cache<PathBuf, Arc<Vec<FileEntry>>>,
 }
 
@@ -93,7 +93,7 @@ impl AppState {
             run_finished_notify: Arc::new(tokio::sync::Notify::new()),
             token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             catalog_fetch_lock: Arc::new(tokio::sync::Mutex::new(())),
-            clients: DashMap::new(),
+            client: Mutex::new(None),
             file_cache,
         })
     }
@@ -140,7 +140,7 @@ impl AppState {
         self.set_token(None);
         self.current_user_id.store(None);
         self.catalog.store(None);
-        self.clients.clear();
+        *self.client.lock() = None;
     }
 
     pub async fn sign_out(&self) {
@@ -268,17 +268,13 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    pub fn chat_client(&self, provider: &str) -> AppResult<ChatClient> {
-        let key = if provider.trim().is_empty() {
-            "vertex"
-        } else {
-            provider.trim()
-        };
-        if let Some(client) = self.clients.get(key) {
+    pub fn chat_client(&self) -> AppResult<ChatClient> {
+        let mut slot = self.client.lock();
+        if let Some(client) = slot.as_ref() {
             return Ok(client.clone());
         }
-        let client = crate::llm::build_client(self.token.clone(), key)?;
-        self.clients.insert(key.to_string(), client.clone());
+        let client = crate::llm::build_client(self.token.clone())?;
+        *slot = Some(client.clone());
         Ok(client)
     }
 

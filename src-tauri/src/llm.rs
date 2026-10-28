@@ -10,9 +10,11 @@ use rig::agent::{
     RequestPatch, RunSettled,
 };
 use rig::catalog::ModelSpec;
-use rig::completion::{Message, Section, SystemPrompt};
+use rig::completion::{Effort, Message, PromptError, Reasoning, Section, SystemPrompt, Usage};
 use rig::conversation::{Conversation, Halt};
+use rig::error::{ErrorReport, ProviderError};
 use rig::message::{ImageDetail, UserContent};
+use rig::providers::gemini::extension::GeminiOptions;
 use rig::providers::registry::ProviderId;
 use rig::rig_reqwest::ReqwestMiddlewareClient;
 use rig::tool::{DynamicTool, Tool};
@@ -31,7 +33,7 @@ use crate::connectors::ConnectorDef;
 use crate::error::{AppError, AppResult};
 use crate::events::ChatEvent;
 use crate::gateway::{Gateway, ModelInfo, TokenHandle};
-use crate::persistence::SqliteMemory;
+use crate::persistence::{SqliteMemory, TurnUsage};
 use crate::session;
 use crate::tools::{parse_display_info, window_lines, RunCommand, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
@@ -66,10 +68,10 @@ impl reqwest_middleware::Middleware for AuthMiddleware {
     }
 }
 
-pub type ChatClient = rig::providers::openai::OpenAI;
+pub type ChatClient = rig::providers::gemini::Gemini;
 pub type ChatAgent = Agent;
 
-pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient> {
+pub fn build_client(token: TokenHandle) -> AppResult<ChatClient> {
     let retry_policy = reqwest_retry::policies::ExponentialBackoff::builder()
         .build_with_max_retries(3);
     let client = reqwest_middleware::ClientBuilder::new(crate::util::streaming_http_client())
@@ -78,14 +80,11 @@ pub fn build_client(token: TokenHandle, provider: &str) -> AppResult<ChatClient>
         .build();
 
     let http = ReqwestMiddlewareClient::from(client);
-    let config = rig::providers::openai::OpenAIConfig::with_key(
-        &rig::providers::openai::wire::OPENAI,
-        "",
-    )
-    .with_base_url(&config::inference_base_url(provider))
-    .with_route(rig::providers::openai::Route::Chat);
+    let config = rig::providers::gemini::GeminiConfig::new("")
+        .with_base_url(config::inference_base_url());
     Ok(config.connect(http))
 }
+
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,14 +133,20 @@ pub struct AgentInputs<'a> {
     pub workspace: Option<&'a Path>,
     pub connectors: Vec<&'static ConnectorDef>,
     pub connector_tools: Vec<DynamicTool>,
+    pub thinking_effort: Effort,
 }
 
 pub fn build_agent(inputs: AgentInputs<'_>) -> ChatAgent {
     let preamble = build_preamble(inputs.data_dir, inputs.workspace, &inputs.connectors);
     let ctx = inputs.tools;
-    let model = inputs.client.completion(inputs.model.id.as_str());
+    let model = inputs
+        .client
+        .completion(inputs.model.id.as_str())
+        .thought_replay(rig::providers::gemini::completion::ThoughtReplay::All);
     let mut builder = AgentBuilder::new(model)
         .preamble(preamble)
+        .reasoning(Reasoning::Effort(inputs.thinking_effort))
+        .provider_option(GeminiOptions::new().include_thoughts(true))
         .tool(ctx.list_dir())
         .tool(ctx.read_file())
         .tool(ctx.read_skill())
@@ -382,8 +387,9 @@ pub struct RunParams<'a> {
 }
 
 fn model_spec(model: &ModelInfo) -> Option<ModelSpec> {
-    let provider = ProviderId::catalog("openai")?;
+    let provider = ProviderId::catalog(rig::providers::gemini::PROVIDER_NAME)?;
     let mut spec = ModelSpec::new(provider, model.id.clone()).with_tools(true);
+    spec.input.image = model.supports_images();
     if model.context_window > 0 {
         spec = spec.with_context_window(u32::try_from(model.context_window).unwrap_or(u32::MAX));
     }
@@ -391,6 +397,28 @@ fn model_spec(model: &ModelInfo) -> Option<ModelSpec> {
         spec = spec.with_max_output_tokens(u32::try_from(model.max_tokens).unwrap_or(u32::MAX));
     }
     Some(spec)
+}
+
+fn turn_usage(usage: &Usage) -> Option<TurnUsage> {
+    Some(TurnUsage {
+        context_tokens: usage.context_tokens()?,
+        input_tokens: usage.input_tokens.unwrap_or(0),
+        output_tokens: usage.output_tokens.unwrap_or(0),
+        cached_tokens: usage.cached_input_tokens.unwrap_or(0),
+        reasoning_tokens: usage.reasoning_tokens.unwrap_or(0),
+    })
+}
+
+impl TurnUsage {
+    fn event(&self) -> ChatEvent {
+        ChatEvent::Usage {
+            context_tokens: self.context_tokens,
+            input_tokens: Some(self.input_tokens),
+            output_tokens: Some(self.output_tokens),
+            cached_tokens: Some(self.cached_tokens),
+            reasoning_tokens: Some(self.reasoning_tokens),
+        }
+    }
 }
 
 fn compaction_policy() -> CompactionPolicy {
@@ -659,7 +687,9 @@ impl SessionHook {
         let _ = deps.channel.send(ChatEvent::Usage {
             context_tokens: tokens_after,
             input_tokens: None,
+            output_tokens: None,
             cached_tokens: None,
+            reasoning_tokens: None,
         });
         let _ = deps.channel.send(ChatEvent::Compacted {
             original_message_count: replaced,
@@ -863,25 +893,12 @@ pub async fn run_chat(
             }
             Ok(MultiTurnStreamItem::CompletionCall(call)) => {
                 turn_text.clear();
-                let usage = call.usage;
-                if let Some(context) = usage.context_tokens() {
-                    if let Err(error) = memory
-                        .record_usage(
-                            &session_id,
-                            context,
-                            usage.input_tokens.unwrap_or(0),
-                            usage.output_tokens.unwrap_or(0),
-                        )
-                        .await
-                    {
+                if let Some(turn) = turn_usage(&call.usage) {
+                    if let Err(error) = memory.record_usage(&session_id, &turn).await {
                         tracing::error!(error = %error, "failed to persist token usage");
                         sentry::capture_error(&error);
                     }
-                    let _ = channel.send(ChatEvent::Usage {
-                        context_tokens: context,
-                        input_tokens: usage.input_tokens,
-                        cached_tokens: usage.cached_input_tokens,
-                    });
+                    let _ = channel.send(turn.event());
                 }
             }
             Ok(MultiTurnStreamItem::FinalResponse(response)) => {
@@ -894,9 +911,8 @@ pub async fn run_chat(
                 if cancel.is_cancelled() {
                     finish!(RunOutcome::Cancelled);
                 }
-                let raw = error.to_string();
-                overflowed = is_context_overflow(&raw);
-                let reason = humanize_llm_error(&raw);
+                overflowed = is_context_overflow(&error);
+                let reason = humanize_llm_error(&error);
                 sentry::capture_message(&format!("chat stream error: {reason}"), sentry::Level::Error);
                 finish!(RunOutcome::Failed(reason));
             }
@@ -1110,41 +1126,93 @@ pub async fn build_user_message(
     })
 }
 
-pub fn is_context_overflow(raw: &str) -> bool {
-    let lower = raw.to_lowercase();
-    lower.contains("context length")
-        || lower.contains("context_length")
-        || lower.contains("maximum context")
-        || (lower.contains("status: 400") && lower.contains("token"))
+pub fn is_context_overflow(error: &PromptError) -> bool {
+    match error {
+        PromptError::Report(report) => report.is_context_overflow(),
+        PromptError::Provider(provider) => ErrorReport::from(provider).is_context_overflow(),
+        _ => false,
+    }
 }
 
-pub fn humanize_llm_error(raw: &str) -> String {
-    if is_context_overflow(raw) {
+pub fn humanize_llm_error(error: &PromptError) -> String {
+    if is_context_overflow(error) {
         return "The model's context window overflowed mid-run. \
             The conversation will be compacted automatically before your next message is sent. \
             If this keeps happening, try starting a new chat."
             .to_string();
     }
 
-    if let Some(start) = raw.find('{') {
-        if let Some(end) = raw.rfind('}') {
-            if end > start {
-                let json_slice = &raw[start..=end];
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_slice) {
-                    if let Some(msg) = extract_json_error_message(&val) {
-                        return msg;
+    match error {
+        PromptError::Cancelled { reason, .. } => {
+            if reason.is_empty() || reason == "cancelled" {
+                "The run was cancelled.".to_string()
+            } else {
+                format!("The run was cancelled: {reason}")
+            }
+        }
+        PromptError::MaxTurns { max_turns, .. } => {
+            format!("The agent reached the maximum turn limit of {max_turns}.")
+        }
+        PromptError::UnknownToolCall { tool_name, .. } => {
+            format!("The model tried to call an unknown tool: `{tool_name}`.")
+        }
+        PromptError::Memory { error, .. } => {
+            format!("Conversation storage error: {error}")
+        }
+        PromptError::Provider(ProviderError::InvalidAuthentication(_)) => {
+            "Authentication failed with the model provider. Please sign in again.".to_string()
+        }
+        PromptError::Provider(ProviderError::CacheExpired { name, .. }) => {
+            format!("The cached context `{name}` has expired or was deleted. Please retry.")
+        }
+        PromptError::Provider(ProviderError::Truncated) => {
+            "The model response stream was interrupted before completion. Please retry.".to_string()
+        }
+        PromptError::Provider(ProviderError::Http(http_err)) => {
+            let desc = http_err.to_string();
+            if desc.to_lowercase().contains("timeout") {
+                "The model provider did not respond in time. Please retry.".to_string()
+            } else {
+                format!("Network error: {desc}")
+            }
+        }
+        PromptError::Provider(ProviderError::UnsupportedOption(opt)) => {
+            format!("Unsupported model parameter: {opt}")
+        }
+        _ => {
+            if let Ok(Some(json)) = error.provider_response_json() {
+                if let Some(msg) = extract_json_error_message(&json) {
+                    if error.provider_response_status() == Some(http::StatusCode::TOO_MANY_REQUESTS) {
+                        return format!("The model provider is rate limiting requests: {msg}");
                     }
+                    return msg;
                 }
+            }
+
+            if let Some(status) = error.provider_response_status() {
+                if status == http::StatusCode::TOO_MANY_REQUESTS {
+                    return "The model provider is rate limiting requests. Please retry shortly.".to_string();
+                } else if status == http::StatusCode::UNAUTHORIZED || status == http::StatusCode::FORBIDDEN {
+                    return "Authentication failed with the model provider. Please sign in again.".to_string();
+                } else if status.is_server_error() {
+                    return "The model provider encountered an internal error. Please retry.".to_string();
+                }
+            }
+
+            if let Some(body) = error.provider_response_body() {
+                let trimmed = body.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('{') {
+                    return trimmed.to_string();
+                }
+            }
+
+            match error {
+                PromptError::Report(r) => r.message.clone(),
+                PromptError::Provider(p) => ErrorReport::from(p).message,
+                _ => error.to_string(),
             }
         }
     }
-
-    raw.trim_start_matches("CompletionError: ")
-        .trim_start_matches("HttpError: ")
-        .trim_start_matches("ProviderError: ")
-        .trim_start_matches("RequestError: ")
-        .trim()
-        .to_string()
 }
 
 fn extract_json_error_message(val: &serde_json::Value) -> Option<String> {

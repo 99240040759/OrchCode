@@ -19,13 +19,10 @@ pub fn sentry_dsn() -> &'static str {
 
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
 
-pub fn inference_base_url(provider: &str) -> String {
-    let clean = if provider.trim().is_empty() {
-        DEFAULT_INFERENCE_PROVIDER
-    } else {
-        provider.trim()
-    };
-    format!("{}/{}/v1", gcp_functions_url(), clean)
+/// Root the native Gemini client talks to. The gateway forwards
+/// `/vertex/v1beta/models/{model}:streamGenerateContent` to Vertex AI.
+pub fn inference_base_url() -> String {
+    format!("{}/vertex", gcp_functions_url())
 }
 
 pub fn models_url() -> &'static str {
@@ -55,8 +52,6 @@ pub fn tavily_url() -> &'static str {
 pub fn composio_url(path: &str) -> String {
     format!("{}/composio{}", gcp_functions_url(), path)
 }
-
-const DEFAULT_INFERENCE_PROVIDER: &str = "vertex";
 
 pub const DEFAULT_MAX_TURNS: usize = 100;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;

@@ -298,9 +298,7 @@ async fn preflight(state: &AppState, model: &str) -> Result<Preflight, String> {
         .resolve(model)
         .cloned()
         .ok_or_else(|| format!("Model not found: {model}. Pick another model and try again."))?;
-    let client = state
-        .chat_client(&model_info.provider)
-        .map_err(|error| error.to_string())?;
+    let client = state.chat_client().map_err(|error| error.to_string())?;
     Ok(Preflight {
         model_info,
         client,
@@ -317,6 +315,7 @@ pub async fn start_chat(
     prompt: String,
     attachments: Vec<AttachmentRef>,
     active_connectors: Vec<String>,
+    thinking_effort: String,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     if session_id.trim().is_empty() {
@@ -457,6 +456,11 @@ pub async fn start_chat(
         workspace: Some(workspace.as_path()),
         connectors: connectors.defs,
         connector_tools: connectors.tools,
+        thinking_effort: match thinking_effort.as_str() {
+            "medium" => rig::completion::Effort::Medium,
+            "high" => rig::completion::Effort::High,
+            _ => rig::completion::Effort::Low,
+        },
     });
 
     let result = run_chat(

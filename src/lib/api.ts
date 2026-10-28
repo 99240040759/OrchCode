@@ -24,10 +24,13 @@ export interface SessionSummary {
   workspacePath?: string | null;
   updatedAt: number;
   contextTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
 }
 
-export type ToolIcon =
-  | "file"
+export type ToolIcon =  | "file"
   | "folder"
   | "terminal"
   | "search"
@@ -112,7 +115,9 @@ export type ChatStreamEvent =
       type: "usage";
       contextTokens: number;
       inputTokens?: number;
+      outputTokens?: number;
       cachedTokens?: number;
+      reasoningTokens?: number;
     }
   | {
       type: "compacted";
@@ -206,6 +211,7 @@ export function startChat(
   prompt: string,
   attachments: AttachmentRef[],
   activeConnectors: string[],
+  thinkingEffort: string,
   onEvent: (evt: ChatStreamEvent) => void
 ): Promise<void> {
   const channel = new Channel<ChatStreamEvent>();
@@ -216,6 +222,7 @@ export function startChat(
     prompt,
     attachments,
     activeConnectors,
+    thinkingEffort,
     onEvent: channel,
   });
 }

@@ -60,7 +60,9 @@ export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNo
 interface TokenUsage {
   contextTokens: number;
   inputTokens?: number;
+  outputTokens?: number;
   cachedTokens?: number;
+  reasoningTokens?: number;
 }
 
 export interface ChatMessage {
@@ -126,6 +128,10 @@ function messageViewToLocal(v: MessageView): ChatMessage {
 function usageFrom(session: SessionSummary): TokenUsage {
   return {
     contextTokens: session.contextTokens,
+    inputTokens: session.inputTokens,
+    outputTokens: session.outputTokens,
+    cachedTokens: session.cachedTokens,
+    reasoningTokens: session.reasoningTokens,
   };
 }
 
@@ -142,6 +148,7 @@ interface ChatState {
   sessionTokens: TokenUsage;
   models: ModelDto[];
   selectedModel: ModelDto | null;
+  thinkingEffort: string;
   budget: Budget | null;
   error: string | null;
   initialized: boolean;
@@ -160,6 +167,7 @@ interface ChatActions {
   toggleConnector: (id: string) => void;
   pruneConnectors: (connectedIds: string[]) => void;
   setSelectedModel: (key: string) => void;
+  setThinkingEffort: (effort: string) => void;
   refreshSessions: () => Promise<void>;
   refreshModels: () => Promise<void>;
   refreshBudget: () => Promise<void>;
@@ -187,6 +195,7 @@ const INITIAL_STATE: ChatState = {
   sessionTokens: ZERO_USAGE,
   models: [],
   selectedModel: null,
+  thinkingEffort: "low",
   budget: null,
   error: null,
   initialized: false,
@@ -246,12 +255,13 @@ export const useChatStore = create(
       try {
         const wsPath = useWorkspaceStore.getState().current?.path ?? null;
 
-        const [sessions, models, savedModel] = await Promise.all([
+        const [sessions, models, savedModel, savedEffort] = await Promise.all([
           wsPath
             ? api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
             : Promise.resolve([] as SessionSummary[]),
           api.listModels().catch(() => [] as ModelDto[]),
           api.getUserPref("selectedModel").catch(() => null),
+          api.getUserPref("thinkingEffort").catch(() => null),
         ]);
         if (epoch !== initEpoch) return;
 
@@ -259,6 +269,7 @@ export const useChatStore = create(
           s.sessions = sessions;
           s.models = models;
           s.selectedModel = pickModel(models, savedModel);
+          s.thinkingEffort = ["low", "medium", "high"].includes(savedEffort ?? "") ? savedEffort! : "low";
         });
 
         await bindListeners();
@@ -606,7 +617,9 @@ export const useChatStore = create(
                 s.sessionTokens = {
                   contextTokens: event.contextTokens,
                   inputTokens: event.inputTokens,
+                  outputTokens: event.outputTokens,
                   cachedTokens: event.cachedTokens,
+                  reasoningTokens: event.reasoningTokens,
                 };
             });
             break;
@@ -677,6 +690,7 @@ export const useChatStore = create(
           text,
           attachments,
           connectorSelections[sessionId] ?? [],
+          get().thinkingEffort,
           handleEvent
         );
         syncFlush(); settle();
@@ -730,6 +744,12 @@ export const useChatStore = create(
       if (!model) return;
       set((s) => { s.selectedModel = model; });
       void api.setUserPref("selectedModel", key).catch(() => undefined);
+    },
+
+    setThinkingEffort: (effort: string) => {
+      if (!["low", "medium", "high"].includes(effort)) return;
+      set((s) => { s.thinkingEffort = effort; });
+      void api.setUserPref("thinkingEffort", effort).catch(() => undefined);
     },
 
     refreshSessions: async () => {

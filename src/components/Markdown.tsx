@@ -1,6 +1,9 @@
 import React, { useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { VscCheck, VscCopy } from "react-icons/vsc";
 import Prism from "prismjs";
@@ -254,7 +257,8 @@ const MARKDOWN_COMPONENTS: Components = {
   },
 };
 
-const REMARK_PLUGINS = [remarkGfm];
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
 
 function splitBlocks(text: string): string[] {
   const lines = text.split("\n");
@@ -287,7 +291,11 @@ function splitBlocks(text: string): string[] {
 
 const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+    <ReactMarkdown
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={REHYPE_PLUGINS}
+      components={MARKDOWN_COMPONENTS}
+    >
       {text}
     </ReactMarkdown>
   );

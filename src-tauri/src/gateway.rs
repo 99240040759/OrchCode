@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use secrecy::{ExposeSecret, SecretString};
@@ -12,17 +13,13 @@ use crate::error::{AppError, AppResult};
 pub type TokenHandle = Arc<arc_swap::ArcSwapOption<SecretString>>;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub id: String,
-    #[serde(default)]
     pub name: String,
-    #[serde(default)]
     pub provider: String,
-    #[serde(rename = "contextWindow", default)]
     pub context_window: u64,
-    #[serde(rename = "maxTokens", default)]
     pub max_tokens: u64,
-    #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub badge: Option<String>,
@@ -65,22 +62,15 @@ impl ModelCatalog {
     }
 }
 
-fn default_allowed() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
-    #[serde(default, alias = "cost_usd", alias = "costUsd", alias = "cost")]
+    #[serde(alias = "cost_usd")]
     pub cost_usd: f64,
-    #[serde(default, alias = "limit_usd", alias = "limitUsd", alias = "limit")]
+    #[serde(alias = "limit_usd")]
     pub limit_usd: f64,
-    #[serde(default)]
     pub remaining: f64,
-    #[serde(default)]
     pub period: String,
-    #[serde(default = "default_allowed")]
     pub allowed: bool,
 }
 
@@ -106,115 +96,93 @@ impl Gateway {
             .ok_or(AppError::NoToken)
     }
 
-    pub async fn models(&self) -> AppResult<ModelCatalog> {
+    async fn get<T: DeserializeOwned>(&self, url: &str, timeout: Duration) -> AppResult<T> {
         let token = self.require_token()?;
         let resp = self
             .http
-            .get(config::models_url())
+            .get(url)
             .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(20))
+            .timeout(timeout)
             .send()
             .await?;
-        let resp = check_status(resp).await?;
-        let map: HashMap<String, ModelInfo> = resp.json().await?;
+        Ok(check_status(resp).await?.json().await?)
+    }
+
+    async fn post<B: Serialize + ?Sized, T: DeserializeOwned>(
+        &self,
+        url: &str,
+        body: &B,
+        timeout: Duration,
+    ) -> AppResult<T> {
+        let token = self.require_token()?;
+        let resp = self
+            .http
+            .post(url)
+            .bearer_auth(token.expose_secret())
+            .timeout(timeout)
+            .json(body)
+            .send()
+            .await?;
+        Ok(check_status(resp).await?.json().await?)
+    }
+
+    pub async fn models(&self) -> AppResult<ModelCatalog> {
+        let map: HashMap<String, ModelInfo> =
+            self.get(config::models_url(), Duration::from_secs(20)).await?;
         Ok(ModelCatalog::from_map(map))
     }
 
     pub async fn budget(&self) -> AppResult<Budget> {
-        let token = self.require_token()?;
-        let resp = self
-            .http
-            .get(config::budget_url())
-            .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(15))
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-        Ok(resp.json().await?)
+        self.get(config::budget_url(), Duration::from_secs(15)).await
     }
 
     pub async fn transcribe(&self, audio_base64: &str) -> AppResult<String> {
-        let token = self.require_token()?;
-        let resp = self
-            .http
-            .post(config::transcribe_url())
-            .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(300))
-            .json(&json!({ "audio": audio_base64 }))
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-
         #[derive(Deserialize)]
-        struct TranscribeResp {
-            #[serde(default)]
+        struct Resp {
             text: String,
         }
-
-        let body: TranscribeResp = resp.json().await?;
-        Ok(body.text)
+        let resp: Resp = self
+            .post(
+                config::transcribe_url(),
+                &json!({ "audio": audio_base64 }),
+                Duration::from_secs(300),
+            )
+            .await?;
+        Ok(resp.text)
     }
 
     pub async fn tavily(&self, req: &TavilyRequest) -> AppResult<TavilyResponse> {
-        let token = self.require_token()?;
-        let resp = self
-            .http
-            .post(config::tavily_url())
-            .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(30))
-            .json(req)
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-        Ok(resp.json().await?)
+        self.post(config::tavily_url(), req, Duration::from_secs(30)).await
     }
 
     pub async fn generate_title(&self, prompt: &str) -> AppResult<String> {
-        let token = self.require_token()?;
-        let resp = self
-            .http
-            .post(config::title_url())
-            .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(20))
-            .json(&json!({ "prompt": prompt }))
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-
         #[derive(Deserialize)]
-        struct TitleResp {
-            #[serde(default)]
+        struct Resp {
             title: String,
         }
-
-        let body: TitleResp = resp.json().await?;
-        Ok(body.title)
+        let resp: Resp = self
+            .post(
+                config::title_url(),
+                &json!({ "prompt": prompt }),
+                Duration::from_secs(20),
+            )
+            .await?;
+        Ok(resp.title)
     }
 
     pub async fn summarize(&self, system: &str, prompt: &str, max_tokens: u64) -> AppResult<String> {
-        let token = self.require_token()?;
-        let resp = self
-            .http
-            .post(config::summarize_url())
-            .bearer_auth(token.expose_secret())
-            .timeout(Duration::from_secs(config::SUMMARY_REQUEST_TIMEOUT_SECS))
-            .json(&json!({
-                "system": system,
-                "prompt": prompt,
-                "maxTokens": max_tokens,
-            }))
-            .send()
-            .await?;
-        let resp = check_status(resp).await?;
-
         #[derive(Deserialize)]
-        struct SummaryResp {
-            #[serde(default)]
+        struct Resp {
             text: String,
         }
-
-        let body: SummaryResp = resp.json().await?;
-        Ok(body.text)
+        let resp: Resp = self
+            .post(
+                config::summarize_url(),
+                &json!({ "system": system, "prompt": prompt, "maxTokens": max_tokens }),
+                Duration::from_secs(config::SUMMARY_REQUEST_TIMEOUT_SECS),
+            )
+            .await?;
+        Ok(resp.text)
     }
 }
 

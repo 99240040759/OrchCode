@@ -62,7 +62,11 @@ pub enum ChatEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_tokens: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         cached_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_tokens: Option<u64>,
     },
     #[serde(rename_all = "camelCase")]
     Compacted {
