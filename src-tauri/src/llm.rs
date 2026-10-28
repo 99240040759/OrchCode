@@ -367,6 +367,7 @@ struct RunDeps {
     channel: Channel<ChatEvent>,
     policy: CompactionPolicy,
     spec: Option<ModelSpec>,
+    compaction_trigger: u64,
     cancel: CancellationToken,
 }
 
@@ -456,6 +457,7 @@ impl ChatRun {
             channel: params.channel,
             policy: compaction_policy(),
             spec: model_spec(params.model),
+            compaction_trigger: config::compaction_trigger_tokens(params.model.context_window),
             cancel: params.cancel,
         });
         let shared = Arc::new(Mutex::new(RunSession {
@@ -681,7 +683,7 @@ impl AgentHook for SessionHook {
         session.mirror(event.history, event.prompt);
 
         let estimate = session.next_request_estimate();
-        if estimate >= config::COMPACTION_TRIGGER_TOKENS && session.may_compact() {
+        if estimate >= self.deps.compaction_trigger && session.may_compact() {
             self.compact(&mut session).await;
         }
         if let Err(error) = session.save().await {

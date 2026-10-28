@@ -87,7 +87,7 @@ export function createMentionRegex(): RegExp {
   return new RegExp(MENTION_PATTERN, "g");
 }
 
-export const AUTO_COMPACT_TOKENS = 100_000;
+export const AUTO_COMPACT_RATIO = 0.8;
 
 function trimTrailingZero(value: string): string {
   return value.endsWith(".0") ? value.slice(0, -2) : value;

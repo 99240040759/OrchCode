@@ -280,16 +280,26 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 
 /* ─── MESSAGES ───────────────────────────────────────────────────────────── */
 .Msg { display:flex; flex-direction:column; width:100%; }
-.Msg-user { align-items:flex-end; }
+.Msg-user { align-items:flex-end; margin:14px 0; }
+.Msg-user:first-child { margin-top:4px; }
 .Msg-user .Msg-bubble { padding:9px 13px; border-radius:var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); background:rgba(255,255,255,.10); border:1px solid var(--md-outline); color:var(--md-on); font-size:13px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
 .Msg-assistant { align-items:stretch; }
-.Msg-assistant > * + * { margin-top:8px; }
-.Msg-assistant > .Reasoning + .Reasoning,
-.Msg-assistant > .ToolList + .Reasoning,
-.Msg-assistant > .Reasoning + .ToolList,
-.Msg-assistant > .ToolList + .ToolList,
+.Msg-assistant > * + * { margin-top:10px; }
+.Msg-assistant > .ToolList + .ToolList { margin-top:4px; }
+.Msg-assistant > .Reasoning + .Reasoning { margin-top:6px; }
+
+/* Separation between text, tool calls, and responses */
+.Msg-assistant > * + .ToolList { margin-top:12px; }
+.Msg-assistant > .ToolList + .ToolList { margin-top:4px; }
+.Msg-assistant > .ToolList + * { margin-top:14px; }
+.Msg-assistant > .Reasoning + * { margin-top:12px; }
+
+/* Thinking shimmer breathing room between turns & responses */
+.Msg-assistant > * + .ThinkingShimmer,
 .Msg-assistant > .ToolList + .ThinkingShimmer,
-.Msg-assistant > .Reasoning + .ThinkingShimmer { margin-top:4px; }
+.Msg-assistant > .Reasoning + .ThinkingShimmer { margin-top:12px; }
+.Msg-assistant > .ThinkingShimmer + * { margin-top:14px; }
+
 .Msg-assistant > .Msg-notice { margin:10px 0; }
 
 .Msg-attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end; }
@@ -300,7 +310,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .Msg-notice-text { color:#f07078; }
 
 /* ─── THINKING SHIMMER (GPU) ─────────────────────────────────────────────── */
-.ThinkingShimmer { display:inline-flex; align-items:center; height:22px; min-height:22px; padding:0; margin:0; }
+.ThinkingShimmer { display:inline-flex; align-items:center; height:24px; min-height:24px; padding:2px 0; margin:2px 0; }
 .ThinkingShimmer-text { font-size:13px; font-weight:500; background:linear-gradient(90deg, var(--md-on-dim) 0%, var(--md-on) 35%, #ffffff 50%, var(--md-on) 65%, var(--md-on-dim) 100% ); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; animation:shimmer 2.2s linear infinite; will-change:background-position; transform:translateZ(0); }
 
 .Msg-streamingText { animation:streamFadeIn .32s var(--ease); }

@@ -19,7 +19,7 @@ export const ContextBar = React.memo(function ContextBar({ contextWindow, sessio
     Math.max(0, Math.round((contextTokens / maxContext) * 100))
   );
 
-  const compactAt = Math.min(utils.AUTO_COMPACT_TOKENS, maxContext);
+  const compactAt = Math.round(maxContext * utils.AUTO_COMPACT_RATIO);
   const level =
     contextTokens >= compactAt || fillPct > 85
       ? "danger"

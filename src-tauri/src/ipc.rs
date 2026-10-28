@@ -476,7 +476,7 @@ pub async fn start_chat(
     if result.overflowed {
         let _ = state
             .memory
-            .set_context_tokens(&session_id, config::COMPACTION_TRIGGER_TOKENS)
+            .set_context_tokens(&session_id, config::compaction_trigger_tokens(model_info.context_window))
             .await;
     }
 

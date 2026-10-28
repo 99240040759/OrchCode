@@ -76,7 +76,11 @@ pub const MAX_VIEW_TOOL_OUTPUT_CHARS: usize = 16_000;
 
 pub const PREAMBLE_TOKEN_RESERVE: u64 = 9_000;
 
-pub const COMPACTION_TRIGGER_TOKENS: u64 = 100_000;
+pub const COMPACTION_TRIGGER_PERCENT: u64 = 80;
+
+pub fn compaction_trigger_tokens(context_window: u64) -> u64 {
+    context_window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100
+}
 
 pub const COMPACTION_KEEP_RECENT_TOKENS: usize = 24_000;
 
