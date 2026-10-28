@@ -114,7 +114,8 @@ impl FirebaseAuthClient {
             .timeout(request_timeout())
             .json(&serde_json::json!({
                 "providerId": "google.com",
-                "continueUri": redirect_to
+                "continueUri": redirect_to,
+                "authFlowType": "CODE_FLOW"
             }))
             .send()
             .await
