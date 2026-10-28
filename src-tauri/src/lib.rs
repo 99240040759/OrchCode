@@ -88,12 +88,21 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
     if let Some(rest) = util::strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
         handle_connector_callback(app, rest).await;
-    } else if util::strip_prefix_ignore_ascii_case(raw_url, "orch://auth").is_some()
-        || util::strip_prefix_ignore_ascii_case(raw_url, "orch://login").is_some()
-    {
+    } else if is_sign_in_callback_url(raw_url) {
         handle_sign_in_callback(app, raw_url).await;
     }
     focus_main_window(app);
+}
+
+fn is_sign_in_callback_url(raw_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw_url) else {
+        return false;
+    };
+    url.scheme().eq_ignore_ascii_case("orch")
+        && url
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("auth-callback"))
+        && (url.path().is_empty() || url.path() == "/")
 }
 
 const INVALID_CONNECTOR_CALLBACK: &str = "Invalid connector sign-in callback";

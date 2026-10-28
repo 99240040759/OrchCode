@@ -429,11 +429,6 @@ pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
         for (k, v) in url.query_pairs() {
             assign_param(&mut params, k.as_ref(), v.as_ref());
         }
-        if let Some(fragment) = url.fragment() {
-            for (k, v) in url::form_urlencoded::parse(fragment.as_bytes()) {
-                assign_param(&mut params, k.as_ref(), v.as_ref());
-            }
-        }
     }
 
     params
