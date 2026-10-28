@@ -123,7 +123,7 @@ pub struct SqliteMemory {
 }
 
 impl SqliteMemory {
-    pub fn open(path: &Path) -> AppResult<Self> {
+    pub(crate) fn open(path: &Path) -> AppResult<Self> {
         tauri::async_runtime::block_on(Self::open_async(path))
     }
 

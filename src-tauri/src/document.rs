@@ -3,8 +3,8 @@ use std::path::Path;
 use crate::error::{AppError, AppResult};
 
 // Supported document extensions for parse_document_file.
-// Legacy binary OLE2 formats (.doc, .ppt, .xls, .ods) are NOT listed here because
-// office_oxide only handles OpenXML; spreadsheets go through calamine instead.
+// Binary word processor and presentation formats (.doc, .ppt) are unsupported;
+// spreadsheets (.xlsx, .xls, .ods) are parsed via calamine.
 pub const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "docx", "xlsx", "xls", "ods", "pptx"];
 
 pub fn document_type_info(file_type: &str) -> (Option<String>, String) {

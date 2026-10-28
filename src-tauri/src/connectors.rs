@@ -11,7 +11,7 @@ use crate::error::{AppError, AppResult};
 use crate::gateway::TokenHandle;
 
 const ACTIVE_STATUS: &str = "ACTIVE";
-const DEFINITIONS_TTL: Duration = Duration::from_secs(60 * 60);
+const DEFINITIONS_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Debug)]
 pub struct ConnectorDef {
@@ -79,13 +79,9 @@ pub fn find_def(id: &str) -> Option<&'static ConnectorDef> {
 }
 
 pub fn resolve_defs(ids: &[String]) -> AppResult<Vec<&'static ConnectorDef>> {
-    for id in ids {
-        find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.clone()))?;
-    }
-    Ok(CONNECTOR_DEFS
-        .iter()
-        .filter(|def| ids.iter().any(|id| id == def.id))
-        .collect())
+    ids.iter()
+        .map(|id| find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.clone())))
+        .collect()
 }
 
 pub fn def_for_slug(slug: &str) -> Option<&'static ConnectorDef> {
@@ -140,6 +136,7 @@ impl ConnectorManager {
     pub async fn begin_connect(&self, id: &str) -> AppResult<String> {
         let def = find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.to_string()))?;
         self.accounts_cache.invalidate_all();
+        self.specs_cache.invalidate_all();
         Ok(self.client.connect(def.id).await?)
     }
 
@@ -151,6 +148,7 @@ impl ConnectorManager {
             .find(|account| account.toolkit == def.id && account.status == ACTIVE_STATUS)
             .ok_or_else(|| AppError::ConnectorNotConnected(def.name.to_string()))?;
         self.accounts_cache.invalidate_all();
+        self.specs_cache.invalidate_all();
         Ok(self.client.disconnect(&account.id).await?)
     }
 

@@ -331,7 +331,7 @@ fn cached_user_path(data_dir: &Path) -> PathBuf {
     data_dir.join(CACHED_USER_FILE)
 }
 
-pub fn save_cached_user(data_dir: &Path, profile: &UserProfile) {
+fn save_cached_user(data_dir: &Path, profile: &UserProfile) {
     if let Ok(json) = serde_json::to_vec(profile) {
         let path = cached_user_path(data_dir);
         if let Ok(mut tmp) = tempfile::NamedTempFile::new_in(data_dir) {
@@ -347,7 +347,7 @@ pub async fn save_cached_user_async(data_dir: PathBuf, profile: UserProfile) {
     let _ = tokio::task::spawn_blocking(move || save_cached_user(&data_dir, &profile)).await;
 }
 
-pub fn load_cached_user(data_dir: &Path) -> Option<UserProfile> {
+fn load_cached_user(data_dir: &Path) -> Option<UserProfile> {
     let raw = std::fs::read(cached_user_path(data_dir)).ok()?;
     serde_json::from_slice(&raw).ok()
 }
@@ -359,7 +359,7 @@ pub async fn load_cached_user_async(data_dir: PathBuf) -> Option<UserProfile> {
         .flatten()
 }
 
-pub fn clear_cached_user(data_dir: &Path) {
+fn clear_cached_user(data_dir: &Path) {
     let _ = std::fs::remove_file(cached_user_path(data_dir));
 }
 
@@ -389,9 +389,9 @@ pub fn jwt_user_id(token: &str) -> Option<String> {
 }
 
 #[derive(Default)]
-pub struct AuthCallbackParams {
-    pub code: Option<String>,
-    pub error: Option<String>,
+struct AuthCallbackParams {
+    code: Option<String>,
+    error: Option<String>,
 }
 
 fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
@@ -409,7 +409,7 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
     }
 }
 
-pub fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
+fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
     let normalized = match crate::util::strip_prefix_ignore_ascii_case(raw, "orch://") {
         Some(rest) => format!("http://localhost/{rest}"),
         None => raw.to_string(),
@@ -451,9 +451,9 @@ pub async fn handle_auth_callback(
     }
 
     let session_id = session_id.ok_or_else(|| "Missing sign-in session".to_string())?;
-    params
-        .code
-        .ok_or_else(|| "No authorization code found in sign-in callback".to_string())?;
+    if params.code.is_none() {
+        return Err("No authorization code found in sign-in callback".to_string());
+    }
     let request_uri = auth_callback_request_uri(raw_url)?;
     let client = FirebaseAuthClient::new();
     let (session, profile) = client

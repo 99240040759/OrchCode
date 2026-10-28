@@ -140,10 +140,11 @@ pub struct AgentInputs<'a> {
     pub connectors: Vec<&'static ConnectorDef>,
     pub connector_tools: Vec<DynamicTool>,
     pub thinking_effort: Effort,
+    pub skills: Arc<[crate::skills::Skill]>,
 }
 
 pub fn build_agent(inputs: AgentInputs<'_>) -> ChatAgent {
-    let preamble = build_preamble(inputs.data_dir, inputs.workspace, &inputs.connectors);
+    let preamble = build_preamble(&inputs.skills, inputs.workspace, &inputs.connectors);
     let ctx = inputs.tools;
     let model = inputs
         .client
@@ -235,10 +236,9 @@ const ROLE: &str = r#"You are the user's autonomous software engineer inside a d
 - For a user question, give the direct answer first, then enough evidence to make the reasoning checkable. For implementation, summarize the result rather than dumping internal reasoning.
 - Be clear and economical. Use familiar words, short paragraphs, and lists only when they make the result easier to scan. Avoid generic praise, canned transitions, and claims of certainty unsupported by evidence."#;
 
-fn build_preamble(data_dir: &Path, workspace: Option<&Path>, connectors: &[&'static ConnectorDef]) -> String {
+fn build_preamble(skills: &[crate::skills::Skill], workspace: Option<&Path>, connectors: &[&'static ConnectorDef]) -> String {
     let mut sections: Vec<Section> = Vec::new();
 
-    let skills = crate::skills::load_all_skills(data_dir);
     if !skills.is_empty() {
         let mut text = String::from(
             "These are reusable procedure guides for common task categories. \
@@ -325,13 +325,15 @@ pub struct RunSession {
     first_new_id: u64,
     compactions: u32,
     cooldown: Option<usize>,
+    prompt_mirrored: bool,
 }
 
 impl RunSession {
     fn mirror(&mut self, history: &[Arc<Message>], prompt: &Message) {
         let mut fresh: Vec<Arc<Message>> = history.iter().skip(self.synced).cloned().collect();
-        if history.len() >= self.synced {
+        if !self.prompt_mirrored {
             fresh.push(Arc::new(prompt.clone()));
+            self.prompt_mirrored = true;
         }
         self.synced = self.synced.max(history.len() + 1);
         if !fresh.is_empty() {
@@ -509,6 +511,7 @@ impl ChatRun {
             first_new_id,
             compactions: 0,
             cooldown: None,
+            prompt_mirrored: false,
         }));
         Ok(Self { shared, deps })
     }
@@ -1119,7 +1122,7 @@ pub async fn build_user_message(
             .collect::<Vec<_>>()
     })
     .await
-    .unwrap_or_default();
+    .map_err(|e| format!("failed to load attachments: {e}"))?;
 
     let mut parts: Vec<UserContent> = Vec::new();
     if !prompt.trim().is_empty() {

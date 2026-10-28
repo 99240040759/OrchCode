@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import * as api from "../../../lib/api";
 import { extractPromptFromDoc } from "../MentionNodeView";
@@ -11,14 +11,16 @@ export function useDictation({
   setNotice: (notice: string | null) => void;
 }) {
   const [recording, setRecording] = useState(false);
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
 
   const toggleDictation = useCallback(async () => {
-    if (recording) {
-      setRecording(false);
+    if (recordingRef.current) {
       try {
         await api.stopDictation();
+        setRecording(false);
       } catch (e) {
-        console.error("Failed to stop dictation:", e);
+        setNotice(api.errorMessage(e));
       }
       return;
     }
@@ -47,17 +49,17 @@ export function useDictation({
       setRecording(false);
       setNotice(api.errorMessage(e));
     }
-  }, [recording, editorRef, setNotice]);
+  }, [editorRef, setNotice]);
 
   const stopDictation = useCallback(async () => {
-    if (!recording) return;
-    setRecording(false);
+    if (!recordingRef.current) return;
     try {
       await api.stopDictation();
+      setRecording(false);
     } catch (e) {
-      console.error("Failed to stop dictation:", e);
+      setNotice(api.errorMessage(e));
     }
-  }, [recording]);
+  }, [setNotice]);
 
   return { recording, toggleDictation, stopDictation };
 }

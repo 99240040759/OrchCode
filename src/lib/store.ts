@@ -5,6 +5,7 @@ import * as api from "./api";
 import { newId } from "./api";
 import { useWorkspaceStore } from "./workspace";
 import { useArtifactsStore } from "./artifacts";
+import { useConnectorsStore } from "./connectors";
 import type {
   AttachmentRef,
   Budget,
@@ -236,6 +237,9 @@ async function bindListeners() {
     listen("models-updated", () => {
       void useChatStore.getState().refreshModels();
     }),
+    listen("connector-changed", () => {
+      void useConnectorsStore.getState().refresh();
+    }),
   ]);
   const fns = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
@@ -254,7 +258,7 @@ function pickModel(models: ModelDto[], key: string | null | undefined): ModelDto
   return (key ? models.find((m) => m.key === key) : undefined) ?? models[0] ?? null;
 }
 
-let cancelActiveStreamFlush: (() => void) | null = null;
+const activeStreamFlushes = new Map<string, () => void>();
 
 export const useChatStore = create(
   immer<ChatStore>((set, get) => ({
@@ -304,12 +308,12 @@ export const useChatStore = create(
     },
 
     reloadForWorkspace: async () => {
-      if (cancelActiveStreamFlush) {
-        cancelActiveStreamFlush();
-        cancelActiveStreamFlush = null;
-      }
       const running = get().streamingSessionId;
-      if (running) await api.cancelChat(running).catch(() => undefined);
+      if (running) {
+        activeStreamFlushes.get(running)?.();
+        activeStreamFlushes.delete(running);
+        await api.cancelChat(running).catch(() => undefined);
+      }
       const wsPath = useWorkspaceStore.getState().current?.path ?? null;
       const freshId = newId();
       useArtifactsStore.getState().dropWorkspaceTabs();
@@ -330,12 +334,10 @@ export const useChatStore = create(
     },
 
     reset: () => {
-      if (cancelActiveStreamFlush) {
-        cancelActiveStreamFlush();
-        cancelActiveStreamFlush = null;
-      }
       const running = get().streamingSessionId;
       if (running) void api.cancelChat(running).catch(() => undefined);
+      for (const cancel of activeStreamFlushes.values()) cancel();
+      activeStreamFlushes.clear();
       initEpoch += 1;
       isInitializing = false;
       unbindListeners();
@@ -403,9 +405,12 @@ export const useChatStore = create(
           const earlierMessages: ChatMessage[] = page.messages.map(messageViewToLocal);
           s.messages = mergeAdjacentAssistantMessages([...earlierMessages, ...s.messages]);
         });
-      } catch {
+      } catch (e) {
         set((s) => {
-          s.loadingEarlierMessages = false;
+          if (s.currentSessionId === id) {
+            s.loadingEarlierMessages = false;
+            s.error = api.errorMessage(e);
+          }
         });
       }
     },
@@ -569,7 +574,7 @@ export const useChatStore = create(
         flush();
       };
 
-      cancelActiveStreamFlush = () => {
+      activeStreamFlushes.set(sessionId, () => {
         if (rafId !== null) {
           cancelAnimationFrame(rafId);
           rafId = null;
@@ -580,7 +585,7 @@ export const useChatStore = create(
         }
         textBuffer = "";
         reasoningBuffer = "";
-      };
+      });
 
       const handleEvent = (event: ChatStreamEvent) => {
         receivedEvents = true;
@@ -724,7 +729,7 @@ export const useChatStore = create(
         });
         return true;
       } finally {
-        cancelActiveStreamFlush = null;
+        activeStreamFlushes.delete(sessionId);
       }
     },
 
@@ -749,6 +754,8 @@ export const useChatStore = create(
 
     cancel: () => {
       const target = get().streamingSessionId ?? get().currentSessionId;
+      activeStreamFlushes.get(target)?.();
+      activeStreamFlushes.delete(target);
       void api.cancelChat(target).catch(() => undefined);
     },
 

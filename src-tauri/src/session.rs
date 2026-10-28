@@ -59,10 +59,11 @@ pub async fn destroy(data_dir: &Path, session_id: &str) -> AppResult<()> {
     let dir = conversations_root(data_dir).join(session_id);
     tokio::task::spawn_blocking(move || -> AppResult<()> {
         store.destroy().map_err(AppError::Io)?;
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(AppError::Io)?;
+        match std::fs::remove_dir_all(&dir) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::Io(e)),
         }
-        Ok(())
     })
     .await
     .map_err(|e| {
@@ -72,7 +73,7 @@ pub async fn destroy(data_dir: &Path, session_id: &str) -> AppResult<()> {
 }
 
 fn stable_id(cid: &str, message: u64, item_idx: usize, kind: Option<&str>) -> String {
-    crate::util::stable_hash_hex(&format!("{cid}:{message}:{item_idx}:{}", kind.unwrap_or("")))
+    crate::util::fast_hash_hex(&format!("{cid}:{message}:{item_idx}:{}", kind.unwrap_or("")))
 }
 
 pub fn message_view_id(cid: &str, id: MessageId) -> String {
@@ -331,7 +332,7 @@ fn assistant_view(
             }
             AssistantContent::ToolCall(tc) => {
                 let args = serde_json::to_string(&tc.function.arguments).unwrap_or_default();
-                let display_info = parse_display_info(&tc.function.name.to_string(), &args);
+                let display_info = parse_display_info(tc.function.name.as_ref(), &args);
                 let entry = outputs.get(&tc.id.to_string());
                 let status = match entry {
                     Some((_, false)) => "done",

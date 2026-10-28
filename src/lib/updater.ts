@@ -6,7 +6,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import * as api from "./api";
 import { IS_MAC } from "./utils";
 
-const LATEST_RELEASE_URL = "https://github.com/sameer786ss/OrchCode/releases/latest";
+const LATEST_RELEASE_URL = "https://github.com/sameer786ss/orchcode/releases/latest";
 const MANIFEST_URL = `${LATEST_RELEASE_URL}/download/latest.json`;
 
 function isNewer(remote: string, current: string): boolean {

@@ -24,10 +24,17 @@ fn main() {
         None
     };
 
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_ansi(false))
-        .with(sentry_tracing::layer())
-        .init();
+    let fmt_layer = tracing_subscriber::fmt::layer().with_ansi(cfg!(debug_assertions));
+    if _guard.is_some() {
+        tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(sentry_tracing::layer())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(fmt_layer)
+            .init();
+    }
 
     orch_lib::run();
 }

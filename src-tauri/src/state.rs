@@ -51,6 +51,7 @@ pub struct AppState {
     current_user_id: ArcSwapOption<String>,
     sign_in: Mutex<Option<SignInAttempt>>,
     pub sign_in_lock: Arc<tokio::sync::Mutex<()>>,
+    pub prefs_save_lock: Arc<tokio::sync::Mutex<()>>,
     last_callback: Mutex<Option<(String, Instant)>>,
     run_finished_notify: Arc<tokio::sync::Notify>,
     token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
@@ -89,6 +90,7 @@ impl AppState {
             current_user_id: ArcSwapOption::empty(),
             sign_in: Mutex::new(None),
             sign_in_lock: Arc::new(tokio::sync::Mutex::new(())),
+            prefs_save_lock: Arc::new(tokio::sync::Mutex::new(())),
             last_callback: Mutex::new(None),
             run_finished_notify: Arc::new(tokio::sync::Notify::new()),
             token_refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -118,7 +120,10 @@ impl AppState {
     }
 
     pub fn has_token(&self) -> bool {
-        self.access_token().is_some()
+        self.token
+            .load()
+            .as_ref()
+            .is_some_and(|token| !token.expose_secret().is_empty())
     }
 
     pub fn current_user_id(&self) -> Option<String> {
@@ -278,7 +283,7 @@ impl AppState {
         Ok(client)
     }
 
-    pub async fn catalog(&self) -> AppResult<ModelCatalog> {
+    pub async fn catalog(&self) -> AppResult<Arc<ModelCatalog>> {
         if let Some(cat) = self.cached_catalog() {
             return Ok(cat);
         }
@@ -289,17 +294,16 @@ impl AppState {
         self.refresh_catalog().await
     }
 
-    fn cached_catalog(&self) -> Option<ModelCatalog> {
+    fn cached_catalog(&self) -> Option<Arc<ModelCatalog>> {
         self.catalog
             .load_full()
             .filter(|catalog| !catalog.is_empty())
-            .map(|catalog| catalog.as_ref().clone())
     }
 
-    pub async fn refresh_catalog(&self) -> AppResult<ModelCatalog> {
+    pub async fn refresh_catalog(&self) -> AppResult<Arc<ModelCatalog>> {
         self.ensure_fresh_token().await?;
-        let fresh = self.gateway.models().await?;
-        self.catalog.store(Some(Arc::new(fresh.clone())));
+        let fresh = Arc::new(self.gateway.models().await?);
+        self.catalog.store(Some(fresh.clone()));
         Ok(fresh)
     }
 
@@ -437,6 +441,10 @@ impl AppState {
         }
     }
 
+    pub fn has_run(&self, session_id: &str) -> bool {
+        self.runs.contains_key(session_id)
+    }
+
     pub fn run_owner(&self, session_id: &str) -> Option<String> {
         self.runs.get(session_id).map(|run| run.owner_id.clone())
     }
@@ -482,7 +490,7 @@ impl AppState {
 
     pub fn close_all_terminals(&self) {
         let mut guard = self.terminals.lock();
-        for (_, session) in guard.iter_mut() {
+        for session in guard.values_mut() {
             session.kill();
         }
         guard.clear();

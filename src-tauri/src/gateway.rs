@@ -230,8 +230,6 @@ pub struct TavilyRequest {
 #[derive(Debug, Deserialize)]
 pub struct TavilyResponse {
     #[serde(default)]
-    pub answer: Option<String>,
-    #[serde(default)]
     pub results: Vec<TavilyResult>,
 }
 

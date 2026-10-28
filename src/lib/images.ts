@@ -39,8 +39,10 @@ class LruImageCache {
 
 const cache = new LruImageCache(CACHE_LIMIT);
 const inflight = new Map<string, Promise<string>>();
+let cacheEpoch = 0;
 
 export function clearImageCache(): void {
+  cacheEpoch += 1;
   cache.clear();
   inflight.clear();
 }
@@ -53,9 +55,12 @@ function loadImageDataUrl(path: string, version = 0): Promise<string> {
   const pending = inflight.get(cacheKey);
   if (pending) return pending;
 
+  const currentEpoch = cacheEpoch;
   const request = readImageDataUrl(path)
     .then((url) => {
-      cache.set(cacheKey, url);
+      if (currentEpoch === cacheEpoch) {
+        cache.set(cacheKey, url);
+      }
       return url;
     })
     .finally(() => {

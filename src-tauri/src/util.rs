@@ -13,10 +13,6 @@ pub fn now_secs() -> i64 {
     now_ms() / 1000
 }
 
-pub fn stable_hash_hex(input: &str) -> String {
-    fast_hash_hex(input)
-}
-
 pub fn fast_hash_hex(input: &str) -> String {
     format!("{:016x}", xxhash_rust::xxh3::xxh3_64(input.as_bytes()))
 }

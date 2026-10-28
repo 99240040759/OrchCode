@@ -149,8 +149,19 @@ fn thumbnail_cache() -> &'static Cache<String, String> {
     })
 }
 
+fn thumbnail_cache_key(b64: &str, mime: &str, max_dimension: u32) -> String {
+    let len = b64.len();
+    if len <= 8192 {
+        crate::util::fast_hash_hex(&format!("{len}:{mime}:{max_dimension}:{b64}"))
+    } else {
+        let head = &b64[..4096];
+        let tail = &b64[len - 4096..];
+        crate::util::fast_hash_hex(&format!("{len}:{mime}:{max_dimension}:{head}:{tail}"))
+    }
+}
+
 pub fn thumbnail_data_url_from_base64(b64: &str, mime: &str, max_dimension: u32) -> Option<String> {
-    let key = crate::util::fast_hash_hex(b64);
+    let key = thumbnail_cache_key(b64, mime, max_dimension);
     if let Some(cached) = thumbnail_cache().get(&key) {
         return Some(cached);
     }

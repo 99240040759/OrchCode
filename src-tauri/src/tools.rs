@@ -1173,18 +1173,22 @@ fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) ->
         .case_insensitive(true)
         .build(query)
         .map_err(|e| ToolError::msg(format!("invalid search pattern: {e}")))?;
-    let results = Arc::new(Mutex::new(Vec::<(String, u64, String)>::new()));
-    let total_chars = Arc::new(Mutex::new(0usize));
-    let truncated = Arc::new(Mutex::new(false));
+
+    #[derive(Default)]
+    struct SearchAccumulator {
+        results: Vec<(String, u64, String)>,
+        total_chars: usize,
+        truncated: bool,
+    }
+
+    let state = Arc::new(Mutex::new(SearchAccumulator::default()));
     let matcher = Arc::new(matcher);
 
     fs_util::workspace_walker(search_path)
         .build_parallel()
         .run(|| {
             let matcher = matcher.clone();
-            let results = results.clone();
-            let total_chars = total_chars.clone();
-            let truncated = truncated.clone();
+            let state = state.clone();
             let mut searcher = grep_searcher::SearcherBuilder::new()
                 .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
                 .line_number(true)
@@ -1201,44 +1205,46 @@ fn search_text(root: &Path, search_path: &Path, query: &str, max_hits: usize) ->
                 {
                     return WalkState::Continue;
                 }
-                if results.lock().len() >= max_hits
-                    || *total_chars.lock() >= config::MAX_SEARCH_OUTPUT_CHARS
                 {
-                    *truncated.lock() = true;
-                    return WalkState::Quit;
+                    let mut guard = state.lock();
+                    if guard.results.len() >= max_hits || guard.total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
+                        guard.truncated = true;
+                        return WalkState::Quit;
+                    }
                 }
 
                 let file_path = entry.path().to_path_buf();
                 let rel_path = fs_util::display_relative(root, &file_path);
-                let results = results.clone();
-                let total_chars = total_chars.clone();
-                let truncated = truncated.clone();
+                let state = state.clone();
                 let sink = grep_searcher::sinks::UTF8(move |line_num, line| {
-                    let mut result_guard = results.lock();
-                    let mut char_guard = total_chars.lock();
-                    if result_guard.len() >= max_hits
-                        || *char_guard >= config::MAX_SEARCH_OUTPUT_CHARS
-                    {
-                        *truncated.lock() = true;
+                    let mut guard = state.lock();
+                    if guard.results.len() >= max_hits || guard.total_chars >= config::MAX_SEARCH_OUTPUT_CHARS {
+                        guard.truncated = true;
                         return Ok(false);
                     }
                     let trimmed = line.trim();
                     let shown = crate::util::truncate_chars(trimmed, config::MAX_SEARCH_LINE_CHARS);
                     let suffix = if shown.len() < trimmed.len() { " …" } else { "" };
                     let output = format!("{rel_path}:{line_num}: {shown}{suffix}");
-                    *char_guard += output.chars().count() + 1;
-                    result_guard.push((rel_path.clone(), line_num, output));
-                    Ok(result_guard.len() < max_hits
-                        && *char_guard < config::MAX_SEARCH_OUTPUT_CHARS)
+                    guard.total_chars += output.chars().count() + 1;
+                    guard.results.push((rel_path.clone(), line_num, output));
+                    let continue_search = guard.results.len() < max_hits
+                        && guard.total_chars < config::MAX_SEARCH_OUTPUT_CHARS;
+                    if !continue_search {
+                        guard.truncated = true;
+                    }
+                    Ok(continue_search)
                 });
                 let _ = searcher.search_path(matcher.as_ref(), &file_path, sink);
                 WalkState::Continue
             })
         });
 
-    let mut results = Arc::try_unwrap(results).unwrap().into_inner();
+    let (mut results, truncated) = {
+        let mut guard = state.lock();
+        (std::mem::take(&mut guard.results), guard.truncated)
+    };
     results.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-    let truncated = *truncated.lock();
     if results.is_empty() {
         Ok(format!("No matches found for pattern: '{query}'"))
     } else {
@@ -1505,7 +1511,7 @@ impl Tool for ReadSkill {
         _ctx: &mut rig::tool::ToolContext,
         args: Self::Args,
     ) -> Result<Self::Output, Self::Error> {
-        let skills = load_all_skills(&self.data_dir);
+        let skills = load_all_skills(self.data_dir.clone()).await;
         let target = args.name.trim().to_lowercase();
         let skill = skills
             .iter()
@@ -1574,11 +1580,6 @@ impl Tool for WebSearch {
 
         let resp = self.gateway.tavily(&req).await?;
         let mut out = String::new();
-        if let Some(answer) = resp.answer.filter(|a| !a.is_empty()) {
-            out.push_str("Answer: ");
-            out.push_str(&answer);
-            out.push_str("\n\n");
-        }
 
         if resp.results.is_empty() {
             out.push_str("No results found.");

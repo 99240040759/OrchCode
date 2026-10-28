@@ -219,7 +219,15 @@ pub async fn forget_workspace(
             .session_ids_for_workspace(&canonical, &user_id)
             .await
             .map_err(|e| e.to_string())?;
+        for id in &session_ids {
+            state.cancel_run(id);
+        }
         state.wait_for_runs(&session_ids, Duration::from_secs(5)).await;
+        for id in &session_ids {
+            if state.has_run(id) {
+                return Err(format!("cannot delete project: session {id} could not be stopped in time"));
+            }
+        }
         for id in &session_ids {
             if let Err(error) = session::destroy(&state.data_dir, id).await {
                 tracing::error!(session_id = %id, error = %error, "could not delete conversation");
@@ -448,10 +456,12 @@ pub async fn start_chat(
         data_dir: state.data_dir.clone(),
         supports_images: model_info.supports_images(),
     };
+    let skills = crate::skills::load_all_skills(state.data_dir.clone()).await;
     let agent = build_agent(AgentInputs {
         client: &client,
         model: &model_info,
         tools: &tool_context,
+        skills,
         data_dir: &state.data_dir,
         workspace: Some(workspace.as_path()),
         connectors: connectors.defs,
@@ -639,6 +649,7 @@ pub async fn set_user_pref(
     scoped: Option<bool>,
 ) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
+    let _guard = state.prefs_save_lock.lock().await;
     let store = app.store("prefs.json").map_err(|e| e.to_string())?;
     let full_key = prefs_key(&state, &key, scoped.unwrap_or(false))?;
     store.set(full_key, serde_json::Value::String(value));

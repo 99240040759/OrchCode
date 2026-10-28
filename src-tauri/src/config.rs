@@ -11,16 +11,20 @@ pub fn sentry_dsn() -> &'static str {
     DSN.get_or_init(|| {
         std::env::var("SENTRY_DSN")
             .ok()
+            .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| option_env!("SENTRY_DSN").unwrap_or("").to_string())
+            .unwrap_or_else(|| {
+                option_env!("SENTRY_DSN")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_default()
+            })
     })
     .as_str()
 }
 
 pub const AUTH_REDIRECT_URL: &str = "https://orch.live/auth-callback";
 
-/// Root the native Gemini client talks to. The gateway forwards
-/// `/vertex/v1beta/models/{model}:streamGenerateContent` to Vertex AI.
 pub fn inference_base_url() -> String {
     format!("{}/vertex", gcp_functions_url())
 }
@@ -93,12 +97,12 @@ pub const STREAM_CHUNK_TIMEOUT_SECS: u64 = 360;
 pub const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 1_800;
 pub const SUMMARY_REQUEST_TIMEOUT_SECS: u64 = 180;
 
-pub const FILE_INDEX_TTL_SECS: u64 = 10;
+pub const FILE_INDEX_TTL_SECS: u64 = 120;
 pub const MAX_INDEXED_FILES: usize = 200_000;
 
 pub const MAX_PREVIEW_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_PREVIEW_IMAGE_DIMENSION: u32 = 2048;
-pub const MAX_BINARY_PREVIEW_BYTES: u64 = 200 * 1024 * 1024;
+pub const MAX_BINARY_PREVIEW_BYTES: u64 = 30 * 1024 * 1024;
 pub const MAX_SPREADSHEET_ROWS: usize = 5_000;
 pub const MAX_SPREADSHEET_COLS: usize = 200;
 

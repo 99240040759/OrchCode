@@ -22,17 +22,22 @@ pub struct DictationHandle {
     recording: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
     stop_notify: Arc<tokio::sync::Notify>,
+    stop_signal: Arc<(parking_lot::Mutex<bool>, parking_lot::Condvar)>,
 }
 
 impl DictationHandle {
     pub fn stop(&self) {
         self.recording.store(false, Ordering::SeqCst);
+        *self.stop_signal.0.lock() = true;
+        self.stop_signal.1.notify_all();
         self.stop_notify.notify_one();
     }
 
     pub fn cancel(&self) {
         self.finished.store(true, Ordering::SeqCst);
         self.recording.store(false, Ordering::SeqCst);
+        *self.stop_signal.0.lock() = true;
+        self.stop_signal.1.notify_all();
         self.stop_notify.notify_one();
     }
 }
@@ -43,6 +48,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
     let capture_finished = Arc::new(AtomicBool::new(false));
     let stop_notify = Arc::new(tokio::sync::Notify::new());
     let capture_notify = Arc::new(tokio::sync::Notify::new());
+    let stop_signal = Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new()));
     let samples: Samples = Arc::new(Mutex::new(Vec::with_capacity(65536)));
     let sample_rate = Arc::new(AtomicU32::new(0));
 
@@ -55,8 +61,9 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         let capture_finished = capture_finished.clone();
         let capture_notify = capture_notify.clone();
         let stop_notify = stop_notify.clone();
+        let stop_signal = stop_signal.clone();
         std::thread::spawn(move || {
-            if let Err(e) = capture_loop(&recording, &samples, &sample_rate) {
+            if let Err(e) = capture_loop(&recording, &samples, &sample_rate, &stop_signal) {
                 sentry::capture_error(&e);
                 recording.store(false, Ordering::SeqCst);
                 finished.store(true, Ordering::SeqCst);
@@ -98,6 +105,7 @@ pub fn start(gateway: Arc<Gateway>, channel: Channel<DictationEvent>) -> AppResu
         recording,
         finished,
         stop_notify,
+        stop_signal,
     })
 }
 
@@ -105,6 +113,7 @@ fn capture_loop(
     recording: &Arc<AtomicBool>,
     samples: &Samples,
     sample_rate: &Arc<AtomicU32>,
+    stop_signal: &Arc<(parking_lot::Mutex<bool>, parking_lot::Condvar)>,
 ) -> AppResult<()> {
     let host = cpal::default_host();
     let device = host
@@ -227,9 +236,12 @@ fn capture_loop(
         .play()
         .map_err(|e| AppError::Audio(format!("failed to start stream: {e}")))?;
 
-    while recording.load(Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(50));
+    let (lock, cvar) = &**stop_signal;
+    let mut stopped = lock.lock();
+    while recording.load(Ordering::SeqCst) && !*stopped {
+        cvar.wait(&mut stopped);
     }
+    let _ = stream.pause();
     drop(stream);
     let _ = collector_thread.join();
     Ok(())

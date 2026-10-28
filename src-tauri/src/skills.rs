@@ -62,17 +62,24 @@ fn skills_cache() -> &'static Cache<PathBuf, Arc<[Skill]>> {
     })
 }
 
-pub fn load_all_skills(data_dir: &Path) -> Arc<[Skill]> {
+pub async fn load_all_skills(data_dir: PathBuf) -> Arc<[Skill]> {
     let skills_dir = data_dir.join("skills");
-    skills_cache().get_with(skills_dir.clone(), || {
-        let mut skills = Vec::new();
-        let mut seen = HashSet::new();
+    if let Some(cached) = skills_cache().get(&skills_dir) {
+        return cached;
+    }
+    tokio::task::spawn_blocking(move || {
+        skills_cache().get_with(skills_dir.clone(), || {
+            let mut skills = Vec::new();
+            let mut seen = HashSet::new();
 
-        scan_skills_directory(&skills_dir, &mut skills, &mut seen);
+            scan_skills_directory(&skills_dir, &mut skills, &mut seen);
 
-        skills.sort_by(|a, b| a.name.cmp(&b.name));
-        skills.into()
+            skills.sort_by(|a, b| a.name.cmp(&b.name));
+            skills.into()
+        })
     })
+    .await
+    .unwrap_or_else(|_| Arc::new([]))
 }
 
 fn scan_skills_directory(dir: &Path, out: &mut Vec<Skill>, seen: &mut HashSet<String>) {
