@@ -96,18 +96,24 @@ pub struct AttachmentRef {
 
 pub const FILE_PART_PREFIX: &str = "<file:";
 pub const PDF_PART_PREFIX: &str = "<pdf:";
+pub const MENTION_FILE_PART_PREFIX: &str = "<mention-file:";
+pub const MENTION_PDF_PART_PREFIX: &str = "<mention-pdf:";
 pub const NOTE_PART_PREFIX: &str = "<note>";
 
 pub fn is_payload_part(text: &str) -> bool {
     text.starts_with(FILE_PART_PREFIX)
         || text.starts_with(PDF_PART_PREFIX)
+        || text.starts_with(MENTION_FILE_PART_PREFIX)
+        || text.starts_with(MENTION_PDF_PART_PREFIX)
         || text.starts_with(NOTE_PART_PREFIX)
 }
 
 pub fn payload_part_label(text: &str) -> Option<String> {
     let rest = text
         .strip_prefix(FILE_PART_PREFIX)
-        .or_else(|| text.strip_prefix(PDF_PART_PREFIX))?;
+        .or_else(|| text.strip_prefix(PDF_PART_PREFIX))
+        .or_else(|| text.strip_prefix(MENTION_FILE_PART_PREFIX))
+        .or_else(|| text.strip_prefix(MENTION_PDF_PART_PREFIX))?;
     let end = rest.find('>')?;
     let label = &rest[..end];
     if label.is_empty() {
@@ -928,6 +934,10 @@ pub async fn run_chat(
 }
 
 
+pub fn is_mention_context_part(text: &str) -> bool {
+    text.starts_with(MENTION_FILE_PART_PREFIX) || text.starts_with(MENTION_PDF_PART_PREFIX)
+}
+
 fn mention_regex() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
@@ -936,7 +946,10 @@ fn mention_regex() -> &'static regex::Regex {
     })
 }
 
-fn collect_mentioned_paths(workspace: Option<&Path>, prompt: &str) -> Vec<(PathBuf, Option<String>)> {
+fn collect_mentioned_paths(
+    workspace: Option<&Path>,
+    prompt: &str,
+) -> Vec<(PathBuf, Option<String>)> {
     let Some(ws) = workspace else {
         return Vec::new();
     };
@@ -978,6 +991,7 @@ fn load_attachment(
     path: &Path,
     label: &str,
     line_range: Option<&str>,
+    is_mention: bool,
     supports_images: bool,
 ) -> Result<AttachmentPart, String> {
     let ext = crate::util::lowercase_extension(path);
@@ -1015,14 +1029,26 @@ fn load_attachment(
         if parsed.full_text.trim().is_empty() {
             return Err(format!("{label} contains no extractable text"));
         }
-        let prefix = if ext == "pdf" { PDF_PART_PREFIX } else { FILE_PART_PREFIX };
+        let prefix = match (is_mention, ext == "pdf") {
+            (true, true) => MENTION_PDF_PART_PREFIX,
+            (true, false) => MENTION_FILE_PART_PREFIX,
+            (false, true) => PDF_PART_PREFIX,
+            (false, false) => FILE_PART_PREFIX,
+        };
         (prefix, parsed.full_text)
     } else {
         let bytes = std::fs::read(path).map_err(|e| format!("cannot read attachment {label}: {e}"))?;
         if crate::util::looks_binary(&bytes) {
             return Err(format!("{label} is a binary file and cannot be attached as text"));
         }
-        (FILE_PART_PREFIX, String::from_utf8_lossy(&bytes).into_owned())
+        (
+            if is_mention {
+                MENTION_FILE_PART_PREFIX
+            } else {
+                FILE_PART_PREFIX
+            },
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )
     };
 
     let (content, label_with_range) = match line_range {
@@ -1052,30 +1078,36 @@ pub async fn build_user_message(
     supports_images: bool,
 ) -> Result<BuiltUserMessage, String> {
     let mut notes: Vec<String> = Vec::new();
-    let mut targets: Vec<(PathBuf, String, Option<String>)> = Vec::new();
+    let mut targets: Vec<(PathBuf, String, Option<String>, bool)> = Vec::new();
 
     for attachment in attachments {
         match crate::tools::fs_util::resolve_readable_file(workspace, &attachment.path) {
             Ok(path) => {
                 let label = display_label(&path, workspace);
-                targets.push((path, label, None));
+                targets.push((path, label, None, false));
             }
             Err(error) => notes.push(format!("{} could not be attached: {error}", attachment.name)),
         }
     }
     for (path, line_range) in collect_mentioned_paths(workspace, prompt) {
         let label = display_label(&path, workspace);
-        targets.push((path, label, line_range));
+        targets.push((path, label, line_range, true));
     }
 
     let mut seen: HashSet<(PathBuf, Option<String>)> = HashSet::new();
-    targets.retain(|(path, _, range)| seen.insert((path.clone(), range.clone())));
+    targets.retain(|(path, _, range, _)| seen.insert((path.clone(), range.clone())));
 
     let loaded = tokio::task::spawn_blocking(move || {
         targets
             .into_iter()
-            .map(|(path, label, range)| {
-                let result = load_attachment(&path, &label, range.as_deref(), supports_images);
+            .map(|(path, label, range, is_mention)| {
+                let result = load_attachment(
+                    &path,
+                    &label,
+                    range.as_deref(),
+                    is_mention,
+                    supports_images,
+                );
                 (label, result)
             })
             .collect::<Vec<_>>()

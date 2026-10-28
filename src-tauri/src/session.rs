@@ -218,17 +218,19 @@ fn user_view(cid: &str, id: MessageId, content: &[UserContent]) -> Option<Messag
             UserContent::Text(t) => {
                 if is_payload_part(&t.text) {
                     if let Some(label) = payload_part_label(&t.text) {
-                        let path = label
-                            .split_once("#L")
-                            .map(|(path, _)| path)
-                            .unwrap_or(&label)
-                            .to_string();
-                        attachments.push(AttachmentView {
-                            name: crate::util::basename(&path),
-                            is_image: false,
-                            path: Some(path),
-                            data_url: None,
-                        });
+                        if !crate::llm::is_mention_context_part(&t.text) {
+                            let path = label
+                                .split_once("#L")
+                                .map(|(path, _)| path)
+                                .unwrap_or(&label)
+                                .to_string();
+                            attachments.push(AttachmentView {
+                                name: crate::util::basename(&path),
+                                is_image: false,
+                                path: Some(path),
+                                data_url: None,
+                            });
+                        }
                     } else if let Some(note) = t
                         .text
                         .strip_prefix(crate::llm::NOTE_PART_PREFIX)

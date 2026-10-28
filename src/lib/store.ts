@@ -125,6 +125,19 @@ function messageViewToLocal(v: MessageView): ChatMessage {
   };
 }
 
+function mergeAdjacentAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
+  const merged: ChatMessage[] = [];
+  for (const message of messages) {
+    const previous = merged[merged.length - 1];
+    if (previous?.role === "assistant" && message.role === "assistant") {
+      previous.items.push(...message.items);
+      continue;
+    }
+    merged.push({ ...message, items: [...message.items] });
+  }
+  return merged;
+}
+
 function usageFrom(session: SessionSummary): TokenUsage {
   return {
     contextTokens: session.contextTokens,
@@ -365,7 +378,7 @@ export const useChatStore = create(
           if (s.currentSessionId !== id) return;
           s.hasMoreMessages = page.hasMore;
           s.earliestMessageId = page.earliestMessageId;
-          s.messages = page.messages.map(messageViewToLocal);
+          s.messages = mergeAdjacentAssistantMessages(page.messages.map(messageViewToLocal));
         });
       } catch (e) {
         set((s) => {
@@ -388,7 +401,7 @@ export const useChatStore = create(
           s.hasMoreMessages = page.hasMore;
           s.earliestMessageId = page.earliestMessageId;
           const earlierMessages: ChatMessage[] = page.messages.map(messageViewToLocal);
-          s.messages = [...earlierMessages, ...s.messages];
+          s.messages = mergeAdjacentAssistantMessages([...earlierMessages, ...s.messages]);
         });
       } catch {
         set((s) => {
