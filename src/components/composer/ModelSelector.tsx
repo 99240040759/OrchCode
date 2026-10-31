@@ -26,6 +26,13 @@ export const ModelSelector = React.memo(function ModelSelector({
 }: ModelSelectorProps) {
   const thinkingEffort = useChatStore((s) => s.thinkingEffort);
   const setThinkingEffort = useChatStore((s) => s.setThinkingEffort);
+
+  React.useEffect(() => {
+    if (thinkingEffort !== "high") {
+      setThinkingEffort("high");
+    }
+  }, [thinkingEffort, setThinkingEffort]);
+
   return (
     <>
       <DropdownMenu>
@@ -66,15 +73,19 @@ export const ModelSelector = React.memo(function ModelSelector({
             </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent sideOffset={6} align={align}>
-            {["low", "medium", "high"].map((effort) => (
-              <DropdownMenuItem
-                key={effort}
-                onSelect={() => setThinkingEffort(effort)}
-              >
-                <span className="ModelItem-name">{effort[0].toUpperCase() + effort.slice(1)}</span>
-                {thinkingEffort === effort && <VscCheck aria-label="Selected" />}
-              </DropdownMenuItem>
-            ))}
+            {["low", "medium", "high"].map((effort) => {
+              const isDisabled = effort !== "high";
+              return (
+                <DropdownMenuItem
+                  key={effort}
+                  disabled={isDisabled}
+                  onSelect={() => !isDisabled && setThinkingEffort(effort)}
+                >
+                  <span className="ModelItem-name">{effort[0].toUpperCase() + effort.slice(1)}</span>
+                  {thinkingEffort === effort && <VscCheck aria-label="Selected" />}
+                </DropdownMenuItem>
+              );
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

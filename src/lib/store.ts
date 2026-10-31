@@ -209,7 +209,7 @@ const INITIAL_STATE: ChatState = {
   sessionTokens: ZERO_USAGE,
   models: [],
   selectedModel: null,
-  thinkingEffort: "low",
+  thinkingEffort: "high",
   budget: null,
   error: null,
   initialized: false,
@@ -272,7 +272,7 @@ export const useChatStore = create(
       try {
         const wsPath = useWorkspaceStore.getState().current?.path ?? null;
 
-        const [sessions, models, savedModel, savedEffort] = await Promise.all([
+        const [sessions, models, savedModel, _savedEffort] = await Promise.all([
           wsPath
             ? api.listSessionsForWorkspace(wsPath).catch(() => [] as SessionSummary[])
             : Promise.resolve([] as SessionSummary[]),
@@ -286,7 +286,7 @@ export const useChatStore = create(
           s.sessions = sessions;
           s.models = models;
           s.selectedModel = pickModel(models, savedModel);
-          s.thinkingEffort = ["low", "medium", "high"].includes(savedEffort ?? "") ? savedEffort! : "low";
+          s.thinkingEffort = "high";
         });
 
         await bindListeners();
