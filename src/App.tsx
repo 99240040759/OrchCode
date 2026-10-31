@@ -30,7 +30,9 @@ function AppShell() {
         view={view}
       />
       <div className="AppShell-body">
-        {sidebarOpen && <Sidebar currentView={view} onViewChange={setView} />}
+        <div className="Sidebar-slot" data-open={sidebarOpen}>
+          <Sidebar currentView={view} onViewChange={setView} />
+        </div>
         <div className="Main">
           <div className="Main-view" style={{ display: view === "chat" ? "contents" : "none" }}>
             <ChatPanel visible={view === "chat"} />
@@ -142,7 +144,7 @@ function Root() {
 export default function App() {
   return (
     <ErrorBoundary FallbackComponent={AppError}>
-      <TooltipProvider delayDuration={120} disableHoverableContent>
+      <TooltipProvider delayDuration={400} skipDelayDuration={0} disableHoverableContent>
         <Root />
       </TooltipProvider>
     </ErrorBoundary>

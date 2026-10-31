@@ -82,9 +82,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const dictationRef = useRef(dictation);
   dictationRef.current = dictation;
 
-  const placeholderText = promptMode
-    ? "Write a message..."
-    : "Ask anything, @ to mention a file, / for actions";
+  const placeholderText = "Ask anything, @ to mention, / for actions";
 
   const editor = useEditor({
     shouldRerenderOnTransaction: false,
@@ -105,9 +103,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
     ],
     editorProps: {
       attributes: {
-        class: promptMode
-          ? "Composer-input Composer-input-prompt"
-          : "Composer-input",
+        class: "Composer-input",
         "data-placeholder": placeholderText,
       },
       handleKeyDown: (_view, event) => {
@@ -207,7 +203,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const canSend = hasContent || attachments.length > 0;
 
   return (
-    <div ref={composerRef} className="Composer" data-recording={dictation.recording || undefined}>
+    <div
+      ref={composerRef}
+      className="Composer"
+      data-prompt={promptMode || undefined}
+      data-recording={dictation.recording || undefined}
+    >
       <SuggestionPopover
         anchorRef={composerRef}
         trigger={suggestions.trigger}
@@ -220,6 +221,15 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
         onSelectCommand={runCommand}
         onHighlight={suggestions.setHighlighted}
       />
+
+      {!promptMode && (
+        <div className="Composer-topBar">
+          <WorkspaceDisplay
+            currentName={currentWs?.name}
+            currentPath={currentWs?.path}
+          />
+        </div>
+      )}
 
       <div className="Composer-box">
         {attachments.length > 0 && (
@@ -242,22 +252,10 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
           </div>
         )}
 
-        <div
-          className={
-            promptMode
-              ? "Composer-inputArea Composer-inputArea-prompt"
-              : "Composer-inputArea"
-          }
-        >
+        <div className="Composer-inputArea">
           <EditorContent editor={editor} />
 
-          <div
-            className={
-              promptMode
-                ? "Composer-row Composer-row-prompt"
-                : "Composer-row"
-            }
-          >
+          <div className="Composer-row">
             <DropdownMenu
               onOpenChange={(open) => {
                 if (open) void refreshConnectors();
@@ -292,17 +290,15 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {!promptMode && (
-              <ModelSelector
-                models={models}
-                selectedModel={selectedModel}
-                setSelectedModel={setSelectedModel}
-              />
-            )}
+            <ModelSelector
+              models={models}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+            />
 
             <span className="Composer-rowspacer" />
 
-            {!promptMode && (
+            {(promptMode || sessionTokens.contextTokens > 0) && (
               <ContextBar
                 contextWindow={selectedModel?.contextWindow}
                 sessionTokens={sessionTokens}
@@ -319,37 +315,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
             />
           </div>
         </div>
-
-        {!promptMode && (
-          <div className="Composer-subrow">
-            <WorkspaceDisplay
-              currentName={currentWs?.name}
-              currentPath={currentWs?.path}
-            />
-          </div>
-        )}
       </div>
-
-      {promptMode && (
-        <div className="Composer-footer">
-          <WorkspaceDisplay
-            currentName={currentWs?.name}
-            currentPath={currentWs?.path}
-          />
-          <div className="Composer-footer-right">
-            <ModelSelector
-              models={models}
-              selectedModel={selectedModel}
-              setSelectedModel={setSelectedModel}
-              align="end"
-            />
-            <ContextBar
-              contextWindow={selectedModel?.contextWindow}
-              sessionTokens={sessionTokens}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

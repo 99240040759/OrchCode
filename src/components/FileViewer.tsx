@@ -7,6 +7,7 @@ import * as api from "../lib/api";
 import * as utils from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
+import { useWorkspaceStore } from "../lib/workspace";
 import { Markdown } from "./Markdown";
 import { CodeViewer } from "./CodeViewer";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -55,17 +56,36 @@ function mediaMime(kind: "video" | "audio", path: string): string {
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
+  const wsName = useWorkspaceStore((s) => s.current?.name);
   const parts = utils.splitPathParts(path);
   return (
     <div className="FileBreadcrumb">
-      {parts.map((part, index) => (
-        <span key={`${part}-${index}`} className="FileBreadcrumb-item">
-          {index > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
-          <span className={index === parts.length - 1 ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"}>
-            {part}
-          </span>
+      {wsName && (
+        <span className="FileBreadcrumb-item">
+          <span className="FileBreadcrumb-folder">{wsName}</span>
+          {parts.length > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
         </span>
-      ))}
+      )}
+      {parts.map((part, index) => {
+        const isLast = index === parts.length - 1;
+        return (
+          <span key={`${part}-${index}`} className="FileBreadcrumb-item">
+            {index > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
+            {isLast && (
+              <ExplorerIcon
+                type="file"
+                name={part}
+                className="FileBreadcrumb-fileIcon"
+                width={14}
+                height={14}
+              />
+            )}
+            <span className={isLast ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"}>
+              {part}
+            </span>
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -313,19 +333,14 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
             </Button>
           </Tooltip>
           <Tooltip content={copied ? "Copied" : "Copy content"} side="bottom">
-            <button
-              type="button"
-              className="CodeBlock-copy"
+            <Button
+              className="IconBtn"
               onClick={copy}
               aria-label="Copy file content"
               disabled={!content}
             >
-              {copied ? (
-                <><VscCheck className="CodeBlock-copyIconDone" /> Copied</>
-              ) : (
-                <><VscCopy /> Copy</>
-              )}
-            </button>
+              {copied ? <VscCheck className="CodeBlock-copyIconDone" /> : <VscCopy />}
+            </Button>
           </Tooltip>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { VscClose } from "react-icons/vsc";
 import {
   Panel,
@@ -27,9 +27,21 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const initialChatSize = useRef(chatSizeFor(panelOpen, maximized)).current;
   const artifactPanelRef = useRef<HTMLDivElement>(null);
+  const [animating, setAnimating] = useState(false);
+  const prevLayoutRef = useRef({ panelOpen, maximized });
 
   useEffect(() => {
+    const prev = prevLayoutRef.current;
+    const changed = prev.panelOpen !== panelOpen || prev.maximized !== maximized;
+    prevLayoutRef.current = { panelOpen, maximized };
+
     const chat = chatSizeFor(panelOpen, maximized);
+    if (changed) {
+      setAnimating(true);
+      groupRef.current?.setLayout([chat, 100 - chat]);
+      const timer = window.setTimeout(() => setAnimating(false), 200);
+      return () => window.clearTimeout(timer);
+    }
     groupRef.current?.setLayout([chat, 100 - chat]);
   }, [panelOpen, maximized]);
 
@@ -79,6 +91,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
         className="WorkspacePanels"
         data-panel-open={panelOpen}
         data-maximized={maximized}
+        data-animating={animating || undefined}
       >
         <Panel
           id="chat"
@@ -89,9 +102,11 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
           minSize={0}
           onCollapse={onChatCollapse}
         >
-          <div className="ChatPane">
-            {hasMessages && <MessageList />}
-            <div className={hasMessages ? "Composer-dock" : "EmptyState"}>
+          <div className="ChatPane" data-has-messages={hasMessages}>
+            <div className="ChatPane-top">
+              {hasMessages && <MessageList />}
+            </div>
+            <div className="Composer-dock">
               {error && (
                 <div className="ChatPane-error" role="alert">
                   <span>{error}</span>
@@ -109,6 +124,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
                 <InputBar promptMode={hasMessages} />
               </div>
             </div>
+            <div className="ChatPane-bottomSpacer" />
           </div>
         </Panel>
         <PanelResizeHandle className="PanelResizeHandle" disabled={!panelOpen || maximized} />

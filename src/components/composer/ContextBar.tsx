@@ -26,7 +26,6 @@ export const ContextBar = React.memo(function ContextBar({ contextWindow, sessio
       : contextTokens >= compactAt * 0.8
         ? "warn"
         : "normal";
-  const markPct = Math.min(100, Math.round((compactAt / maxContext) * 100));
   const cacheHit =
     inputTokens && cachedTokens !== undefined && inputTokens > 0
       ? Math.round((cachedTokens / inputTokens) * 100)
@@ -37,13 +36,29 @@ export const ContextBar = React.memo(function ContextBar({ contextWindow, sessio
     `Context: ${used} of ${total} tokens (${fillPct}%).` +
     (cacheHit !== null ? ` Prompt cache: ${cacheHit}% of the last request's input.` : "");
 
+  const radius = 7.5;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (fillPct / 100) * circumference;
+
   return (
     <Tooltip content={tooltip} side="top">
       <div className="ContextBar" data-level={level}>
-        <div className="ContextBar-track">
-          <div className="ContextBar-fill" style={{ width: `${fillPct}%` }} />
-          <div className="ContextBar-mark" style={{ left: `${markPct}%` }} />
-        </div>
+        <svg className="ContextBar-ring" viewBox="0 0 20 20" aria-hidden="true">
+          <circle
+            className="ContextBar-track"
+            cx="10"
+            cy="10"
+            r={radius}
+          />
+          <circle
+            className="ContextBar-fill"
+            cx="10"
+            cy="10"
+            r={radius}
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+          />
+        </svg>
       </div>
     </Tooltip>
   );

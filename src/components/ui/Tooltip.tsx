@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "../../lib/utils";
+import { useOverlayStore } from "./DropdownMenu";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
@@ -40,16 +41,42 @@ export function Tooltip({
   side = "top",
   align = "center",
   sideOffset = 6,
-  delayDuration = 150,
+  delayDuration = 350,
   className,
   disabled = false,
 }: TooltipProps) {
+  const [open, setOpen] = useState(false);
+  const overlayOpen = useOverlayStore((s) => s.count > 0);
+
+  useEffect(() => {
+    if (overlayOpen || disabled || !content) {
+      setOpen(false);
+    }
+  }, [overlayOpen, disabled, content]);
+
   if (disabled || !content) return children;
 
   return (
-    <TooltipPrimitive.Root delayDuration={delayDuration} disableHoverableContent>
-      <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
-      <TooltipContent side={side} align={align} sideOffset={sideOffset} className={className}>
+    <TooltipPrimitive.Root
+      open={open && !overlayOpen}
+      onOpenChange={setOpen}
+      delayDuration={delayDuration}
+      disableHoverableContent
+    >
+      <TooltipPrimitive.Trigger
+        asChild
+        onFocus={(e) => {
+          e.preventDefault();
+        }}
+      >
+        {children}
+      </TooltipPrimitive.Trigger>
+      <TooltipContent
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        className={className}
+      >
         {content}
       </TooltipContent>
     </TooltipPrimitive.Root>

@@ -129,13 +129,7 @@ export const useArtifactsStore = create(
 
     openTerminal: () => {
       set((s) => {
-        const existing = s.tabs.find((t) => t.kind === "terminal");
-        if (existing) {
-          s.activeId = existing.id;
-          s.panelOpen = true;
-          return;
-        }
-        const tab: ArtifactTab = { id: newId(), kind: "terminal" };
+        const tab: ArtifactTab = { id: newId(), kind: "terminal", label: "Terminal" };
         s.tabs.push(tab);
         s.activeId = tab.id;
         s.panelOpen = true;

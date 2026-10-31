@@ -1,5 +1,5 @@
 import React from "react";
-import { VscArrowUp, VscDebugStop, VscMic } from "react-icons/vsc";
+import { VscArrowRight, VscDebugStop, VscMic } from "react-icons/vsc";
 import { Button } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -20,59 +20,54 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
   onCancel,
   onToggleDictation,
 }: ComposerActionBtnProps) {
-  let mode: "streaming" | "recording" | "send" | "idle";
-  if (streaming) mode = "streaming";
-  else if (recording) mode = "recording";
-  else if (canSend) mode = "send";
-  else mode = "idle";
-
-  const config = {
-    streaming: {
-      tooltip: "Stop generating",
-      ariaLabel: "Stop generating",
-      className: "Composer-send Composer-stop",
-      icon: <VscDebugStop />,
-      onClick: onCancel,
-    },
-    recording: {
-      tooltip: "Stop dictation",
-      ariaLabel: "Stop dictation",
-      className: "Composer-send Composer-mic-send",
-      icon: (
-        <span className="Composer-micWaves" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-        </span>
-      ),
-      onClick: onToggleDictation,
-    },
-    send: {
-      tooltip: "Send message (Enter)",
-      ariaLabel: "Send message",
-      className: "Composer-send",
-      icon: <VscArrowUp />,
-      onClick: onSend,
-    },
-    idle: {
-      tooltip: "Voice dictation",
-      ariaLabel: "Start voice dictation",
-      className: "Composer-send Composer-mic-idle",
-      icon: <VscMic />,
-      onClick: onToggleDictation,
-    },
-  }[mode];
-
   return (
-    <Tooltip content={config.tooltip} side="top">
-      <Button
-        className={config.className}
-        aria-label={config.ariaLabel}
-        onClick={config.onClick}
-      >
-        {config.icon}
-      </Button>
-    </Tooltip>
+    <div className="Composer-actions">
+      <Tooltip content={recording ? "Stop dictation" : "Voice dictation"} side="top">
+        <Button
+          className={
+            recording
+              ? "Composer-micBtn Composer-mic-send"
+              : "Composer-micBtn"
+          }
+          aria-label={recording ? "Stop dictation" : "Start voice dictation"}
+          onClick={onToggleDictation}
+          disabled={streaming}
+        >
+          {recording ? (
+            <span className="Composer-micWaves" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : (
+            <VscMic />
+          )}
+        </Button>
+      </Tooltip>
+
+      {streaming ? (
+        <Tooltip content="Stop generating" side="top">
+          <Button
+            className="Composer-send Composer-stop"
+            aria-label="Stop generating"
+            onClick={onCancel}
+          >
+            <VscDebugStop />
+          </Button>
+        </Tooltip>
+      ) : (
+        <Tooltip content="Send message (Enter)" side="top">
+          <Button
+            className="Composer-send"
+            aria-label="Send message"
+            disabled={!canSend}
+            onClick={onSend}
+          >
+            <VscArrowRight />
+          </Button>
+        </Tooltip>
+      )}
+    </div>
   );
 });

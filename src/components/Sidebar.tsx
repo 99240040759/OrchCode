@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
+  VscAdd,
   VscCheck,
-  VscChevronDown,
   VscClose,
-  VscEditSparkle,
+  VscExtensions,
+  VscFolder,
   VscFolderOpened,
+  VscNewFolder,
   VscRocket,
   VscSignOut,
   VscTrash,
-  VscExtensions,
 } from "react-icons/vsc";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
@@ -75,7 +76,7 @@ const SessionItem = React.memo(function SessionItem({
           onClick={() => onSelect(session.id)}
         >
           <span className="ThreadItem-title" title={session.title || "New chat"}>{session.title || "New chat"}</span>
-          <span className="ThreadItem-time">{relativeTime}</span>
+          {!confirming && <span className="ThreadItem-time">{relativeTime}</span>}
         </button>
       </Tooltip>
 
@@ -172,36 +173,98 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const budgetLevel =
     usedPct >= BUDGET_DANGER_PCT ? "danger" : usedPct >= BUDGET_WARN_PCT ? "warn" : "ok";
 
+  const workspacesToDisplay =
+    allWorkspaces.length > 0
+      ? allWorkspaces
+      : currentWs
+        ? [currentWs]
+        : [];
+
   return (
     <aside className="Sidebar">
+      <div className="Sidebar-header">
+        <Button
+          className="Sidebar-newchat"
+          onClick={() => { newChat(); onViewChange("chat"); }}
+          disabled={streaming}
+          aria-label="New Conversation"
+        >
+          <VscAdd />
+          <span>New Conversation</span>
+        </Button>
+      </div>
 
-      <div className="Sidebar-workspace">
-        <DropdownMenu open={wsMenuOpen} onOpenChange={onWsMenuOpenChange}>
-          <Tooltip content="Switch workspace" side="right">
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="Sidebar-wsBtn" aria-label="Switch workspace">
-                <VscFolderOpened className="Sidebar-wsIcon" />
-                <span className="Sidebar-wsName">{currentWs?.name ?? "Workspace"}</span>
-                <VscChevronDown className="Sidebar-wsChevron" />
-              </button>
-            </DropdownMenuTrigger>
-          </Tooltip>
-          <DropdownMenuContent sideOffset={4} align="start">
-            {allWorkspaces.map((ws) => (
-              <div key={ws.id} className="WsMenuItem">
+      <nav className="Sidebar-viewnav" aria-label="Views">
+        <Tooltip content="Integrations" side="right">
+          <button
+            type="button"
+            className="Sidebar-viewbtn"
+            data-active={currentView === "connectors"}
+            onClick={() => onViewChange("connectors")}
+            aria-label="Integrations"
+          >
+            <VscExtensions />
+            <span>Integrations</span>
+          </button>
+        </Tooltip>
+      </nav>
+
+      {wsError && (
+        <div className="ChatPane-error" role="alert">
+          <span>{wsError}</span>
+          <button type="button" className="ChatPane-errorClose" aria-label="Dismiss error" onClick={dismissWsError}>
+            <VscClose />
+          </button>
+        </div>
+      )}
+
+      <div className="Sidebar-projectsHeader">
+        <span className="Sidebar-projectsTitle">Projects</span>
+        <div className="Sidebar-projectsActions">
+          <DropdownMenu open={wsMenuOpen} onOpenChange={onWsMenuOpenChange}>
+            <Tooltip content="Add project" side="right">
+              <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="WsMenuItem-name"
-                  data-active={ws.id === currentWs?.id}
-                  disabled={wsLocked}
+                  className="IconBtn Sidebar-projectsActionBtn"
+                  aria-label="Add project"
+                >
+                  <VscNewFolder />
+                </button>
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent sideOffset={4} align="end">
+              <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
+                <VscFolderOpened />
+                <span>Open folder…</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={wsLocked} onSelect={() => void createQuick()}>
+                <VscRocket />
+                <span>New quick project</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      <nav className="Sidebar-threads" aria-label="Projects and conversations">
+        {workspacesToDisplay.map((ws) => {
+          const isCurrentWs = ws.id === currentWs?.id;
+          return (
+            <div key={ws.id} className="Sidebar-projectGroup">
+              <div className="Sidebar-wsRow" data-active={isCurrentWs}>
+                <button
+                  type="button"
+                  className="Sidebar-wsBtn"
+                  disabled={wsLocked && !isCurrentWs}
                   onClick={() => {
-                    onWsMenuOpenChange(false);
-                    if (ws.id !== currentWs?.id) void switchTo(ws.id);
+                    if (!isCurrentWs) void switchTo(ws.id);
                   }}
                 >
-                  {ws.name}
-                  {ws.id === currentWs?.id && <VscCheck className="WsMenuItem-check" />}
+                  <VscFolder className="Sidebar-wsIcon" />
+                  <span className="Sidebar-wsName">{ws.name}</span>
                 </button>
+
                 {pendingWsDelete === ws.id ? (
                   <div className="WsMenuItem-confirm">
                     <button
@@ -234,70 +297,27 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                   </button>
                 )}
               </div>
-            ))}
-            {allWorkspaces.length > 0 && <div className="DropdownMenu-separator" />}
-            <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
-              <VscFolderOpened />
-              <span>Open folder…</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={wsLocked} onSelect={() => void createQuick()}>
-              <VscRocket />
-              <span>New quick project</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
 
-      {wsError && (
-        <div className="ChatPane-error" role="alert">
-          <span>{wsError}</span>
-          <button type="button" className="ChatPane-errorClose" aria-label="Dismiss error" onClick={dismissWsError}>
-            <VscClose />
-          </button>
-        </div>
-      )}
-
-      <div className="Sidebar-header">
-        <Button
-          className="Sidebar-newchat"
-          onClick={() => { newChat(); onViewChange("chat"); }}
-          disabled={streaming}
-          aria-label="New chat"
-        >
-          <VscEditSparkle />
-          <span>New chat</span>
-        </Button>
-      </div>
-
-      <nav className="Sidebar-viewnav" aria-label="Views">
-        <Tooltip content="Integrations" side="right">
-          <button
-            type="button"
-            className="Sidebar-viewbtn"
-            data-active={currentView === "connectors"}
-            onClick={() => onViewChange("connectors")}
-            aria-label="Integrations"
-          >
-            <VscExtensions />
-            <span>Integrations</span>
-          </button>
-        </Tooltip>
-      </nav>
-
-      <nav className="Sidebar-threads" aria-label="Conversations">
-        {sessions.length === 0 && (
-          <p className="Sidebar-empty">No conversations yet.</p>
-        )}
-        {sessions.map((session) => (
-          <SessionItem
-            key={session.id}
-            session={session}
-            isActive={session.id === currentSessionId}
-            streaming={streaming}
-            onSelect={handleSelectSession}
-            onDelete={handleDeleteSession}
-          />
-        ))}
+              {isCurrentWs && (
+                <div className="Sidebar-projectSessions">
+                  {sessions.length === 0 && (
+                    <p className="Sidebar-empty">No conversations yet.</p>
+                  )}
+                  {sessions.map((session) => (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      isActive={currentView === "chat" && session.id === currentSessionId}
+                      streaming={streaming}
+                      onSelect={handleSelectSession}
+                      onDelete={handleDeleteSession}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="Sidebar-footer">

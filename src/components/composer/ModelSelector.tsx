@@ -1,5 +1,4 @@
 import React from "react";
-import { VscCheck } from "react-icons/vsc";
 import * as api from "../../lib/api";
 import { useChatStore } from "../../lib/store";
 import { Button } from "../ui/Button";
@@ -33,13 +32,15 @@ export const ModelSelector = React.memo(function ModelSelector({
     }
   }, [thinkingEffort, setThinkingEffort]);
 
+  const supportsThinking = selectedModel?.capabilities.includes("thinking") ?? false;
+
   return (
-    <>
+    <div className="Composer-modelGroup">
       <DropdownMenu>
         <Tooltip content="Select AI model" side="top">
           <DropdownMenuTrigger asChild>
             <Button className="Composer-model">
-              <span>{selectedModel?.name ?? "Model"}</span>
+              <span className="Composer-modelName">{selectedModel?.name ?? "Model"}</span>
               {selectedModel?.badge && (
                 <span className="Composer-badge">{selectedModel.badge}</span>
               )}
@@ -53,22 +54,24 @@ export const ModelSelector = React.memo(function ModelSelector({
           {models.map((model) => (
             <DropdownMenuItem
               key={model.key}
+              data-selected={model.key === selectedModel?.key || undefined}
               onSelect={() => setSelectedModel(model.key)}
             >
               <span className="ModelItem-name">{model.name}</span>
               {model.badge && <span className="Composer-badge">{model.badge}</span>}
-              {model.key === selectedModel?.key && <VscCheck aria-label="Selected" />}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {selectedModel?.capabilities.includes("thinking") && (
+      {supportsThinking && (
         <DropdownMenu>
           <Tooltip content="Select effort" side="top">
             <DropdownMenuTrigger asChild>
-              <Button className="Composer-model" aria-label={`Effort: ${thinkingEffort}`}>
-                <span>{thinkingEffort[0].toUpperCase() + thinkingEffort.slice(1)}</span>
+              <Button className="Composer-model Composer-modelEffort" aria-label={`Effort: ${thinkingEffort}`}>
+                <span className="Composer-effortLabel">
+                  {thinkingEffort[0].toUpperCase() + thinkingEffort.slice(1)}
+                </span>
               </Button>
             </DropdownMenuTrigger>
           </Tooltip>
@@ -79,16 +82,16 @@ export const ModelSelector = React.memo(function ModelSelector({
                 <DropdownMenuItem
                   key={effort}
                   disabled={isDisabled}
+                  data-selected={thinkingEffort === effort || undefined}
                   onSelect={() => !isDisabled && setThinkingEffort(effort)}
                 >
                   <span className="ModelItem-name">{effort[0].toUpperCase() + effort.slice(1)}</span>
-                  {thinkingEffort === effort && <VscCheck aria-label="Selected" />}
                 </DropdownMenuItem>
               );
             })}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-    </>
+    </div>
   );
 });

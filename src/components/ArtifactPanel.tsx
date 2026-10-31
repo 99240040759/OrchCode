@@ -86,8 +86,8 @@ function ArtifactPanelHeader() {
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
 
   return (
-    <div className="ArtifactPanel-header" data-tauri-drag-region>
-      <div className="ArtifactTabs" data-tauri-drag-region>
+    <div className="ArtifactPanel-header">
+      <div className="ArtifactTabs">
         {tabs.map((tab) => {
           const tabName =
             tab.kind === "file"
@@ -95,8 +95,9 @@ function ArtifactPanelHeader() {
               : tab.kind === "browser"
                 ? "Browser"
                 : tab.kind === "terminal"
-                  ? "Terminal"
+                  ? tab.label ?? "Terminal"
                   : tab.label ?? (tab.path ? getBasename(tab.path) : tab.kind.toUpperCase());
+          const isFileTab = tab.kind === "file" && Boolean(tab.path);
           return (
             <div
               key={tab.id}
@@ -105,6 +106,7 @@ function ArtifactPanelHeader() {
               tabIndex={0}
               aria-selected={tab.id === active}
               data-active={tab.id === active}
+              data-file={isFileTab || undefined}
               onClick={() => setActive(tab.id)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -135,18 +137,16 @@ function ArtifactPanelHeader() {
             </div>
           );
         })}
-      </div>
 
-      <div className="ArtifactPanel-actions">
         <DropdownMenu>
           <Tooltip content="New tab" side="bottom">
             <DropdownMenuTrigger asChild>
-              <Button className="IconBtn" aria-label="New artifact">
+              <Button className="IconBtn ArtifactTabs-addBtn" aria-label="New artifact">
                 <VscAdd />
               </Button>
             </DropdownMenuTrigger>
           </Tooltip>
-          <DropdownMenuContent sideOffset={6} align="end">
+          <DropdownMenuContent sideOffset={6} align="start">
             <DropdownMenuItem onSelect={() => openFile()}>
               <RiFolderOpenLine /> Explorer
             </DropdownMenuItem>
@@ -158,7 +158,9 @@ function ArtifactPanelHeader() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      </div>
 
+      <div className="ArtifactPanel-actions">
         <Tooltip content={maximized ? "Restore panel size" : "Maximize panel"} side="bottom">
           <Button
             className="IconBtn"

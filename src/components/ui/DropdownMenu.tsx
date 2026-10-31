@@ -1,6 +1,5 @@
 import React, { useEffect } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { VscCheck } from "react-icons/vsc";
 import { create } from "zustand";
 import { cn } from "../../lib/utils";
 
@@ -24,6 +23,7 @@ export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export function DropdownMenuContent({
   className,
   sideOffset = 4,
+  onCloseAutoFocus,
   children,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
@@ -32,6 +32,10 @@ export function DropdownMenuContent({
       <DropdownMenuPrimitive.Content
         sideOffset={sideOffset}
         className={cn("DropdownMenuContent", className)}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+          event.preventDefault();
+        }}
         {...props}
       >
         <OverlayPresence />
@@ -100,11 +104,6 @@ export function DropdownMenuCheckboxItem({
       {...props}
     >
       {children}
-      <span className="DropdownMenuCheckboxItem-check">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <VscCheck />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
     </DropdownMenuPrimitive.CheckboxItem>
   );
 }
