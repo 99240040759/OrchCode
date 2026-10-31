@@ -3,24 +3,25 @@ import { VscArrowDown } from "react-icons/vsc";
 import { useChatStore } from "../lib/store";
 import { Message } from "./Message";
 
-const NEAR_BOTTOM_PX = 120;
+const NEAR_BOTTOM_PX = 100;
 
 export function MessageList() {
-  const messages  = useChatStore((s) => s.messages);
+  const messages = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
   const hasMoreMessages = useChatStore((s) => s.hasMoreMessages);
   const loadingEarlier = useChatStore((s) => s.loadingEarlierMessages);
   const loadEarlier = useChatStore((s) => s.loadEarlierMessages);
+
   const containerRef = useRef<HTMLDivElement>(null);
-  const bottomRef    = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
   const pinnedRef = useRef(true);
   const lastCountRef = useRef(0);
   const prevScrollHeightRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    const el = containerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
     pinnedRef.current = true;
     setShowJump(false);
@@ -31,7 +32,7 @@ export function MessageList() {
     if (!el) return;
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     pinnedRef.current = pinned;
-    setShowJump(!pinned);
+    setShowJump((prev) => (prev === !pinned ? prev : !pinned));
   }, []);
 
   useLayoutEffect(() => {
@@ -48,7 +49,9 @@ export function MessageList() {
       return;
     }
 
-    const lastIsUser = messages[messages.length - 1]?.role === "user" || messages[messages.length - 2]?.role === "user";
+    const lastIsUser =
+      messages[messages.length - 1]?.role === "user" ||
+      messages[messages.length - 2]?.role === "user";
     if (countDelta > 0 && lastIsUser && streaming) {
       el.scrollTop = el.scrollHeight;
       pinnedRef.current = true;
@@ -72,9 +75,10 @@ export function MessageList() {
       >
         <div className="MessageList-inner">
           {hasMoreMessages && (
-            <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+            <div className="MessageList-earlierWrap">
               <button
                 type="button"
+                className="MessageList-loadEarlier"
                 disabled={loadingEarlier}
                 onClick={() => {
                   if (containerRef.current) {
@@ -82,28 +86,14 @@ export function MessageList() {
                   }
                   void loadEarlier();
                 }}
-                style={{
-                  background: "transparent",
-                  border: "1px solid var(--border, rgba(255,255,255,0.12))",
-                  borderRadius: "6px",
-                  padding: "4px 12px",
-                  fontSize: "12px",
-                  color: "var(--foreground-muted, #888)",
-                  cursor: loadingEarlier ? "default" : "pointer",
-                }}
               >
-                {loadingEarlier ? "Loading earlier messages..." : "Load earlier messages"}
+                {loadingEarlier ? "Loading earlier messages…" : "Load earlier messages"}
               </button>
             </div>
           )}
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          <div
-            ref={bottomRef}
-            className="MessageList-bottomSpacer"
-            style={{ overflowAnchor: "auto" }}
-          />
         </div>
       </div>
       {showJump && (

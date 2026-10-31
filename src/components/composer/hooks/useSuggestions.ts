@@ -117,7 +117,6 @@ export function useSuggestions({
   const hits = trigger === "@" ? fileHits : commandHits;
   const activeIndex = hits.length === 0 ? 0 : Math.min(highlighted, hits.length - 1);
 
-  // Keep a stable ref so handleKeyDown does not need to rebind listeners
   const stateRef = useRef({ hits, activeIndex, trigger, close, onInsertMention, onRunCommand });
   stateRef.current = { hits, activeIndex, trigger, close, onInsertMention, onRunCommand };
 

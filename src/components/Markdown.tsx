@@ -71,21 +71,23 @@ function isWorkspaceLink(href: string): boolean {
   return /\.[a-zA-Z0-9]+(?:#L\d+(?:-\d+)?)?$/.test(href);
 }
 
-function workspacePathFromHref(href: string): string {
-  let path = href;
-  if (path.startsWith("file://")) {
-    path = path.slice(7);
-    if (/^\/[a-zA-Z]:\//.test(path)) {
-      path = path.slice(1);
+function parseWorkspaceHref(href: string): { path: string; lineRange?: string } {
+  let raw = href;
+  if (raw.startsWith("file://")) {
+    raw = raw.slice(7);
+    if (/^\/[a-zA-Z]:\//.test(raw)) {
+      raw = raw.slice(1);
     }
-  } else if (path.startsWith("file:")) {
-    path = path.slice(5);
+  } else if (raw.startsWith("file:")) {
+    raw = raw.slice(5);
   }
-  const withoutFragment = path.replace(/#L\d+(?:-\d+)?$/, "");
+  const lineMatch = /(#L\d+(?:-\d+)?)$/.exec(raw);
+  const lineRange = lineMatch ? lineMatch[1] : undefined;
+  const withoutFragment = lineMatch ? raw.slice(0, lineMatch.index) : raw;
   try {
-    return decodeURIComponent(withoutFragment);
+    return { path: decodeURIComponent(withoutFragment), lineRange };
   } catch {
-    return withoutFragment;
+    return { path: withoutFragment, lineRange };
   }
 }
 
@@ -127,6 +129,60 @@ export function renderToken(token: Prism.Token | string, key: string): React.Rea
   );
 }
 
+export function tokenizeToLines(code: string, grammar: Prism.Grammar | null): React.ReactNode[][] {
+  const rawLines = code.split("\n");
+  if (!grammar || code.length === 0) {
+    return rawLines.map((line) => (line.length > 0 ? [line] : []));
+  }
+  const lines: React.ReactNode[][] = [[]];
+  let keyCounter = 0;
+
+  const appendToken = (token: Prism.Token | string, wrapperClass?: string) => {
+    if (typeof token === "string") {
+      const parts = token.split("\n");
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) lines.push([]);
+        const part = parts[i];
+        if (part.length > 0) {
+          const currentLine = lines[lines.length - 1];
+          if (wrapperClass) {
+            currentLine.push(
+              <span key={`t-${++keyCounter}`} className={wrapperClass}>
+                {part}
+              </span>
+            );
+          } else {
+            currentLine.push(part);
+          }
+        }
+      }
+      return;
+    }
+
+    const aliases = token.alias
+      ? Array.isArray(token.alias)
+        ? token.alias.join(" ")
+        : token.alias
+      : "";
+    const tokenClass = `token ${token.type} ${aliases}`.trim();
+    const combinedClass = wrapperClass ? `${wrapperClass} ${tokenClass}` : tokenClass;
+
+    if (Array.isArray(token.content)) {
+      for (const child of token.content) {
+        appendToken(child, combinedClass);
+      }
+    } else {
+      appendToken(token.content as Prism.Token | string, combinedClass);
+    }
+  };
+
+  const tokens = Prism.tokenize(code, grammar);
+  for (const token of tokens) {
+    appendToken(token);
+  }
+  return lines;
+}
+
 function nodeText(node: React.ReactNode): string {
   if (node === null || node === undefined || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -146,7 +202,7 @@ const CodeBlock = React.memo(function CodeBlock({ lang, code }: { lang: string; 
   return (
     <div className="CodeBlock">
       <div className="CodeBlock-header">
-        <span className="CodeBlock-lang">{lang ? lang.toLowerCase() : ""}</span>
+        <span className="CodeBlock-lang">{lang ? lang.toLowerCase() : "code"}</span>
         <Tooltip content={copied ? "Copied" : "Copy code"} side="top">
           <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
             {copied ? (
@@ -172,7 +228,7 @@ const CodeBlock = React.memo(function CodeBlock({ lang, code }: { lang: string; 
 
 function WorkspaceImage({ src, alt }: { src: string; alt?: string }) {
   const isData = src.startsWith("data:");
-  const loaded = useImageDataUrl(isData ? null : workspacePathFromHref(src));
+  const loaded = useImageDataUrl(isData ? null : parseWorkspaceHref(src).path);
   const url = isData ? src : loaded.src;
   if (!url) {
     return (
@@ -210,6 +266,11 @@ const MARKDOWN_COMPONENTS: Components = {
     const link = href ?? "";
     if (!link) return <a {...props}>{children}</a>;
     if (isWorkspaceLink(link)) {
+      const { path, lineRange } = parseWorkspaceHref(link);
+      const label = nodeText(children).trim();
+      if (label && looksLikePath(path)) {
+        return <FileTag path={path} name={label} lineRange={lineRange} />;
+      }
       return (
         <a
           {...props}
@@ -217,7 +278,7 @@ const MARKDOWN_COMPONENTS: Components = {
           tabIndex={0}
           onClick={(event) => {
             event.preventDefault();
-            useArtifactsStore.getState().openFile(workspacePathFromHref(link));
+            useArtifactsStore.getState().openFile(path);
           }}
         >
           {children}
@@ -267,7 +328,11 @@ function splitBlocks(text: string): string[] {
   let inCode = false;
 
   for (const line of lines) {
-    if (line.startsWith("```")) {
+    if (line.startsWith("```") || line.startsWith("~~~")) {
+      if (!inCode && current.length > 0) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
       inCode = !inCode;
       current.push(line);
       if (!inCode) {
@@ -276,10 +341,22 @@ function splitBlocks(text: string): string[] {
       }
       continue;
     }
-    if (!inCode && line.trim() === "" && current.length > 0) {
-      blocks.push(current.join("\n"));
-      current = [];
-      continue;
+    if (!inCode) {
+      if (line.trim() === "") {
+        if (current.length > 0) {
+          blocks.push(current.join("\n"));
+          current = [];
+        }
+        continue;
+      }
+      if (/^#{1,6}\s/.test(line)) {
+        if (current.length > 0) {
+          blocks.push(current.join("\n"));
+          current = [];
+        }
+        blocks.push(line);
+        continue;
+      }
     }
     current.push(line);
   }
@@ -302,8 +379,8 @@ const MarkdownBlock = React.memo(function MarkdownBlock({ text }: { text: string
 });
 
 export const Markdown = React.memo(function Markdown({ children }: { children: string }) {
-  if (!children || !children.trim()) return null;
-  const blocks = React.useMemo(() => splitBlocks(children), [children]);
+  const blocks = useMemo(() => (children && children.trim() ? splitBlocks(children) : []), [children]);
+  if (blocks.length === 0) return null;
   return (
     <div className="Markdown">
       {blocks.map((block, i) => (

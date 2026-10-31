@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   VscArrowLeft,
   VscArrowRight,
+  VscGlobe,
   VscLinkExternal,
   VscRefresh,
   VscClose,
@@ -246,19 +247,14 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
               }}
               disabled={!ready}
             >
-              {loading ? <VscClose /> : <VscRefresh className={loading ? "BrowserBar-spin" : ""} />}
+              {loading ? <VscClose /> : <VscRefresh />}
             </Button>
           </Tooltip>
         </div>
 
         <div className={`BrowserBar-urlWrap${inputFocused ? " focused" : ""}`}>
           {!inputFocused && (
-            <span className="BrowserBar-favicon" aria-hidden="true">
-              🌐
-            </span>
-          )}
-          {loading && !inputFocused && (
-            <span className="BrowserBar-loadBar" aria-hidden="true" />
+            <VscGlobe className="BrowserBar-favicon" aria-hidden="true" />
           )}
           <input
             ref={inputRef}
@@ -286,8 +282,6 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
           </Button>
         </Tooltip>
       </div>
-
-      {loading && <div className="BrowserBar-progress" aria-hidden="true" />}
 
       {error && (
         <div className="BrowserView-error" role="alert">

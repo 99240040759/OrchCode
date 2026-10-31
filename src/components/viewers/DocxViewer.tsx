@@ -50,7 +50,7 @@ export function DocxViewer({ path }: { path: string }) {
   return (
     <div className="DocxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} width={16} height={16} />
         <span className="DocViewer-title">{fileName}</span>
         {ready && (
           <div className="DocViewer-controls">

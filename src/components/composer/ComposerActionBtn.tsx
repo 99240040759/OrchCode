@@ -26,23 +26,14 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
         <Button
           className={
             recording
-              ? "Composer-micBtn Composer-mic-send"
+              ? "Composer-micBtn Composer-mic-active"
               : "Composer-micBtn"
           }
           aria-label={recording ? "Stop dictation" : "Start voice dictation"}
           onClick={onToggleDictation}
           disabled={streaming}
         >
-          {recording ? (
-            <span className="Composer-micWaves" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </span>
-          ) : (
-            <VscMic />
-          )}
+          {recording ? <VscDebugStop /> : <VscMic />}
         </Button>
       </Tooltip>
 

@@ -158,7 +158,7 @@ export function PdfViewer({ path, active = true }: { path: string; active?: bool
   return (
     <div className="PdfViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} width={16} height={16} />
         <span className="DocViewer-title">{fileName}</span>
         {numPages > 0 && (
           <span className="DocViewer-meta">{numPages} page{numPages !== 1 ? "s" : ""}</span>

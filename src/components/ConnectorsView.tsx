@@ -25,7 +25,7 @@ function ConnectorCard({ connector, pending, onConnect, onDisconnect }: Connecto
     <article className="ConnectorCard" data-connected={connector.connected}>
       <div className="ConnectorCard-top">
         <div className="ConnectorCard-icon">
-          <ConnectorIcon id={connector.id} size={32} />
+          <ConnectorIcon id={connector.id} size={28} />
         </div>
         <div className="ConnectorCard-identity">
           <h3 className="ConnectorCard-name">{connector.name}</h3>
@@ -170,7 +170,7 @@ export function ConnectorsView() {
   if (!loaded) {
     return (
       <div className="ConnectorsView ConnectorsView--loading">
-        <p>Loading connectors…</p>
+        <div className="Spinner" role="status" aria-label="Loading connectors" />
       </div>
     );
   }
@@ -207,8 +207,10 @@ export function ConnectorsView() {
 
         {error && (
           <div className="ConnectorsView-error" role="alert">
-            <strong>Error:</strong> {error}
-            <Button onClick={() => setError(null)}>Dismiss</Button>
+            <span>{error}</span>
+            <Button className="ConnectorsView-errorDismiss" onClick={() => setError(null)}>
+              Dismiss
+            </Button>
           </div>
         )}
 

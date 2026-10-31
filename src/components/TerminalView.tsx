@@ -16,19 +16,22 @@ export function TerminalView({ id }: { id: string }) {
 
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue("--md-bg").trim() || "#0f0f0f";
-    const fg = styles.getPropertyValue("--md-on").trim() || "#e8e8e8";
+    const fg = styles.getPropertyValue("--md-on").trim() || "#ececec";
+    const monoFont =
+      styles.getPropertyValue("--font-mono").trim() ||
+      '"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace';
 
     const term = new XTerm({
       fontSize: 12,
-      fontFamily: '"SF Mono", "SF Pro Mono", Menlo, Monaco, monospace',
-      cursorBlink: true,
+      fontFamily: monoFont,
+      cursorBlink: false,
       scrollback: 5000,
       theme: {
         background: bg,
         foreground: fg,
         cursor: fg,
         cursorAccent: bg,
-        selectionBackground: "rgba(255, 255, 255, 0.14)",
+        selectionBackground: "rgba(255, 255, 255, 0.16)",
         black: "#1a1a1a",
         red: "#fc6b83",
         green: "#70b489",
@@ -36,12 +39,12 @@ export function TerminalView({ id }: { id: string }) {
         blue: "#c8c8c8",
         magenta: "#b48ead",
         cyan: "#a0a0a0",
-        white: "#e8e8e8",
-        brightBlack: "rgba(232, 232, 232, 0.4)",
+        white: "#ececec",
+        brightBlack: "#787878",
         brightRed: "#fc6b83",
         brightGreen: "#70b489",
         brightYellow: "#f1b467",
-        brightBlue: "#e8e8e8",
+        brightBlue: "#ececec",
         brightMagenta: "#b48ead",
         brightCyan: "#d4d4d4",
         brightWhite: "#ffffff",

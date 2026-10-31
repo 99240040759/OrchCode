@@ -1,6 +1,6 @@
-import React, { useMemo } from "react";
-import Prism from "prismjs";
-import { getPrismGrammar, renderToken } from "./Markdown";
+import React, { useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { getPrismGrammar, tokenizeToLines } from "./Markdown";
 import * as utils from "../lib/utils";
 
 const EXT_TO_LANG: Record<string, string> = {
@@ -40,40 +40,58 @@ interface CodeViewerProps {
 }
 
 export const CodeViewer = React.memo(function CodeViewer({ path, content }: CodeViewerProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const lang = useMemo(() => langFromPath(path), [path]);
 
   const lines = useMemo(() => {
-    const grammar = getPrismGrammar(lang);
-    const rawLines = content.split("\n");
-    return rawLines.map((line, index) => {
-      if (!grammar || line.length === 0) {
-        return { key: index, nodes: line as React.ReactNode };
-      }
-      const tokens = Prism.tokenize(line, grammar.grammar);
-      return {
-        key: index,
-        nodes: tokens.map((t, i) => renderToken(t, `l${index}-t${i}`)),
-      };
-    });
+    const parsed = getPrismGrammar(lang);
+    return tokenizeToLines(content, parsed?.grammar ?? null);
   }, [content, lang]);
 
-  const gutterWidth = String(lines.length).length;
+  const gutterWidth = Math.max(2, String(lines.length).length);
+
+  const virtualizer = useVirtualizer({
+    count: lines.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 21,
+    overscan: 24,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <div
+      ref={scrollRef}
       className="CodeViewer"
       style={{ ["--gutter-ch" as string]: gutterWidth }}
     >
-      <pre className="CodeViewer-pre" aria-label={`Source of ${utils.getBasename(path)}`}>
+      <pre
+        className="CodeViewer-pre"
+        aria-label={`Source of ${utils.getBasename(path)}`}
+        style={{ height: virtualizer.getTotalSize() + 24 }}
+      >
         <code className={`language-${lang}`}>
-          {lines.map((line) => (
-            <span className="CodeViewer-line" key={line.key}>
-              <span className="CodeViewer-ln" aria-hidden="true">
-                {line.key + 1}
+          {virtualItems.map((virtualRow) => {
+            const nodes = lines[virtualRow.index];
+            return (
+              <span
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                className="CodeViewer-line"
+                style={{
+                  transform: `translateY(${virtualRow.start + 12}px)`,
+                }}
+              >
+                <span className="CodeViewer-ln" aria-hidden="true">
+                  {virtualRow.index + 1}
+                </span>
+                <span className="CodeViewer-code">
+                  {nodes && nodes.length > 0 ? nodes : "\n"}
+                </span>
               </span>
-              <span className="CodeViewer-code">{line.nodes}</span>
-            </span>
-          ))}
+            );
+          })}
         </code>
       </pre>
     </div>

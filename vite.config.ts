@@ -32,7 +32,7 @@ export default defineConfig(({ mode }) => {
               ? `${segments[0]}/${segments[1]}`
               : segments[0];
 
-            if (pkgName === "react" || pkgName === "react-dom") {
+            if (pkgName === "react" || pkgName === "react-dom" || pkgName.startsWith("@tanstack")) {
               return "vendor-react";
             }
             if (pkgName.startsWith("@radix-ui")) {

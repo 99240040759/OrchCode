@@ -40,7 +40,8 @@ export function SuggestionPopover({
 
     const updatePosition = () => {
       const rect = anchor.getBoundingClientRect();
-      const titlebarBottom = document.querySelector<HTMLElement>(".Titlebar")?.getBoundingClientRect().bottom ?? 0;
+      const titlebarBottom =
+        document.querySelector<HTMLElement>(".Titlebar")?.getBoundingClientRect().bottom ?? 0;
       setPosition({
         position: "fixed",
         left: rect.left,
@@ -61,18 +62,17 @@ export function SuggestionPopover({
     };
   }, [anchorRef, trigger]);
 
-  // Auto-scroll the active item into view
   useEffect(() => {
-    if (!listRef.current) return;
+    if (!trigger || !listRef.current) return;
     const activeEl = listRef.current.querySelector<HTMLElement>('[data-active="true"]');
     if (activeEl) {
       activeEl.scrollIntoView({ block: "nearest" });
     }
-  }, [activeIndex]);
+  }, [activeIndex, trigger]);
 
   if (!trigger || !position) return null;
 
-  return createPortal((
+  return createPortal(
     <Command className="MentionPopover" label="Suggestions" shouldFilter={false} style={position}>
       <Command.List ref={listRef} className="MentionPopover-list">
         {trigger === "@" ? (
@@ -139,6 +139,7 @@ export function SuggestionPopover({
           })
         )}
       </Command.List>
-    </Command>
-  ), document.body);
+    </Command>,
+    document.body
+  );
 }

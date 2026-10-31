@@ -1,4 +1,4 @@
-import React, { useEffect, useState, SVGProps } from "react";
+import React, { useEffect, useState, type SVGProps } from "react";
 import { VscClose } from "react-icons/vsc";
 import {
   BsFileEarmarkPdfFill,
@@ -11,7 +11,7 @@ import { cn, getBasename, getExt } from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
 
-export function Avatar({
+export const Avatar = React.memo(function Avatar({
   src,
   fallback,
   className,
@@ -35,7 +35,7 @@ export function Avatar({
       )}
     </span>
   );
-}
+});
 
 type ExplorerIconType = "file" | "folder";
 
@@ -44,7 +44,13 @@ interface ExplorerIconProps extends SVGProps<SVGSVGElement> {
   name: string;
 }
 
-export function ExplorerIcon({ type, name, className, style, ...svgProps }: ExplorerIconProps) {
+export const ExplorerIcon = React.memo(function ExplorerIcon({
+  type,
+  name,
+  className,
+  style,
+  ...svgProps
+}: ExplorerIconProps) {
   if (type === "folder") return <FolderIcon folderName={name} className={className} style={style} {...svgProps} />;
 
   const ext = getExt(name);
@@ -62,9 +68,15 @@ export function ExplorerIcon({ type, name, className, style, ...svgProps }: Expl
   }
 
   return <FileIcon fileName={name} autoAssign className={className} style={style} {...svgProps} />;
-}
+});
 
-export function ChromeIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+export const ChromeIcon = React.memo(function ChromeIcon({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: React.CSSProperties;
+}) {
   return (
     <img
       src="/chrome.svg"
@@ -73,7 +85,7 @@ export function ChromeIcon({ className, style }: { className?: string; style?: R
       style={{ width: 14, height: 14, flexShrink: 0, ...style }}
     />
   );
-}
+});
 
 interface AttachmentCardProps {
   name: string;
@@ -84,7 +96,14 @@ interface AttachmentCardProps {
   onRemove?: () => void;
 }
 
-export function AttachmentCard({ name, isImage, path, dataUrl, onOpen, onRemove }: AttachmentCardProps) {
+export const AttachmentCard = React.memo(function AttachmentCard({
+  name,
+  isImage,
+  path,
+  dataUrl,
+  onOpen,
+  onRemove,
+}: AttachmentCardProps) {
   const fetched = useImageDataUrl(isImage && !dataUrl ? path : null);
   const src = dataUrl ?? fetched.src;
   const title = path ?? name;
@@ -92,7 +111,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onOpen, onRemove 
 
   return (
     <div
-      className="AttachmentCard"
+      className={cn("AttachmentCard", onOpen && "AttachmentCard-clickable")}
       title={title}
       role={onOpen ? "button" : undefined}
       tabIndex={onOpen ? 0 : undefined}
@@ -118,8 +137,8 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onOpen, onRemove 
           type="file"
           name={name}
           className="AttachmentCard-icon"
-          width={16}
-          height={16}
+          width={15}
+          height={15}
         />
       )}
       <span className="AttachmentCard-name">{name}</span>
@@ -138,7 +157,7 @@ export function AttachmentCard({ name, isImage, path, dataUrl, onOpen, onRemove 
       )}
     </div>
   );
-}
+});
 
 interface FileTagProps {
   path: string;
@@ -149,7 +168,7 @@ interface FileTagProps {
   interactive?: boolean;
 }
 
-export function FileTag({
+export const FileTag = React.memo(function FileTag({
   path,
   name,
   lineRange,
@@ -158,7 +177,7 @@ export function FileTag({
   interactive = true,
 }: FileTagProps) {
   const openFile = useArtifactsStore((s) => s.openFile);
-  const filename = name || getBasename(path);
+  const filename = name || getBasename(path) || path;
   const clickable = interactive && Boolean(path);
 
   const activate = (event: React.SyntheticEvent) => {
@@ -188,8 +207,8 @@ export function FileTag({
         type="file"
         name={filename}
         className="FileTag-icon"
-        width={14}
-        height={14}
+        width={13}
+        height={13}
       />
       <span className="FileTag-name">{filename}</span>
       {lineRange && <span className="FileTag-lineRange">{lineRange}</span>}
@@ -199,12 +218,13 @@ export function FileTag({
       )}
     </span>
   );
-}
+});
 
-export function ThinkingShimmer() {
+export const ThinkingIndicator = React.memo(function ThinkingIndicator() {
   return (
-    <div className="ThinkingShimmer" role="status">
-      <span className="ThinkingShimmer-text">Thinking…</span>
+    <div className="ThinkingIndicator" role="status">
+      <span className="ThinkingIndicator-spinner" aria-hidden="true" />
+      <span className="ThinkingIndicator-text">Thinking…</span>
     </div>
   );
-}
+});

@@ -39,7 +39,7 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
           <button type="button" className="Composer-repo" aria-label="Switch workspace">
             <VscFolder className="Composer-repoIcon" />
             <span>{currentName ?? "Workspace"}</span>
-            <VscChevronDown className="Composer-repoChevron" />
+            <VscChevronDown className="Composer-chevron" />
           </button>
         </DropdownMenuTrigger>
       </Tooltip>

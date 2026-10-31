@@ -3,7 +3,7 @@ import { PPTXViewer } from "pptxviewjs";
 import { errorMessage, readBinaryFile } from "../../lib/api";
 import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
-import { ZoomControls, PageControls, useZoom } from "./ViewerChrome";
+import { ViewerError, ViewerLoading, ZoomControls, PageControls, useZoom } from "./ViewerChrome";
 
 const BASE_SLIDE_WIDTH = 960;
 const SLIDE_ASPECT = 9 / 16;
@@ -128,7 +128,7 @@ export function PptxViewer({ path, active = true }: { path: string; active?: boo
   return (
     <div className="PptxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} width={16} height={16} />
         <span className="DocViewer-title">{fileName}</span>
         {slideCount > 0 && (
           <span className="DocViewer-meta">{slideCount} slide{slideCount !== 1 ? "s" : ""}</span>
@@ -150,22 +150,12 @@ export function PptxViewer({ path, active = true }: { path: string; active?: boo
       </div>
 
       <div className="PptxViewer-stage">
-        {loading && (
-          <div className="PptxViewer-overlay" role="status">
-            <div className="DocViewer-spinner" />
-            <span>Loading presentation…</span>
-          </div>
-        )}
-        {error && (
-          <div className="PptxViewer-overlay PptxViewer-overlay--error" role="alert">
-            <span className="DocViewer-error-icon" aria-hidden="true">⚠</span>
-            <p>{error}</p>
-          </div>
-        )}
+        {loading && <ViewerLoading label="Loading presentation…" />}
+        {error && <ViewerError message={error} />}
         <canvas
           ref={canvasRef}
           className="PptxViewer-canvas"
-          style={{ visibility: ready ? "visible" : "hidden" }}
+          style={{ display: ready ? "block" : "none" }}
           aria-label={`Slide ${slideIndex + 1} of ${slideCount}`}
           tabIndex={-1}
         />

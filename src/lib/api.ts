@@ -258,20 +258,6 @@ export function readSpreadsheet(path: string): Promise<SpreadsheetSheet[]> {
   return invoke("read_spreadsheet", { path });
 }
 
-interface DocumentFileMeta {
-  name: string;
-  sizeBytes: number;
-  extension: string;
-  mime: string;
-  artifactKind?: DocumentArtifactKind | null;
-  typeLabel: string;
-  modified: number | null;
-}
-
-export function readDocumentMetadata(path: string): Promise<DocumentFileMeta> {
-  return invoke("read_document_metadata", { path });
-}
-
 export function startDictation(onEvent: (evt: DictationEvent) => void): Promise<void> {
   const channel = new Channel<DictationEvent>();
   channel.onmessage = onEvent;

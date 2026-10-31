@@ -28,7 +28,7 @@ import { formatUsd } from "../lib/utils";
 import type { SessionSummary } from "../lib/api";
 import type { AppView } from "../App";
 
-const BUDGET_WARN_PCT   = 75;
+const BUDGET_WARN_PCT = 75;
 const BUDGET_DANGER_PCT = 90;
 
 function budgetLabel(cost: number, limit: number): string {
@@ -39,25 +39,20 @@ const SessionItem = React.memo(function SessionItem({
   session,
   isActive,
   streaming,
+  nowTick,
   onSelect,
   onDelete,
 }: {
   session: SessionSummary;
   isActive: boolean;
   streaming: boolean;
+  nowTick: number;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [relativeTime, setRelativeTime] = useState(() => formatRelativeTime(session.updatedAt));
-
-  useEffect(() => {
-    setRelativeTime(formatRelativeTime(session.updatedAt));
-    const interval = setInterval(() => {
-      setRelativeTime(formatRelativeTime(session.updatedAt));
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [session.updatedAt]);
+  void nowTick;
+  const relativeTime = formatRelativeTime(session.updatedAt);
 
   return (
     <div
@@ -75,7 +70,9 @@ const SessionItem = React.memo(function SessionItem({
           disabled={streaming && !isActive}
           onClick={() => onSelect(session.id)}
         >
-          <span className="ThreadItem-title" title={session.title || "New chat"}>{session.title || "New chat"}</span>
+          <span className="ThreadItem-title" title={session.title || "New chat"}>
+            {session.title || "New chat"}
+          </span>
           {!confirming && <span className="ThreadItem-time">{relativeTime}</span>}
         </button>
       </Tooltip>
@@ -86,7 +83,10 @@ const SessionItem = React.memo(function SessionItem({
             <Button
               className="ThreadItem-confirmYes"
               aria-label={`Confirm delete ${session.title || "New chat"}`}
-              onClick={() => { setConfirming(false); onDelete(session.id); }}
+              onClick={() => {
+                setConfirming(false);
+                onDelete(session.id);
+              }}
             >
               <VscCheck />
             </Button>
@@ -122,29 +122,37 @@ interface SidebarProps {
 }
 
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
-  const user             = useAuthStore((s) => s.user);
-  const signOut          = useAuthStore((s) => s.signOut);
-  const sessions         = useChatStore((s) => s.sessions);
+  const user = useAuthStore((s) => s.user);
+  const signOut = useAuthStore((s) => s.signOut);
+  const sessions = useChatStore((s) => s.sessions);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
-  const streaming        = useChatStore((s) => s.streaming);
-  const newChat          = useChatStore((s) => s.newChat);
-  const selectSession    = useChatStore((s) => s.selectSession);
-  const deleteSession    = useChatStore((s) => s.deleteSession);
-  const budget           = useChatStore((s) => s.budget);
+  const streaming = useChatStore((s) => s.streaming);
+  const newChat = useChatStore((s) => s.newChat);
+  const selectSession = useChatStore((s) => s.selectSession);
+  const deleteSession = useChatStore((s) => s.deleteSession);
+  const budget = useChatStore((s) => s.budget);
 
-  const currentWs   = useWorkspaceStore((s) => s.current);
+  const currentWs = useWorkspaceStore((s) => s.current);
   const allWorkspaces = useWorkspaceStore((s) => s.all);
-  const switchTo    = useWorkspaceStore((s) => s.switchTo);
+  const switchTo = useWorkspaceStore((s) => s.switchTo);
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
   const createQuick = useWorkspaceStore((s) => s.createQuickProject);
-  const removeWs    = useWorkspaceStore((s) => s.remove);
-  const wsBusy      = useWorkspaceStore((s) => s.busy);
-  const wsError     = useWorkspaceStore((s) => s.error);
+  const removeWs = useWorkspaceStore((s) => s.remove);
+  const wsBusy = useWorkspaceStore((s) => s.busy);
+  const wsError = useWorkspaceStore((s) => s.error);
   const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState(0);
   const wsLocked = streaming || wsBusy;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTick((t) => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const onWsMenuOpenChange = (open: boolean) => {
     setWsMenuOpen(open);
@@ -185,7 +193,10 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       <div className="Sidebar-header">
         <Button
           className="Sidebar-newchat"
-          onClick={() => { newChat(); onViewChange("chat"); }}
+          onClick={() => {
+            newChat();
+            onViewChange("chat");
+          }}
           disabled={streaming}
           aria-label="New Conversation"
         >
@@ -200,7 +211,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
             type="button"
             className="Sidebar-viewbtn"
             data-active={currentView === "connectors"}
-            onClick={() => onViewChange("connectors")}
+            onClick={() => onViewChange(currentView === "connectors" ? "chat" : "connectors")}
             aria-label="Integrations"
           >
             <VscExtensions />
@@ -250,6 +261,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       <nav className="Sidebar-threads" aria-label="Projects and conversations">
         {workspacesToDisplay.map((ws) => {
           const isCurrentWs = ws.id === currentWs?.id;
+          const FolderIconComponent = isCurrentWs ? VscFolderOpened : VscFolder;
           return (
             <div key={ws.id} className="Sidebar-projectGroup">
               <div className="Sidebar-wsRow" data-active={isCurrentWs}>
@@ -259,9 +271,10 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                   disabled={wsLocked && !isCurrentWs}
                   onClick={() => {
                     if (!isCurrentWs) void switchTo(ws.id);
+                    onViewChange("chat");
                   }}
                 >
-                  <VscFolder className="Sidebar-wsIcon" />
+                  <FolderIconComponent className="Sidebar-wsIcon" />
                   <span className="Sidebar-wsName">{ws.name}</span>
                 </button>
 
@@ -270,9 +283,16 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     <button
                       type="button"
                       className="WsMenuItem-confirmYes"
-                      title={ws.isQuickProject ? "Delete this quick project and its chats" : "Remove from list (files and chats are kept)"}
+                      title={
+                        ws.isQuickProject
+                          ? "Delete this quick project and its chats"
+                          : "Remove from list (files and chats are kept)"
+                      }
                       disabled={wsLocked}
-                      onClick={() => { setPendingWsDelete(null); void removeWs(ws.id); }}
+                      onClick={() => {
+                        setPendingWsDelete(null);
+                        void removeWs(ws.id);
+                      }}
                     >
                       <VscCheck />
                     </button>
@@ -291,7 +311,10 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     className="WsMenuItem-del"
                     title={ws.isQuickProject ? "Delete quick project" : "Remove from list"}
                     disabled={wsLocked}
-                    onClick={(e) => { e.stopPropagation(); setPendingWsDelete(ws.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingWsDelete(ws.id);
+                    }}
                   >
                     <VscTrash />
                   </button>
@@ -309,6 +332,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                       session={session}
                       isActive={currentView === "chat" && session.id === currentSessionId}
                       streaming={streaming}
+                      nowTick={nowTick}
                       onSelect={handleSelectSession}
                       onDelete={handleDeleteSession}
                     />

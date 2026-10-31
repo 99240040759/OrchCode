@@ -27,7 +27,7 @@ export function normalizePath(pathStr: string): string {
     }
   }
   const res = stack.join("/");
-  return isAbs ? "/" + res : res || (isAbs ? "/" : ".");
+  return isAbs ? "/" + res : res || ".";
 }
 
 export function toRelativeWorkspacePath(path: string, workspaceRoot?: string | null): string {

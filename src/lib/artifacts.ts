@@ -42,7 +42,6 @@ interface ArtifactsActions {
   openFile: (path?: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
-  openDocument: (path: string, kind: DocumentArtifactKind, label?: string) => void;
   setTabPath: (id: string, path: string) => void;
   fileWritten: (path: string) => void;
   dropWorkspaceTabs: () => void;
@@ -130,24 +129,6 @@ export const useArtifactsStore = create(
     openTerminal: () => {
       set((s) => {
         const tab: ArtifactTab = { id: newId(), kind: "terminal", label: "Terminal" };
-        s.tabs.push(tab);
-        s.activeId = tab.id;
-        s.panelOpen = true;
-      });
-    },
-
-    openDocument: (rawPath: string, kind: DocumentArtifactKind, label?: string) => {
-      const path = normalizeWorkspacePath(rawPath);
-      set((s) => {
-        const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
-        if (existing) {
-          existing.preview = false;
-          if (label) existing.label = label;
-          s.activeId = existing.id;
-          s.panelOpen = true;
-          return;
-        }
-        const tab: ArtifactTab = { id: newId(), kind, path, label };
         s.tabs.push(tab);
         s.activeId = tab.id;
         s.panelOpen = true;

@@ -20,7 +20,11 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("selectstart", (e) => {
   const node = e.target as Node | null;
   const el = (node instanceof Element ? node : node?.parentElement) as HTMLElement | null;
-  if (!el?.closest("input, textarea, [contenteditable='true'], [contenteditable=''], .Composer-input, .Msg, .Markdown, .CodeViewer, .CodeBlock, .ToolRow, .ToolRow-output, .Reasoning-body, .XlsxViewer-table, .DocViewer-render")) {
+  if (
+    !el?.closest(
+      "input, textarea, [contenteditable='true'], [contenteditable=''], .Composer-input, .Msg, .Markdown, .CodeViewer, .CodeBlock, .ToolRow, .ToolRow-output, .Reasoning-body, .XlsxViewer-table, .DocxViewer-render"
+    )
+  ) {
     e.preventDefault();
   }
 });
@@ -30,4 +34,3 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
   </React.StrictMode>
 );
-

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { VscClose } from "react-icons/vsc";
 import {
   Panel,
@@ -18,30 +18,18 @@ function chatSizeFor(panelOpen: boolean, maximized: boolean): number {
 }
 
 export function ChatPanel({ visible = true }: { visible?: boolean }) {
-  const hasMessages  = useChatStore((s) => s.messages.length > 0);
-  const error        = useChatStore((s) => s.error);
+  const hasMessages = useChatStore((s) => s.messages.length > 0);
+  const error = useChatStore((s) => s.error);
   const dismissError = useChatStore((s) => s.dismissError);
-  const panelOpen    = useArtifactsStore((s) => s.panelOpen);
-  const maximized    = useArtifactsStore((s) => s.maximized);
+  const panelOpen = useArtifactsStore((s) => s.panelOpen);
+  const maximized = useArtifactsStore((s) => s.maximized);
 
   const groupRef = useRef<ImperativePanelGroupHandle>(null);
   const initialChatSize = useRef(chatSizeFor(panelOpen, maximized)).current;
   const artifactPanelRef = useRef<HTMLDivElement>(null);
-  const [animating, setAnimating] = useState(false);
-  const prevLayoutRef = useRef({ panelOpen, maximized });
 
   useEffect(() => {
-    const prev = prevLayoutRef.current;
-    const changed = prev.panelOpen !== panelOpen || prev.maximized !== maximized;
-    prevLayoutRef.current = { panelOpen, maximized };
-
     const chat = chatSizeFor(panelOpen, maximized);
-    if (changed) {
-      setAnimating(true);
-      groupRef.current?.setLayout([chat, 100 - chat]);
-      const timer = window.setTimeout(() => setAnimating(false), 200);
-      return () => window.clearTimeout(timer);
-    }
     groupRef.current?.setLayout([chat, 100 - chat]);
   }, [panelOpen, maximized]);
 
@@ -91,7 +79,6 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
         className="WorkspacePanels"
         data-panel-open={panelOpen}
         data-maximized={maximized}
-        data-animating={animating || undefined}
       >
         <Panel
           id="chat"
@@ -124,7 +111,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
                 <InputBar promptMode={hasMessages} />
               </div>
             </div>
-            <div className="ChatPane-bottomSpacer" />
+            {!hasMessages && <div className="ChatPane-bottomSpacer" />}
           </div>
         </Panel>
         <PanelResizeHandle className="PanelResizeHandle" disabled={!panelOpen || maximized} />
@@ -137,7 +124,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
           minSize={0}
           onCollapse={onArtifactsCollapse}
         >
-          <div ref={artifactPanelRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+          <div ref={artifactPanelRef} className="ArtifactPanel-MeasureWrap">
             <ArtifactPanel visible={visible} />
           </div>
         </Panel>

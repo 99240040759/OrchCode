@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDebouncedCallback } from "use-debounce";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
@@ -95,6 +96,7 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
   const [hits, setHits] = useState<api.FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const search = useDebouncedCallback(async (text: string) => {
     setLoading(true);
@@ -130,6 +132,13 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
     return () => search.cancel();
   }, [query, search]);
 
+  const virtualizer = useVirtualizer({
+    count: hits.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 28,
+    overscan: 16,
+  });
+
   return (
     <div className="FilePicker">
       <input
@@ -141,7 +150,7 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
         spellCheck={false}
         autoFocus
       />
-      <div className="FilePicker-list">
+      <div ref={listRef} className="FilePicker-list">
         {error ? (
           <p className="FilePicker-empty">{error}</p>
         ) : loading ? (
@@ -149,22 +158,32 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
         ) : hits.length === 0 ? (
           <p className="FilePicker-empty">No files found</p>
         ) : (
-          hits.map((hit) => {
-            const filename = utils.getBasename(hit.path) || hit.name;
-            const dir = utils.getDirname(hit.path);
-            return (
-              <button
-                type="button"
-                key={hit.path}
-                className="FilePicker-item"
-                onClick={() => onPick(hit.path)}
-              >
-                <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={14} height={14} />
-                <span className="FilePicker-name">{filename}</span>
-                {dir && <span className="FilePicker-path">{dir}</span>}
-              </button>
-            );
-          })
+          <div
+            className="FilePicker-virtual"
+            style={{ height: virtualizer.getTotalSize() }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const hit = hits[virtualRow.index];
+              const filename = utils.getBasename(hit.path) || hit.name;
+              const dir = utils.getDirname(hit.path);
+              return (
+                <button
+                  type="button"
+                  key={hit.path}
+                  className="FilePicker-item"
+                  style={{
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                  onClick={() => onPick(hit.path)}
+                >
+                  <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={14} height={14} />
+                  <span className="FilePicker-name">{filename}</span>
+                  {dir && <span className="FilePicker-path">{dir}</span>}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

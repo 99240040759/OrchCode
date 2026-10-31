@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { errorMessage, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
 import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
@@ -12,8 +13,6 @@ export function XlsxViewer({ path }: { path: string }) {
   const fileName = getBasename(path);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(600);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,7 +24,6 @@ export function XlsxViewer({ path }: { path: string }) {
         if (cancelled) return;
         setSheets(parsed);
         setActiveSheet(0);
-        setScrollTop(0);
       },
       (e) => {
         if (!cancelled) setError(errorMessage(e));
@@ -37,43 +35,37 @@ export function XlsxViewer({ path }: { path: string }) {
     };
   }, [path]);
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setViewportHeight(el.clientHeight || 600);
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setViewportHeight(entry.contentRect.height);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [activeSheet]);
-
-  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
-  }, []);
-
-  if (error) return <ViewerError message={error} />;
-  if (!sheets) return <ViewerLoading label="Loading spreadsheet…" />;
-
-  const current = sheets[activeSheet];
+  const current = sheets?.[activeSheet];
   const fontSize = Math.round(12 * zoom.zoom);
   const rowHeight = Math.max(22, Math.round(28 * zoom.zoom));
   const totalRows = current ? current.rows.length : 0;
   const colCount = current && current.rows[0] ? current.rows[0].length + 1 : 1;
 
-  const overscan = 15;
-  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
-  const endIndex = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
-  const topSpace = startIndex * rowHeight;
-  const bottomSpace = Math.max(0, (totalRows - endIndex) * rowHeight);
-  const visibleRows = current ? current.rows.slice(startIndex, endIndex) : [];
+  const virtualizer = useVirtualizer({
+    count: totalRows,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 15,
+  });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, activeSheet, virtualizer]);
+
+  if (error) return <ViewerError message={error} />;
+  if (!sheets) return <ViewerLoading label="Loading spreadsheet…" />;
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const topSpace = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const bottomSpace =
+    virtualItems.length > 0
+      ? Math.max(0, virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end)
+      : 0;
 
   return (
     <div className="XlsxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} width={16} height={16} />
         <span className="DocViewer-title">{fileName}</span>
         {sheets.length > 0 && (
           <span className="DocViewer-meta">
@@ -98,7 +90,6 @@ export function XlsxViewer({ path }: { path: string }) {
               className={`XlsxViewer-tab${index === activeSheet ? " active" : ""}`}
               onClick={() => {
                 setActiveSheet(index);
-                setScrollTop(0);
                 if (scrollRef.current) scrollRef.current.scrollTop = 0;
               }}
             >
@@ -110,7 +101,6 @@ export function XlsxViewer({ path }: { path: string }) {
 
       <div
         ref={scrollRef}
-        onScroll={onScroll}
         className="XlsxViewer-scroll"
         role="tabpanel"
         id={`xlsx-panel-${activeSheet}`}
@@ -124,12 +114,19 @@ export function XlsxViewer({ path }: { path: string }) {
         {current && current.rows.length > 0 ? (
           <table className="XlsxViewer-table" style={{ fontSize }}>
             <tbody>
-              {topSpace > 0 && <tr style={{ height: topSpace }}><td colSpan={colCount} /></tr>}
-              {visibleRows.map((row, idx) => {
-                const ri = startIndex + idx;
+              {topSpace > 0 && (
+                <tr style={{ height: topSpace }}>
+                  <td colSpan={colCount} />
+                </tr>
+              )}
+              {virtualItems.map((virtualRow) => {
+                const ri = virtualRow.index;
+                const row = current.rows[ri];
                 return (
-                  <tr key={ri} style={{ height: rowHeight }}>
-                    <td className="XlsxViewer-row-num" style={{ fontSize: Math.round(fontSize * 0.9) }}>{ri + 1}</td>
+                  <tr key={virtualRow.key} style={{ height: rowHeight }}>
+                    <td className="XlsxViewer-row-num" style={{ fontSize: Math.round(fontSize * 0.9) }}>
+                      {ri + 1}
+                    </td>
                     {row.map((cell, ci) => (
                       <td key={ci} className="XlsxViewer-cell">
                         {cell}
@@ -138,7 +135,11 @@ export function XlsxViewer({ path }: { path: string }) {
                   </tr>
                 );
               })}
-              {bottomSpace > 0 && <tr style={{ height: bottomSpace }}><td colSpan={colCount} /></tr>}
+              {bottomSpace > 0 && (
+                <tr style={{ height: bottomSpace }}>
+                  <td colSpan={colCount} />
+                </tr>
+              )}
             </tbody>
           </table>
         ) : (
