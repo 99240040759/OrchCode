@@ -1,18 +1,17 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { VscAdd, VscClose } from "react-icons/vsc";
+import { useCallback, useRef, useState } from "react";
+import { VscAdd } from "react-icons/vsc";
 import { RiFileTextLine, RiImageLine } from "react-icons/ri";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import * as utils from "../lib/utils";
-import { selectActiveConnectors, useChatStore } from "../lib/store";
+import { useChatStore } from "../lib/store";
 import { useConnectorsStore } from "../lib/connectors";
 import { useWorkspaceStore } from "../lib/workspace";
 import { useArtifactsStore } from "../lib/artifacts";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { AttachmentCard } from "./ChatPrimitives";
-import { ConnectorIcon } from "./icons/ConnectorIcon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,21 +41,9 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const newChat = useChatStore((s) => s.newChat);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
-  const activeConnectorIds = useChatStore(selectActiveConnectors);
-  const toggleConnector = useChatStore((s) => s.toggleConnector);
 
-  const connectors = useConnectorsStore((s) => s.connectors);
   const refreshConnectors = useConnectorsStore((s) => s.refresh);
   const currentWs = useWorkspaceStore((s) => s.current);
-
-  const activeConnectors = useMemo(
-    () =>
-      activeConnectorIds.map((id) => {
-        const found = connectors.find((c) => c.id === id);
-        return { id, name: found?.name ?? id };
-      }),
-    [activeConnectorIds, connectors]
-  );
 
   const [notice, setNotice] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
@@ -311,25 +298,6 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
             />
-
-            {activeConnectors.length > 0 && (
-              <div className="Composer-connectors">
-                {activeConnectors.map((connector) => (
-                  <Tooltip key={connector.id} content={`Disable ${connector.name} in this chat`} side="top">
-                    <button
-                      type="button"
-                      className="Composer-connectorChip"
-                      onClick={() => toggleConnector(connector.id)}
-                      aria-label={`Disable ${connector.name}`}
-                    >
-                      <ConnectorIcon id={connector.id} size={12} />
-                      <span>{connector.name}</span>
-                      <VscClose className="Composer-connectorChipClose" />
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
-            )}
 
             <span className="Composer-rowspacer" />
 

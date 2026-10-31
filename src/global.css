@@ -17,10 +17,10 @@
   --md-on-var:      #b4b4b4;
   --md-on-dim:      #7a7a7a;
 
-  --md-outline:     rgba(255,255,255,.13);
-  --md-outline-var: rgba(255,255,255,.07);
-  --md-outline-hi:  rgba(255,255,255,.24);
-  --md-outline-in:  rgba(255,255,255,.11);
+  --md-outline:     rgba(255,255,255,.07);
+  --md-outline-var: rgba(255,255,255,.045);
+  --md-outline-hi:  rgba(255,255,255,.12);
+  --md-outline-in:  rgba(255,255,255,.06);
 
   --md-primary:     #dcdcdc;
   --md-secondary:   #b0b0b0;
@@ -180,7 +180,6 @@ summary,
 .Composer-repo,
 .Composer-micBtn,
 .Composer-send,
-.Composer-connectorChip,
 .AttachmentCard-remove,
 .MentionItem,
 .DropdownMenuItem,
@@ -215,14 +214,12 @@ summary,
 .WinBtn,
 .Sidebar-viewbtn,
 .Reasoning-toggle,
-.ToolRow-header--interactive,
 .Msg-actionBtn,
 .MessageList-loadEarlier,
 .Composer-plus,
 .Composer-model,
 .Composer-repo,
 .Composer-micBtn,
-.Composer-connectorChip,
 .AttachmentCard,
 .AttachmentCard-remove,
 .FileTag-clickable,
@@ -667,7 +664,7 @@ button:disabled,
 
 .Titlebar-update-ready {
   background: rgba(255,255,255,.1);
-  border: 1px solid var(--md-outline-hi);
+  border: 1px solid var(--md-outline);
   color: var(--md-on);
 }
 
@@ -1319,11 +1316,11 @@ button:disabled,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--r-full);
   background: var(--md-s1);
-  border: 1px solid var(--md-outline-hi);
+  border: 1px solid var(--md-outline);
   color: var(--md-on);
   box-shadow: var(--shadow);
   transition: background var(--dur) var(--ease);
@@ -1347,20 +1344,24 @@ button:disabled,
 
 .Msg-user {
   align-items: flex-end;
-  margin: 6px 0;
+  margin: 8px 0;
+}
+
+.Msg-user:first-child {
+  margin-top: 4px;
 }
 
 .Msg-user .Msg-bubble {
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg);
   background: var(--md-s1);
   border: 1px solid var(--md-outline);
   color: var(--md-on);
-  font-size: var(--fs-base);
-  line-height: 1.6;
+  font-size: var(--fs-md);
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  max-width: 88%;
+  max-width: 85%;
 }
 
 .Msg-assistant {
@@ -1465,24 +1466,20 @@ button:disabled,
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 6px;
-  margin-left: -6px;
-  border-radius: var(--r-sm);
+  height: 22px;
+  min-height: 22px;
   color: var(--md-on-var);
   font-size: var(--fs-md);
-  font-weight: 500;
   width: fit-content;
 }
 
 .Reasoning-toggle:hover {
   color: var(--md-on);
-  background: var(--md-hover);
 }
 
 .Reasoning-label {
   font-size: var(--fs-md);
-  line-height: 24px;
+  line-height: 22px;
 }
 
 .Reasoning-chevron {
@@ -1497,22 +1494,22 @@ button:disabled,
 }
 
 .Reasoning-body {
-  padding: 6px 10px 6px 14px;
-  margin-left: 4px;
-  font-size: var(--fs-md);
+  padding: 4px 8px 6px 16px;
+  margin-left: 5px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
   color: var(--md-on-var);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
+  max-height: 220px;
   overflow-y: auto;
-  border-left: 2px solid var(--md-outline);
+  border-left: 1px solid var(--md-outline);
 }
 
 .Reasoning-body .Markdown {
-  font-size: var(--fs-md);
-  line-height: 1.55;
-  color: var(--md-on-var);
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
 }
 
 .Reasoning-body .Markdown p {
@@ -1526,7 +1523,7 @@ button:disabled,
 .Reasoning-body .Markdown h1,
 .Reasoning-body .Markdown h2,
 .Reasoning-body .Markdown h3 {
-  font-size: var(--fs-md);
+  font-size: inherit;
   margin: 8px 0 4px;
 }
 
@@ -1550,27 +1547,28 @@ button:disabled,
 }
 
 .ToolRow-header {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  min-height: 26px;
-  width: fit-content;
-  max-width: 100%;
+  height: 22px;
+  min-height: 22px;
 }
 
 .ToolRow-header--interactive {
-  padding: 2px 6px;
-  margin-left: -6px;
-  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.ToolRow-header--interactive:hover .ToolRow-label,
+.ToolRow-header--interactive:hover .ToolRow-toggle {
+  color: var(--md-on);
 }
 
 .ToolRow-label {
   font-size: var(--fs-md);
-  font-weight: 500;
-  color: var(--md-on-var);
   flex-shrink: 0;
   line-height: 22px;
+  color: var(--md-on-var);
 }
 
 .ToolRow[data-status='running'] .ToolRow-label {
@@ -1584,16 +1582,11 @@ button:disabled,
 .ToolRow-target {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: var(--r-sm);
-  background: rgba(255,255,255,.05);
-  border: 1px solid var(--md-outline-var);
+  gap: 6px;
   color: var(--md-on);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  max-width: 440px;
+  max-width: 65%;
 }
 
 .ToolRow-icon {
@@ -1604,17 +1597,17 @@ button:disabled,
 }
 
 .ToolRow-errIcon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   color: var(--md-error-c);
   flex-shrink: 0;
 }
 
 .ToolRow-spinner {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,.16);
+  border: 1.5px solid rgba(255,255,255,.15);
   border-top-color: var(--md-on);
   animation: spin .8s linear infinite;
   flex-shrink: 0;
@@ -1623,12 +1616,14 @@ button:disabled,
 .ToolRow-toggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--r-xs);
-  color: var(--md-on-var);
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--md-on-dim);
   flex-shrink: 0;
+}
+
+.ToolRow-toggle:hover {
+  color: var(--md-on);
 }
 
 .ToolRow-chevron {
@@ -1642,17 +1637,17 @@ button:disabled,
 }
 
 .ToolRow-output {
-  margin-top: 4px;
-  padding: 8px 12px;
+  margin-top: 3px;
+  padding: 8px 10px;
   max-height: 260px;
   overflow: auto;
-  border-radius: var(--r-md);
-  border: 1px solid var(--md-outline);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--md-outline-var);
   background: var(--md-s0);
-  color: var(--md-on);
+  color: var(--md-on-var);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  line-height: 1.55;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1660,16 +1655,11 @@ button:disabled,
 .FileTag {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: var(--r-sm);
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--md-outline);
+  gap: 4px;
   color: var(--md-on);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  line-height: 1;
+  line-height: 1.4;
   vertical-align: middle;
   max-width: 100%;
   white-space: nowrap;
@@ -1678,8 +1668,7 @@ button:disabled,
 
 .Composer-input .FileTag,
 .Msg-bubble .FileTag {
-  margin: 0 2px;
-  vertical-align: baseline;
+  color: var(--md-on);
 }
 
 .FileTag-clickable {
@@ -1688,9 +1677,12 @@ button:disabled,
 
 .FileTag-clickable:hover,
 .FileTag-clickable:focus-visible {
-  background: rgba(255,255,255,.12);
-  border-color: var(--md-outline-hi);
   color: #ffffff;
+}
+
+.ToolRow .FileTag {
+  height: 20px;
+  line-height: normal;
 }
 
 .FileTag-icon {
@@ -1706,13 +1698,13 @@ button:disabled,
 
 .FileTag-added {
   color: var(--md-success);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-xs);
 }
 
 .FileTag-removed {
   color: var(--md-error-c);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-xs);
 }
 
@@ -1754,7 +1746,7 @@ button:disabled,
   display: flex;
   flex-direction: column;
   background: var(--md-s0);
-  border: 1px solid var(--md-outline);
+  border: 1px solid var(--md-outline-in);
   border-radius: var(--r-xl);
   overflow: hidden;
   transition: border-color var(--dur) var(--ease);
@@ -1765,7 +1757,7 @@ button:disabled,
 }
 
 .Composer[data-recording='true'] .Composer-box {
-  border-color: var(--md-error-c);
+  border-color: rgba(243,79,110,.45);
 }
 
 .Composer-attachments {
@@ -1837,7 +1829,7 @@ button:disabled,
 
 .Composer-input .react-renderer {
   display: inline-block;
-  vertical-align: baseline;
+  vertical-align: middle;
 }
 
 .Composer-input .FileTag {
@@ -1849,7 +1841,6 @@ button:disabled,
   align-items: center;
   gap: 6px;
   padding: 4px 10px 10px;
-  flex-wrap: wrap;
 }
 
 .Composer-rowspacer {
@@ -1936,38 +1927,6 @@ button:disabled,
 .Composer-repoIcon {
   width: 14px;
   height: 14px;
-  color: var(--md-on-var);
-}
-
-.Composer-connectors {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.Composer-connectorChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: var(--r-full);
-  background: rgba(255,255,255,.06);
-  border: 1px solid var(--md-outline);
-  color: var(--md-on);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-}
-
-.Composer-connectorChip:hover {
-  background: rgba(255,255,255,.11);
-  border-color: var(--md-outline-hi);
-}
-
-.Composer-connectorChipClose {
-  width: 11px;
-  height: 11px;
   color: var(--md-on-var);
 }
 
@@ -2093,7 +2052,7 @@ button:disabled,
   padding: 4px 8px;
   border: 1px solid var(--md-outline);
   border-radius: var(--r-md);
-  background: rgba(255,255,255,.05);
+  background: rgba(255,255,255,.04);
   max-width: 240px;
 }
 
@@ -2103,7 +2062,7 @@ button:disabled,
 
 .AttachmentCard:hover {
   border-color: var(--md-outline-hi);
-  background: rgba(255,255,255,.08);
+  background: rgba(255,255,255,.06);
 }
 
 .AttachmentCard-thumbWrap {
@@ -2112,7 +2071,7 @@ button:disabled,
   border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--md-s2);
-  border: 1px solid var(--md-outline);
+  border: 1px solid var(--md-outline-var);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -2166,7 +2125,7 @@ button:disabled,
   flex-direction: column;
   max-height: 280px;
   overflow: hidden;
-  border: 1px solid var(--md-outline-hi);
+  border: 1px solid var(--md-outline);
   border-radius: var(--r-md);
   background: var(--md-s3);
   box-shadow: var(--shadow);
@@ -2246,7 +2205,7 @@ button:disabled,
   max-height: 248px;
   overflow-y: auto;
   background: var(--md-s3);
-  border: 1px solid var(--md-outline-hi);
+  border: 1px solid var(--md-outline);
   border-radius: var(--r-md);
   padding: 4px;
   box-shadow: var(--shadow);
@@ -2289,7 +2248,7 @@ button:disabled,
 
 .DropdownMenu-separator {
   height: 1px;
-  background: var(--md-outline);
+  background: var(--md-outline-var);
   margin: var(--sp-1) 0;
 }
 
@@ -2394,7 +2353,7 @@ button:disabled,
   height: 74px;
   border: 1px solid var(--md-outline);
   border-radius: var(--r-lg);
-  background: rgba(255,255,255,.03);
+  background: rgba(255,255,255,.02);
   color: var(--md-on-var);
 }
 
@@ -2461,7 +2420,7 @@ button:disabled,
 }
 
 .ArtifactTab[data-active='true'] {
-  border-color: var(--md-outline);
+  border-color: var(--md-outline-var);
 }
 
 .ArtifactTab-iconWrap {
@@ -2615,8 +2574,8 @@ button:disabled,
 
 .Markdown blockquote {
   margin: 0 0 10px;
-  padding: 4px 12px;
-  border-left: 3px solid var(--md-outline-hi);
+  padding: 2px 12px;
+  border-left: 2px solid var(--md-outline);
   color: var(--md-on-var);
 }
 
@@ -2625,8 +2584,7 @@ button:disabled,
   font-size: var(--fs-sm);
   padding: 2px 5px;
   border-radius: var(--r-xs);
-  background: rgba(255,255,255,.08);
-  border: 1px solid var(--md-outline-var);
+  background: rgba(255,255,255,.07);
   color: var(--md-on);
 }
 
@@ -2637,7 +2595,7 @@ button:disabled,
   overscroll-behavior-x: contain;
   overscroll-behavior-y: auto;
   margin: 12px 0;
-  border: 1px solid var(--md-outline);
+  border: 1px solid var(--md-outline-var);
   border-radius: var(--r-md);
 }
 
@@ -2749,7 +2707,7 @@ button:disabled,
 
 .CodeBlock {
   margin: 12px 0;
-  border: 1px solid var(--md-outline);
+  border: 1px solid var(--md-outline-var);
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--md-s0);
@@ -3403,7 +3361,7 @@ button:disabled,
   padding: 4px 8px;
   border-radius: var(--r-sm);
   background: var(--md-s3);
-  border: 1px solid var(--md-outline-hi);
+  border: 1px solid var(--md-outline);
   box-shadow: var(--shadow);
   color: var(--md-on);
   font-family: var(--font);
