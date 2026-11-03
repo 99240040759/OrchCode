@@ -35,5 +35,5 @@ dist-ssr
 *.sw?
 
 # Legacy / archive folders
-gcp-functions-old/
+gcp-functions-preview/
 
