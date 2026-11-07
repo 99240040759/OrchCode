@@ -204,6 +204,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 .WorkspacePanels[data-panel-open='false'] .ArtifactPanel { display:none; }
 
 .ChatPane { display:flex; flex-direction:column; height:100%; width:100%; min-height:0; min-width:0; overflow:hidden; background:var(--md-bg); }
+.ChatPane[data-has-messages='false'] { background-image:radial-gradient(rgba(242,239,233,.08) 1px, transparent 1px); background-size:20px 20px; background-position:center; }
 .ChatPane-top { display:flex; flex-direction:column; width:100%; min-height:0; flex:0.44 1 0%; }
 .ChatPane[data-has-messages='true'] .ChatPane-top { flex:1 1 0%; }
 .ChatPane-bottomSpacer { flex:0.56 1 0%; min-height:0; pointer-events:none; }
