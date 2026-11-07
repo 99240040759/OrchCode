@@ -41,22 +41,16 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
     const el = artifactPanelRef.current;
     if (!el) return;
 
-    let rafId = 0;
-    let pendingWidth = 0;
-    const flush = () => {
-      rafId = 0;
-      document.documentElement.style.setProperty("--artifact-panel-w", `${pendingWidth}px`);
-    };
+    let lastWidth = 0;
 
     const ro = new ResizeObserver((entries) => {
       const w = Math.round(entries[entries.length - 1].contentRect.width);
-      if (w <= 0) return;
-      pendingWidth = w;
-      if (rafId === 0) rafId = requestAnimationFrame(flush);
+      if (w <= 0 || w === lastWidth) return;
+      lastWidth = w;
+      document.documentElement.style.setProperty("--artifact-panel-w", `${w}px`);
     });
     ro.observe(el);
     return () => {
-      if (rafId !== 0) cancelAnimationFrame(rafId);
       ro.disconnect();
       document.documentElement.style.removeProperty("--artifact-panel-w");
     };

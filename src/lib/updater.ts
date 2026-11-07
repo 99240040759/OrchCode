@@ -6,9 +6,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import * as api from "./api";
 import { IS_MAC } from "./utils";
 
-const LATEST_RELEASE_URL = "https://github.com/sameer786ss/orchcode/releases/latest";
-const MANIFEST_URL = `${LATEST_RELEASE_URL}/download/latest.json`;
-
 function isNewer(remote: string, current: string): boolean {
   const remoteParts = remote.replace(/^v/, "").split(".").map((part) => parseInt(part, 10) || 0);
   const currentParts = current.replace(/^v/, "").split(".").map((part) => parseInt(part, 10) || 0);
@@ -32,6 +29,7 @@ type UpdateStatus =
 interface UpdaterState {
   status: UpdateStatus;
   version: string;
+  releaseUrl: string;
   percent: number;
   error: string | null;
   pendingUpdate: Update | null;
@@ -47,6 +45,7 @@ type UpdaterStore = UpdaterState & UpdaterActions;
 export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
   status: "idle",
   version: "",
+  releaseUrl: "",
   percent: 0,
   error: null,
   pendingUpdate: null,
@@ -60,20 +59,13 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
 
     if (IS_MAC) {
       try {
-        const response = await fetch(MANIFEST_URL, { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Update manifest request failed (${response.status})`);
-        }
-        const manifest = (await response.json()) as { version?: unknown };
-        if (typeof manifest.version !== "string" || manifest.version.trim() === "") {
-          throw new Error("Update manifest did not include a version");
-        }
-
+        const latest = await api.fetchLatestRelease();
         const currentVersion = await getVersion();
-        if (isNewer(manifest.version, currentVersion)) {
+        if (isNewer(latest.version, currentVersion)) {
           set({
             status: "manualAvailable",
-            version: manifest.version,
+            version: latest.version.replace(/^v/, ""),
+            releaseUrl: latest.releaseUrl,
             percent: 0,
             pendingUpdate: null,
           });
@@ -131,10 +123,12 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
     const { status, pendingUpdate } = get();
     if (status === "manualAvailable") {
       try {
-        await openUrl(LATEST_RELEASE_URL);
+        await openUrl(get().releaseUrl);
       } catch (e) {
         set({ status: "manualAvailable", error: api.errorMessage(e) });
+        return;
       }
+      await api.quitApp();
       return;
     }
 

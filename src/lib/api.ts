@@ -139,6 +139,19 @@ type TerminalEvent = { type: "data"; data: string } | { type: "exit" };
 
 export type HistoryAction = "back" | "forward" | "reload" | "stop";
 
+export interface LatestRelease {
+  version: string;
+  releaseUrl: string;
+}
+
+export function fetchLatestRelease(): Promise<LatestRelease> {
+  return invoke("fetch_latest_release");
+}
+
+export function quitApp(): Promise<void> {
+  return invoke("quit_app");
+}
+
 export function getAuthUser(): Promise<UserDisplay | null> {
   return invoke("get_auth_user");
 }

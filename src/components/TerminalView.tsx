@@ -15,8 +15,8 @@ export function TerminalView({ id }: { id: string }) {
     let disposed = false;
 
     const styles = getComputedStyle(document.documentElement);
-    const bg = styles.getPropertyValue("--md-bg").trim() || "#0f0f0f";
-    const fg = styles.getPropertyValue("--md-on").trim() || "#ececec";
+    const bg = styles.getPropertyValue("--md-bg").trim() || "#11100F";
+    const fg = styles.getPropertyValue("--md-on").trim() || "#F2EFE9";
     const monoFont =
       styles.getPropertyValue("--font-mono").trim() ||
       '"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace';
@@ -31,23 +31,23 @@ export function TerminalView({ id }: { id: string }) {
         foreground: fg,
         cursor: fg,
         cursorAccent: bg,
-        selectionBackground: "rgba(255, 255, 255, 0.16)",
-        black: "#1a1a1a",
-        red: "#fc6b83",
-        green: "#70b489",
-        yellow: "#f1b467",
-        blue: "#c8c8c8",
-        magenta: "#b48ead",
-        cyan: "#a0a0a0",
-        white: "#ececec",
-        brightBlack: "#787878",
-        brightRed: "#fc6b83",
-        brightGreen: "#70b489",
-        brightYellow: "#f1b467",
-        brightBlue: "#ececec",
-        brightMagenta: "#b48ead",
-        brightCyan: "#d4d4d4",
-        brightWhite: "#ffffff",
+        selectionBackground: "rgba(242, 100, 61, 0.3)",
+        black: "#2A2724",
+        red: "#F2643D",
+        green: "#F2EFE9",
+        yellow: "#F5A623",
+        blue: "#A8A29A",
+        magenta: "#F2643D",
+        cyan: "#A8A29A",
+        white: "#F2EFE9",
+        brightBlack: "#A8A29A",
+        brightRed: "#F2643D",
+        brightGreen: "#F2EFE9",
+        brightYellow: "#F5A623",
+        brightBlue: "#F2EFE9",
+        brightMagenta: "#F5A623",
+        brightCyan: "#F2EFE9",
+        brightWhite: "#F2EFE9",
       },
     });
     const fit = new FitAddon();

@@ -69,6 +69,60 @@ async fn cached_display(state: &AppState) -> Option<UserDisplay> {
     Some(UserDisplay::from_profile(&profile))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatestRelease {
+    version: String,
+    release_url: String,
+}
+
+#[tauri::command]
+pub async fn fetch_latest_release(app: tauri::AppHandle) -> Result<LatestRelease, String> {
+    let manifest_url = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|cfg| cfg.get("endpoints"))
+        .and_then(|endpoints| endpoints.get(0))
+        .and_then(|endpoint| endpoint.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "No updater endpoint configured".to_string())?;
+    let release_url = manifest_url
+        .split("/download/")
+        .next()
+        .unwrap_or(&manifest_url)
+        .to_string();
+
+    let response = crate::util::http_client()
+        .get(&manifest_url)
+        .header("Cache-Control", "no-cache")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| format!("Update manifest request failed: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Update manifest request failed ({})", status.as_u16()));
+    }
+    let manifest: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Update manifest is not valid JSON: {e}"))?;
+    let version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "Update manifest did not include a version".to_string())?;
+    Ok(LatestRelease { version, release_url })
+}
+
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 pub async fn get_auth_user(state: State<'_, AppState>) -> Result<Option<UserDisplay>, String> {
     let client = auth::FirebaseAuthClient::new();

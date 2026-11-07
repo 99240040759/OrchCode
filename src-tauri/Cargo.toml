@@ -1,6 +1,6 @@
 [package]
 name = "orch"
-version = "1.0.1"
+version = "1.0.2"
 description = "Orch Desktop Application"
 authors = ["you"]
 edition = "2021"

@@ -244,6 +244,8 @@ pub fn run() {
             ipc::get_connector_auth_url,
             ipc::disconnect_connector,
             ipc::report_error,
+            ipc::fetch_latest_release,
+            ipc::quit_app,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the application");
