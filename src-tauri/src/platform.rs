@@ -30,7 +30,9 @@ pub fn setup_native_window(window: &tauri::WebviewWindow) {
 
 
 #[cfg(target_os = "macos")]
-pub fn setup_native_window(_window: &tauri::WebviewWindow) {}
+pub fn setup_native_window(window: &tauri::WebviewWindow) {
+    let _ = window.set_theme(Some(tauri::Theme::Dark));
+}
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn setup_native_window(_window: &tauri::WebviewWindow) {}

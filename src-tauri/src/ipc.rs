@@ -22,13 +22,6 @@ use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
 
-fn is_safe_path_segment(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
 fn canonical_string(path: &str) -> String {
     dunce::canonicalize(PathBuf::from(path))
         .map(|p| p.to_string_lossy().to_string())
@@ -220,17 +213,6 @@ pub fn set_workspace(state: State<'_, AppState>, path: String) -> Result<String,
 }
 
 #[tauri::command]
-pub fn create_quick_project_dir(state: State<'_, AppState>, id: String, name: String) -> Result<String, String> {
-    if !is_safe_path_segment(&id) || !is_safe_path_segment(&name) {
-        return Err("invalid quick project id or name".to_string());
-    }
-    let dir = state.quick_project_path(&id, &name);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create quick project dir: {e}"))?;
-    let canonical = dunce::canonicalize(&dir).unwrap_or(dir);
-    Ok(canonical.to_string_lossy().to_string())
-}
-
-#[tauri::command]
 pub async fn list_sessions_for_workspace(
     state: State<'_, AppState>,
     workspace_path: String,
@@ -250,7 +232,6 @@ pub async fn forget_workspace(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     workspace_path: String,
-    delete_project: bool,
 ) -> Result<(), String> {
     let canonical = canonical_string(&workspace_path);
     let workspace = PathBuf::from(&canonical);
@@ -263,53 +244,6 @@ pub async fn forget_workspace(
 
     if was_active_workspace {
         state.set_workspace(None);
-    }
-
-    if delete_project {
-        let root = dunce::canonicalize(state.quick_projects_root()).map_err(|e| e.to_string())?;
-        let user_id = state.current_user_id().unwrap_or_default();
-        let session_ids = state
-            .memory
-            .session_ids_for_workspace(&canonical, &user_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        for id in &session_ids {
-            state.cancel_run(id);
-        }
-        state.wait_for_runs(&session_ids, Duration::from_secs(5)).await;
-        for id in &session_ids {
-            if state.has_run(id) {
-                return Err(format!("cannot delete project: session {id} could not be stopped in time"));
-            }
-        }
-        for id in &session_ids {
-            if let Err(error) = session::destroy(&state.data_dir, id).await {
-                tracing::error!(session_id = %id, error = %error, "could not delete conversation");
-                sentry::capture_error(&error);
-            }
-        }
-        state
-            .memory
-            .delete_sessions_for_workspace(&canonical, &user_id)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        // Close terminals in this workspace before attempting directory removal
-        // (open PTYs lock the directory on Windows).
-        if was_active_workspace {
-            state.close_all_terminals();
-        }
-
-        if workspace.exists() {
-            let target = dunce::canonicalize(&workspace).map_err(|e| format!("cannot resolve project: {e}"))?;
-            if target == root || !target.starts_with(&root) {
-                return Err("only quick projects created by Orch can be deleted".to_string());
-            }
-            tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&target))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| format!("failed to delete quick project directory: {e}"))?;
-        }
     }
 
     let _ = app.emit("sessions-updated", ());

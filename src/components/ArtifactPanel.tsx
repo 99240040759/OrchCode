@@ -1,12 +1,12 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import {
-  VscAdd,
-  VscClose,
-  VscScreenFull,
-  VscScreenNormal,
-  VscTerminal,
-} from "react-icons/vsc";
-import { RiFolderOpenLine } from "react-icons/ri";
+  LuFolderOpen,
+  LuMaximize2,
+  LuMinimize2,
+  LuPlus,
+  LuTerminal,
+  LuX,
+} from "react-icons/lu";
 import { listen } from "@tauri-apps/api/event";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../lib/artifacts";
 import { getBasename } from "../lib/utils";
@@ -35,24 +35,24 @@ const VIEWER_FALLBACK = (
 );
 function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
   if (tab.kind === "browser") return <ChromeIcon className="ArtifactTab-icon" />;
-  if (tab.kind === "terminal") return <VscTerminal className="ArtifactTab-icon" />;
-  if (tab.kind === "file" && !tab.path) return <RiFolderOpenLine className="ArtifactTab-icon" />;
+  if (tab.kind === "terminal") return <LuTerminal className="ArtifactTab-icon" />;
+  if (tab.kind === "file" && !tab.path) return <LuFolderOpen className="ArtifactTab-icon" />;
   const name = tab.path ? getBasename(tab.path) : `${tabName}.${tab.kind}`;
   return (
     <ExplorerIcon
       type="file"
       name={name}
       className="ArtifactTab-icon"
-      width={14}
-      height={14}
+      width={16}
+      height={16}
     />
   );
 }
 
 const EMPTY_CARDS = [
-  { kind: "file" as const, label: "Explorer", Icon: RiFolderOpenLine },
+  { kind: "file" as const, label: "Explorer", Icon: LuFolderOpen },
   { kind: "browser" as const, label: "Browser", Icon: ChromeIcon },
-  { kind: "terminal" as const, label: "Terminal", Icon: VscTerminal },
+  { kind: "terminal" as const, label: "Terminal", Icon: LuTerminal },
 ];
 
 function useFileWrittenListener() {
@@ -129,7 +129,7 @@ function ArtifactPanelHeader() {
                     <ArtifactTabIcon tab={tab} tabName={tabName} />
                   </span>
                   <span className="ArtifactTab-iconClose" aria-hidden="true">
-                    <VscClose />
+                    <LuX />
                   </span>
                 </button>
               </Tooltip>
@@ -142,19 +142,19 @@ function ArtifactPanelHeader() {
           <Tooltip content="New tab" side="bottom">
             <DropdownMenuTrigger asChild>
               <Button className="IconBtn ArtifactTabs-addBtn" aria-label="New artifact">
-                <VscAdd />
+                <LuPlus />
               </Button>
             </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent sideOffset={6} align="start">
             <DropdownMenuItem onSelect={() => openFile()}>
-              <RiFolderOpenLine /> Explorer
+              <LuFolderOpen /> Explorer
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openBrowser()}>
               <ChromeIcon /> Browser
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openTerminal()}>
-              <VscTerminal /> Terminal
+              <LuTerminal /> Terminal
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -167,7 +167,7 @@ function ArtifactPanelHeader() {
             aria-label={maximized ? "Restore panel size" : "Maximize panel"}
             onClick={toggleMaximized}
           >
-            {maximized ? <VscScreenNormal /> : <VscScreenFull />}
+            {maximized ? <LuMinimize2 /> : <LuMaximize2 />}
           </Button>
         </Tooltip>
       </div>

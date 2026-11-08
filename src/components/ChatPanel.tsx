@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { VscClose } from "react-icons/vsc";
+import { LuX } from "react-icons/lu";
 import {
   Panel,
   PanelGroup,
@@ -14,7 +14,7 @@ import { MessageList } from "./MessageList";
 
 function chatSizeFor(panelOpen: boolean, maximized: boolean): number {
   if (!panelOpen) return 100;
-  return maximized ? 0 : 60;
+  return maximized ? 0 : 45;
 }
 
 export function ChatPanel({ visible = true }: { visible?: boolean }) {
@@ -97,7 +97,7 @@ export function ChatPanel({ visible = true }: { visible?: boolean }) {
                     aria-label="Dismiss error"
                     onClick={dismissError}
                   >
-                    <VscClose />
+                    <LuX />
                   </button>
                 </div>
               )}

@@ -9,7 +9,6 @@ import {
   errorMessage,
   newId,
   setWorkspace,
-  createQuickProjectDir,
   forgetWorkspace,
 } from "./api";
 
@@ -17,7 +16,6 @@ export interface WorkspaceMeta {
   id: string;
   name: string;
   path: string;
-  isQuickProject: boolean;
   createdAt: number;
 }
 
@@ -39,7 +37,6 @@ interface WorkspaceState {
 interface WorkspaceActions {
   initialize: () => Promise<void>;
   pickAndOpen: () => Promise<void>;
-  createQuickProject: () => Promise<void>;
   switchTo: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   dismissError: () => void;
@@ -59,32 +56,19 @@ const INITIAL_STATE: WorkspaceState = {
   error: null,
 };
 
-const ADJECTIVES = [
-  "swift", "bright", "calm", "bold", "clear", "cool", "daring", "eager",
-  "fair", "gentle", "happy", "keen", "lively", "noble", "proud", "quick",
-  "quiet", "radiant", "sharp", "silent", "smooth", "sparkling", "steady", "strong",
-  "tidy", "valiant", "vibrant", "warm", "wise", "agile", "clever", "cosmic"
-];
-
-const ANIMALS = [
-  "falcon", "otter", "tiger", "lynx", "orca", "sparrow", "fox", "badger",
-  "crane", "dolphin", "eagle", "hawk", "koala", "lemur", "panda", "raven",
-  "seal", "wolf", "zebra", "panther", "cheetah", "bison", "jaguar", "gecko",
-  "finch", "heron", "robin", "beaver", "elk", "bear", "hare", "salmon"
-];
-
-function randomProjectName(existingNames: Set<string>): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
-  const name = `${adj}-${animal}`;
-  return existingNames.has(name) ? `${name}-${newId().slice(0, 4)}` : name;
-}
-
 function parseList(raw: string | null): WorkspaceMeta[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as WorkspaceMeta[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as Array<Record<string, unknown>>)
+      .filter((w) => !w.isQuickProject && !(typeof w.path === "string" && w.path.includes("quick-projects")))
+      .map((w) => ({
+        id: String(w.id),
+        name: String(w.name),
+        path: String(w.path),
+        createdAt: Number(w.createdAt) || 0,
+      }));
   } catch {
     return [];
   }
@@ -232,25 +216,9 @@ export const useWorkspaceStore = create(
             id: newId(),
             name,
             path: selected,
-            isQuickProject: false,
             createdAt: Date.now(),
           });
           const meta = get().all.find((w) => w.path === activated.path) ?? activated;
-          await commit(meta, upsert(get().all, meta));
-        }),
-
-      createQuickProject: () =>
-        exclusive(async () => {
-          const id = newId();
-          const name = randomProjectName(new Set(get().all.map((w) => w.name)));
-          const path = await createQuickProjectDir(id, name);
-          const meta = await activateWorkspace({
-            id,
-            name,
-            path,
-            isQuickProject: true,
-            createdAt: Date.now(),
-          });
           await commit(meta, upsert(get().all, meta));
         }),
 
@@ -266,7 +234,7 @@ export const useWorkspaceStore = create(
         exclusive(async () => {
           const target = get().all.find((w) => w.id === id);
           if (!target) return;
-          await forgetWorkspace(target.path, target.isQuickProject);
+          await forgetWorkspace(target.path);
           const next = get().all.filter((w) => w.id !== id);
           await saveAll(next);
           const wasCurrent = get().current?.id === id;

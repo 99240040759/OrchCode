@@ -105,8 +105,8 @@ export function SuggestionPopover({
                     type="file"
                     name={filename}
                     className="MentionItem-icon"
-                    width={14}
-                    height={14}
+                    width={18}
+                    height={18}
                   />
                   <span className="MentionItem-name">{filename}</span>
                   {dir && <span className="MentionItem-path">{dir}</span>}

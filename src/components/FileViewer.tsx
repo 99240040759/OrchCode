@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useDebouncedCallback } from "use-debounce";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { VscCheck, VscChevronRight, VscCode, VscCopy, VscPreview, VscRefresh } from "react-icons/vsc";
+import { LuCheck, LuChevronRight, LuCode, LuCopy, LuEye, LuRotateCw } from "react-icons/lu";
 
 import * as api from "../lib/api";
 import * as utils from "../lib/utils";
@@ -64,21 +64,21 @@ function FileBreadcrumb({ path }: { path: string }) {
       {wsName && (
         <span className="FileBreadcrumb-item">
           <span className="FileBreadcrumb-folder">{wsName}</span>
-          {parts.length > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
+          {parts.length > 0 && <LuChevronRight className="FileBreadcrumb-sep" />}
         </span>
       )}
       {parts.map((part, index) => {
         const isLast = index === parts.length - 1;
         return (
           <span key={`${part}-${index}`} className="FileBreadcrumb-item">
-            {index > 0 && <VscChevronRight className="FileBreadcrumb-sep" />}
+            {index > 0 && <LuChevronRight className="FileBreadcrumb-sep" />}
             {isLast && (
               <ExplorerIcon
                 type="file"
                 name={part}
                 className="FileBreadcrumb-fileIcon"
-                width={14}
-                height={14}
+                width={17}
+                height={17}
               />
             )}
             <span className={isLast ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"}>
@@ -177,7 +177,7 @@ function FilePicker({ onPick }: { onPick: (path: string) => void }) {
                   }}
                   onClick={() => onPick(hit.path)}
                 >
-                  <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={14} height={14} />
+                  <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={18} height={18} />
                   <span className="FilePicker-name">{filename}</span>
                   {dir && <span className="FilePicker-path">{dir}</span>}
                 </button>
@@ -229,7 +229,7 @@ function BinaryFileMessage({ path }: { path: string }) {
   return (
     <div className="FileContent-msg">
       <div className="BinaryFileMsg">
-        <ExplorerIcon type="file" name={name} width={40} height={40} className="BinaryFileMsg-icon" />
+        <ExplorerIcon type="file" name={name} width={48} height={48} className="BinaryFileMsg-icon" />
         <span className="BinaryFileMsg-name">{name}</span>
         <span className="BinaryFileMsg-hint">Binary file (.{utils.getExt(path)}) — cannot be displayed as text</span>
       </div>
@@ -337,7 +337,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
                 aria-label={mode === "preview" ? "View source code" : "Preview markdown"}
                 onClick={() => setMode((m) => (m === "preview" ? "code" : "preview"))}
               >
-                {mode === "preview" ? <VscCode /> : <VscPreview />}
+                {mode === "preview" ? <LuCode /> : <LuEye />}
               </Button>
             </Tooltip>
           )}
@@ -348,7 +348,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
               onClick={() => setReloadTick((t) => t + 1)}
               disabled={loading}
             >
-              <VscRefresh />
+              <LuRotateCw />
             </Button>
           </Tooltip>
           <Tooltip content={copied ? "Copied" : "Copy content"} side="bottom">
@@ -358,7 +358,7 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
               aria-label="Copy file content"
               disabled={!content}
             >
-              {copied ? <VscCheck className="CodeBlock-copyIconDone" /> : <VscCopy />}
+              {copied ? <LuCheck className="CodeBlock-copyIconDone" /> : <LuCopy />}
             </Button>
           </Tooltip>
         </div>

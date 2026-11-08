@@ -1,25 +1,18 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  VscAdd,
-  VscCheck,
-  VscClose,
-  VscExtensions,
-  VscFolder,
-  VscFolderOpened,
-  VscNewFolder,
-  VscRocket,
-  VscSignOut,
-  VscTrash,
-} from "react-icons/vsc";
+  LuBlocks,
+  LuCheck,
+  LuFolder,
+  LuFolderOpen,
+  LuFolderPlus,
+  LuLogOut,
+  LuPlus,
+  LuTrash2,
+  LuX,
+} from "react-icons/lu";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/DropdownMenu";
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
 import { useWorkspaceStore } from "../lib/workspace";
@@ -88,7 +81,7 @@ const SessionItem = React.memo(function SessionItem({
                 onDelete(session.id);
               }}
             >
-              <VscCheck />
+              <LuCheck />
             </Button>
           </Tooltip>
           <Tooltip content="Cancel" side="top">
@@ -97,7 +90,7 @@ const SessionItem = React.memo(function SessionItem({
               aria-label="Cancel delete"
               onClick={() => setConfirming(false)}
             >
-              <VscClose />
+              <LuX />
             </Button>
           </Tooltip>
         </div>
@@ -108,7 +101,7 @@ const SessionItem = React.memo(function SessionItem({
             aria-label={`Delete ${session.title || "New chat"}`}
             onClick={() => setConfirming(true)}
           >
-            <VscTrash />
+            <LuTrash2 />
           </Button>
         </Tooltip>
       )}
@@ -136,13 +129,11 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const allWorkspaces = useWorkspaceStore((s) => s.all);
   const switchTo = useWorkspaceStore((s) => s.switchTo);
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
-  const createQuick = useWorkspaceStore((s) => s.createQuickProject);
   const removeWs = useWorkspaceStore((s) => s.remove);
   const wsBusy = useWorkspaceStore((s) => s.busy);
   const wsError = useWorkspaceStore((s) => s.error);
   const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
-  const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const wsLocked = streaming || wsBusy;
@@ -153,11 +144,6 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     }, 30000);
     return () => clearInterval(interval);
   }, []);
-
-  const onWsMenuOpenChange = (open: boolean) => {
-    setWsMenuOpen(open);
-    if (!open) setPendingWsDelete(null);
-  };
 
   const handleSelectSession = useCallback(
     (id: string) => {
@@ -200,7 +186,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
           disabled={streaming}
           aria-label="New Conversation"
         >
-          <VscAdd />
+          <LuPlus />
           <span>New Conversation</span>
         </Button>
       </div>
@@ -214,7 +200,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
             onClick={() => onViewChange(currentView === "connectors" ? "chat" : "connectors")}
             aria-label="Integrations"
           >
-            <VscExtensions />
+            <LuBlocks />
             <span>Integrations</span>
           </button>
         </Tooltip>
@@ -224,7 +210,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         <div className="ChatPane-error" role="alert">
           <span>{wsError}</span>
           <button type="button" className="ChatPane-errorClose" aria-label="Dismiss error" onClick={dismissWsError}>
-            <VscClose />
+            <LuX />
           </button>
         </div>
       )}
@@ -232,36 +218,24 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       <div className="Sidebar-projectsHeader">
         <span className="Sidebar-projectsTitle">Projects</span>
         <div className="Sidebar-projectsActions">
-          <DropdownMenu open={wsMenuOpen} onOpenChange={onWsMenuOpenChange}>
-            <Tooltip content="Add project" side="right">
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="IconBtn Sidebar-projectsActionBtn"
-                  aria-label="Add project"
-                >
-                  <VscNewFolder />
-                </button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent sideOffset={4} align="end">
-              <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
-                <VscFolderOpened />
-                <span>Open folder…</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled={wsLocked} onSelect={() => void createQuick()}>
-                <VscRocket />
-                <span>New quick project</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Tooltip content="Open folder" side="right">
+            <button
+              type="button"
+              className="IconBtn Sidebar-projectsActionBtn"
+              aria-label="Open folder"
+              disabled={wsLocked}
+              onClick={() => void pickAndOpen()}
+            >
+              <LuFolderPlus />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
       <nav className="Sidebar-threads" aria-label="Projects and conversations">
         {workspacesToDisplay.map((ws) => {
           const isCurrentWs = ws.id === currentWs?.id;
-          const FolderIconComponent = isCurrentWs ? VscFolderOpened : VscFolder;
+          const FolderIconComponent = isCurrentWs ? LuFolderOpen : LuFolder;
           return (
             <div key={ws.id} className="Sidebar-projectGroup">
               <div className="Sidebar-wsRow" data-active={isCurrentWs}>
@@ -283,18 +257,14 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     <button
                       type="button"
                       className="WsMenuItem-confirmYes"
-                      title={
-                        ws.isQuickProject
-                          ? "Delete this quick project and its chats"
-                          : "Remove from list (files and chats are kept)"
-                      }
+                      title="Remove from list (files and chats are kept)"
                       disabled={wsLocked}
                       onClick={() => {
                         setPendingWsDelete(null);
                         void removeWs(ws.id);
                       }}
                     >
-                      <VscCheck />
+                      <LuCheck />
                     </button>
                     <button
                       type="button"
@@ -302,21 +272,21 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                       title="Cancel"
                       onClick={() => setPendingWsDelete(null)}
                     >
-                      <VscClose />
+                      <LuX />
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     className="WsMenuItem-del"
-                    title={ws.isQuickProject ? "Delete quick project" : "Remove from list"}
+                    title="Remove from list"
                     disabled={wsLocked}
                     onClick={(e) => {
                       e.stopPropagation();
                       setPendingWsDelete(ws.id);
                     }}
                   >
-                    <VscTrash />
+                    <LuTrash2 />
                   </button>
                 )}
               </div>
@@ -383,7 +353,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               aria-label="Sign out"
               onClick={() => void signOut()}
             >
-              <VscSignOut />
+              <LuLogOut />
             </Button>
           </Tooltip>
         </div>

@@ -1,5 +1,5 @@
 import React from "react";
-import { VscChevronDown, VscFolder, VscFolderOpened, VscRocket } from "react-icons/vsc";
+import { LuChevronDown, LuFolder, LuFolderOpen } from "react-icons/lu";
 import { useChatStore } from "../../lib/store";
 import { useWorkspaceStore } from "../../lib/workspace";
 import { Tooltip } from "../ui/Tooltip";
@@ -24,7 +24,6 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
   const allWorkspaces = useWorkspaceStore((s) => s.all);
   const switchTo = useWorkspaceStore((s) => s.switchTo);
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
-  const createQuick = useWorkspaceStore((s) => s.createQuickProject);
   const wsBusy = useWorkspaceStore((s) => s.busy);
   const streaming = useChatStore((s) => s.streaming);
   const wsLocked = streaming || wsBusy;
@@ -37,9 +36,9 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
       >
         <DropdownMenuTrigger asChild>
           <button type="button" className="Composer-repo" aria-label="Switch workspace">
-            <VscFolder className="Composer-repoIcon" />
+            <LuFolder className="Composer-repoIcon" />
             <span>{currentName ?? "Workspace"}</span>
-            <VscChevronDown className="Composer-chevron" />
+            <LuChevronDown className="Composer-chevron" />
           </button>
         </DropdownMenuTrigger>
       </Tooltip>
@@ -53,18 +52,14 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
               if (ws.id !== currentWs?.id) void switchTo(ws.id);
             }}
           >
-            <VscFolder />
+            <LuFolder />
             <span className="ModelItem-name">{ws.name}</span>
           </DropdownMenuItem>
         ))}
         {allWorkspaces.length > 0 && <DropdownMenuSeparator />}
         <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
-          <VscFolderOpened />
+          <LuFolderOpen />
           <span>Open folder…</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={wsLocked} onSelect={() => void createQuick()}>
-          <VscRocket />
-          <span>New quick project</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  VscArrowLeft,
-  VscArrowRight,
-  VscGlobe,
-  VscLinkExternal,
-  VscRefresh,
-  VscClose,
-} from "react-icons/vsc";
+  LuArrowLeft,
+  LuArrowRight,
+  LuExternalLink,
+  LuGlobe,
+  LuRotateCw,
+  LuX,
+} from "react-icons/lu";
 import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -14,11 +14,19 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import { DEFAULT_BROWSER_URL } from "../lib/artifacts";
 import { newId } from "../lib/api";
+import { IS_MAC } from "../lib/utils";
+import { ChromeIcon } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { useOverlayStore } from "./ui/DropdownMenu";
 
 const OFFSCREEN = -100000;
+
+// On macOS, WebKit WKWebView omits Safari identifiers by default, causing Google
+// and other major sites to classify it as legacy and serve ancient 1990s HTML.
+// Setting a modern Safari UA on macOS ensures modern layouts & dark-mode styling.
+const MAC_SAFARI_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15";
 
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
@@ -69,6 +77,7 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
       y: OFFSCREEN,
       width: 1,
       height: 1,
+      userAgent: IS_MAC ? MAC_SAFARI_UA : undefined,
     });
 
     void webview.once("tauri://created", () => {
@@ -217,7 +226,7 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
         <div className="BrowserBar-navGroup">
           <Tooltip content="Back" side="bottom">
             <Button className="IconBtn" aria-label="Back" onClick={() => runHistory("back")} disabled={!ready}>
-              <VscArrowLeft />
+              <LuArrowLeft />
             </Button>
           </Tooltip>
           <Tooltip content="Forward" side="bottom">
@@ -227,7 +236,7 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
               onClick={() => runHistory("forward")}
               disabled={!ready}
             >
-              <VscArrowRight />
+              <LuArrowRight />
             </Button>
           </Tooltip>
           <Tooltip content={loading ? "Stop loading" : "Reload"} side="bottom">
@@ -247,14 +256,14 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
               }}
               disabled={!ready}
             >
-              {loading ? <VscClose /> : <VscRefresh />}
+              {loading ? <LuX /> : <LuRotateCw />}
             </Button>
           </Tooltip>
         </div>
 
         <div className={`BrowserBar-urlWrap${inputFocused ? " focused" : ""}`}>
           {!inputFocused && (
-            <VscGlobe className="BrowserBar-favicon" aria-hidden="true" />
+            <ChromeIcon className="BrowserBar-favicon" width={16} height={16} />
           )}
           <input
             ref={inputRef}
@@ -278,7 +287,7 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
             aria-label="Open in system browser"
             onClick={() => void openUrl(normalizeUrl(input))}
           >
-            <VscLinkExternal />
+            <LuExternalLink />
           </Button>
         </Tooltip>
       </div>

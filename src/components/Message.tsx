@@ -1,17 +1,17 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
-  VscBook,
-  VscCheck,
-  VscChevronRight,
-  VscCopy,
-  VscFlame,
-  VscGlobe,
-  VscMcp,
-  VscScreenNormal,
-  VscSearch,
-  VscTerminal,
-  VscWarning,
-} from "react-icons/vsc";
+  LuBookOpen,
+  LuCheck,
+  LuChevronRight,
+  LuCopy,
+  LuCpu,
+  LuFlame,
+  LuGlobe,
+  LuSearch,
+  LuShrink,
+  LuTerminal,
+  LuTriangleAlert,
+} from "react-icons/lu";
 import type { ToolIcon } from "../lib/api";
 import type {
   ChatMessage,
@@ -31,12 +31,12 @@ import { ConnectorIcon } from "./icons/ConnectorIcon";
 type NonFileToolIcon = Exclude<ToolIcon, "file" | "folder">;
 
 const TOOL_ICONS: Record<NonFileToolIcon, React.ComponentType<{ className?: string }>> = {
-  terminal: VscTerminal,
-  search: VscSearch,
-  globe: VscGlobe,
-  book: VscBook,
-  cpu: VscMcp,
-  zapOff: VscFlame,
+  terminal: LuTerminal,
+  search: LuSearch,
+  globe: LuGlobe,
+  book: LuBookOpen,
+  cpu: LuCpu,
+  zapOff: LuFlame,
 };
 
 function isNonFileToolIcon(icon: ToolIcon): icon is NonFileToolIcon {
@@ -51,7 +51,7 @@ const CompactionDivider = React.memo(function CompactionDivider({ item }: { item
       side="top"
     >
       <div className="CompactionNotice">
-        <VscScreenNormal className="CompactionNotice-icon" />
+        <LuShrink className="CompactionNotice-icon" />
         <span>
           Context compacted · {item.originalMessageCount} messages summarised · {time}
         </span>
@@ -102,8 +102,8 @@ const ToolTarget = React.memo(function ToolTarget({ tool }: { tool: ToolCallItem
         type={info.icon === "folder" ? "folder" : "file"}
         name={info.targetText}
         className="ToolRow-icon"
-        width={13}
-        height={13}
+        width={16}
+        height={16}
       />
       <span className="ToolRow-text">{info.targetText}</span>
     </span>
@@ -138,11 +138,11 @@ const ToolRow = React.memo(function ToolRow({ tool }: { tool: ToolCallItem }) {
         <ToolTarget tool={tool} />
         {tool.status === "running" && <span className="ToolRow-spinner" role="status" aria-label="Running" />}
         {tool.status === "error" && (
-          <VscWarning className="ToolRow-errIcon" aria-label="Tool call failed" />
+          <LuTriangleAlert className="ToolRow-errIcon" aria-label="Tool call failed" />
         )}
         {hasOutput && (
           <span className="ToolRow-toggle" data-open={open} aria-hidden="true">
-            <VscChevronRight className="ToolRow-chevron" />
+            <LuChevronRight className="ToolRow-chevron" />
           </span>
         )}
       </div>
@@ -206,7 +206,7 @@ const ThinkingBlock = React.memo(function ThinkingBlock({ item }: { item: Reason
         onClick={() => setUserToggled(!isOpen)}
       >
         <span className="Reasoning-label">{label}</span>
-        <VscChevronRight className="Reasoning-chevron" />
+        <LuChevronRight className="Reasoning-chevron" />
       </button>
       {isOpen && (
         <div className="Reasoning-body" ref={bodyRef} onScroll={handleScroll}>
@@ -261,7 +261,7 @@ const MessageCopyBtn = React.memo(function MessageCopyBtn({ text }: { text: stri
           onClick={copy}
           aria-label="Copy response"
         >
-          {copied ? <VscCheck className="CodeBlock-copyIconDone" /> : <VscCopy />}
+          {copied ? <LuCheck className="CodeBlock-copyIconDone" /> : <LuCopy />}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </Tooltip>
@@ -356,7 +356,7 @@ export const Message = React.memo(function Message({ message }: { message: ChatM
       {showThinking && <ThinkingIndicator />}
       {message.error && (
         <div className="Msg-error" role="alert">
-          <VscWarning aria-hidden="true" />
+          <LuTriangleAlert aria-hidden="true" />
           <span>{message.error}</span>
         </div>
       )}

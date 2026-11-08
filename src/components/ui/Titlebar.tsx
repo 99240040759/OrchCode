@@ -5,12 +5,14 @@ import {
   VscChromeMaximize,
   VscChromeMinimize,
   VscChromeRestore,
-  VscLayoutSidebarLeft,
-  VscLayoutSidebarLeftOff,
-  VscLayoutSidebarRight,
-  VscLayoutSidebarRightOff,
-  VscRefresh,
 } from "react-icons/vsc";
+import {
+  LuPanelLeft,
+  LuPanelLeftClose,
+  LuPanelRight,
+  LuPanelRightClose,
+  LuRotateCw,
+} from "react-icons/lu";
 import { useArtifactsStore } from "../../lib/artifacts";
 import { useUpdaterStore } from "../../lib/updater";
 import { useChatStore } from "../../lib/store";
@@ -31,7 +33,7 @@ function UpdateBadge() {
     return (
       <Tooltip content={`Downloading update v${version}`} side="bottom">
         <span className="Titlebar-update-badge Titlebar-update-downloading">
-          <VscRefresh className="Titlebar-spinner" />
+          <LuRotateCw className="Titlebar-spinner" />
           <span>{percent > 0 && percent < 100 ? `${percent}%` : "Downloading…"}</span>
         </span>
       </Tooltip>
@@ -45,7 +47,7 @@ function UpdateBadge() {
           className="Titlebar-update-badge Titlebar-update-ready"
           onClick={() => void apply()}
         >
-          <VscRefresh />
+          <LuRotateCw />
           <span>Update available</span>
         </Button>
       </Tooltip>
@@ -59,7 +61,7 @@ function UpdateBadge() {
           className="Titlebar-update-badge Titlebar-update-ready"
           onClick={() => void apply()}
         >
-          <VscRefresh />
+          <LuRotateCw />
           <span>Restart to update</span>
         </Button>
       </Tooltip>
@@ -70,7 +72,7 @@ function UpdateBadge() {
     return (
       <Tooltip content="Applying update" side="bottom">
         <span className="Titlebar-update-badge Titlebar-update-downloading">
-          <VscRefresh className="Titlebar-spinner" />
+          <LuRotateCw className="Titlebar-spinner" />
           <span>Restarting…</span>
         </span>
       </Tooltip>
@@ -84,7 +86,7 @@ function UpdateBadge() {
           className="Titlebar-update-badge Titlebar-update-failed"
           onClick={() => void start()}
         >
-          <VscRefresh />
+          <LuRotateCw />
           <span>Update failed</span>
         </Button>
       </Tooltip>
@@ -170,7 +172,7 @@ function ArtifactPanelToggle() {
         data-active={panelOpen}
         onClick={() => setPanelOpen(!panelOpen)}
       >
-        {panelOpen ? <VscLayoutSidebarRightOff /> : <VscLayoutSidebarRight />}
+        {panelOpen ? <LuPanelRightClose /> : <LuPanelRight />}
       </Button>
     </Tooltip>
   );
@@ -203,7 +205,7 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar, view 
               data-active={true}
               onClick={onToggleSidebar}
             >
-              <VscLayoutSidebarLeftOff />
+              <LuPanelLeftClose />
             </Button>
           </Tooltip>
           <div className="Titlebar-drag" data-tauri-drag-region />
@@ -228,7 +230,7 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar, view 
                 data-active={false}
                 onClick={onToggleSidebar}
               >
-                <VscLayoutSidebarLeft />
+                <LuPanelLeft />
               </Button>
             </Tooltip>
           )}

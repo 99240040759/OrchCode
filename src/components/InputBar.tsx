@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { VscAdd } from "react-icons/vsc";
-import { RiFileTextLine, RiImageLine } from "react-icons/ri";
+import { LuFileText, LuImage, LuPlus } from "react-icons/lu";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -270,7 +269,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                     className="Composer-plus"
                     aria-label="Add attachment"
                   >
-                    <VscAdd />
+                    <LuPlus />
                   </Button>
                 </DropdownMenuTrigger>
               </Tooltip>
@@ -281,11 +280,11 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                     if (modelSupportsImages) void pickFiles(true);
                   }}
                 >
-                  <RiImageLine />
+                  <LuImage />
                   <span>Image</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void pickFiles(false)}>
-                  <RiFileTextLine />
+                  <LuFileText />
                   <span>File</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

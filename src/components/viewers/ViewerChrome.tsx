@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { VscChevronLeft, VscChevronRight } from "react-icons/vsc";
+import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 
 export function ViewerLoading({ label }: { label: string }) {
   return (
@@ -107,7 +107,7 @@ export function PageControls({ page, total, onPrev, onNext, onGoto }: PageContro
         aria-label="Previous page"
         title="Previous page"
       >
-        <VscChevronLeft />
+        <LuChevronLeft />
       </button>
 
       <span className="DocViewer-pageIndicator">
@@ -149,7 +149,7 @@ export function PageControls({ page, total, onPrev, onNext, onGoto }: PageContro
         aria-label="Next page"
         title="Next page"
       >
-        <VscChevronRight />
+        <LuChevronRight />
       </button>
     </nav>
   );

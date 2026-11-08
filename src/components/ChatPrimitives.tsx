@@ -1,5 +1,5 @@
 import React, { useEffect, useState, type SVGProps } from "react";
-import { VscClose } from "react-icons/vsc";
+import { LuX } from "react-icons/lu";
 import {
   BsFileEarmarkPdfFill,
   BsFileEarmarkWordFill,
@@ -49,40 +49,53 @@ export const ExplorerIcon = React.memo(function ExplorerIcon({
   name,
   className,
   style,
+  width = 16,
+  height = 16,
   ...svgProps
 }: ExplorerIconProps) {
-  if (type === "folder") return <FolderIcon folderName={name} className={className} style={style} {...svgProps} />;
+  if (type === "folder") {
+    return <FolderIcon folderName={name} className={className} style={style} width={width} height={height} {...svgProps} />;
+  }
 
   const ext = getExt(name);
   if (ext === "pdf") {
-    return <BsFileEarmarkPdfFill className={className} style={{ color: "#e2574c", ...style }} {...svgProps} />;
+    return <BsFileEarmarkPdfFill className={className} style={{ color: "#e2574c", ...style }} width={width} height={height} {...svgProps} />;
   }
   if (ext === "docx" || ext === "doc") {
-    return <BsFileEarmarkWordFill className={className} style={{ color: "#185abd", ...style }} {...svgProps} />;
+    return <BsFileEarmarkWordFill className={className} style={{ color: "#185abd", ...style }} width={width} height={height} {...svgProps} />;
   }
   if (ext === "xlsx" || ext === "xls" || ext === "ods") {
-    return <BsFileEarmarkExcelFill className={className} style={{ color: "#107c41", ...style }} {...svgProps} />;
+    return <BsFileEarmarkExcelFill className={className} style={{ color: "#107c41", ...style }} width={width} height={height} {...svgProps} />;
   }
   if (ext === "pptx" || ext === "ppt") {
-    return <BsFileEarmarkPptFill className={className} style={{ color: "#c43e1c", ...style }} {...svgProps} />;
+    return <BsFileEarmarkPptFill className={className} style={{ color: "#c43e1c", ...style }} width={width} height={height} {...svgProps} />;
   }
 
-  return <FileIcon fileName={name} autoAssign className={className} style={style} {...svgProps} />;
+  return <FileIcon fileName={name} autoAssign className={className} style={style} width={width} height={height} {...svgProps} />;
 });
 
 export const ChromeIcon = React.memo(function ChromeIcon({
   className,
   style,
+  width,
+  height,
 }: {
   className?: string;
   style?: React.CSSProperties;
+  width?: number | string;
+  height?: number | string;
 }) {
   return (
     <img
       src="/chrome.svg"
       alt=""
-      className={className}
-      style={{ width: 14, height: 14, flexShrink: 0, ...style }}
+      className={cn("ChromeIcon", className)}
+      style={{
+        ...(width !== undefined ? { width } : {}),
+        ...(height !== undefined ? { height } : {}),
+        flexShrink: 0,
+        ...style,
+      }}
     />
   );
 });
@@ -137,8 +150,8 @@ export const AttachmentCard = React.memo(function AttachmentCard({
           type="file"
           name={name}
           className="AttachmentCard-icon"
-          width={15}
-          height={15}
+          width={22}
+          height={22}
         />
       )}
       <span className="AttachmentCard-name">{name}</span>
@@ -152,7 +165,7 @@ export const AttachmentCard = React.memo(function AttachmentCard({
             onRemove();
           }}
         >
-          <VscClose />
+          <LuX />
         </button>
       )}
     </div>
@@ -207,8 +220,8 @@ export const FileTag = React.memo(function FileTag({
         type="file"
         name={filename}
         className="FileTag-icon"
-        width={13}
-        height={13}
+        width={16}
+        height={16}
       />
       <span className="FileTag-name">{filename}</span>
       {lineRange && <span className="FileTag-lineRange">{lineRange}</span>}

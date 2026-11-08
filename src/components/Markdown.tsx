@@ -5,7 +5,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { VscCheck, VscCopy } from "react-icons/vsc";
+import { LuCheck, LuCopy } from "react-icons/lu";
 import Prism from "prismjs";
 import "prismjs/components/prism-typescript";
 import "prismjs/components/prism-jsx";
@@ -207,12 +207,12 @@ const CodeBlock = React.memo(function CodeBlock({ lang, code }: { lang: string; 
           <button type="button" className="CodeBlock-copy" onClick={copy} aria-label="Copy code">
             {copied ? (
               <>
-                <VscCheck className="CodeBlock-copyIconDone" />
+                <LuCheck className="CodeBlock-copyIconDone" />
                 <span>Copied</span>
               </>
             ) : (
               <>
-                <VscCopy />
+                <LuCopy />
                 <span>Copy</span>
               </>
             )}

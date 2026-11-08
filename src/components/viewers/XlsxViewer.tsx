@@ -36,7 +36,7 @@ export function XlsxViewer({ path }: { path: string }) {
   }, [path]);
 
   const current = sheets?.[activeSheet];
-  const fontSize = Math.round(12 * zoom.zoom);
+  const fontSize = Math.round(13 * zoom.zoom);
   const rowHeight = Math.max(22, Math.round(28 * zoom.zoom));
   const totalRows = current ? current.rows.length : 0;
   const colCount = current && current.rows[0] ? current.rows[0].length + 1 : 1;
@@ -65,7 +65,7 @@ export function XlsxViewer({ path }: { path: string }) {
   return (
     <div className="XlsxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={16} height={16} />
+        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
         <span className="DocViewer-title">{fileName}</span>
         {sheets.length > 0 && (
           <span className="DocViewer-meta">

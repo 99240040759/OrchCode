@@ -68,9 +68,6 @@ impl AppState {
         let memory = SqliteMemory::open(&db_path)?;
         let connector_manager = Arc::new(ConnectorManager::new(token.clone()));
 
-        let quick_projects_dir = data_dir.join("quick-projects");
-        std::fs::create_dir_all(&quick_projects_dir)?;
-
         let file_cache = Cache::builder()
             .time_to_live(Duration::from_secs(config::FILE_INDEX_TTL_SECS))
             .build();
@@ -246,14 +243,6 @@ impl AppState {
 
     pub fn require_workspace(&self) -> AppResult<PathBuf> {
         self.workspace().ok_or(AppError::NoWorkspace)
-    }
-
-    pub fn quick_projects_root(&self) -> PathBuf {
-        self.data_dir.join("quick-projects")
-    }
-
-    pub fn quick_project_path(&self, id: &str, name: &str) -> PathBuf {
-        self.quick_projects_root().join(format!("{id}-{name}"))
     }
 
     pub fn invalidate_file_index(&self) {

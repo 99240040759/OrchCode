@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { VscChevronRight, VscPlug } from "react-icons/vsc";
+import { LuChevronRight, LuPlug } from "react-icons/lu";
 import { selectActiveConnectors, useChatStore } from "../../lib/store";
 import { useConnectorsStore } from "../../lib/connectors";
 import { ConnectorIcon } from "../icons/ConnectorIcon";
@@ -26,10 +26,10 @@ export function ConnectorsMenu() {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
-        <VscPlug />
+        <LuPlug />
         <span className="DropdownMenuSubTrigger-label">Connectors</span>
         {active.length > 0 && <span className="DropdownMenuSubTrigger-count">{active.length}</span>}
-        <VscChevronRight className="DropdownMenuSubTrigger-chevron" />
+        <LuChevronRight className="DropdownMenuSubTrigger-chevron" />
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         {connected.length === 0 ? (

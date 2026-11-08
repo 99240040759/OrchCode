@@ -1,5 +1,5 @@
 import React from "react";
-import { VscArrowRight, VscDebugStop, VscMic } from "react-icons/vsc";
+import { LuArrowUp, LuMic, LuSquare } from "react-icons/lu";
 import { Button } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -33,7 +33,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
           onClick={onToggleDictation}
           disabled={streaming}
         >
-          {recording ? <VscDebugStop /> : <VscMic />}
+          {recording ? <LuSquare /> : <LuMic />}
         </Button>
       </Tooltip>
 
@@ -44,7 +44,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
             aria-label="Stop generating"
             onClick={onCancel}
           >
-            <VscDebugStop />
+            <LuSquare />
           </Button>
         </Tooltip>
       ) : (
@@ -55,7 +55,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
             disabled={!canSend}
             onClick={onSend}
           >
-            <VscArrowRight />
+            <LuArrowUp />
           </Button>
         </Tooltip>
       )}

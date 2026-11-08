@@ -1,4 +1,4 @@
-import { VscClose, VscFolderOpened, VscRocket } from "react-icons/vsc";
+import { LuFolderOpen, LuX } from "react-icons/lu";
 import { Titlebar } from "./ui/Titlebar";
 import { useWorkspaceStore } from "../lib/workspace";
 
@@ -6,7 +6,6 @@ export function WorkspacePicker() {
   const busy         = useWorkspaceStore((s) => s.busy);
   const error        = useWorkspaceStore((s) => s.error);
   const pickAndOpen  = useWorkspaceStore((s) => s.pickAndOpen);
-  const createQuick  = useWorkspaceStore((s) => s.createQuickProject);
   const dismissError = useWorkspaceStore((s) => s.dismissError);
 
   return (
@@ -18,7 +17,7 @@ export function WorkspacePicker() {
         <h1 className="WorkspacePicker-title">Choose a workspace</h1>
         <p className="WorkspacePicker-sub">
           Every conversation is tied to a workspace folder. Pick an existing
-          project or start a fresh quick project.
+          project directory to get started.
         </p>
 
         <div className="WorkspacePicker-actions" aria-busy={busy}>
@@ -28,23 +27,10 @@ export function WorkspacePicker() {
             disabled={busy}
             onClick={() => void pickAndOpen()}
           >
-            <VscFolderOpened className="WorkspacePicker-card-icon" />
+            <LuFolderOpen className="WorkspacePicker-card-icon" />
             <span className="WorkspacePicker-card-label">Open folder</span>
             <span className="WorkspacePicker-card-hint">
               Choose an existing project directory
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="WorkspacePicker-card"
-            disabled={busy}
-            onClick={() => void createQuick()}
-          >
-            <VscRocket className="WorkspacePicker-card-icon" />
-            <span className="WorkspacePicker-card-label">Quick project</span>
-            <span className="WorkspacePicker-card-hint">
-              Auto-named workspace, stored in app data
             </span>
           </button>
         </div>
@@ -58,7 +44,7 @@ export function WorkspacePicker() {
               aria-label="Dismiss error"
               onClick={dismissError}
             >
-              <VscClose />
+              <LuX />
             </button>
           </div>
         )}

@@ -20,9 +20,10 @@ export function TerminalView({ id }: { id: string }) {
     const monoFont =
       styles.getPropertyValue("--font-mono").trim() ||
       '"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace';
+    const termFontSize = parseInt(styles.getPropertyValue("--fs-sm")) || 13;
 
     const term = new XTerm({
-      fontSize: 12,
+      fontSize: termFontSize,
       fontFamily: monoFont,
       cursorBlink: false,
       scrollback: 5000,

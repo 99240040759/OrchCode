@@ -168,12 +168,8 @@ export function setWorkspace(path: string): Promise<string> {
   return invoke("set_workspace", { path });
 }
 
-export function createQuickProjectDir(id: string, name: string): Promise<string> {
-  return invoke("create_quick_project_dir", { id, name });
-}
-
-export function forgetWorkspace(workspacePath: string, deleteProject: boolean): Promise<void> {
-  return invoke("forget_workspace", { workspacePath, deleteProject });
+export function forgetWorkspace(workspacePath: string): Promise<void> {
+  return invoke("forget_workspace", { workspacePath });
 }
 
 export function listSessionsForWorkspace(workspacePath: string): Promise<SessionSummary[]> {

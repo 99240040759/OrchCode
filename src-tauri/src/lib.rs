@@ -223,7 +223,6 @@ pub fn run() {
             ipc::get_oauth_url,
             ipc::sign_out_auth,
             ipc::set_workspace,
-            ipc::create_quick_project_dir,
             ipc::list_sessions_for_workspace,
             ipc::forget_workspace,
             ipc::list_models,
