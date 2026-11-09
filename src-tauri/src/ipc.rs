@@ -1,58 +1,80 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
+use base64::Engine as _;
 use secrecy::ExposeSecret;
+use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::auth::{self, UserDisplay};
+use crate::cloud::{self, CloudWorkspaceInfo};
 use crate::config;
 use crate::dictation;
 use crate::error::AppError;
-use crate::events::{ChatEvent, DictationEvent, TerminalEvent};
-use crate::gateway::{Budget, ModelInfo};
+use crate::events::{ChatEvent, DictationEvent, EventSink, TerminalEvent};
+use crate::gateway::{Budget, CloudAttachment, CloudChatStreamReq, ModelInfo};
 use crate::llm::{
     build_agent, build_user_message, run_chat, AgentInputs, AttachmentRef, ChatRun, RunOutcome,
-    RunParams,
+    RunParams, SessionBackend,
 };
-use crate::persistence::SessionViewPage;
+use crate::persistence::SessionRecordPage;
 use crate::session;
 use crate::state::AppState;
 use crate::terminal;
 use crate::tools::ToolContext;
+use crate::workspace::Workspace;
+
+struct TauriEventSink {
+    channel: Channel<ChatEvent>,
+    app: tauri::AppHandle,
+}
+
+impl EventSink for TauriEventSink {
+    fn send(&self, event: ChatEvent) {
+        let _ = self.channel.send(event);
+    }
+
+    fn emit_file_written(&self, path: &str) {
+        let state = self.app.state::<AppState>();
+        state.invalidate_file_index();
+        let _ = self
+            .app
+            .emit("file-written", serde_json::json!({ "path": path }));
+    }
+}
 
 fn canonical_string(path: &str) -> String {
+    if cloud::is_cloud_workspace(path) {
+        return cloud::normalize_cloud_workspace_and_repo(path)
+            .map(|(w, _)| w)
+            .unwrap_or_else(|_| path.to_string());
+    }
     dunce::canonicalize(PathBuf::from(path))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| path.to_string())
 }
 
+fn ensure_owner(owner: Option<&str>, user_id: &str) -> Result<(), String> {
+    match owner {
+        Some(owner) if owner != user_id => {
+            Err("session does not belong to the current user".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelDto {
     pub key: String,
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub context_window: u64,
-    pub max_tokens: u64,
-    pub capabilities: Vec<String>,
-    pub badge: Option<String>,
+    #[serde(flatten)]
+    pub info: ModelInfo,
 }
 
 impl ModelDto {
-    fn from_entry(key: String, m: ModelInfo) -> Self {
-        Self {
-            key,
-            id: m.id,
-            name: m.name,
-            provider: m.provider,
-            context_window: m.context_window,
-            max_tokens: m.max_tokens,
-            capabilities: m.capabilities,
-            badge: m.badge,
-        }
+    fn from_entry(key: String, info: ModelInfo) -> Self {
+        Self { key, info }
     }
 }
 
@@ -202,14 +224,47 @@ pub async fn sign_out_auth(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_workspace(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    let resolved = dunce::canonicalize(PathBuf::from(&path)).map_err(|e| format!("cannot resolve path: {e}"))?;
+pub async fn set_workspace(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if cloud::is_cloud_workspace(trimmed)
+        || trimmed.starts_with("https://github.com/")
+        || trimmed.starts_with("https://gitlab.com/")
+        || trimmed.starts_with("https://bitbucket.org/")
+    {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        let info = state
+            .gateway
+            .cloud_init_workspace(trimmed)
+            .await
+            .map_err(|e| e.to_string())?;
+        let ws = Workspace::from_cloud_info(info);
+        let key = ws.key();
+        state.set_workspace(Some(ws));
+        return Ok(key);
+    }
+
+    let resolved = dunce::canonicalize(PathBuf::from(trimmed)).map_err(|e| format!("cannot resolve path: {e}"))?;
     if !resolved.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
     let display = resolved.to_string_lossy().to_string();
-    state.set_workspace(Some(resolved));
+    state.set_workspace(Some(Workspace::Local(resolved)));
     Ok(display)
+}
+
+#[tauri::command]
+pub async fn init_cloud_workspace(
+    state: State<'_, AppState>,
+    repo_url: String,
+) -> Result<CloudWorkspaceInfo, String> {
+    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    let info = state
+        .gateway
+        .cloud_init_workspace(&repo_url)
+        .await
+        .map_err(|e| e.to_string())?;
+    state.set_workspace(Some(Workspace::from_cloud_info(info.clone())));
+    Ok(info)
 }
 
 #[tauri::command]
@@ -220,9 +275,18 @@ pub async fn list_sessions_for_workspace(
     let Some(user_id) = state.current_user_id() else {
         return Ok(Vec::new());
     };
+    let canonical = canonical_string(&workspace_path);
+    if cloud::is_cloud_workspace(&canonical) {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        return state
+            .gateway
+            .cloud_list_sessions(&canonical)
+            .await
+            .map_err(|e| e.to_string());
+    }
     state
         .memory
-        .list_sessions_for_workspace(&canonical_string(&workspace_path), &user_id)
+        .list_sessions_for_workspace(&canonical, &user_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -236,8 +300,7 @@ pub async fn forget_workspace(
     let canonical = canonical_string(&workspace_path);
     let workspace = PathBuf::from(&canonical);
 
-    // Capture whether this is the active workspace before clearing it.
-    let was_active_workspace = state.workspace().as_deref() == Some(workspace.as_path());
+    let was_active_workspace = state.workspace_key().as_deref() == Some(canonical.as_str());
 
     let sessions = state.cancel_runs_in_workspace(&workspace);
     state.wait_for_runs(&sessions, Duration::from_secs(10)).await;
@@ -252,7 +315,10 @@ pub async fn forget_workspace(
 
 #[tauri::command]
 pub async fn list_models(state: State<'_, AppState>, force_refresh: Option<bool>) -> Result<Vec<ModelDto>, String> {
-    let catalog = if force_refresh.unwrap_or(false) {
+    let catalog = if state.active_cloud_workspace().is_some() {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        std::sync::Arc::new(state.gateway.cloud_models().await.map_err(|e| e.to_string())?)
+    } else if force_refresh.unwrap_or(false) {
         state.refresh_catalog().await.map_err(|e| e.to_string())?
     } else {
         state.catalog().await.map_err(|e| e.to_string())?
@@ -327,16 +393,89 @@ pub async fn start_chat(
         return Err("a prompt or at least one attachment is required".to_string());
     }
 
-    let workspace = state
-        .workspace()
+    let current = state
+        .current_workspace()
         .ok_or_else(|| "Open a workspace folder before starting a chat".to_string())?;
     let run_owner = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    let workspace_string = workspace.to_string_lossy().to_string();
+    let workspace_string = current.key();
+
     let (run_id, cancel) = state
-        .start_run(&session_id, Some(workspace.clone()), run_owner.clone())
+        .start_run(&session_id, Some(PathBuf::from(&workspace_string)), run_owner.clone())
         .map_err(|error| error.to_string())?;
+
+    let workspace = match current.as_ref() {
+        Workspace::Local(path) => path.clone(),
+        Workspace::Cloud(cloud_ws) => {
+            state.ensure_fresh_token().await.map_err(|e| {
+                state.finish_run(&session_id, &run_id);
+                e.to_string()
+            })?;
+
+            let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink {
+                channel: on_event.clone(),
+                app: app.clone(),
+            });
+
+            state.set_cloud_session(Some(session_id.clone()));
+
+            let mut cloud_attachments = Vec::with_capacity(attachments.len());
+            for att in attachments {
+                let data_base64 = match att.data_base64 {
+                    Some(data) => Some(data),
+                    None => {
+                        let p = Path::new(&att.path);
+                        if p.is_file() {
+                            tokio::fs::read(p)
+                                .await
+                                .ok()
+                                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes))
+                        } else {
+                            None
+                        }
+                    }
+                };
+                match data_base64 {
+                    Some(data_base64) => cloud_attachments.push(CloudAttachment {
+                        name: att.name,
+                        data_base64,
+                    }),
+                    None => {
+                        let _ = on_event.send(ChatEvent::notice(format!(
+                            "{} could not be read and was not attached",
+                            att.name
+                        )));
+                    }
+                }
+            }
+
+            let req = CloudChatStreamReq {
+                session_id: session_id.clone(),
+                prompt: prompt.clone(),
+                model: model.clone(),
+                workspace: workspace_string.clone(),
+                repo_url: Some(cloud_ws.repo_url.clone()),
+                attachments: cloud_attachments,
+            };
+
+            let _ = app.emit("sessions-updated", ());
+            let stream_res = state
+                .gateway
+                .cloud_stream_chat(&req, event_sink.clone(), cancel.clone())
+                .await;
+
+            state.finish_run(&session_id, &run_id);
+            let _ = app.emit("sessions-updated", ());
+            if let Err(error) = stream_res {
+                let message = error.to_string();
+                sentry::capture_message(&format!("cloud chat run failed: {message}"), sentry::Level::Error);
+                let _ = on_event.send(ChatEvent::error(message));
+                let _ = on_event.send(ChatEvent::done());
+            }
+            return Ok(());
+        }
+    };
 
     let ready = tokio::select! {
         biased;
@@ -356,14 +495,15 @@ pub async fn start_chat(
         }
     };
 
-    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-        if owner != user_id {
-            state.finish_run(&session_id, &run_id);
-            return Err("session does not belong to the current user".to_string());
-        }
-    } else if user_id != run_owner {
+    let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink {
+        channel: on_event.clone(),
+        app: app.clone(),
+    });
+
+    let stored_owner = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())?;
+    if let Err(error) = ensure_owner(Some(stored_owner.as_deref().unwrap_or(run_owner.as_str())), &user_id) {
         state.finish_run(&session_id, &run_id);
-        return Err("session does not belong to the current user".to_string());
+        return Err(error);
     }
 
     let prepared = tokio::select! {
@@ -371,8 +511,8 @@ pub async fn start_chat(
         _ = cancel.cancelled() => Err("cancelled".to_string()),
         result = state.connector_manager.prepare(&active_connectors) => result.map_err(|error| error.to_string()),
     };
-    let connectors = match prepared {
-        Ok(connectors) => connectors,
+    let (connector_defs, connector_tools) = match prepared {
+        Ok(c) => (c.defs, c.tools),
         Err(error) => {
             state.finish_run(&session_id, &run_id);
             sentry::capture_message(&format!("connectors prepare failed: {error}"), sentry::Level::Error);
@@ -396,9 +536,7 @@ pub async fn start_chat(
         }
     };
     if !built.notes.is_empty() {
-        let _ = on_event.send(ChatEvent::Notice {
-            message: built.notes.join("\n"),
-        });
+        let _ = on_event.send(ChatEvent::notice(built.notes.join("\n")));
     }
 
     if let Err(error) = state
@@ -411,17 +549,20 @@ pub async fn start_chat(
         return Err(format!("failed to save the chat request: {error}"));
     }
     let _ = app.emit("sessions-updated", ());
-
     if !state.memory.session_has_title(&session_id).await.unwrap_or(false) {
         spawn_title_generation(&app, &state, &session_id, &prompt);
     }
 
+    let backend = SessionBackend {
+        data_dir: state.data_dir.clone(),
+        memory: state.memory.clone(),
+    };
+
     let chat = match ChatRun::begin(RunParams {
-        data_dir: &state.data_dir,
+        backend,
         session_id: &session_id,
         gateway: state.gateway.clone(),
-        memory: state.memory.clone(),
-        channel: on_event.clone(),
+        event_sink: event_sink.clone(),
         model: &model_info,
         cancel: cancel.clone(),
     })
@@ -439,7 +580,7 @@ pub async fn start_chat(
         workspace: Some(workspace.clone()),
         run_id: run_id.clone(),
         gateway: state.gateway.clone(),
-        app_handle: app.clone(),
+        event_sink: event_sink.clone(),
         command_manager: (*state.command_manager).clone(),
         data_dir: state.data_dir.clone(),
         supports_images: model_info.supports_images(),
@@ -452,8 +593,8 @@ pub async fn start_chat(
         skills,
         data_dir: &state.data_dir,
         workspace: Some(workspace.as_path()),
-        connectors: connectors.defs,
-        connector_tools: connectors.tools,
+        connectors: connector_defs,
+        connector_tools,
         thinking_effort: match thinking_effort.as_str() {
             "medium" => rig::completion::Effort::Medium,
             "high" => rig::completion::Effort::High,
@@ -466,7 +607,7 @@ pub async fn start_chat(
         &chat,
         built.message.clone(),
         cancel.clone(),
-        on_event.clone(),
+        event_sink.clone(),
     )
     .await;
     state.command_manager.kill_foreground_for_run(&run_id);
@@ -476,23 +617,70 @@ pub async fn start_chat(
         sentry::capture_error(&error);
     }
     if result.overflowed {
-        let _ = state
-            .memory
-            .set_context_tokens(&session_id, config::compaction_trigger_tokens(model_info.context_window))
-            .await;
+        let trigger = config::compaction_trigger_tokens(model_info.context_window);
+        let _ = state.memory.set_context_tokens(&session_id, trigger).await;
     }
 
     state.finish_run(&session_id, &run_id);
     let _ = app.emit("sessions-updated", ());
-    let event = match result.outcome {
-        RunOutcome::Completed => ChatEvent::Done,
-        RunOutcome::Cancelled => ChatEvent::Cancelled,
+    let closing = match result.outcome {
+        RunOutcome::Completed => vec![ChatEvent::done()],
+        RunOutcome::Cancelled => vec![ChatEvent::cancelled(), ChatEvent::done()],
         RunOutcome::Failed(message) => {
             sentry::capture_message(&format!("chat run failed: {message}"), sentry::Level::Error);
-            ChatEvent::Error { message }
+            vec![ChatEvent::error(message), ChatEvent::done()]
         }
     };
-    let _ = on_event.send(event);
+    for event in closing {
+        let _ = on_event.send(event);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_chat(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    on_event: Channel<ChatEvent>,
+) -> Result<(), String> {
+    if !session::is_safe_session_id(&session_id) {
+        return Err("invalid session id".to_string());
+    }
+    let current = state
+        .current_workspace()
+        .ok_or_else(|| "Open a workspace folder before resuming a chat".to_string())?;
+    if current.cloud().is_none() {
+        return Err("Only cloud sessions can be resumed".to_string());
+    }
+    let run_owner = state
+        .current_user_id()
+        .ok_or_else(|| "authentication required".to_string())?;
+    let (run_id, cancel) = state
+        .start_run(&session_id, Some(PathBuf::from(current.key())), run_owner)
+        .map_err(|error| error.to_string())?;
+
+    if let Err(error) = state.ensure_fresh_token().await {
+        state.finish_run(&session_id, &run_id);
+        return Err(error.to_string());
+    }
+    state.set_cloud_session(Some(session_id.clone()));
+
+    let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink {
+        channel: on_event.clone(),
+        app: app.clone(),
+    });
+    let result = state
+        .gateway
+        .cloud_resume_chat(&session_id, event_sink, cancel)
+        .await;
+
+    state.finish_run(&session_id, &run_id);
+    let _ = app.emit("sessions-updated", ());
+    if let Err(error) = result {
+        let _ = on_event.send(ChatEvent::error(error.to_string()));
+        let _ = on_event.send(ChatEvent::done());
+    }
     Ok(())
 }
 
@@ -523,17 +711,19 @@ pub async fn cancel_chat(state: State<'_, AppState>, session_id: String) -> Resu
     let user_id = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    let owner = state
+    let mut owner = state
         .memory
         .session_owner(&session_id)
         .await
         .map_err(|e| e.to_string())?;
-    let owner = owner.or_else(|| state.run_owner(&session_id));
-    let owner = owner.ok_or_else(|| "session not found".to_string())?;
-    if owner != user_id {
-        return Err("session does not belong to the current user".to_string());
+    if owner.is_none() {
+        owner = state.run_owner(&session_id);
     }
+    ensure_owner(owner.as_deref(), &user_id)?;
     state.cancel_run(&session_id);
+    if state.active_cloud_workspace().is_some() {
+        let _ = state.gateway.cloud_cancel_chat(&session_id).await;
+    }
     Ok(())
 }
 
@@ -542,48 +732,76 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
     let user_id = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-        if owner != user_id {
-            return Err("session does not belong to the current user".to_string());
-        }
-    }
+    let local_owner = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())?;
+    ensure_owner(local_owner.as_deref(), &user_id)?;
     state.cancel_run(&session_id);
     state
         .wait_for_runs(std::slice::from_ref(&session_id), Duration::from_secs(10))
         .await;
-    session::destroy(&state.data_dir, &session_id)
-        .await
-        .map_err(|e| {
-            sentry::capture_error(&e);
-            e.to_string()
-        })?;
-    state
-        .memory
-        .delete_session(&session_id)
-        .await
-        .map_err(|e| {
-            sentry::capture_error(&e);
-            e.to_string()
-        })?;
+    if local_owner.is_some() {
+        session::destroy(&state.data_dir, &session_id)
+            .await
+            .map_err(|e| {
+                sentry::capture_error(&e);
+                e.to_string()
+            })?;
+        state
+            .memory
+            .delete_session(&session_id)
+            .await
+            .map_err(|e| {
+                sentry::capture_error(&e);
+                e.to_string()
+            })?;
+    }
+    if state.active_cloud_workspace().is_some() || local_owner.is_none() {
+        let _ = state.ensure_fresh_token().await;
+        let _ = state.gateway.cloud_delete_session(&session_id).await;
+        if state.cloud_session().as_deref() == Some(session_id.as_str()) {
+            state.set_cloud_session(None);
+        }
+    }
     let _ = app.emit("sessions-updated", ());
     Ok(())
 }
 
 #[tauri::command]
-pub async fn get_session_messages_page(
+pub async fn get_session_records(
     state: State<'_, AppState>,
     session_id: String,
     limit: Option<usize>,
-    before_message_id: Option<i64>,
-) -> Result<SessionViewPage, String> {
+    before_seq: Option<i64>,
+) -> Result<SessionRecordPage, String> {
     let user_id = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    if let Some(owner) = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())? {
-        if owner != user_id {
-            return Err("session does not belong to the current user".to_string());
+    let local_owner = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())?;
+    let is_cloud_active = state.active_cloud_workspace().is_some();
+
+    if is_cloud_active || local_owner.is_none() {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        if let Ok(page) = state
+            .gateway
+            .cloud_session_history(
+                &session_id,
+                limit.unwrap_or(50).clamp(1, 200),
+                before_seq,
+            )
+            .await
+        {
+            if state.active_cloud_workspace().is_none() {
+                if let Ok(info) = state.gateway.cloud_session_workspace(&session_id).await {
+                    state.set_workspace(Some(Workspace::from_cloud_info(info)));
+                }
+            }
+            if state.active_cloud_workspace().is_some() {
+                state.set_cloud_session(Some(session_id.clone()));
+            }
+            return Ok(page);
         }
     }
+
+    ensure_owner(local_owner.as_deref(), &user_id)?;
     let durations = state
         .memory
         .reasoning_durations(&session_id)
@@ -594,10 +812,17 @@ pub async fn get_session_messages_page(
         &session_id,
         durations,
         limit.unwrap_or(50).clamp(1, 200),
-        before_message_id,
+        before_seq,
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_cloud_session(state: State<'_, AppState>, session_id: Option<String>) {
+    if state.active_cloud_workspace().is_some() {
+        state.set_cloud_session(session_id.filter(|id| !id.trim().is_empty()));
+    }
 }
 
 fn prefs_key(state: &AppState, key: &str, scoped: bool) -> Result<String, String> {
@@ -684,41 +909,48 @@ pub async fn terminal_open(
     rows: u16,
     on_event: Channel<TerminalEvent>,
 ) -> Result<(), String> {
-    let workspace = state.workspace().unwrap_or_else(|| {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| state.data_dir.clone())
-    });
     let terminals = state.terminals.clone();
     let id_cleanup = id.clone();
     let instance_id = uuid::Uuid::new_v4();
-    let session = tokio::task::spawn_blocking(move || {
-        terminal::open(
-            Path::new(&workspace),
-            cols.max(1),
-            rows.max(1),
-            on_event,
-            instance_id,
-            Box::new(move |exited_id| {
-                let mut guard = terminals.lock();
-                if let Some(entry) = guard.get(&id_cleanup) {
-                    if entry.instance_id() == exited_id {
-                        guard.remove(&id_cleanup);
+
+    if state.active_cloud_workspace().is_some() {
+        return Err("Terminals are not available in cloud workspaces. The agent runs commands in its own sandbox.".to_string());
+    }
+    let session = {
+        let workspace = state.workspace().unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| state.data_dir.clone())
+        });
+        tokio::task::spawn_blocking(move || {
+            terminal::open(
+                Path::new(&workspace),
+                cols.max(1),
+                rows.max(1),
+                on_event,
+                instance_id,
+                Box::new(move |exited_id| {
+                    let mut guard = terminals.lock();
+                    if let Some(entry) = guard.get(&id_cleanup) {
+                        if entry.instance_id() == exited_id {
+                            guard.remove(&id_cleanup);
+                        }
                     }
-                }
-            }),
-        )
-    })
-    .await
-    .map_err(|e| {
-        sentry::capture_message(&format!("terminal spawn task failed: {e}"), sentry::Level::Error);
-        e.to_string()
-    })?
-    .map_err(|e| {
-        sentry::capture_error(&e);
-        e.to_string()
-    })?;
+                }),
+            )
+        })
+        .await
+        .map_err(|e| {
+            sentry::capture_message(&format!("terminal spawn task failed: {e}"), sentry::Level::Error);
+            e.to_string()
+        })?
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })?
+    };
+
     let previous = {
         let mut guard = state.terminals.lock();
         guard.insert(id, session)

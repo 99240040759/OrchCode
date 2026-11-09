@@ -1,13 +1,44 @@
+use std::sync::OnceLock;
+
 pub fn gcp_functions_url() -> &'static str {
-    env!("GCP_FUNCTIONS_URL")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| {
+        std::env::var("GCP_FUNCTIONS_URL")
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                option_env!("GCP_FUNCTIONS_URL")
+                    .map(|s| s.trim().trim_end_matches('/').to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| {
+                let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+                format!("http://127.0.0.1:{port}")
+            })
+    })
+    .as_str()
 }
 
 pub fn firebase_api_key() -> &'static str {
-    env!("FIREBASE_API_KEY")
+    static KEY: OnceLock<String> = OnceLock::new();
+    KEY.get_or_init(|| {
+        std::env::var("FIREBASE_API_KEY")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                option_env!("FIREBASE_API_KEY")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_default()
+    })
+    .as_str()
 }
 
 pub fn sentry_dsn() -> &'static str {
-    static DSN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static DSN: OnceLock<String> = OnceLock::new();
     DSN.get_or_init(|| {
         std::env::var("SENTRY_DSN")
             .ok()
@@ -30,36 +61,53 @@ pub fn inference_base_url() -> String {
 }
 
 pub fn models_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/models")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/models", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn title_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/title")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/title", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn summarize_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/summarize")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/summarize", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn budget_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/budget")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/budget", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn transcribe_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/transcribe")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/transcribe", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn tavily_url() -> &'static str {
-    concat!(env!("GCP_FUNCTIONS_URL"), "/tavily")
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| format!("{}/tavily", gcp_functions_url()))
+        .as_str()
 }
 
 pub fn composio_url(path: &str) -> String {
     format!("{}/composio{}", gcp_functions_url(), path)
 }
 
+pub fn cloud_url(path: &str) -> String {
+    format!("{}/cloud{}", gcp_functions_url(), path)
+}
+
 pub const DEFAULT_MAX_TURNS: usize = 100;
 pub const DEFAULT_TOOL_CONCURRENCY: usize = 4;
 pub const COMMAND_FOREGROUND_HANDOFF_SECS: u64 = 30;
+pub const COMMAND_MAX_WAIT_MS: u64 = 300_000;
 
 pub const MAX_ATTACHMENT_SOURCE_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_TEXT_ATTACHMENT_CHARS: usize = 200_000;

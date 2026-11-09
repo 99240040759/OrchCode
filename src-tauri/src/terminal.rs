@@ -8,11 +8,17 @@ use tauri::ipc::Channel;
 use crate::error::{AppError, AppResult};
 use crate::events::TerminalEvent;
 
+enum TerminalBackend {
+    Local {
+        master: Box<dyn MasterPty + Send>,
+        input: SyncSender<Vec<u8>>,
+        killer: Box<dyn ChildKiller + Send + Sync>,
+    },
+}
+
 pub struct TerminalSession {
     instance_id: uuid::Uuid,
-    master: Box<dyn MasterPty + Send>,
-    input: SyncSender<Vec<u8>>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    backend: TerminalBackend,
 }
 
 impl TerminalSession {
@@ -21,20 +27,30 @@ impl TerminalSession {
     }
 
     pub fn write(&self, data: &str) -> bool {
-        self.input.send(data.as_bytes().to_vec()).is_ok()
+        match &self.backend {
+            TerminalBackend::Local { input, .. } => input.send(data.as_bytes().to_vec()).is_ok(),
+        }
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {
-        let _ = self.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
+        match &self.backend {
+            TerminalBackend::Local { master, .. } => {
+                let _ = master.resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+        }
     }
 
     pub fn kill(&mut self) {
-        let _ = self.killer.kill();
+        match &mut self.backend {
+            TerminalBackend::Local { killer, .. } => {
+                let _ = killer.kill();
+            }
+        }
     }
 }
 
@@ -140,8 +156,10 @@ pub fn open(
 
     Ok(TerminalSession {
         instance_id,
-        master: pair.master,
-        input,
-        killer,
+        backend: TerminalBackend::Local {
+            master: pair.master,
+            input,
+            killer,
+        },
     })
 }

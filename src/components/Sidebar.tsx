@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   LuBlocks,
   LuCheck,
+  LuCloud,
   LuFolder,
   LuFolderOpen,
   LuFolderPlus,
@@ -10,6 +11,7 @@ import {
   LuTrash2,
   LuX,
 } from "react-icons/lu";
+import { CloudMountForm } from "./CloudMountForm";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
@@ -17,7 +19,7 @@ import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
 import { useWorkspaceStore } from "../lib/workspace";
 import { formatRelativeTime } from "../lib/api";
-import { formatUsd } from "../lib/utils";
+import { formatUsd, isCloudWorkspace } from "../lib/utils";
 import type { SessionSummary } from "../lib/api";
 import type { AppView } from "../App";
 
@@ -134,6 +136,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const wsError = useWorkspaceStore((s) => s.error);
   const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
+  const [showMount, setShowMount] = useState(false);
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const wsLocked = streaming || wsBusy;
@@ -229,13 +232,30 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               <LuFolderPlus />
             </button>
           </Tooltip>
+          <Tooltip content="Mount cloud repository" side="right">
+            <button
+              type="button"
+              className="IconBtn Sidebar-projectsActionBtn"
+              aria-label="Mount cloud repository"
+              disabled={wsLocked}
+              onClick={() => setShowMount((v) => !v)}
+            >
+              <LuCloud />
+            </button>
+          </Tooltip>
         </div>
       </div>
+
+      {showMount && <CloudMountForm compact disabled={wsLocked} onMounted={() => setShowMount(false)} />}
 
       <nav className="Sidebar-threads" aria-label="Projects and conversations">
         {workspacesToDisplay.map((ws) => {
           const isCurrentWs = ws.id === currentWs?.id;
-          const FolderIconComponent = isCurrentWs ? LuFolderOpen : LuFolder;
+          const FolderIconComponent = isCloudWorkspace(ws.path)
+            ? LuCloud
+            : isCurrentWs
+              ? LuFolderOpen
+              : LuFolder;
           return (
             <div key={ws.id} className="Sidebar-projectGroup">
               <div className="Sidebar-wsRow" data-active={isCurrentWs}>

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 use sqlx::{Executor, Row};
 
 use crate::error::{AppError, AppResult};
-use crate::events::ToolDisplayInfo;
 use crate::util::now_ms;
 
 const SCHEMA: &str = "
@@ -36,15 +35,24 @@ const SCHEMA: &str = "
  );
 ";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionViewPage {
-    pub messages: Vec<MessageView>,
-    pub has_more: bool,
-    pub earliest_message_id: Option<i64>,
+pub struct SessionRecord {
+    pub seq: i64,
+    #[serde(default)]
+    pub turn: i64,
+    pub record: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRecordPage {
+    pub records: Vec<SessionRecord>,
+    pub has_more: bool,
+    pub earliest_seq: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     pub id: String,
@@ -56,63 +64,17 @@ pub struct SessionSummary {
     pub output_tokens: i64,
     pub cached_tokens: i64,
     pub reasoning_tokens: i64,
+    #[serde(default)]
+    pub running: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct TurnUsage {
     pub context_tokens: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
     pub reasoning_tokens: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AttachmentView {
-    pub name: String,
-    pub is_image: bool,
-    pub path: Option<String>,
-    pub data_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum MessageItemView {
-    Text {
-        id: String,
-        text: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    Reasoning {
-        id: String,
-        text: String,
-        duration_seconds: Option<u64>,
-    },
-    #[serde(rename_all = "camelCase")]
-    ToolCall {
-        id: String,
-        name: String,
-        args: String,
-        output: Option<String>,
-        display_info: ToolDisplayInfo,
-        status: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    CompactionNotice {
-        id: String,
-        original_message_count: usize,
-        ts: i64,
-    },
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageView {
-    pub id: String,
-    pub role: String,
-    pub items: Vec<MessageItemView>,
-    pub attachments: Vec<AttachmentView>,
 }
 
 const POOL_SIZE: u32 = 6;
@@ -123,7 +85,7 @@ pub struct SqliteMemory {
 }
 
 impl SqliteMemory {
-    pub(crate) fn open(path: &Path) -> AppResult<Self> {
+    pub fn open(path: &Path) -> AppResult<Self> {
         tauri::async_runtime::block_on(Self::open_async(path))
     }
 
@@ -260,37 +222,16 @@ impl SqliteMemory {
                 output_tokens: row.get(6),
                 cached_tokens: row.get(7),
                 reasoning_tokens: row.get(8),
+                running: false,
             })
             .collect();
 
         Ok(summaries)
     }
 
-    pub async fn session_ids_for_workspace(&self, workspace_path: &str, user_id: &str) -> AppResult<Vec<String>> {
-        let rows = sqlx::query("SELECT id FROM sessions WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)")
-            .bind(workspace_path)
-            .bind(user_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(sql_err)?;
-
-        Ok(rows.into_iter().map(|row| row.get(0)).collect())
-    }
-
     pub async fn delete_session(&self, session_id: &str) -> AppResult<()> {
         sqlx::query("DELETE FROM sessions WHERE id = ?1")
             .bind(session_id)
-            .execute(&self.pool)
-            .await
-            .map_err(sql_err)?;
-
-        Ok(())
-    }
-
-    pub async fn delete_sessions_for_workspace(&self, workspace_path: &str, user_id: &str) -> AppResult<()> {
-        sqlx::query("DELETE FROM sessions WHERE workspace_path = ?1 AND (user_id = ?2 OR user_id IS NULL)")
-            .bind(workspace_path)
-            .bind(user_id)
             .execute(&self.pool)
             .await
             .map_err(sql_err)?;

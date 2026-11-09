@@ -9,7 +9,8 @@ import {
 } from "react-icons/lu";
 import { listen } from "@tauri-apps/api/event";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../lib/artifacts";
-import { getBasename } from "../lib/utils";
+import { useWorkspaceStore } from "../lib/workspace";
+import { getBasename, isCloudWorkspace } from "../lib/utils";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
 import { TerminalView } from "./TerminalView";
@@ -61,8 +62,9 @@ function useFileWrittenListener() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<string>("file-written", (event) => {
-      if (event.payload) fileWritten(event.payload);
+    void listen<{ path?: string }>("file-written", (event) => {
+      const path = event.payload?.path;
+      if (path) fileWritten(path);
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
@@ -84,6 +86,7 @@ function ArtifactPanelHeader() {
   const closeTab      = useArtifactsStore((s) => s.closeTab);
   const setActive     = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
+  const cloudWorkspace = useWorkspaceStore((s) => isCloudWorkspace(s.current?.path));
 
   return (
     <div className="ArtifactPanel-header">
@@ -153,9 +156,11 @@ function ArtifactPanelHeader() {
             <DropdownMenuItem onSelect={() => openBrowser()}>
               <ChromeIcon /> Browser
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => openTerminal()}>
-              <LuTerminal /> Terminal
-            </DropdownMenuItem>
+            {!cloudWorkspace && (
+              <DropdownMenuItem onSelect={() => openTerminal()}>
+                <LuTerminal /> Terminal
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -219,6 +224,10 @@ export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
   const openFile     = useArtifactsStore((s) => s.openFile);
   const openBrowser  = useArtifactsStore((s) => s.openBrowser);
   const openTerminal = useArtifactsStore((s) => s.openTerminal);
+  const cloudWorkspace = useWorkspaceStore((s) => isCloudWorkspace(s.current?.path));
+  const emptyCards = cloudWorkspace
+    ? EMPTY_CARDS.filter((card) => card.kind !== "terminal")
+    : EMPTY_CARDS;
 
   useFileWrittenListener();
 
@@ -231,7 +240,7 @@ export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
         {tabs.length === 0 ? (
           <div className="ArtifactEmpty">
             <div className="ArtifactCards">
-              {EMPTY_CARDS.map(({ kind, label, Icon }) => (
+              {emptyCards.map(({ kind, label, Icon }) => (
                 <Button
                   key={kind}
                   className="ArtifactCard"
@@ -247,7 +256,9 @@ export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
               ))}
             </div>
             <p className="ArtifactPanel-hint">
-              Open a file, browser, or terminal. Files the agent edits show up here too.
+              {cloudWorkspace
+                ? "Open a file or browser. Files the agent edits show up here too."
+                : "Open a file, browser, or terminal. Files the agent edits show up here too."}
             </p>
           </div>
         ) : (

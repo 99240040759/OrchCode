@@ -12,6 +12,7 @@ use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 
 use crate::auth;
+use crate::cloud::CloudWorkspace;
 use crate::config;
 use crate::connectors::ConnectorManager;
 use crate::dictation::DictationHandle;
@@ -21,8 +22,7 @@ use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
 use crate::llm::ChatClient;
 use crate::persistence::SqliteMemory;
 use crate::tools::CommandManager;
-
-pub type WorkspaceHandle = Arc<ArcSwapOption<PathBuf>>;
+use crate::workspace::Workspace;
 
 pub struct RunHandle {
     pub run_id: String,
@@ -38,7 +38,9 @@ struct SignInAttempt {
 
 pub struct AppState {
     pub token: TokenHandle,
-    pub workspace: WorkspaceHandle,
+    pub workspace: ArcSwapOption<Workspace>,
+    pub cloud_session: ArcSwapOption<String>,
+    pub http: reqwest::Client,
     pub data_dir: PathBuf,
     pub gateway: Arc<Gateway>,
     pub catalog: ArcSwapOption<ModelCatalog>,
@@ -57,7 +59,7 @@ pub struct AppState {
     token_refresh_lock: Arc<tokio::sync::Mutex<()>>,
     catalog_fetch_lock: Arc<tokio::sync::Mutex<()>>,
     client: Mutex<Option<ChatClient>>,
-    file_cache: Cache<PathBuf, Arc<Vec<FileEntry>>>,
+    file_cache: Cache<String, Arc<Vec<FileEntry>>>,
 }
 
 impl AppState {
@@ -67,6 +69,7 @@ impl AppState {
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
         let connector_manager = Arc::new(ConnectorManager::new(token.clone()));
+        let http = crate::util::http_client();
 
         let file_cache = Cache::builder()
             .time_to_live(Duration::from_secs(config::FILE_INDEX_TTL_SECS))
@@ -74,7 +77,9 @@ impl AppState {
 
         Ok(Self {
             token,
-            workspace: Arc::new(ArcSwapOption::empty()),
+            workspace: ArcSwapOption::empty(),
+            cloud_session: ArcSwapOption::empty(),
+            http,
             data_dir: data_dir.to_path_buf(),
             gateway,
             catalog: ArcSwapOption::empty(),
@@ -219,44 +224,106 @@ impl AppState {
         *guard = Some((raw_url.to_string(), Instant::now()));
     }
 
-    pub fn set_workspace(&self, path: Option<PathBuf>) {
-        if self.workspace() != path {
+    pub fn set_workspace(&self, workspace: Option<Workspace>) {
+        let previous = self.workspace_key();
+        let next = workspace.as_ref().map(Workspace::key);
+        if previous != next {
             self.cancel_all_runs();
+            self.cloud_session.store(None);
         }
-        sentry::configure_scope(|scope| match &path {
-            Some(p) => scope.set_tag("workspace", p.to_string_lossy().to_string()),
+        sentry::configure_scope(|scope| match &next {
+            Some(key) => scope.set_tag("workspace", key.clone()),
             None => scope.remove_tag("workspace"),
         });
         sentry::add_breadcrumb(sentry::Breadcrumb {
             category: Some("workspace".to_string()),
-            message: Some(format!("workspace updated: {:?}", path.as_deref())),
+            message: Some(format!("workspace updated: {next:?}")),
             level: sentry::Level::Info,
             ..Default::default()
         });
-        self.workspace.store(path.map(Arc::new));
+        self.workspace.store(workspace.map(Arc::new));
         self.invalidate_file_index();
     }
 
+    pub fn current_workspace(&self) -> Option<Arc<Workspace>> {
+        self.workspace.load_full()
+    }
+
+    pub fn workspace_key(&self) -> Option<String> {
+        self.current_workspace().map(|workspace| workspace.key())
+    }
+
     pub fn workspace(&self) -> Option<PathBuf> {
-        self.workspace.load_full().map(|path| path.as_ref().clone())
+        self.current_workspace()
+            .and_then(|workspace| workspace.local_path().map(Path::to_path_buf))
+    }
+
+    pub fn active_cloud_workspace(&self) -> Option<Arc<CloudWorkspace>> {
+        self.current_workspace()
+            .and_then(|workspace| workspace.cloud().cloned())
     }
 
     pub fn require_workspace(&self) -> AppResult<PathBuf> {
         self.workspace().ok_or(AppError::NoWorkspace)
     }
 
+    pub fn set_cloud_session(&self, session_id: Option<String>) {
+        let changed = self.cloud_session.load().as_deref().map(|id| id.as_str())
+            != session_id.as_deref();
+        self.cloud_session.store(session_id.map(Arc::new));
+        if changed {
+            self.invalidate_file_index();
+        }
+    }
+
+    pub fn cloud_session(&self) -> Option<String> {
+        self.cloud_session
+            .load_full()
+            .map(|id| id.as_ref().clone())
+    }
+
     pub fn invalidate_file_index(&self) {
         self.file_cache.invalidate_all();
     }
 
-    pub async fn file_index(&self, root: &Path) -> Result<Arc<Vec<FileEntry>>, String> {
-        let root_buf = root.to_path_buf();
+    pub async fn file_index(&self) -> Result<Arc<Vec<FileEntry>>, String> {
+        let workspace = self
+            .current_workspace()
+            .ok_or_else(|| AppError::NoWorkspace.to_string())?;
+        if workspace.cloud().is_some() {
+            self.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        }
+        let cloud_session = self.cloud_session();
+        let gateway = self.gateway.clone();
         self.file_cache
-            .try_get_with(root_buf.clone(), async {
-                tokio::task::spawn_blocking(move || crate::fsapi::build_file_index(&root_buf))
-                    .await
-                    .map(Arc::new)
-                    .map_err(|e| format!("file index task failed: {e}"))
+            .try_get_with(workspace.key(), async move {
+                match workspace.as_ref() {
+                    Workspace::Local(root) => {
+                        let root = root.clone();
+                        tokio::task::spawn_blocking(move || crate::fsapi::build_file_index(&root))
+                            .await
+                            .map(Arc::new)
+                            .map_err(|e| format!("file index task failed: {e}"))
+                    }
+                    Workspace::Cloud(cloud) => {
+                        let Some(session_id) = cloud_session else {
+                            return Ok(Arc::new(Vec::new()));
+                        };
+                        let entries: Vec<FileEntry> = gateway
+                            .cloud_files_json(
+                                "list",
+                                &session_id,
+                                &[("limit", config::MAX_INDEXED_FILES.to_string())],
+                            )
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let paths = entries
+                            .into_iter()
+                            .filter_map(|e| crate::cloud::relative_cloud_path(&cloud.repo_dir, &e.path))
+                            .collect();
+                        Ok(Arc::new(crate::fsapi::build_file_index_from_paths(paths)))
+                    }
+                }
             })
             .await
             .map_err(|e| e.to_string())

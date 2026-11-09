@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use futures::StreamExt;
 use rig::agent::{
     Agent, AgentBuilder, AgentHook, CompletionCallAction, CompletionCallEvent, HookContext,
@@ -17,26 +18,27 @@ use rig::message::{ImageDetail, UserContent};
 use rig::providers::gemini::extension::GeminiOptions;
 use rig::providers::registry::ProviderId;
 use rig::rig_reqwest::ReqwestMiddlewareClient;
-use rig::tool::{DynamicTool, Tool};
+use rig::tool::DynamicTool;
 use rig_memory::{
     apply_summary, estimate_tokens, save_async, summary_state, CompactReason, CompactionPolicy,
     DirStore, TrackArgument,
 };
-use serde::Deserialize;
 use secrecy::ExposeSecret;
-use tauri::ipc::Channel;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::connectors::ConnectorDef;
 use crate::error::{AppError, AppResult};
-use crate::events::ChatEvent;
+use crate::events::{ChatEvent, EventSink};
 use crate::gateway::{Gateway, ModelInfo, TokenHandle};
 use crate::persistence::{SqliteMemory, TurnUsage};
 use crate::session;
-use crate::tools::{parse_display_info, window_lines, RunCommand, ToolContext};
+use crate::tools::{window_lines, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
+use crate::wire;
 
 #[derive(Clone, Debug)]
 pub struct AuthMiddleware {
@@ -86,12 +88,14 @@ pub fn build_client(token: TokenHandle) -> AppResult<ChatClient> {
 }
 
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentRef {
     pub path: String,
     pub name: String,
     pub is_image: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
 }
 
 pub const FILE_PART_PREFIX: &str = "<file:";
@@ -144,7 +148,11 @@ pub struct AgentInputs<'a> {
 }
 
 pub fn build_agent(inputs: AgentInputs<'_>) -> ChatAgent {
-    let preamble = build_preamble(&inputs.skills, inputs.workspace, &inputs.connectors);
+    let preamble = build_preamble(
+        &inputs.skills,
+        inputs.workspace,
+        &inputs.connectors,
+    );
     let ctx = inputs.tools;
     let model = inputs
         .client
@@ -155,13 +163,15 @@ pub fn build_agent(inputs: AgentInputs<'_>) -> ChatAgent {
         .reasoning(Reasoning::Effort(inputs.thinking_effort))
         .provider_option(GeminiOptions::new().include_thoughts(true))
         .tool(ctx.list_dir())
-        .tool(ctx.read_file())
+        .tool(ctx.find_by_name())
+        .tool(ctx.view_file())
         .tool(ctx.read_skill())
-        .tool(ctx.write_file())
-        .tool(ctx.multi_replace())
+        .tool(ctx.write_to_file())
+        .tool(ctx.replace_file_content())
         .tool(ctx.search_workspace())
-        .tool(ctx.web_search())
-        .tool(ctx.run_command())
+        .tool(ctx.search())
+        .tool(ctx.browse())
+        .tool(ctx.execute_bash())
         .tool(ctx.get_command_status())
         .tool(ctx.stop_command());
 
@@ -236,7 +246,11 @@ const ROLE: &str = r#"You are the user's autonomous software engineer inside a d
 - For a user question, give the direct answer first, then enough evidence to make the reasoning checkable. For implementation, summarize the result rather than dumping internal reasoning.
 - Be clear and economical. Use familiar words, short paragraphs, and lists only when they make the result easier to scan. Avoid generic praise, canned transitions, and claims of certainty unsupported by evidence."#;
 
-fn build_preamble(skills: &[crate::skills::Skill], workspace: Option<&Path>, connectors: &[&'static ConnectorDef]) -> String {
+fn build_preamble(
+    skills: &[crate::skills::Skill],
+    workspace: Option<&Path>,
+    connectors: &[&'static ConnectorDef],
+) -> String {
     let mut sections: Vec<Section> = Vec::new();
 
     if !skills.is_empty() {
@@ -264,7 +278,10 @@ The skill content gives you a proven sequence of steps, tool calls, and checks �
     }
 
     let environment = match workspace {
-        Some(path) => format!("Active Workspace: {}", path.display()),
+        Some(path) => format!(
+            "Active Workspace: {}\nFile and directory tools take absolute paths inside this workspace; build every path from this base.",
+            path.display()
+        ),
         None => "No workspace folder is currently open. You can answer questions and explain concepts. If the user wants to work on a project, suggest opening a workspace folder."
             .to_string(),
     };
@@ -314,6 +331,34 @@ pub struct RunResult {
 struct Anchor {
     tokens: u64,
     covered: usize,
+}
+
+#[derive(Clone)]
+pub struct SessionBackend {
+    pub data_dir: PathBuf,
+    pub memory: SqliteMemory,
+}
+
+impl SessionBackend {
+    pub async fn session_context_tokens(&self, session_id: &str) -> u64 {
+        self.memory.session_context_tokens(session_id).await.unwrap_or(0)
+    }
+
+    pub async fn set_context_tokens(&self, session_id: &str, tokens: u64) -> AppResult<()> {
+        self.memory.set_context_tokens(session_id, tokens).await
+    }
+
+    pub async fn record_usage(&self, session_id: &str, usage: &TurnUsage) -> AppResult<()> {
+        self.memory.record_usage(session_id, usage).await
+    }
+
+    pub async fn save_reasoning_durations(
+        &self,
+        session_id: &str,
+        keys: Vec<(String, u64)>,
+    ) -> AppResult<()> {
+        self.memory.save_reasoning_durations(session_id, keys).await
+    }
 }
 
 pub struct RunSession {
@@ -382,8 +427,8 @@ impl RunSession {
 struct RunDeps {
     session_id: String,
     gateway: Arc<Gateway>,
-    memory: SqliteMemory,
-    channel: Channel<ChatEvent>,
+    backend: SessionBackend,
+    event_sink: Arc<dyn EventSink>,
     policy: CompactionPolicy,
     spec: Option<ModelSpec>,
     compaction_trigger: u64,
@@ -391,11 +436,10 @@ struct RunDeps {
 }
 
 pub struct RunParams<'a> {
-    pub data_dir: &'a Path,
     pub session_id: &'a str,
     pub gateway: Arc<Gateway>,
-    pub memory: SqliteMemory,
-    pub channel: Channel<ChatEvent>,
+    pub backend: SessionBackend,
+    pub event_sink: Arc<dyn EventSink>,
     pub model: &'a ModelInfo,
     pub cancel: CancellationToken,
 }
@@ -425,13 +469,15 @@ fn turn_usage(usage: &Usage) -> Option<TurnUsage> {
 
 impl TurnUsage {
     fn event(&self) -> ChatEvent {
-        ChatEvent::Usage {
-            context_tokens: self.context_tokens,
-            input_tokens: Some(self.input_tokens),
-            output_tokens: Some(self.output_tokens),
-            cached_tokens: Some(self.cached_tokens),
-            reasoning_tokens: Some(self.reasoning_tokens),
-        }
+        ChatEvent::usage(
+            json!({
+                "total_input_tokens": self.input_tokens,
+                "total_output_tokens": self.output_tokens,
+                "total_cached_tokens": self.cached_tokens,
+                "total_thought_tokens": self.reasoning_tokens,
+            }),
+            json!({ "total_input_tokens": self.context_tokens }),
+        )
     }
 }
 
@@ -441,9 +487,9 @@ fn compaction_policy() -> CompactionPolicy {
     policy.summarizer.limits.summary_tokens = config::COMPACTION_SUMMARY_TOKENS;
     policy.summarizer.limits.snippet_chars = config::COMPACTION_SNIPPET_CHARS;
     policy.tracked = vec![
-        TrackArgument::new("read_file", "path", "read-files"),
-        TrackArgument::new("write_file", "path", "modified-files"),
-        TrackArgument::new("multi_replace_file_content", "path", "modified-files"),
+        TrackArgument::new("view_file", "AbsolutePath", "read-files"),
+        TrackArgument::new("write_to_file", "TargetFile", "modified-files"),
+        TrackArgument::new("replace_file_content", "TargetFile", "modified-files"),
     ];
     policy
 }
@@ -475,19 +521,15 @@ pub struct ChatRun {
 
 impl ChatRun {
     pub async fn begin(params: RunParams<'_>) -> AppResult<Self> {
-        let store = session::open_store(params.data_dir, params.session_id)?;
-        let conversation = session::load(params.data_dir, params.session_id).await?;
+        let store = session::open_store(&params.backend.data_dir, params.session_id)?;
+        let conversation = session::load(&params.backend.data_dir, params.session_id).await?;
         let len = conversation.messages().len();
         let first_new_id = conversation
             .entries()
             .map(|entry| entry.id.get())
             .max()
             .map_or(0, |highest| highest + 1);
-        let stored = params
-            .memory
-            .session_context_tokens(params.session_id)
-            .await
-            .unwrap_or(0);
+        let stored = params.backend.session_context_tokens(params.session_id).await;
         let anchor = (stored > 0 && len > 0).then_some(Anchor {
             tokens: stored,
             covered: len,
@@ -495,8 +537,8 @@ impl ChatRun {
         let deps = Arc::new(RunDeps {
             session_id: params.session_id.to_string(),
             gateway: params.gateway,
-            memory: params.memory,
-            channel: params.channel,
+            backend: params.backend.clone(),
+            event_sink: params.event_sink,
             policy: compaction_policy(),
             spec: model_spec(params.model),
             compaction_trigger: config::compaction_trigger_tokens(params.model.context_window),
@@ -580,7 +622,7 @@ impl ChatRun {
         drop(session);
         if let Err(error) = self
             .deps
-            .memory
+            .backend
             .save_reasoning_durations(&self.deps.session_id, keys)
             .await
         {
@@ -621,9 +663,7 @@ impl SessionHook {
             }
         };
 
-        let _ = deps.channel.send(ChatEvent::Notice {
-            message: "Compacting…".to_string(),
-        });
+        deps.event_sink.send(ChatEvent::notice("Compacting…"));
         let system = plan.request.system_instructions().unwrap_or_default().to_string();
         let prompt = request_text(&plan.request.chat_history);
         let max_tokens = plan.request.max_tokens.unwrap_or(config::COMPACTION_SUMMARY_TOKENS);
@@ -632,9 +672,7 @@ impl SessionHook {
             _ = deps.cancel.cancelled() => None,
             result = deps.gateway.summarize(&system, &prompt, max_tokens) => Some(result),
         };
-        let _ = deps.channel.send(ChatEvent::Notice {
-            message: String::new(),
-        });
+        deps.event_sink.send(ChatEvent::notice(String::new()));
 
         let summary = match written {
             None => return,
@@ -684,7 +722,7 @@ impl SessionHook {
             sentry::capture_error(&error);
         }
         if let Err(error) = deps
-            .memory
+            .backend
             .set_context_tokens(&deps.session_id, tokens_after)
             .await
         {
@@ -699,19 +737,16 @@ impl SessionHook {
             ),
             None => (None, None),
         };
-        let _ = deps.channel.send(ChatEvent::Usage {
-            context_tokens: tokens_after,
-            input_tokens: None,
-            output_tokens: None,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        });
-        let _ = deps.channel.send(ChatEvent::Compacted {
-            original_message_count: replaced,
-            ts: crate::util::now_ms(),
+        deps.event_sink.send(ChatEvent::usage(
+            json!({}),
+            json!({ "total_input_tokens": tokens_after }),
+        ));
+        deps.event_sink.send(ChatEvent::compacted(
+            replaced,
+            crate::util::now_ms(),
             compaction_message_id,
             compaction_item_id,
-        });
+        ));
     }
 }
 
@@ -773,19 +808,89 @@ impl AgentHook for SessionHook {
     }
 }
 
-struct ReasoningClock {
-    started: Option<Instant>,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepKind {
+    Thought,
+    Text,
+}
+
+struct OpenStep {
+    index: i64,
+    kind: StepKind,
+    started: Instant,
+}
+
+struct StepStream {
+    sink: Arc<dyn EventSink>,
+    next_index: i64,
+    open: Option<OpenStep>,
     durations: Vec<u64>,
 }
 
-impl ReasoningClock {
-    fn close(&mut self, channel: &Channel<ChatEvent>) {
-        let Some(start) = self.started.take() else {
+impl StepStream {
+    fn new(sink: Arc<dyn EventSink>) -> Self {
+        Self {
+            sink,
+            next_index: 0,
+            open: None,
+            durations: Vec::new(),
+        }
+    }
+
+    fn take_index(&mut self) -> i64 {
+        let index = self.next_index;
+        self.next_index += 1;
+        index
+    }
+
+    fn append(&mut self, kind: StepKind, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        if self.open.as_ref().map(|open| open.kind) != Some(kind) {
+            self.close();
+            let index = self.take_index();
+            let step = match kind {
+                StepKind::Thought => json!({ "type": "thought" }),
+                StepKind::Text => json!({ "type": "model_output" }),
+            };
+            self.sink.send(ChatEvent::step_start(index, step));
+            self.open = Some(OpenStep {
+                index,
+                kind,
+                started: Instant::now(),
+            });
+        }
+        let Some(index) = self.open.as_ref().map(|open| open.index) else {
             return;
         };
-        let duration_seconds = start.elapsed().as_secs_f64().round().max(1.0) as u64;
-        self.durations.push(duration_seconds);
-        let _ = channel.send(ChatEvent::ReasoningDone { duration_seconds });
+        let delta = match kind {
+            StepKind::Thought => json!({ "content": { "text": text } }),
+            StepKind::Text => json!({ "type": "text", "text": text }),
+        };
+        self.sink.send(ChatEvent::step_delta(index, delta));
+    }
+
+    fn close(&mut self) {
+        let Some(open) = self.open.take() else {
+            return;
+        };
+        let extra = match open.kind {
+            StepKind::Thought => {
+                let duration_seconds = open.started.elapsed().as_secs_f64().round().max(1.0) as u64;
+                self.durations.push(duration_seconds);
+                json!({ "duration_seconds": duration_seconds })
+            }
+            StepKind::Text => json!({}),
+        };
+        self.sink.send(ChatEvent::step_stop(open.index, extra));
+    }
+
+    fn whole(&mut self, step: Value) {
+        self.close();
+        let index = self.take_index();
+        self.sink.send(ChatEvent::step_start(index, step));
+        self.sink.send(ChatEvent::step_stop(index, json!({})));
     }
 }
 
@@ -794,7 +899,7 @@ pub async fn run_chat(
     run: &ChatRun,
     user_message: Message,
     cancel: CancellationToken,
-    channel: Channel<ChatEvent>,
+    event_sink: Arc<dyn EventSink>,
 ) -> RunResult {
     let history = run.history().await;
     let mut stream = agent
@@ -805,12 +910,9 @@ pub async fn run_chat(
         .tool_concurrency(config::DEFAULT_TOOL_CONCURRENCY)
         .stream();
 
-    let memory = run.deps.memory.clone();
+    let backend = run.deps.backend.clone();
     let session_id = run.deps.session_id.clone();
-    let mut reasoning = ReasoningClock {
-        started: None,
-        durations: Vec::new(),
-    };
+    let mut steps = StepStream::new(event_sink.clone());
     let mut turn_text = String::new();
     let mut final_messages: Option<Vec<Message>> = None;
     let mut overflowed = false;
@@ -823,9 +925,9 @@ pub async fn run_chat(
     macro_rules! finish {
         ($outcome:expr) => {{
             let outcome = $outcome;
-            reasoning.close(&channel);
+            steps.close();
             return RunResult {
-                reasoning_durations: std::mem::take(&mut reasoning.durations),
+                reasoning_durations: std::mem::take(&mut steps.durations),
                 outcome,
                 partial_text: std::mem::take(&mut turn_text),
                 final_messages: final_messages.take(),
@@ -867,57 +969,49 @@ pub async fn run_chat(
                 if let rig::streaming::Item::Event(event) = item {
                     match event {
                         rig::streaming::StreamEvent::Text { text, .. } => {
-                            reasoning.close(&channel);
                             turn_text.push_str(&text);
-                            let _ = channel.send(ChatEvent::Text { delta: text });
+                            steps.append(StepKind::Text, text);
                         }
                         rig::streaming::StreamEvent::Reasoning { text, .. } => {
-                            if !text.is_empty() && reasoning.started.is_none() {
-                                reasoning.started = Some(Instant::now());
-                            }
-                            let _ = channel.send(ChatEvent::Reasoning { delta: text });
+                            steps.append(StepKind::Thought, text);
                         }
                         _ => {}
                     }
                 }
             }
             Ok(MultiTurnStreamItem::ToolCall { tool_call }) => {
-                reasoning.close(&channel);
-                let args = serde_json::Value::Object(tool_call.function.arguments.clone()).to_string();
+                let arguments = Value::Object(tool_call.function.arguments.clone());
                 let wire_id = tool_call.id.to_string();
                 let call_name = tool_call.function.name.to_string();
                 pending_tools.insert(wire_id.clone());
-                let display_info = parse_display_info(&call_name, &args);
-                let _ = channel.send(ChatEvent::ToolCall {
-                    id: wire_id,
-                    name: call_name,
-                    args,
-                    display_info,
-                });
+                steps.whole(wire::call_step(&wire_id, &call_name, arguments));
             }
             Ok(MultiTurnStreamItem::ToolResult { tool_result }) => {
                 let wire_id = tool_result.call.to_string();
                 pending_tools.remove(&wire_id);
-                let output = (tool_result.name == *<RunCommand as Tool>::NAME)
-                    .then(|| session::render_tool_result(&tool_result.content));
-                let _ = channel.send(ChatEvent::ToolResult {
-                    id: wire_id,
-                    output,
-                    is_error: tool_result.is_error,
-                });
+                let output = clip_middle(
+                    &session::render_tool_result(&tool_result.content),
+                    config::MAX_VIEW_TOOL_OUTPUT_CHARS,
+                );
+                steps.whole(wire::result_step(
+                    &wire_id,
+                    &tool_result.name.to_string(),
+                    tool_result.is_error,
+                    &output,
+                ));
             }
             Ok(MultiTurnStreamItem::CompletionCall(call)) => {
                 turn_text.clear();
                 if let Some(turn) = turn_usage(&call.usage) {
-                    if let Err(error) = memory.record_usage(&session_id, &turn).await {
+                    if let Err(error) = backend.record_usage(&session_id, &turn).await {
                         tracing::error!(error = %error, "failed to persist token usage");
                         sentry::capture_error(&error);
                     }
-                    let _ = channel.send(turn.event());
+                    event_sink.send(turn.event());
                 }
             }
             Ok(MultiTurnStreamItem::FinalResponse(response)) => {
-                reasoning.close(&channel);
+                steps.close();
                 final_messages = Some(response.messages.clone());
                 saw_final_response = true;
             }
@@ -1088,8 +1182,34 @@ pub async fn build_user_message(
 ) -> Result<BuiltUserMessage, String> {
     let mut notes: Vec<String> = Vec::new();
     let mut targets: Vec<(PathBuf, String, Option<String>, bool)> = Vec::new();
+    let mut temp_files: Vec<PathBuf> = Vec::new();
 
     for attachment in attachments {
+        if let Some(ref b64) = attachment.data_base64 {
+            match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(bytes) => {
+                    let safe_name = attachment
+                        .name
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+                        .collect::<String>();
+                    let tmp_path = std::env::temp_dir().join(format!(
+                        "orch_att_{}_{}",
+                        uuid::Uuid::new_v4().simple(),
+                        safe_name
+                    ));
+                    if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
+                        notes.push(format!("{} could not be staged: {e}", attachment.name));
+                        continue;
+                    }
+                    temp_files.push(tmp_path.clone());
+                    targets.push((tmp_path, attachment.name.clone(), None, false));
+                }
+                Err(e) => notes.push(format!("{} has invalid base64: {e}", attachment.name)),
+            }
+            continue;
+        }
+
         match crate::tools::fs_util::resolve_readable_file(workspace, &attachment.path) {
             Ok(path) => {
                 let label = display_label(&path, workspace);
@@ -1098,6 +1218,7 @@ pub async fn build_user_message(
             Err(error) => notes.push(format!("{} could not be attached: {error}", attachment.name)),
         }
     }
+
     for (path, line_range) in collect_mentioned_paths(workspace, prompt) {
         let label = display_label(&path, workspace);
         targets.push((path, label, line_range, true));
@@ -1123,6 +1244,10 @@ pub async fn build_user_message(
     })
     .await
     .map_err(|e| format!("failed to load attachments: {e}"))?;
+
+    for tmp in temp_files {
+        let _ = tokio::fs::remove_file(tmp).await;
+    }
 
     let mut parts: Vec<UserContent> = Vec::new();
     if !prompt.trim().is_empty() {

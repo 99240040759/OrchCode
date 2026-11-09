@@ -5,7 +5,8 @@ import { useWorkspaceStore } from "./workspace";
 import { toRelativeWorkspacePath, getExt } from "./utils";
 
 function normalizeWorkspacePath(path: string): string {
-  return toRelativeWorkspacePath(path, useWorkspaceStore.getState().current?.path);
+  const current = useWorkspaceStore.getState().current;
+  return toRelativeWorkspacePath(path, current?.path, current?.repoDir);
 }
 
 export type ArtifactKind = "file" | "browser" | "terminal" | DocumentArtifactKind;

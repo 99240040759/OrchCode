@@ -21,6 +21,8 @@ interface ModelSelectorProps {
   align?: "start" | "end";
 }
 
+const CLOUD_PROVIDER = "antigravity";
+
 const EFFORT_LEVELS = [
   { key: "low", label: "Low" },
   { key: "medium", label: "Medium" },
@@ -38,18 +40,25 @@ export const ModelSelector = React.memo(function ModelSelector({
 
   const activeEffortLabel =
     EFFORT_LEVELS.find((e) => e.key === thinkingEffort)?.label ?? "High";
+  const selectedHasEffort = selectedModel?.provider !== CLOUD_PROVIDER;
 
   return (
     <div className="Composer-modelGroup">
       <DropdownMenu>
         <Tooltip
-          content={`Model: ${selectedModel?.name ?? "Select model"} · Thinking: ${activeEffortLabel}`}
+          content={
+            selectedHasEffort
+              ? `Model: ${selectedModel?.name ?? "Select model"} · Thinking: ${activeEffortLabel}`
+              : `Model: ${selectedModel?.name ?? "Select model"}`
+          }
           side="top"
         >
           <DropdownMenuTrigger asChild>
             <Button className="Composer-model">
               <span className="Composer-modelName">{selectedModel?.name ?? "Select model"}</span>
-              <span className="Composer-effortLabel">· {activeEffortLabel}</span>
+              {selectedHasEffort && (
+                <span className="Composer-effortLabel">· {activeEffortLabel}</span>
+              )}
               <LuChevronDown className="Composer-chevron" />
             </Button>
           </DropdownMenuTrigger>
@@ -58,7 +67,17 @@ export const ModelSelector = React.memo(function ModelSelector({
           {models.length === 0 && (
             <DropdownMenuItem disabled>No models available</DropdownMenuItem>
           )}
-          {models.map((model) => (
+          {models.map((model) =>
+            model.provider === CLOUD_PROVIDER ? (
+              <DropdownMenuItem
+                key={model.key}
+                data-selected={model.key === selectedModel?.key || undefined}
+                onSelect={() => setSelectedModel(model.key)}
+              >
+                <span className="ModelItem-name">{model.name}</span>
+                {model.badge && <span className="Composer-badge">{model.badge}</span>}
+              </DropdownMenuItem>
+            ) : (
             <DropdownMenuSub key={model.key}>
               <DropdownMenuSubTrigger
                 data-selected={model.key === selectedModel?.key || undefined}
@@ -91,7 +110,8 @@ export const ModelSelector = React.memo(function ModelSelector({
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-          ))}
+            )
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

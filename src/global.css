@@ -625,3 +625,7 @@ button:disabled, [role="button"][aria-disabled="true"], [role="menuitem"][data-d
 @media (prefers-reduced-motion: reduce) {
   .Greeting .Avatar, .Greeting-title, .Greeting-sub, .TooltipContent { animation:none; transition:none; opacity:1; transform:none; }
 }
+
+.CloudMount { display:flex; flex-direction:column; gap:var(--sp-2); width:100%; max-width:360px; margin-top:var(--sp-3); }
+.CloudMount-compact { max-width:none; margin:0; padding:var(--sp-2) var(--sp-3); }
+.CloudMount-popover { position:absolute; bottom:100%; left:0; width:280px; z-index:20; background:var(--md-s0); border:1px solid var(--md-outline); border-radius:var(--r-lg); }

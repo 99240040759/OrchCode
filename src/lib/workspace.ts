@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getBasename } from "./utils";
+import { getBasename, isCloudWorkspace } from "./utils";
 import { clearImageCache } from "./images";
 import {
   getUserPref,
@@ -9,6 +9,7 @@ import {
   errorMessage,
   newId,
   setWorkspace,
+  initCloudWorkspace,
   forgetWorkspace,
 } from "./api";
 
@@ -17,6 +18,8 @@ export interface WorkspaceMeta {
   name: string;
   path: string;
   createdAt: number;
+  repoUrl?: string;
+  repoDir?: string;
 }
 
 type WorkspacePickStatus =
@@ -37,6 +40,7 @@ interface WorkspaceState {
 interface WorkspaceActions {
   initialize: () => Promise<void>;
   pickAndOpen: () => Promise<void>;
+  openCloudRepo: (repoUrl: string, customName?: string) => Promise<void>;
   switchTo: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   dismissError: () => void;
@@ -68,6 +72,8 @@ function parseList(raw: string | null): WorkspaceMeta[] {
         name: String(w.name),
         path: String(w.path),
         createdAt: Number(w.createdAt) || 0,
+        repoUrl: typeof w.repoUrl === "string" ? w.repoUrl : undefined,
+        repoDir: typeof w.repoDir === "string" ? w.repoDir : undefined,
       }));
   } catch {
     return [];
@@ -91,7 +97,22 @@ async function saveLastId(id: string): Promise<void> {
   await setUserPref(PREF_LAST_WORKSPACE, id, true).catch(() => undefined);
 }
 
+function cloudDisplayName(workspaceUri: string): string {
+  const stripped = workspaceUri.replace(/^cloud:\/\/[^/]+\//, "");
+  return stripped || getBasename(workspaceUri) || workspaceUri;
+}
+
 async function activateWorkspace(meta: WorkspaceMeta): Promise<WorkspaceMeta> {
+  if (isCloudWorkspace(meta.path) || Boolean(meta.repoUrl)) {
+    const info = await initCloudWorkspace(meta.repoUrl || meta.path);
+    return {
+      ...meta,
+      name: meta.name || cloudDisplayName(info.workspace),
+      path: info.workspace,
+      repoUrl: info.repoUrl,
+      repoDir: info.repoDir,
+    };
+  }
   const canonical = await setWorkspace(meta.path);
   return canonical === meta.path ? meta : { ...meta, path: canonical };
 }
@@ -218,7 +239,25 @@ export const useWorkspaceStore = create(
             path: selected,
             createdAt: Date.now(),
           });
-          const meta = get().all.find((w) => w.path === activated.path) ?? activated;
+          const existing = get().all.find((w) => w.path === activated.path);
+          const meta = existing ? { ...existing, ...activated, id: existing.id } : activated;
+          await commit(meta, upsert(get().all, meta));
+        }),
+
+      openCloudRepo: (repoUrl: string, customName?: string) =>
+        exclusive(async () => {
+          const trimmed = repoUrl.trim();
+          if (!trimmed) return;
+          const info = await initCloudWorkspace(trimmed);
+          const existing = get().all.find((w) => w.path === info.workspace);
+          const meta: WorkspaceMeta = {
+            id: existing?.id ?? newId(),
+            name: customName?.trim() || existing?.name || cloudDisplayName(info.workspace),
+            path: info.workspace,
+            repoUrl: info.repoUrl,
+            repoDir: info.repoDir,
+            createdAt: existing?.createdAt ?? Date.now(),
+          };
           await commit(meta, upsert(get().all, meta));
         }),
 

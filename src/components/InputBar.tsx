@@ -287,8 +287,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
                   <LuFileText />
                   <span>File</span>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <ConnectorsMenu />
+                {!utils.isCloudWorkspace(currentWs?.path) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <ConnectorsMenu />
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 

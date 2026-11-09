@@ -1,5 +1,0 @@
-# Shared GCP backend — OrchCode (desktop) + OrchApp (Android)
-# GCP installs node_modules on deploy; never upload them
-node_modules
-.env
-*.log

@@ -28,6 +28,7 @@ export interface SessionSummary {
   outputTokens: number;
   cachedTokens: number;
   reasoningTokens: number;
+  running?: boolean;
 }
 
 export type ToolIcon =  | "file"
@@ -50,34 +51,6 @@ export interface ToolDisplayInfo {
   icon: ToolIcon;
   opensArtifact: boolean;
   connector?: string | null;
-}
-
-export type MessageItemView =
-  | { type: "text"; id: string; text: string }
-  | { type: "reasoning"; id: string; text: string; durationSeconds?: number | null }
-  | {
-      type: "toolCall";
-      id: string;
-      name: string;
-      args: string;
-      output?: string | null;
-      displayInfo: ToolDisplayInfo;
-      status: string;
-    }
-  | { type: "compactionNotice"; id: string; originalMessageCount: number; ts: number };
-
-interface AttachmentView {
-  name: string;
-  isImage: boolean;
-  path?: string | null;
-  dataUrl?: string | null;
-}
-
-export interface MessageView {
-  id: string;
-  role: string;
-  items: MessageItemView[];
-  attachments: AttachmentView[];
 }
 
 export interface UserDisplay {
@@ -105,31 +78,95 @@ export interface AttachmentRef {
   isImage: boolean;
 }
 
-export type ChatStreamEvent =
-  | { type: "text"; delta: string }
-  | { type: "reasoning"; delta: string }
-  | { type: "reasoningDone"; durationSeconds: number }
-  | { type: "toolCall"; id: string; name: string; args: string; displayInfo: ToolDisplayInfo }
-  | { type: "toolResult"; id: string; output?: string; isError: boolean }
+export interface AgUsage {
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_cached_tokens?: number;
+  total_thought_tokens?: number;
+}
+
+export interface AgStep {
+  type: string;
+  id?: string;
+  call_id?: string;
+  name?: string;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
+  is_error?: boolean;
+  display?: ToolDisplayInfo;
+}
+
+export interface AgDelta {
+  type?: string;
+  text?: string;
+  content?: { text?: string };
+}
+
+export interface AgEvent {
+  event_type: string;
+  index?: number;
+  step?: AgStep;
+  delta?: AgDelta;
+  usage?: AgUsage;
+  step_usage?: AgUsage;
+  interaction?: { status?: string; usage?: AgUsage };
+  status?: string;
+  error?: { message?: string; code?: string };
+  message?: string;
+  duration_seconds?: number;
+  original_message_count?: number;
+  ts?: number;
+  message_id?: string | null;
+  item_id?: string | null;
+}
+
+export type ChatStreamEvent = AgEvent;
+
+export interface HistoryContentPart {
+  type: string;
+  text?: string;
+  data?: string;
+  mime_type?: string;
+  uri?: string;
+  name?: string;
+  path?: string;
+}
+
+export type HistoryRecord =
+  | { kind: "user_input"; content: HistoryContentPart[] }
   | {
-      type: "usage";
-      contextTokens: number;
-      inputTokens?: number;
-      outputTokens?: number;
-      cachedTokens?: number;
-      reasoningTokens?: number;
+      kind: "step";
+      index: number;
+      step: AgStep;
+      deltas: AgDelta[];
+      stop?: { duration_seconds?: number } | null;
     }
+  | { kind: "interaction"; event_type: string; data: Record<string, unknown> }
   | {
-      type: "compacted";
-      originalMessageCount: number;
+      kind: "orch.compaction";
+      original_message_count: number;
       ts: number;
-      compactionMessageId?: string;
-      compactionItemId?: string;
-    }
-  | { type: "notice"; message: string }
-  | { type: "done" }
-  | { type: "cancelled" }
-  | { type: "error"; message: string };
+      message_id: string;
+      item_id: string;
+    };
+
+export interface SessionRecord {
+  seq: number;
+  turn: number;
+  record: HistoryRecord;
+}
+
+export interface SessionRecordPage {
+  records: SessionRecord[];
+  hasMore: boolean;
+  earliestSeq: number | null;
+}
+
+export interface CloudWorkspaceInfo {
+  workspace: string;
+  repoUrl: string;
+  repoDir: string;
+}
 
 type DictationEvent =
   | { type: "final"; text: string }
@@ -168,6 +205,14 @@ export function setWorkspace(path: string): Promise<string> {
   return invoke("set_workspace", { path });
 }
 
+export function initCloudWorkspace(repoUrl: string): Promise<CloudWorkspaceInfo> {
+  return invoke("init_cloud_workspace", { repoUrl });
+}
+
+export function setCloudSession(sessionId: string | null): Promise<void> {
+  return invoke("set_cloud_session", { sessionId });
+}
+
 export function forgetWorkspace(workspacePath: string): Promise<void> {
   return invoke("forget_workspace", { workspacePath });
 }
@@ -184,21 +229,15 @@ export function getBudget(): Promise<Budget> {
   return invoke("get_budget");
 }
 
-interface SessionViewPage {
-  messages: MessageView[];
-  hasMore: boolean;
-  earliestMessageId: number | null;
-}
-
-export function getSessionMessagesPage(
+export function getSessionRecords(
   sessionId: string,
   limit?: number,
-  beforeMessageId?: number | null
-): Promise<SessionViewPage> {
-  return invoke("get_session_messages_page", {
+  beforeSeq?: number | null
+): Promise<SessionRecordPage> {
+  return invoke("get_session_records", {
     sessionId,
     limit: limit ?? 50,
-    beforeMessageId: beforeMessageId ?? null,
+    beforeSeq: beforeSeq ?? null,
   });
 }
 
@@ -234,6 +273,15 @@ export function startChat(
     thinkingEffort,
     onEvent: channel,
   });
+}
+
+export function resumeChat(
+  sessionId: string,
+  onEvent: (evt: ChatStreamEvent) => void
+): Promise<void> {
+  const channel = new Channel<ChatStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke("resume_chat", { sessionId, onEvent: channel });
 }
 
 export function cancelChat(sessionId: string): Promise<void> {

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod browser;
+pub mod cloud;
 pub mod config;
 pub mod connector_tools;
 pub mod connectors;
@@ -21,6 +22,8 @@ pub mod state;
 pub mod terminal;
 pub mod tools;
 pub mod util;
+pub mod wire;
+pub mod workspace;
 
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -223,16 +226,19 @@ pub fn run() {
             ipc::get_oauth_url,
             ipc::sign_out_auth,
             ipc::set_workspace,
+            ipc::init_cloud_workspace,
             ipc::list_sessions_for_workspace,
             ipc::forget_workspace,
             ipc::list_models,
             ipc::get_budget,
-            ipc::get_session_messages_page,
+            ipc::get_session_records,
+            ipc::set_cloud_session,
             ipc::clear_session,
             ipc::get_user_pref,
             ipc::set_user_pref,
             ipc::start_chat,
             ipc::cancel_chat,
+            ipc::resume_chat,
             ipc::start_dictation,
             ipc::stop_dictation,
             ipc::terminal_open,
@@ -257,7 +263,6 @@ pub fn run() {
                 }
             }
             handle.state::<AppState>().shutdown();
-            // Flush Sentry before the process exits (macOS never unwinds main).
             if let Some(client) = sentry::Hub::current().client() {
                 client.close(Some(std::time::Duration::from_secs(2)));
             }

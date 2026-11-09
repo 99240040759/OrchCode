@@ -6,12 +6,18 @@ import { newId } from "./api";
 import { useWorkspaceStore } from "./workspace";
 import { useArtifactsStore } from "./artifacts";
 import { useConnectorsStore } from "./connectors";
+import {
+  applyResult,
+  deltaText,
+  recordsToMessages,
+  resultFromStep,
+  toolItemFromStep,
+  usageFromEvent,
+} from "./steps";
 import type {
   AttachmentRef,
   Budget,
   ChatStreamEvent,
-  MessageItemView,
-  MessageView,
   ModelDto,
   SessionSummary,
   ToolDisplayInfo,
@@ -78,54 +84,6 @@ export interface ChatMessage {
 
 const ZERO_USAGE: TokenUsage = { contextTokens: 0 };
 
-function viewItemToLocal(item: MessageItemView): MessageItem {
-  switch (item.type) {
-    case "text":
-      return { type: "text", id: item.id, text: item.text };
-    case "reasoning":
-      return {
-        type: "reasoning",
-        id: item.id,
-        text: item.text,
-        active: false,
-        startTime: 0,
-        durationSeconds: item.durationSeconds ?? undefined,
-      };
-    case "compactionNotice":
-      return {
-        type: "compactionNotice",
-        id: item.id,
-        originalMessageCount: item.originalMessageCount,
-        ts: item.ts,
-      };
-    case "toolCall":
-      return {
-        type: "toolCall",
-        id: item.id,
-        name: item.name,
-        args: item.args,
-        displayInfo: item.displayInfo,
-        output: item.output ?? undefined,
-        status: item.status === "error" ? "error" : "done",
-      };
-  }
-}
-
-function messageViewToLocal(v: MessageView): ChatMessage {
-  return {
-    id: v.id,
-    role: v.role as ChatMessage["role"],
-    items: v.items.map(viewItemToLocal),
-    attachments: v.attachments.map((a) => ({
-      name: a.name,
-      isImage: a.isImage,
-      path: a.path ?? undefined,
-      dataUrl: a.dataUrl ?? undefined,
-    })),
-    streaming: false,
-  };
-}
-
 function mergeAdjacentAssistantMessages(messages: ChatMessage[]): ChatMessage[] {
   const merged: ChatMessage[] = [];
   for (const message of messages) {
@@ -149,13 +107,23 @@ function usageFrom(session: SessionSummary): TokenUsage {
   };
 }
 
+function showSession(s: ChatState, id: string, tokens: TokenUsage) {
+  s.currentSessionId = id;
+  s.messages = [];
+  s.hasMoreMessages = false;
+  s.earliestSeq = null;
+  s.loadingEarlierMessages = false;
+  s.sessionTokens = tokens;
+  s.error = null;
+}
+
 interface ChatState {
   connectorSelections: Record<string, string[]>;
   sessions: SessionSummary[];
   currentSessionId: string;
   messages: ChatMessage[];
   hasMoreMessages: boolean;
-  earliestMessageId: number | null;
+  earliestSeq: number | null;
   loadingEarlierMessages: boolean;
   streaming: boolean;
   streamingSessionId: string | null;
@@ -177,6 +145,7 @@ interface ChatActions {
   loadEarlierMessages: () => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   send: (prompt: string, attachments: AttachmentRef[]) => Promise<boolean>;
+  resumeRun: (id: string) => Promise<void>;
   cancel: () => void;
   toggleConnector: (id: string) => void;
   pruneConnectors: (connectedIds: string[]) => void;
@@ -202,7 +171,7 @@ const INITIAL_STATE: ChatState = {
   currentSessionId: newId(),
   messages: [],
   hasMoreMessages: false,
-  earliestMessageId: null,
+  earliestSeq: null,
   loadingEarlierMessages: false,
   streaming: false,
   streamingSessionId: null,
@@ -334,6 +303,8 @@ export const useChatStore = create(
         s.streamingSessionId = null;
         s.error = null;
       });
+      void api.setCloudSession(freshId).catch(() => undefined);
+      await get().refreshModels();
     },
 
     reset: () => {
@@ -353,14 +324,9 @@ export const useChatStore = create(
       if (get().streaming) return;
       const freshId = newId();
       set((s) => {
-        s.currentSessionId = freshId;
-        s.messages = [];
-        s.hasMoreMessages = false;
-        s.earliestMessageId = null;
-        s.loadingEarlierMessages = false;
-        s.sessionTokens = ZERO_USAGE;
-        s.error = null;
+        showSession(s, freshId, ZERO_USAGE);
       });
+      void api.setCloudSession(freshId).catch(() => undefined);
     },
 
     selectSession: async (id: string) => {
@@ -368,23 +334,21 @@ export const useChatStore = create(
       const target = get().sessions.find((s) => s.id === id);
 
       set((s) => {
-        s.currentSessionId = id;
-        s.messages = [];
-        s.hasMoreMessages = false;
-        s.earliestMessageId = null;
-        s.loadingEarlierMessages = false;
-        s.sessionTokens = target ? usageFrom(target) : ZERO_USAGE;
-        s.error = null;
+        showSession(s, id, target ? usageFrom(target) : ZERO_USAGE);
       });
+      void api.setCloudSession(id).catch(() => undefined);
 
       try {
-        const page = await api.getSessionMessagesPage(id, 50);
+        const page = await api.getSessionRecords(id, 50);
         set((s) => {
           if (s.currentSessionId !== id) return;
           s.hasMoreMessages = page.hasMore;
-          s.earliestMessageId = page.earliestMessageId;
-          s.messages = mergeAdjacentAssistantMessages(page.messages.map(messageViewToLocal));
+          s.earliestSeq = page.earliestSeq;
+          s.messages = mergeAdjacentAssistantMessages(recordsToMessages(page.records));
         });
+        if (get().sessions.find((sess) => sess.id === id)?.running) {
+          void get().resumeRun(id);
+        }
       } catch (e) {
         set((s) => {
           if (s.currentSessionId === id) s.error = api.errorMessage(e);
@@ -394,18 +358,18 @@ export const useChatStore = create(
 
     loadEarlierMessages: async () => {
       const state = get();
-      if (!state.hasMoreMessages || state.loadingEarlierMessages || state.earliestMessageId == null) return;
+      if (!state.hasMoreMessages || state.loadingEarlierMessages || state.earliestSeq == null) return;
       const id = state.currentSessionId;
       set((s) => { s.loadingEarlierMessages = true; });
 
       try {
-        const page = await api.getSessionMessagesPage(id, 50, state.earliestMessageId);
+        const page = await api.getSessionRecords(id, 50, state.earliestSeq);
         set((s) => {
           if (s.currentSessionId !== id) return;
           s.loadingEarlierMessages = false;
           s.hasMoreMessages = page.hasMore;
-          s.earliestMessageId = page.earliestMessageId;
-          const earlierMessages: ChatMessage[] = page.messages.map(messageViewToLocal);
+          s.earliestSeq = page.earliestSeq;
+          const earlierMessages: ChatMessage[] = recordsToMessages(page.records);
           s.messages = mergeAdjacentAssistantMessages([...earlierMessages, ...s.messages]);
         });
       } catch (e) {
@@ -442,6 +406,7 @@ export const useChatStore = create(
           s.error = null;
         }
       });
+      void api.setCloudSession(get().currentSessionId).catch(() => undefined);
     },
 
     send: async (prompt: string, attachments: AttachmentRef[]) => {
@@ -482,258 +447,38 @@ export const useChatStore = create(
         });
       });
 
-      let activeAssistantId = assistantMsgId;
-
-      const patch = (fn: (m: ChatMessage) => void) => {
-        set((s) => {
-          if (s.currentSessionId !== sessionId) return;
-          const last = s.messages[s.messages.length - 1];
-          if (last && last.id === activeAssistantId) {
-            fn(last);
-          } else {
-            const msg = s.messages.find((m) => m.id === activeAssistantId);
-            if (msg) fn(msg);
-          }
-        });
-      };
-
-      let settled = false;
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        syncFlush();
-        patch((m) => {
-          m.streaming = false;
-          for (const item of m.items) {
-            if (item.type === "toolCall" && item.status === "running") item.status = "error";
-          }
-        });
-        set((s) => {
-          if (s.streamingSessionId === sessionId) s.streamingSessionId = null;
-          if (s.currentSessionId === sessionId) s.streaming = false;
-        });
-      };
-
-      let receivedEvents = false;
-
-      let textBuffer = "";
-      let reasoningBuffer = "";
-      let rafId: number | null = null;
-      let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-      const flush = () => {
-        const pendingText = textBuffer;
-        const pendingReasoning = reasoningBuffer;
-        textBuffer = "";
-        reasoningBuffer = "";
-        if (!pendingText && !pendingReasoning) return;
-        patch((m) => {
-          if (pendingReasoning) {
-            const last = m.items[m.items.length - 1];
-            if (last?.type === "reasoning" && last.active) last.text += pendingReasoning;
-            else m.items.push({ type: "reasoning", id: newId(), text: pendingReasoning, active: true, startTime: Date.now() });
-          }
-          if (pendingText) {
-            const last = m.items[m.items.length - 1];
-            if (last?.type === "text") last.text += pendingText;
-            else m.items.push({ type: "text", id: newId(), text: pendingText });
-          }
-        });
-      };
-
-      const scheduleFlush = () => {
-        if (rafId === null) {
-          rafId = requestAnimationFrame(() => {
-            rafId = null;
-            if (flushTimeoutId !== null) {
-              clearTimeout(flushTimeoutId);
-              flushTimeoutId = null;
-            }
-            flush();
-          });
-          if (flushTimeoutId !== null) {
-            clearTimeout(flushTimeoutId);
-          }
-          flushTimeoutId = setTimeout(() => {
-            flushTimeoutId = null;
-            if (rafId !== null) {
-              cancelAnimationFrame(rafId);
-              rafId = null;
-              flush();
-            }
-          }, 100);
-        }
-      };
-
-      const syncFlush = () => {
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-        if (flushTimeoutId !== null) {
-          clearTimeout(flushTimeoutId);
-          flushTimeoutId = null;
-        }
-        flush();
-      };
-
-      activeStreamFlushes.set(sessionId, () => {
-        if (rafId !== null) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-        if (flushTimeoutId !== null) {
-          clearTimeout(flushTimeoutId);
-          flushTimeoutId = null;
-        }
-        textBuffer = "";
-        reasoningBuffer = "";
-      });
-
-      const handleEvent = (event: ChatStreamEvent) => {
-        receivedEvents = true;
-        switch (event.type) {
-          case "text":
-            textBuffer += event.delta;
-            scheduleFlush();
-            break;
-          case "reasoning":
-            reasoningBuffer += event.delta;
-            scheduleFlush();
-            break;
-          case "reasoningDone":
-            syncFlush();
-            patch((m) => {
-              for (let i = m.items.length - 1; i >= 0; i--) {
-                const item = m.items[i];
-                if (item.type === "reasoning" && item.active) {
-                  item.active = false;
-                  item.durationSeconds = event.durationSeconds;
-                  break;
-                }
-              }
-            });
-            break;
-          case "toolCall":
-            syncFlush();
-            patch((m) => {
-              m.items.push({ type: "toolCall", id: event.id, name: event.name, args: event.args, displayInfo: event.displayInfo, status: "running" });
-            });
-            break;
-          case "toolResult":
-            patch((m) => {
-              for (let i = m.items.length - 1; i >= 0; i--) {
-                const item = m.items[i];
-                if (item.type === "toolCall" && item.id === event.id) {
-                  item.output = event.output;
-                  item.status = event.isError ? "error" : "done";
-                  break;
-                }
-              }
-            });
-            break;
-          case "usage":
-            set((s) => {
-              if (s.currentSessionId === sessionId)
-                s.sessionTokens = {
-                  contextTokens: event.contextTokens,
-                  inputTokens: event.inputTokens,
-                  outputTokens: event.outputTokens,
-                  cachedTokens: event.cachedTokens,
-                  reasoningTokens: event.reasoningTokens,
-                };
-            });
-            break;
-          case "notice":
-            patch((m) => { m.notice = event.message; });
-            break;
-          case "compacted": {
-            syncFlush();
-            set((s) => {
-              if (s.currentSessionId !== sessionId) return;
-              const noticeId = event.compactionMessageId || newId();
-              if (s.messages.some((m) => m.id === noticeId)) return;
-
-              const notice: ChatMessage = {
-                id: noticeId,
-                role: "system",
-                items: [
-                  {
-                    type: "compactionNotice",
-                    id: event.compactionItemId || newId(),
-                    originalMessageCount: event.originalMessageCount,
-                    ts: event.ts,
-                  },
-                ],
-                attachments: [],
-                streaming: false,
-              };
-
-              const currentIdx = s.messages.findIndex((m) => m.id === activeAssistantId);
-              if (currentIdx < 0) return;
-              const current = s.messages[currentIdx];
-              if (current.items.length === 0) {
-                s.messages.splice(currentIdx, 0, notice);
-                return;
-              }
-              current.streaming = false;
-              const continuation: ChatMessage = {
-                id: newId(),
-                role: "assistant",
-                items: [],
-                attachments: [],
-                streaming: true,
-              };
-              s.messages.push(notice, continuation);
-              activeAssistantId = continuation.id;
-            });
-            break;
-          }
-          case "done":
-            syncFlush(); settle();
-            void useChatStore.getState().refreshBudget();
-            break;
-          case "cancelled":
-            syncFlush(); settle();
-            break;
-          case "error":
-            syncFlush();
-            patch((m) => { m.error = event.message; });
-            settle();
-            break;
-        }
-      };
-
-      try {
-        await api.startChat(
+      return streamRun(sessionId, userMsgId, assistantMsgId, (onEvent) =>
+        api.startChat(
           sessionId,
           selectedModel.key,
           text,
           attachments,
           connectorSelections[sessionId] ?? [],
           get().thinkingEffort,
-          handleEvent
-        );
-        syncFlush(); settle();
-        return true;
-      } catch (e) {
-        const message = api.errorMessage(e);
-        syncFlush(); settle();
-        if (!receivedEvents) {
-          set((s) => {
-            s.messages = s.messages.filter((m) => m.id !== userMsgId && m.id !== assistantMsgId);
-            if (s.currentSessionId === sessionId && message !== "cancelled") s.error = message;
-          });
-          return false;
+          onEvent
+        )
+      );
+    },
+
+    resumeRun: async (id: string) => {
+      if (get().streaming || get().currentSessionId !== id) return;
+      const assistantMsgId = newId();
+      set((s) => {
+        s.error = null;
+        s.streaming = true;
+        s.streamingSessionId = id;
+        while (s.messages.length > 0 && s.messages[s.messages.length - 1].role !== "user") {
+          s.messages.pop();
         }
-        patch((m) => { m.error = message; });
-        set((s) => {
-          if (s.currentSessionId === sessionId) s.error = message;
+        s.messages.push({
+          id: assistantMsgId,
+          role: "assistant",
+          items: [],
+          attachments: [],
+          streaming: true,
         });
-        return true;
-      } finally {
-        activeStreamFlushes.delete(sessionId);
-      }
+      });
+      await streamRun(id, null, assistantMsgId, (onEvent) => api.resumeChat(id, onEvent));
     },
 
     toggleConnector: (id: string) => {
@@ -819,6 +564,319 @@ export const useChatStore = create(
     },
   }))
 );
+
+async function streamRun(
+  sessionId: string,
+  userMsgId: string | null,
+  assistantMsgId: string,
+  start: (onEvent: (evt: ChatStreamEvent) => void) => Promise<void>
+): Promise<boolean> {
+  const set = useChatStore.setState;
+    let activeAssistantId = assistantMsgId;
+
+    const patch = (fn: (m: ChatMessage) => void) => {
+      set((s) => {
+        if (s.currentSessionId !== sessionId) return;
+        const last = s.messages[s.messages.length - 1];
+        if (last && last.id === activeAssistantId) {
+          fn(last);
+        } else {
+          const msg = s.messages.find((m) => m.id === activeAssistantId);
+          if (msg) fn(msg);
+        }
+      });
+    };
+
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      syncFlush();
+      patch((m) => {
+        m.streaming = false;
+        for (const item of m.items) {
+          if (item.type === "toolCall" && item.status === "running") item.status = "error";
+        }
+      });
+      set((s) => {
+        if (s.streamingSessionId === sessionId) s.streamingSessionId = null;
+        if (s.currentSessionId === sessionId) s.streaming = false;
+      });
+    };
+
+    let receivedEvents = false;
+
+    let textBuffer = "";
+    let reasoningBuffer = "";
+    let rafId: number | null = null;
+    let flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      const pendingText = textBuffer;
+      const pendingReasoning = reasoningBuffer;
+      textBuffer = "";
+      reasoningBuffer = "";
+      if (!pendingText && !pendingReasoning) return;
+      patch((m) => {
+        if (pendingReasoning) {
+          const last = m.items[m.items.length - 1];
+          if (last?.type === "reasoning" && last.active) last.text += pendingReasoning;
+          else m.items.push({ type: "reasoning", id: newId(), text: pendingReasoning, active: true, startTime: Date.now() });
+        }
+        if (pendingText) {
+          const last = m.items[m.items.length - 1];
+          if (last?.type === "text") last.text += pendingText;
+          else m.items.push({ type: "text", id: newId(), text: pendingText });
+        }
+      });
+    };
+
+    const scheduleFlush = () => {
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (flushTimeoutId !== null) {
+            clearTimeout(flushTimeoutId);
+            flushTimeoutId = null;
+          }
+          flush();
+        });
+        if (flushTimeoutId !== null) {
+          clearTimeout(flushTimeoutId);
+        }
+        flushTimeoutId = setTimeout(() => {
+          flushTimeoutId = null;
+          if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+            flush();
+          }
+        }, 100);
+      }
+    };
+
+    const syncFlush = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (flushTimeoutId !== null) {
+        clearTimeout(flushTimeoutId);
+        flushTimeoutId = null;
+      }
+      flush();
+    };
+
+    activeStreamFlushes.set(sessionId, () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (flushTimeoutId !== null) {
+        clearTimeout(flushTimeoutId);
+        flushTimeoutId = null;
+      }
+      textBuffer = "";
+      reasoningBuffer = "";
+    });
+
+    const stepKinds = new Map<number, "thought" | "text">();
+    const thoughtStarts = new Map<number, number>();
+
+    const closeThought = (index: number, reportedSeconds?: number) => {
+      const started = thoughtStarts.get(index);
+      thoughtStarts.delete(index);
+      const seconds =
+        reportedSeconds ?? Math.max(1, Math.round((Date.now() - (started ?? Date.now())) / 1000));
+      syncFlush();
+      patch((m) => {
+        for (let i = m.items.length - 1; i >= 0; i--) {
+          const item = m.items[i];
+          if (item.type === "reasoning" && item.active) {
+            item.active = false;
+            item.durationSeconds = seconds;
+            break;
+          }
+        }
+      });
+    };
+
+    const handleEvent = (event: ChatStreamEvent) => {
+      receivedEvents = true;
+
+      const usage = usageFromEvent(event);
+      if (usage) {
+        set((s) => {
+          if (s.currentSessionId !== sessionId) return;
+          s.sessionTokens = {
+            contextTokens: usage.contextTokens ?? s.sessionTokens.contextTokens,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cachedTokens: usage.cachedTokens,
+            reasoningTokens: usage.reasoningTokens,
+          };
+        });
+      }
+
+      switch (event.event_type) {
+        case "step.start": {
+          const step = event.step;
+          const index = event.index;
+          if (!step || index === undefined) break;
+          if (step.type === "thought") {
+            stepKinds.set(index, "thought");
+            thoughtStarts.set(index, Date.now());
+            break;
+          }
+          if (step.type === "model_output") {
+            stepKinds.set(index, "text");
+            break;
+          }
+          const tool = toolItemFromStep(step);
+          if (tool) {
+            syncFlush();
+            patch((m) => {
+              m.items.push(tool);
+            });
+            break;
+          }
+          const result = resultFromStep(step);
+          if (result) {
+            patch((m) => {
+              applyResult(m.items, result);
+            });
+          }
+          break;
+        }
+        case "step.delta": {
+          const index = event.index;
+          if (index === undefined) break;
+          const text = deltaText(event.delta);
+          if (!text) break;
+          const kind = stepKinds.get(index);
+          if (kind === "thought") {
+            reasoningBuffer += text;
+            scheduleFlush();
+          } else if (kind === "text") {
+            textBuffer += text;
+            scheduleFlush();
+          }
+          break;
+        }
+        case "step.stop": {
+          const index = event.index;
+          if (index === undefined) break;
+          const kind = stepKinds.get(index);
+          stepKinds.delete(index);
+          if (kind === "thought") closeThought(index, event.duration_seconds);
+          else if (kind === "text") syncFlush();
+          break;
+        }
+        case "orch.notice":
+          patch((m) => {
+            m.notice = event.message;
+          });
+          break;
+        case "orch.compacted": {
+          syncFlush();
+          set((s) => {
+            if (s.currentSessionId !== sessionId) return;
+            const noticeId = event.message_id || newId();
+            if (s.messages.some((m) => m.id === noticeId)) return;
+
+            const notice: ChatMessage = {
+              id: noticeId,
+              role: "system",
+              items: [
+                {
+                  type: "compactionNotice",
+                  id: event.item_id || newId(),
+                  originalMessageCount: event.original_message_count ?? 0,
+                  ts: event.ts ?? Date.now(),
+                },
+              ],
+              attachments: [],
+              streaming: false,
+            };
+
+            const currentIdx = s.messages.findIndex((m) => m.id === activeAssistantId);
+            if (currentIdx < 0) return;
+            const current = s.messages[currentIdx];
+            if (current.items.length === 0) {
+              s.messages.splice(currentIdx, 0, notice);
+              return;
+            }
+            current.streaming = false;
+            const continuation: ChatMessage = {
+              id: newId(),
+              role: "assistant",
+              items: [],
+              attachments: [],
+              streaming: true,
+            };
+            s.messages.push(notice, continuation);
+            activeAssistantId = continuation.id;
+          });
+          break;
+        }
+        case "interaction.status_update":
+          if (event.status === "cancelled") {
+            syncFlush();
+            settle();
+          }
+          break;
+        case "error": {
+          syncFlush();
+          const message = event.error?.message ?? event.message ?? "The agent stopped unexpectedly.";
+          patch((m) => {
+            m.error = message;
+          });
+          settle();
+          break;
+        }
+        case "orch.resync":
+          syncFlush();
+          stepKinds.clear();
+          thoughtStarts.clear();
+          patch((m) => {
+            m.items = [];
+            m.error = undefined;
+            m.notice = undefined;
+          });
+          break;
+        case "done":
+          syncFlush();
+          settle();
+          void useChatStore.getState().refreshBudget();
+          break;
+      }
+    };
+
+    try {
+      await start(handleEvent);
+      syncFlush(); settle();
+      return true;
+    } catch (e) {
+      const message = api.errorMessage(e);
+      syncFlush(); settle();
+      if (!receivedEvents) {
+        set((s) => {
+          s.messages = s.messages.filter(
+            (m) => m.id !== assistantMsgId && (userMsgId === null || m.id !== userMsgId)
+          );
+          if (s.currentSessionId === sessionId && message !== "cancelled") s.error = message;
+        });
+        return false;
+      }
+      patch((m) => { m.error = message; });
+      set((s) => {
+        if (s.currentSessionId === sessionId) s.error = message;
+      });
+      return true;
+    } finally {
+      activeStreamFlushes.delete(sessionId);
+    }
+}
 
 useWorkspaceStore.subscribe((state, prev) => {
   if (state.current?.id !== prev.current?.id && useChatStore.getState().initialized) {

@@ -30,9 +30,24 @@ export function normalizePath(pathStr: string): string {
   return isAbs ? "/" + res : res || ".";
 }
 
-export function toRelativeWorkspacePath(path: string, workspaceRoot?: string | null): string {
-  const clean = normalizePath(path);
+export function isCloudWorkspace(path?: string | null): boolean {
+  return Boolean(path && path.trim().startsWith("cloud://"));
+}
+
+export function toRelativeWorkspacePath(
+  path: string,
+  workspaceRoot?: string | null,
+  cloudRepoDir?: string | null
+): string {
+  const clean = normalizePath(path.trim().replace(/^file:\/\//, ""));
   if (!workspaceRoot) return clean;
+  if (isCloudWorkspace(workspaceRoot)) {
+    const base = cloudRepoDir ? normalizePath(cloudRepoDir) : "";
+    if (!base) return clean;
+    if (clean === base) return "";
+    if (clean.startsWith(base + "/")) return clean.slice(base.length + 1);
+    return clean;
+  }
   const root = normalizePath(workspaceRoot);
   if (clean === root) return "";
   const prefix = root.endsWith("/") ? root : root + "/";

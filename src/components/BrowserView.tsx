@@ -3,7 +3,6 @@ import {
   LuArrowLeft,
   LuArrowRight,
   LuExternalLink,
-  LuGlobe,
   LuRotateCw,
   LuX,
 } from "react-icons/lu";
@@ -22,9 +21,6 @@ import { useOverlayStore } from "./ui/DropdownMenu";
 
 const OFFSCREEN = -100000;
 
-// On macOS, WebKit WKWebView omits Safari identifiers by default, causing Google
-// and other major sites to classify it as legacy and serve ancient 1990s HTML.
-// Setting a modern Safari UA on macOS ensures modern layouts & dark-mode styling.
 const MAC_SAFARI_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15";
 
