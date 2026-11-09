@@ -11,7 +11,7 @@ import {
   LuTrash2,
   LuX,
 } from "react-icons/lu";
-import { CloudMountForm } from "./CloudMountForm";
+import { CloudRepoForm } from "./CloudRepoForm";
 import { Avatar } from "./ChatPrimitives";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
@@ -136,7 +136,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const wsError = useWorkspaceStore((s) => s.error);
   const dismissWsError = useWorkspaceStore((s) => s.dismissError);
 
-  const [showMount, setShowMount] = useState(false);
+  const [showCloudForm, setShowCloudForm] = useState(false);
   const [pendingWsDelete, setPendingWsDelete] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const wsLocked = streaming || wsBusy;
@@ -232,13 +232,13 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
               <LuFolderPlus />
             </button>
           </Tooltip>
-          <Tooltip content="Mount cloud repository" side="right">
+          <Tooltip content="Open cloud repo" side="right">
             <button
               type="button"
               className="IconBtn Sidebar-projectsActionBtn"
-              aria-label="Mount cloud repository"
+              aria-label="Open cloud repo"
               disabled={wsLocked}
-              onClick={() => setShowMount((v) => !v)}
+              onClick={() => setShowCloudForm((v) => !v)}
             >
               <LuCloud />
             </button>
@@ -246,7 +246,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         </div>
       </div>
 
-      {showMount && <CloudMountForm compact disabled={wsLocked} onMounted={() => setShowMount(false)} />}
+      {showCloudForm && <CloudRepoForm disabled={wsLocked} onOpened={() => setShowCloudForm(false)} />}
 
       <nav className="Sidebar-threads" aria-label="Projects and conversations">
         {workspacesToDisplay.map((ws) => {

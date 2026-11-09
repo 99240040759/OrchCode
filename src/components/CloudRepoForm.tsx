@@ -1,16 +1,14 @@
 import { useState } from "react";
 import { LuCloud } from "react-icons/lu";
 import { Button } from "./ui/Button";
-import { cn } from "../lib/utils";
 import { useWorkspaceStore } from "../lib/workspace";
 
-interface CloudMountFormProps {
+interface CloudRepoFormProps {
   disabled?: boolean;
-  onMounted?: () => void;
-  compact?: boolean;
+  onOpened?: () => void;
 }
 
-export function CloudMountForm({ disabled, onMounted, compact }: CloudMountFormProps) {
+export function CloudRepoForm({ disabled, onOpened }: CloudRepoFormProps) {
   const openCloudRepo = useWorkspaceStore((s) => s.openCloudRepo);
   const busy = useWorkspaceStore((s) => s.busy);
   const [name, setName] = useState("");
@@ -23,7 +21,7 @@ export function CloudMountForm({ disabled, onMounted, compact }: CloudMountFormP
     void openCloudRepo(url, name.trim() || undefined);
     setName("");
     setRepoUrl("");
-    onMounted?.();
+    onOpened?.();
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -34,7 +32,7 @@ export function CloudMountForm({ disabled, onMounted, compact }: CloudMountFormP
   };
 
   return (
-    <div className={cn("CloudMount", compact && "CloudMount-compact")}>
+    <div className="Sidebar-footer">
       <input
         type="text"
         className="FilePicker-input"
@@ -47,6 +45,7 @@ export function CloudMountForm({ disabled, onMounted, compact }: CloudMountFormP
       />
       <input
         type="url"
+        size={30}
         className="FilePicker-input"
         value={repoUrl}
         disabled={locked}
@@ -57,7 +56,7 @@ export function CloudMountForm({ disabled, onMounted, compact }: CloudMountFormP
       />
       <Button className="Sidebar-newchat" disabled={locked || !repoUrl.trim()} onClick={submit}>
         <LuCloud />
-        <span>{busy ? "Mounting…" : "Mount"}</span>
+        <span>{busy ? "Opening…" : "Open"}</span>
       </Button>
     </div>
   );
