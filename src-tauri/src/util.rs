@@ -47,14 +47,37 @@ pub fn streaming_http_client() -> reqwest::Client {
         .clone()
 }
 
+pub struct NoRateLimitRetry;
+
+impl reqwest_retry::RetryableStrategy for NoRateLimitRetry {
+    fn handle(
+        &self,
+        res: &Result<reqwest::Response, reqwest_middleware::Error>,
+    ) -> Option<reqwest_retry::Retryable> {
+        match res {
+            Ok(response) if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                Some(reqwest_retry::Retryable::Fatal)
+            }
+            Ok(response) => reqwest_retry::default_on_request_success(response),
+            Err(error) => reqwest_retry::default_on_request_failure(error),
+        }
+    }
+}
+
+pub fn retry_middleware() -> reqwest_retry::RetryTransientMiddleware<
+    reqwest_retry::policies::ExponentialBackoff,
+    NoRateLimitRetry,
+> {
+    let policy = reqwest_retry::policies::ExponentialBackoff::builder().build_with_max_retries(3);
+    reqwest_retry::RetryTransientMiddleware::new_with_policy_and_strategy(policy, NoRateLimitRetry)
+}
+
 pub fn retry_http_client() -> reqwest_middleware::ClientWithMiddleware {
     static CLIENT: OnceLock<reqwest_middleware::ClientWithMiddleware> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
-            let policy = reqwest_retry::policies::ExponentialBackoff::builder()
-                .build_with_max_retries(3);
             reqwest_middleware::ClientBuilder::new(http_client())
-                .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(policy))
+                .with(retry_middleware())
                 .build()
         })
         .clone()

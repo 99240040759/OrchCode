@@ -45,11 +45,19 @@ impl EventSink for TauriEventSink {
     }
 }
 
+fn ensure_cloud_attachment_budget(total_bytes: usize) -> Result<(), String> {
+    if total_bytes > config::CLOUD_MAX_ATTACHMENT_TOTAL_BYTES {
+        return Err(format!(
+            "Attachments exceed the {} MB limit",
+            config::CLOUD_MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
+
 fn canonical_string(path: &str) -> String {
     if cloud::is_cloud_workspace(path) {
-        return cloud::normalize_cloud_workspace_and_repo(path)
-            .map(|(w, _)| w)
-            .unwrap_or_else(|_| path.to_string());
+        return path.to_string();
     }
     dunce::canonicalize(PathBuf::from(path))
         .map(|p| p.to_string_lossy().to_string())
@@ -421,26 +429,38 @@ pub async fn start_chat(
             state.set_cloud_session(Some(session_id.clone()));
 
             let mut cloud_attachments = Vec::with_capacity(attachments.len());
+            let mut total_bytes = 0usize;
             for att in attachments {
                 let data_base64 = match att.data_base64 {
                     Some(data) => Some(data),
-                    None => {
-                        let p = Path::new(&att.path);
-                        if p.is_file() {
-                            tokio::fs::read(p)
+                    None => match tokio::fs::metadata(&att.path).await {
+                        Ok(meta) if meta.is_file() => {
+                            if let Err(error) =
+                                ensure_cloud_attachment_budget(total_bytes + meta.len() as usize)
+                            {
+                                state.finish_run(&session_id, &run_id);
+                                return Err(error);
+                            }
+                            tokio::fs::read(&att.path)
                                 .await
                                 .ok()
                                 .map(|bytes| base64::engine::general_purpose::STANDARD.encode(&bytes))
-                        } else {
-                            None
                         }
-                    }
+                        _ => None,
+                    },
                 };
                 match data_base64 {
-                    Some(data_base64) => cloud_attachments.push(CloudAttachment {
-                        name: att.name,
-                        data_base64,
-                    }),
+                    Some(data_base64) => {
+                        total_bytes += data_base64.len() / 4 * 3;
+                        if let Err(error) = ensure_cloud_attachment_budget(total_bytes) {
+                            state.finish_run(&session_id, &run_id);
+                            return Err(error);
+                        }
+                        cloud_attachments.push(CloudAttachment {
+                            name: att.name,
+                            data_base64,
+                        });
+                    }
                     None => {
                         let _ = on_event.send(ChatEvent::notice(format!(
                             "{} could not be read and was not attached",

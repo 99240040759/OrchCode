@@ -313,7 +313,7 @@ impl AppState {
                             .cloud_files_json(
                                 "list",
                                 &session_id,
-                                &[("limit", config::MAX_INDEXED_FILES.to_string())],
+                                &[("limit", config::CLOUD_FILE_LIST_LIMIT.to_string())],
                             )
                             .await
                             .map_err(|e| e.to_string())?;

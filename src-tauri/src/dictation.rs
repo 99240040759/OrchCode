@@ -369,7 +369,7 @@ async fn transcribe(gateway: &Gateway, samples: &[i16], sample_rate: u32) -> App
     };
     let wav = encode_wav(&samples, sample_rate)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
-    gateway.transcribe(&b64).await
+    gateway.transcribe(&b64, "wav").await
 }
 
 fn encode_wav(samples: &[i16], sample_rate: u32) -> AppResult<Vec<u8>> {

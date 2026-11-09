@@ -74,10 +74,8 @@ pub type ChatClient = rig::providers::gemini::Gemini;
 pub type ChatAgent = Agent;
 
 pub fn build_client(token: TokenHandle) -> AppResult<ChatClient> {
-    let retry_policy = reqwest_retry::policies::ExponentialBackoff::builder()
-        .build_with_max_retries(3);
     let client = reqwest_middleware::ClientBuilder::new(crate::util::streaming_http_client())
-        .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(retry_policy))
+        .with(crate::util::retry_middleware())
         .with(AuthMiddleware::new(token))
         .build();
 

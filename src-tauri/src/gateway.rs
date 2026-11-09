@@ -44,7 +44,11 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    pub fn from_map(entries: HashMap<String, ModelInfo>) -> Self {
+    pub fn from_list(models: Vec<ModelInfo>) -> Self {
+        let entries: HashMap<String, ModelInfo> = models
+            .into_iter()
+            .map(|model| (model.id.clone(), model))
+            .collect();
         let mut sorted_list: Vec<(String, ModelInfo)> = entries
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -71,9 +75,7 @@ impl ModelCatalog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
-    #[serde(alias = "cost_usd")]
     pub cost_usd: f64,
-    #[serde(alias = "limit_usd")]
     pub limit_usd: f64,
     pub remaining: f64,
     pub period: String,
@@ -153,23 +155,23 @@ impl Gateway {
     }
 
     pub async fn models(&self) -> AppResult<ModelCatalog> {
-        let map: HashMap<String, ModelInfo> =
+        let models: Vec<ModelInfo> =
             self.get(config::models_url(), Duration::from_secs(20)).await?;
-        Ok(ModelCatalog::from_map(map))
+        Ok(ModelCatalog::from_list(models))
     }
 
     pub async fn cloud_models(&self) -> AppResult<ModelCatalog> {
-        let map: HashMap<String, ModelInfo> = self
+        let models: Vec<ModelInfo> = self
             .get(&config::cloud_url("/models"), Duration::from_secs(20))
             .await?;
-        Ok(ModelCatalog::from_map(map))
+        Ok(ModelCatalog::from_list(models))
     }
 
     pub async fn budget(&self) -> AppResult<Budget> {
         self.get(config::budget_url(), Duration::from_secs(15)).await
     }
 
-    pub async fn transcribe(&self, audio_base64: &str) -> AppResult<String> {
+    pub async fn transcribe(&self, audio_base64: &str, format: &str) -> AppResult<String> {
         #[derive(Deserialize)]
         struct Resp {
             text: String,
@@ -177,7 +179,7 @@ impl Gateway {
         let resp: Resp = self
             .post(
                 config::transcribe_url(),
-                &json!({ "audio": audio_base64 }),
+                &json!({ "audio": audio_base64, "format": format }),
                 Duration::from_secs(300),
             )
             .await?;
@@ -466,11 +468,12 @@ impl Follower {
     ) -> Pumped {
         let mut stream = response.bytes_stream();
         let mut buffer: Vec<u8> = Vec::new();
+        let idle = Duration::from_secs(config::CLOUD_STREAM_IDLE_TIMEOUT_SECS);
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => return Pumped::Cancelled,
-                chunk = stream.next() => {
-                    let Some(Ok(bytes)) = chunk else {
+                chunk = tokio::time::timeout(idle, stream.next()) => {
+                    let Ok(Some(Ok(bytes))) = chunk else {
                         return Pumped::Dropped;
                     };
                     buffer.extend(bytes.iter().copied().filter(|byte| *byte != b'\r'));
@@ -578,7 +581,11 @@ async fn check_status(resp: reqwest::Response) -> AppResult<reqwest::Response> {
     }
     let url = resp.url().to_string();
     let status_code = status.as_u16();
-    let body = resp.text().await.unwrap_or_default();
+    let raw_body = resp.text().await.unwrap_or_default();
+    let (body, code) = parse_server_error(&raw_body);
+    if status_code == 409 && code.as_deref() == Some("RUN_ACTIVE") {
+        return Err(AppError::RunConflict);
+    }
     let err = AppError::Gateway {
         status: status_code,
         body,
@@ -593,10 +600,36 @@ async fn check_status(resp: reqwest::Response) -> AppResult<reqwest::Response> {
         },
         ..Default::default()
     });
-    if status_code >= 500 || status_code == 429 {
+    let expected_limit = code.as_deref() == Some("BUDGET_EXCEEDED");
+    if status_code >= 500 || (status_code == 429 && !expected_limit) {
         sentry::capture_error(&err);
     }
     Err(err)
+}
+
+fn parse_server_error(raw: &str) -> (String, Option<String>) {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return (raw.to_string(), None);
+    };
+    let code = map.get("code").and_then(|c| c.as_str()).map(str::to_string);
+    match map.get("error").and_then(|e| e.as_str()) {
+        Some(message) if !message.is_empty() => (message.to_string(), code),
+        _ => (raw.to_string(), code),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchTopic {
+    General,
+    News,
+    Finance,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchDepth {
+    Basic,
 }
 
 #[derive(Debug, Serialize)]
@@ -605,9 +638,9 @@ pub struct TavilyRequest {
     #[serde(rename = "maxResults", skip_serializing_if = "Option::is_none")]
     pub max_results: Option<u32>,
     #[serde(rename = "searchDepth", skip_serializing_if = "Option::is_none")]
-    pub search_depth: Option<String>,
+    pub search_depth: Option<SearchDepth>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic: Option<String>,
+    pub topic: Option<SearchTopic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
 }

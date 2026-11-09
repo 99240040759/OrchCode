@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config;
 use crate::error::{AppError, AppResult};
 use crate::events::EventSink;
-use crate::gateway::{Gateway, TavilyRequest};
+use crate::gateway::{Gateway, SearchDepth, SearchTopic, TavilyRequest};
 use crate::skills::load_all_skills;
 
 pub const FILE_SIZE_LIMIT: u64 = 10 * 1024 * 1024;
@@ -1495,8 +1495,8 @@ pub struct SearchArgs {
     #[schemars(description = "Optional. Maximum number of results per query. Defaults to 5 and is clamped to 1-10.")]
     pub max_results: Option<u32>,
     #[serde(default)]
-    #[schemars(description = "Optional topic or category filter forwarded to the search provider. Omit when no topic filter is needed.")]
-    pub topic: Option<String>,
+    #[schemars(description = "Optional search topic. Omit for a general search.")]
+    pub topic: Option<SearchTopic>,
     #[serde(default)]
     #[schemars(description = "Optional domain or site filter forwarded to the search provider. Omit for an unrestricted search.")]
     pub domain: Option<String>,
@@ -1547,8 +1547,8 @@ impl Tool for Search {
             let req = TavilyRequest {
                 query: query.clone(),
                 max_results: Some(max_results),
-                search_depth: Some("basic".to_string()),
-                topic: args.topic.clone(),
+                search_depth: Some(SearchDepth::Basic),
+                topic: args.topic,
                 domain: args.domain.clone(),
             };
             let resp = self.gateway.tavily(&req).await?;
