@@ -128,7 +128,7 @@ export function PptxViewer({ path, active = true }: { path: string; active?: boo
   return (
     <div className="PptxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} className="DocViewer-fileIcon" />
         <span className="DocViewer-title">{fileName}</span>
         {slideCount > 0 && (
           <span className="DocViewer-meta">{slideCount} slide{slideCount !== 1 ? "s" : ""}</span>

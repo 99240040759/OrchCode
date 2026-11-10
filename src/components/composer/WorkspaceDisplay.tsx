@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { LuChevronDown, LuCloud, LuFolder, LuFolderOpen } from "react-icons/lu";
 import { useChatStore } from "../../lib/store";
-import { useWorkspaceStore } from "../../lib/workspace";
-import { isCloudWorkspace } from "../../lib/utils";
+import { useModeWorkspaces, useWorkspaceStore } from "../../lib/workspace";
 import { CloudRepoForm } from "../CloudRepoForm";
 import { Tooltip } from "../ui/Tooltip";
 import {
@@ -23,20 +22,20 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
   currentPath,
 }: WorkspaceDisplayProps) {
   const currentWs = useWorkspaceStore((s) => s.current);
-  const allWorkspaces = useWorkspaceStore((s) => s.all);
+  const allWorkspaces = useModeWorkspaces();
+  const cloudMode = useWorkspaceStore((s) => s.mode) === "cloud";
   const switchTo = useWorkspaceStore((s) => s.switchTo);
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
   const wsBusy = useWorkspaceStore((s) => s.busy);
   const streaming = useChatStore((s) => s.streaming);
   const wsLocked = streaming || wsBusy;
-  const isCurrentCloud = isCloudWorkspace(currentPath);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [showCloudForm, setShowCloudForm] = useState(false);
 
   const changeOpen = (open: boolean) => {
     setMenuOpen(open);
-    if (!open) setShowCloudForm(false);
+    setShowCloudForm(open && cloudMode && allWorkspaces.length === 0);
   };
 
   return (
@@ -47,12 +46,12 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
       >
         <DropdownMenuTrigger asChild>
           <button type="button" className="Composer-repo" aria-label="Switch workspace">
-            {isCurrentCloud ? (
+            {cloudMode ? (
               <LuCloud className="Composer-repoIcon" />
             ) : (
               <LuFolder className="Composer-repoIcon" />
             )}
-            <span>{currentName ?? "Workspace"}</span>
+            <span>{currentName ?? (cloudMode ? "Choose repository" : "Open folder")}</span>
             <LuChevronDown className="Composer-chevron" />
           </button>
         </DropdownMenuTrigger>
@@ -65,7 +64,6 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
         ) : (
           <>
             {allWorkspaces.map((ws) => {
-              const cloud = isCloudWorkspace(ws.path);
               return (
                 <DropdownMenuItem
                   key={ws.id}
@@ -75,26 +73,29 @@ export const WorkspaceDisplay = React.memo(function WorkspaceDisplay({
                     if (ws.id !== currentWs?.id) void switchTo(ws.id);
                   }}
                 >
-                  {cloud ? <LuCloud /> : <LuFolder />}
+                  {cloudMode ? <LuCloud /> : <LuFolder />}
                   <span className="ModelItem-name">{ws.name}</span>
                 </DropdownMenuItem>
               );
             })}
             {allWorkspaces.length > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
-              <LuFolderOpen />
-              <span>Open folder…</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={wsLocked}
-              onSelect={(e) => {
-                e.preventDefault();
-                setShowCloudForm(true);
-              }}
-            >
-              <LuCloud />
-              <span>Open cloud repo…</span>
-            </DropdownMenuItem>
+            {cloudMode ? (
+              <DropdownMenuItem
+                disabled={wsLocked}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setShowCloudForm(true);
+                }}
+              >
+                <LuCloud />
+                <span>Choose repository…</span>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem disabled={wsLocked} onSelect={() => void pickAndOpen()}>
+                <LuFolderOpen />
+                <span>Open folder…</span>
+              </DropdownMenuItem>
+            )}
           </>
         )}
       </DropdownMenuContent>

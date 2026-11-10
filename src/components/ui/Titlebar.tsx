@@ -7,6 +7,8 @@ import {
   VscChromeRestore,
 } from "react-icons/vsc";
 import {
+  LuCloud,
+  LuMonitor,
   LuPanelLeft,
   LuPanelLeftClose,
   LuPanelRight,
@@ -16,9 +18,11 @@ import {
 import { useArtifactsStore } from "../../lib/artifacts";
 import { useUpdaterStore } from "../../lib/updater";
 import { useChatStore } from "../../lib/store";
+import { useWorkspaceStore, type WorkspaceMode } from "../../lib/workspace";
 import { cn, IS_MAC } from "../../lib/utils";
 import { Button } from "./Button";
 import { Tooltip } from "./Tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./DropdownMenu";
 import type { AppView } from "../../App";
 
 function UpdateBadge() {
@@ -160,6 +164,46 @@ function SessionTitle({ fallback }: { fallback?: string }) {
   );
 }
 
+const MODES: { id: WorkspaceMode; label: string; hint: string; Icon: typeof LuCloud }[] = [
+  { id: "computer", label: "This computer", hint: "Work on folders on this machine", Icon: LuMonitor },
+  { id: "cloud", label: "Cloud", hint: "Work on a GitHub repo in the cloud", Icon: LuCloud },
+];
+
+function ModeToggle() {
+  const mode = useWorkspaceStore((s) => s.mode);
+  const setMode = useWorkspaceStore((s) => s.setMode);
+  const busy = useWorkspaceStore((s) => s.busy);
+  const streaming = useChatStore((s) => s.streaming);
+  const current = MODES.find((m) => m.id === mode) ?? MODES[0];
+  return (
+    <DropdownMenu>
+      <Tooltip content={current.label} side="bottom">
+        <DropdownMenuTrigger asChild>
+          <Button className="IconBtn Titlebar-iconBtn" aria-label="Workspace mode" disabled={busy || streaming}>
+            <current.Icon />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="end" sideOffset={6}>
+        {MODES.map(({ id, label, hint, Icon }) => (
+          <DropdownMenuItem
+            key={id}
+            className="ModeItem"
+            data-selected={mode === id || undefined}
+            onSelect={() => void setMode(id)}
+          >
+            <Icon />
+            <span className="ModeItem-text">
+              <span>{label}</span>
+              <span className="ModeItem-hint">{hint}</span>
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ArtifactPanelToggle() {
   const panelOpen    = useArtifactsStore((s) => s.panelOpen);
   const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
@@ -244,6 +288,7 @@ export function Titlebar({ title, className, sidebarOpen, onToggleSidebar, view 
         <div className="Titlebar-drag" data-tauri-drag-region />
 
         <div className="Titlebar-right">
+          {inShell && <ModeToggle />}
           <UpdateBadge />
           {!showArtifactSegment && inShell && (view === undefined || view === "chat") && (
             <ArtifactPanelToggle />

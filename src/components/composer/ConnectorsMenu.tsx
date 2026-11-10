@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { LuChevronRight, LuPlug } from "react-icons/lu";
+import { LuCheck, LuChevronRight, LuPlug } from "react-icons/lu";
 import { selectActiveConnectors, useChatStore } from "../../lib/store";
-import { useConnectorsStore } from "../../lib/connectors";
+import { GITHUB_ID, useConnectorsStore } from "../../lib/connectors";
 import { ConnectorIcon } from "../icons/ConnectorIcon";
 import {
   DropdownMenuItem,
@@ -17,7 +17,7 @@ export function ConnectorsMenu() {
   const loadFailed = useConnectorsStore((s) => s.loadFailed);
   const active = useChatStore(selectActiveConnectors);
   const toggleConnector = useChatStore((s) => s.toggleConnector);
-  const connected = useMemo(() => connectors.filter((connector) => connector.connected), [connectors]);
+  const connected = useMemo(() => connectors.filter((connector) => connector.connected && connector.id !== GITHUB_ID), [connectors]);
 
   let emptyLabel = "No connected apps";
   if (loadFailed) emptyLabel = "Couldn't load connectors";
@@ -44,8 +44,9 @@ export function ConnectorsMenu() {
               onCheckedChange={() => toggleConnector(connector.id)}
               onSelect={(event) => event.preventDefault()}
             >
-              <ConnectorIcon id={connector.id} size={14} />
+              <ConnectorIcon id={connector.id} size={16} />
               <span className="ModelItem-name">{connector.name}</span>
+              {active.includes(connector.id) && <LuCheck className="DropdownMenuItem-check" aria-hidden="true" />}
             </DropdownMenuCheckboxItem>
           ))
         )}

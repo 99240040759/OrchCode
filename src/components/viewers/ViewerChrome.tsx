@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
+import { LuChevronLeft, LuChevronRight, LuMinus, LuPlus, LuTriangleAlert } from "react-icons/lu";
 
 export function ViewerLoading({ label }: { label: string }) {
   return (
@@ -13,7 +13,7 @@ export function ViewerLoading({ label }: { label: string }) {
 export function ViewerError({ message }: { message: string }) {
   return (
     <div className="DocViewer-error" role="alert">
-      <span className="DocViewer-error-icon" aria-hidden="true">⚠</span>
+      <LuTriangleAlert className="DocViewer-error-icon" aria-hidden="true" />
       <p>{message}</p>
     </div>
   );
@@ -49,7 +49,7 @@ export function ZoomControls({
         aria-label="Zoom out"
         title="Zoom out"
       >
-        −
+        <LuMinus />
       </button>
       <button
         type="button"
@@ -68,7 +68,7 @@ export function ZoomControls({
         aria-label="Zoom in"
         title="Zoom in"
       >
-        +
+        <LuPlus />
       </button>
     </div>
   );

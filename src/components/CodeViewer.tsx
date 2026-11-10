@@ -53,7 +53,7 @@ export const CodeViewer = React.memo(function CodeViewer({ path, content }: Code
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 21,
+    estimateSize: () => 20,
     overscan: 24,
   });
 

@@ -65,7 +65,7 @@ export function XlsxViewer({ path }: { path: string }) {
   return (
     <div className="XlsxViewer">
       <div className="DocViewer-header">
-        <ExplorerIcon type="file" name={fileName} width={18} height={18} />
+        <ExplorerIcon type="file" name={fileName} className="DocViewer-fileIcon" />
         <span className="DocViewer-title">{fileName}</span>
         {sheets.length > 0 && (
           <span className="DocViewer-meta">

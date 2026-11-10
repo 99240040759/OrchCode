@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use moka::future::Cache;
+use serde::Serialize;
+use serde_json::{json, Value};
 use rig::tool::DynamicTool;
 
 use crate::connector_tools::actions::{self, ActionDef};
@@ -133,6 +135,34 @@ impl ConnectorManager {
             .collect())
     }
 
+    pub async fn github_repos(&self, query: &str) -> AppResult<Vec<RepoInfo>> {
+        let query = query.trim();
+        let (slug, args) = if query.is_empty() {
+            (
+                "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+                json!({ "type": "public", "sort": "updated", "per_page": 50, "raw_response": true }),
+            )
+        } else {
+            ("GITHUB_FIND_REPOSITORIES", json!({ "query": query, "per_page": 30, "raw_response": true }))
+        };
+        let tool = self
+            .client
+            .tools(&[slug])
+            .await?
+            .into_iter()
+            .find(|tool| tool.slug == slug)
+            .ok_or_else(|| AppError::Connector(format!("{slug} is not available")))?;
+        let result = self.client.execute(slug, &tool.version, args).await?;
+        if !result.successful {
+            return Err(AppError::Connector(
+                result.error.unwrap_or_else(|| "GitHub request failed".to_string()),
+            ));
+        }
+        let mut repos = Vec::new();
+        collect_repos(&result.data, &mut repos);
+        Ok(repos)
+    }
+
     pub async fn begin_connect(&self, id: &str) -> AppResult<String> {
         let def = find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.to_string()))?;
         self.accounts_cache.invalidate_all();
@@ -202,6 +232,29 @@ impl ConnectorManager {
             })
             .await
             .map_err(|e| AppError::Connector(e.to_string()))
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoInfo {
+    pub full_name: String,
+    pub url: String,
+    pub description: String,
+}
+
+fn collect_repos(value: &Value, out: &mut Vec<RepoInfo>) {
+    match value {
+        Value::Array(items) => items.iter().for_each(|item| collect_repos(item, out)),
+        Value::Object(map) => match map.get("full_name").and_then(Value::as_str) {
+            Some(full_name) => out.push(RepoInfo {
+                full_name: full_name.to_string(),
+                url: format!("https://github.com/{full_name}"),
+                description: map.get("description").and_then(Value::as_str).unwrap_or_default().to_string(),
+            }),
+            None => map.values().for_each(|inner| collect_repos(inner, out)),
+        },
+        _ => {}
     }
 }
 

@@ -397,6 +397,16 @@ export function listConnectors(): Promise<ConnectorDto[]> {
   return invoke("list_connectors");
 }
 
+export interface GithubRepoDto {
+  fullName: string;
+  url: string;
+  description: string;
+}
+
+export function listGithubRepos(query: string): Promise<GithubRepoDto[]> {
+  return invoke("list_github_repos", { query });
+}
+
 export function getConnectorAuthUrl(connectorId: string): Promise<string> {
   return invoke("get_connector_auth_url", { connectorId });
 }

@@ -1056,6 +1056,18 @@ pub async fn list_connectors(state: State<'_, AppState>) -> Result<Vec<Connector
 }
 
 #[tauri::command]
+pub async fn list_github_repos(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<crate::connectors::RepoInfo>, String> {
+    state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+    state.connector_manager.github_repos(&query).await.map_err(|e| {
+        sentry::capture_error(&e);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
 pub async fn get_connector_auth_url(state: State<'_, AppState>, connector_id: String) -> Result<String, String> {
     state.ensure_fresh_token().await.map_err(|e| {
         sentry::capture_error(&e);

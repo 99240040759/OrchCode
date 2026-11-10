@@ -246,6 +246,7 @@ pub fn run() {
             ipc::terminal_resize,
             ipc::terminal_close,
             ipc::list_connectors,
+            ipc::list_github_repos,
             ipc::get_connector_auth_url,
             ipc::disconnect_connector,
             ipc::report_error,

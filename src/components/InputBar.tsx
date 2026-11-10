@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LuFileText, LuImage, LuPlus } from "react-icons/lu";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -43,6 +43,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
   const refreshConnectors = useConnectorsStore((s) => s.refresh);
   const currentWs = useWorkspaceStore((s) => s.current);
+  const cloudMode = useWorkspaceStore((s) => s.mode) === "cloud";
+  const githubConnected = useConnectorsStore((s) => s.github?.connected ?? false);
+  useEffect(() => {
+    if (cloudMode) void refreshConnectors();
+  }, [cloudMode, refreshConnectors]);
+  const sendEnabled = !cloudMode || (githubConnected && Boolean(currentWs));
 
   const [notice, setNotice] = useState<string | null>(null);
   const [hasContent, setHasContent] = useState(false);
@@ -182,7 +188,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
   runCommandRef.current = runCommand;
 
   const doSend = useCallback(async () => {
-    if (!editor) return;
+    if (!editor || !sendEnabled) return;
     const text = extractPromptFromDoc(editor.state.doc).trim();
     if (!text && attachments.length === 0) return;
 
@@ -198,7 +204,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       editor.commands.setContent(savedDoc);
       setAttachments(pending);
     }
-  }, [editor, attachments, clearAttachments, suggestions, send, setAttachments]);
+  }, [editor, sendEnabled, attachments, clearAttachments, suggestions, send, setAttachments]);
   doSendRef.current = doSend;
 
   const canSend = hasContent || attachments.length > 0;
@@ -209,6 +215,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
       className="Composer"
       data-prompt={promptMode || undefined}
       data-recording={dictation.recording || undefined}
+      data-cloud={cloudMode || undefined}
     >
       <SuggestionPopover
         anchorRef={composerRef}
@@ -315,6 +322,7 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
               streaming={streaming}
               recording={dictation.recording}
               canSend={canSend}
+              sendEnabled={sendEnabled}
               onSend={() => void doSend()}
               onCancel={cancel}
               onToggleDictation={() => void dictation.toggleDictation()}

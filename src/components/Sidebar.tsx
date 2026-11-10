@@ -17,7 +17,7 @@ import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
 import { useAuthStore } from "../lib/auth";
 import { useChatStore } from "../lib/store";
-import { useWorkspaceStore } from "../lib/workspace";
+import { useModeWorkspaces, useWorkspaceStore } from "../lib/workspace";
 import { formatRelativeTime } from "../lib/api";
 import { formatUsd, isCloudWorkspace } from "../lib/utils";
 import type { SessionSummary } from "../lib/api";
@@ -128,7 +128,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const budget = useChatStore((s) => s.budget);
 
   const currentWs = useWorkspaceStore((s) => s.current);
-  const allWorkspaces = useWorkspaceStore((s) => s.all);
+  const allWorkspaces = useModeWorkspaces();
+  const cloudMode = useWorkspaceStore((s) => s.mode) === "cloud";
   const switchTo = useWorkspaceStore((s) => s.switchTo);
   const pickAndOpen = useWorkspaceStore((s) => s.pickAndOpen);
   const removeWs = useWorkspaceStore((s) => s.remove);
@@ -221,32 +222,35 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       <div className="Sidebar-projectsHeader">
         <span className="Sidebar-projectsTitle">Projects</span>
         <div className="Sidebar-projectsActions">
-          <Tooltip content="Open folder" side="right">
-            <button
-              type="button"
-              className="IconBtn Sidebar-projectsActionBtn"
-              aria-label="Open folder"
-              disabled={wsLocked}
-              onClick={() => void pickAndOpen()}
-            >
-              <LuFolderPlus />
-            </button>
-          </Tooltip>
-          <Tooltip content="Open cloud repo" side="right">
-            <button
-              type="button"
-              className="IconBtn Sidebar-projectsActionBtn"
-              aria-label="Open cloud repo"
-              disabled={wsLocked}
-              onClick={() => setShowCloudForm((v) => !v)}
-            >
-              <LuCloud />
-            </button>
-          </Tooltip>
+          {cloudMode ? (
+            <Tooltip content="Choose repository" side="right">
+              <button
+                type="button"
+                className="IconBtn Sidebar-projectsActionBtn"
+                aria-label="Choose repository"
+                disabled={wsLocked}
+                onClick={() => setShowCloudForm((v) => !v)}
+              >
+                <LuCloud />
+              </button>
+            </Tooltip>
+          ) : (
+            <Tooltip content="Open folder" side="right">
+              <button
+                type="button"
+                className="IconBtn Sidebar-projectsActionBtn"
+                aria-label="Open folder"
+                disabled={wsLocked}
+                onClick={() => void pickAndOpen()}
+              >
+                <LuFolderPlus />
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
 
-      {showCloudForm && <CloudRepoForm disabled={wsLocked} onOpened={() => setShowCloudForm(false)} />}
+      {cloudMode && showCloudForm && <CloudRepoForm disabled={wsLocked} onOpened={() => setShowCloudForm(false)} />}
 
       <nav className="Sidebar-threads" aria-label="Projects and conversations">
         {workspacesToDisplay.map((ws) => {

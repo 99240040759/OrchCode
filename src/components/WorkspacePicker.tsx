@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { LuCloud, LuFolderOpen, LuX } from "react-icons/lu";
-import { CloudRepoForm } from "./CloudRepoForm";
 import { Titlebar } from "./ui/Titlebar";
 import { useWorkspaceStore } from "../lib/workspace";
 
@@ -9,8 +7,7 @@ export function WorkspacePicker() {
   const error         = useWorkspaceStore((s) => s.error);
   const pickAndOpen   = useWorkspaceStore((s) => s.pickAndOpen);
   const dismissError  = useWorkspaceStore((s) => s.dismissError);
-
-  const [cloudMode, setCloudMode] = useState(false);
+  const setMode         = useWorkspaceStore((s) => s.setMode);
 
   return (
     <div className="WorkspacePicker">
@@ -41,17 +38,15 @@ export function WorkspacePicker() {
             type="button"
             className="WorkspacePicker-card"
             disabled={busy}
-            onClick={() => setCloudMode((v) => !v)}
+            onClick={() => void setMode("cloud")}
           >
             <LuCloud className="WorkspacePicker-card-icon" />
             <span className="WorkspacePicker-card-label">Cloud</span>
             <span className="WorkspacePicker-card-hint">
-              Open a Git repo
+              Choose a GitHub repo
             </span>
           </button>
         </div>
-
-        {cloudMode && <CloudRepoForm />}
 
         {error && (
           <div className="WorkspacePicker-error" role="alert">

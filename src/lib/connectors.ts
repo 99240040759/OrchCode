@@ -3,8 +3,11 @@ import * as api from "./api";
 import { useChatStore } from "./store";
 import type { ConnectorDto } from "./api";
 
+export const GITHUB_ID = "github";
+
 interface ConnectorsState {
   connectors: ConnectorDto[];
+  github: ConnectorDto | null;
   loaded: boolean;
   loadFailed: boolean;
   error: string | null;
@@ -20,6 +23,7 @@ let refreshSeq = 0;
 
 export const useConnectorsStore = create<ConnectorsState & ConnectorsActions>()((set) => ({
   connectors: [],
+  github: null,
   loaded: false,
   loadFailed: false,
   error: null,
@@ -29,7 +33,8 @@ export const useConnectorsStore = create<ConnectorsState & ConnectorsActions>()(
     try {
       const connectors = await api.listConnectors();
       if (seq !== refreshSeq) return;
-      set({ connectors, loaded: true, loadFailed: false });
+      const github = connectors.find((connector) => connector.id === GITHUB_ID) ?? null;
+      set({ connectors, github, loaded: true, loadFailed: false });
       useChatStore
         .getState()
         .pruneConnectors(connectors.filter((connector) => connector.connected).map((connector) => connector.id));
@@ -43,6 +48,6 @@ export const useConnectorsStore = create<ConnectorsState & ConnectorsActions>()(
 
   reset: () => {
     refreshSeq += 1;
-    set({ connectors: [], loaded: false, loadFailed: false, error: null });
+    set({ connectors: [], github: null, loaded: false, loadFailed: false, error: null });
   },
 }));

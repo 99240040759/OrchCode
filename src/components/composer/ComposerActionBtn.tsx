@@ -7,6 +7,7 @@ interface ComposerActionBtnProps {
   streaming: boolean;
   recording: boolean;
   canSend: boolean;
+  sendEnabled: boolean;
   onSend: () => void;
   onCancel: () => void;
   onToggleDictation: () => void;
@@ -16,6 +17,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
   streaming,
   recording,
   canSend,
+  sendEnabled,
   onSend,
   onCancel,
   onToggleDictation,
@@ -47,7 +49,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
             <LuSquare />
           </Button>
         </Tooltip>
-      ) : (
+      ) : sendEnabled ? (
         <Tooltip content="Send message (Enter)" side="top">
           <Button
             className="Composer-send"
@@ -58,7 +60,7 @@ export const ComposerActionBtn = React.memo(function ComposerActionBtn({
             <LuArrowUp />
           </Button>
         </Tooltip>
-      )}
+      ) : null}
     </div>
   );
 });

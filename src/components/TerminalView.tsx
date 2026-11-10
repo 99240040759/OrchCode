@@ -14,41 +14,44 @@ export function TerminalView({ id }: { id: string }) {
     const sessionId = `${id}:${api.newId()}`;
     let disposed = false;
 
+    // All terminal styling comes from the design tokens in global.css.
     const styles = getComputedStyle(document.documentElement);
-    const bg = styles.getPropertyValue("--md-bg").trim() || "#11100F";
-    const fg = styles.getPropertyValue("--md-on").trim() || "#F2EFE9";
-    const monoFont =
-      styles.getPropertyValue("--font-mono").trim() ||
-      '"JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace';
-    const termFontSize = parseInt(styles.getPropertyValue("--fs-sm")) || 13;
+    const token = (name: string) => styles.getPropertyValue(name).trim();
+    const ink = token("--brand-ink");
+    const raised = token("--brand-raised");
+    const cream = token("--brand-cream");
+    const stone = token("--brand-stone");
+    const accent = token("--brand-accent");
+    const amber = token("--brand-amber");
 
     const term = new XTerm({
-      fontSize: termFontSize,
-      fontFamily: monoFont,
+      fontSize: parseInt(token("--fs-md"), 10),
+      fontFamily: token("--font-mono"),
+      lineHeight: 1.2,
       cursorBlink: false,
       scrollback: 5000,
       theme: {
-        background: bg,
-        foreground: fg,
-        cursor: fg,
-        cursorAccent: bg,
-        selectionBackground: "rgba(242, 100, 61, 0.3)",
-        black: "#2A2724",
-        red: "#F2643D",
-        green: "#F2EFE9",
-        yellow: "#F5A623",
-        blue: "#A8A29A",
-        magenta: "#F2643D",
-        cyan: "#A8A29A",
-        white: "#F2EFE9",
-        brightBlack: "#A8A29A",
-        brightRed: "#F2643D",
-        brightGreen: "#F2EFE9",
-        brightYellow: "#F5A623",
-        brightBlue: "#F2EFE9",
-        brightMagenta: "#F5A623",
-        brightCyan: "#F2EFE9",
-        brightWhite: "#F2EFE9",
+        background: ink,
+        foreground: cream,
+        cursor: cream,
+        cursorAccent: ink,
+        selectionBackground: token("--accent-a3"),
+        black: raised,
+        red: accent,
+        green: cream,
+        yellow: amber,
+        blue: stone,
+        magenta: accent,
+        cyan: stone,
+        white: cream,
+        brightBlack: stone,
+        brightRed: accent,
+        brightGreen: cream,
+        brightYellow: amber,
+        brightBlue: cream,
+        brightMagenta: amber,
+        brightCyan: cream,
+        brightWhite: cream,
       },
     });
     const fit = new FitAddon();

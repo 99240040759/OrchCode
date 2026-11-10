@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -22,6 +23,12 @@ export interface WorkspaceMeta {
   repoDir?: string;
 }
 
+export type WorkspaceMode = "computer" | "cloud";
+
+export function workspaceMode(meta: Pick<WorkspaceMeta, "path" | "repoUrl">): WorkspaceMode {
+  return isCloudWorkspace(meta.path) || Boolean(meta.repoUrl) ? "cloud" : "computer";
+}
+
 type WorkspacePickStatus =
   | "idle"
   | "loading"
@@ -32,6 +39,7 @@ type WorkspacePickStatus =
 interface WorkspaceState {
   current: WorkspaceMeta | null;
   all: WorkspaceMeta[];
+  mode: WorkspaceMode;
   status: WorkspacePickStatus;
   busy: boolean;
   error: string | null;
@@ -39,6 +47,7 @@ interface WorkspaceState {
 
 interface WorkspaceActions {
   initialize: () => Promise<void>;
+  setMode: (mode: WorkspaceMode) => Promise<void>;
   pickAndOpen: () => Promise<void>;
   openCloudRepo: (repoUrl: string, customName?: string) => Promise<void>;
   switchTo: (id: string) => Promise<void>;
@@ -55,6 +64,7 @@ const PREF_ALL_WORKSPACES = "allWorkspaces";
 const INITIAL_STATE: WorkspaceState = {
   current: null,
   all: [],
+  mode: "computer",
   status: "idle",
   busy: false,
   error: null,
@@ -161,6 +171,7 @@ export const useWorkspaceStore = create(
       set((s) => {
         s.all = list;
         s.current = meta;
+        s.mode = workspaceMode(meta);
         s.status = "ready";
         s.error = null;
       });
@@ -215,6 +226,7 @@ export const useWorkspaceStore = create(
           set((s) => {
             s.all = next;
             s.current = active;
+            s.mode = workspaceMode(active);
             s.status = "ready";
           });
           clearImageCache();
@@ -226,6 +238,26 @@ export const useWorkspaceStore = create(
           });
         }
       },
+
+      setMode: (mode) =>
+        exclusive(async () => {
+          if (get().mode === mode && get().status === "ready") return;
+          const target = get()
+            .all.filter((w) => workspaceMode(w) === mode)
+            .sort((a, b) => b.createdAt - a.createdAt)[0];
+          if (target) {
+            const active = await activateWorkspace(target);
+            await commit(active, upsert(get().all, active));
+            return;
+          }
+          set((s) => {
+            s.mode = mode;
+            s.current = null;
+            s.status = "ready";
+            s.error = null;
+          });
+          clearImageCache();
+        }),
 
       pickAndOpen: () =>
         exclusive(async () => {
@@ -306,3 +338,9 @@ export const useWorkspaceStore = create(
     };
   })
 );
+
+export function useModeWorkspaces(): WorkspaceMeta[] {
+  const all = useWorkspaceStore((s) => s.all);
+  const mode = useWorkspaceStore((s) => s.mode);
+  return useMemo(() => all.filter((w) => workspaceMode(w) === mode), [all, mode]);
+}
