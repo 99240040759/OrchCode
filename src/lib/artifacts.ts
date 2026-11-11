@@ -36,20 +36,23 @@ interface ArtifactsState {
   activeId: string | null;
   panelOpen: boolean;
   maximized: boolean;
+  explorerOpen: boolean;
+  treeVersion: number;
   fileVersions: Record<string, number>;
 }
 
 interface ArtifactsActions {
-  openFile: (path?: string) => void;
+  openFile: (path: string) => void;
   openBrowser: (url?: string) => void;
   openTerminal: () => void;
-  setTabPath: (id: string, path: string) => void;
   fileWritten: (path: string) => void;
   dropWorkspaceTabs: () => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   setPanelOpen: (open: boolean) => void;
   toggleMaximized: () => void;
+  toggleExplorer: () => void;
+  showExplorer: () => void;
   reset: () => void;
 }
 
@@ -60,6 +63,8 @@ const INITIAL_STATE: ArtifactsState = {
   activeId: null,
   panelOpen: false,
   maximized: false,
+  explorerOpen: false,
+  treeVersion: 0,
   fileVersions: {},
 };
 
@@ -72,25 +77,8 @@ export const useArtifactsStore = create(
   immer<ArtifactsStore>((set) => ({
     ...INITIAL_STATE,
 
-    openFile: (rawPath?: string) => {
-      const path = rawPath ? normalizeWorkspacePath(rawPath) : undefined;
-      if (!path) {
-        set((s) => {
-          const existing = s.tabs.find((t) => t.kind === "file" && !t.path);
-          if (existing) {
-            existing.preview = false;
-            s.activeId = existing.id;
-            s.panelOpen = true;
-            return;
-          }
-          const tab: ArtifactTab = { id: newId(), kind: "file" };
-          s.tabs.push(tab);
-          s.activeId = tab.id;
-          s.panelOpen = true;
-        });
-        return;
-      }
-
+    openFile: (rawPath: string) => {
+      const path = normalizeWorkspacePath(rawPath);
       const kind = resolveArtifactKind(path);
       set((s) => {
         const existing = s.tabs.find((t) => t.kind === kind && t.path === path);
@@ -153,6 +141,7 @@ export const useArtifactsStore = create(
       const kind = resolveArtifactKind(path);
       set((s) => {
         s.fileVersions[path] = (s.fileVersions[path] ?? 0) + 1;
+        s.treeVersion += 1;
         if (s.tabs.some((t) => t.path === path)) return;
         const active = s.tabs.find((t) => t.id === s.activeId);
         const userBusy = active?.kind === "terminal" || active?.kind === "browser";
@@ -171,18 +160,6 @@ export const useArtifactsStore = create(
         if (!userBusy) {
           s.activeId = tab.id;
           s.panelOpen = true;
-        }
-      });
-    },
-
-    setTabPath: (id: string, rawPath: string) => {
-      const path = normalizeWorkspacePath(rawPath);
-      const kind = resolveArtifactKind(path);
-      set((s) => {
-        const tab = s.tabs.find((t) => t.id === id);
-        if (tab) {
-          tab.kind = kind;
-          tab.path = path;
         }
       });
     },
@@ -221,6 +198,19 @@ export const useArtifactsStore = create(
       set((s) => {
         s.maximized = !s.maximized;
         if (s.maximized) s.panelOpen = true;
+      });
+    },
+
+    toggleExplorer: () => {
+      set((s) => {
+        s.explorerOpen = !s.explorerOpen;
+      });
+    },
+
+    showExplorer: () => {
+      set((s) => {
+        s.explorerOpen = true;
+        s.panelOpen = true;
       });
     },
 

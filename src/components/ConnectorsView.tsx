@@ -25,7 +25,7 @@ function ConnectorCard({ connector, pending, onConnect, onDisconnect }: Connecto
     <article className="ConnectorCard" data-connected={connector.connected}>
       <div className="ConnectorCard-top">
         <div className="ConnectorCard-icon">
-          <ConnectorIcon id={connector.id} size={28} />
+          <ConnectorIcon id={connector.id} />
         </div>
         <div className="ConnectorCard-identity">
           <h3 className="ConnectorCard-name">{connector.name}</h3>

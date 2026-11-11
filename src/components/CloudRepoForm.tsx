@@ -62,7 +62,7 @@ export function CloudRepoForm({ disabled, onOpened }: CloudRepoFormProps) {
     <div className="Sidebar-footer">
       <input
         type="text"
-        className="FilePicker-input"
+        className="SearchInput"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search public repositories"
@@ -81,7 +81,7 @@ export function CloudRepoForm({ disabled, onOpened }: CloudRepoFormProps) {
             title={repo.description || repo.fullName}
             onClick={() => open(repo)}
           >
-            <ConnectorIcon id={GITHUB_ID} size={16} />
+            <ConnectorIcon id={GITHUB_ID} />
             <span className="ModelItem-name">{repo.fullName}</span>
           </button>
         ))}

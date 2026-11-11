@@ -827,10 +827,16 @@ pub async fn get_session_records(
         .reasoning_durations(&session_id)
         .await
         .map_err(|e| e.to_string())?;
+    let runs = state
+        .memory
+        .work_runs(&session_id)
+        .await
+        .map_err(|e| e.to_string())?;
     session::view_page(
         &state.data_dir,
         &session_id,
         durations,
+        runs,
         limit.unwrap_or(50).clamp(1, 200),
         before_seq,
     )

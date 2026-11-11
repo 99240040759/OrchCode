@@ -259,7 +259,7 @@ export function BrowserView({ initialUrl, active = true }: { initialUrl?: string
 
         <div className={`BrowserBar-urlWrap${inputFocused ? " focused" : ""}`}>
           {!inputFocused && (
-            <ChromeIcon className="BrowserBar-favicon" width={16} height={16} />
+            <ChromeIcon className="BrowserBar-favicon" />
           )}
           <input
             ref={inputRef}

@@ -147,6 +147,7 @@ pub const SUMMARY_REQUEST_TIMEOUT_SECS: u64 = 180;
 
 pub const FILE_INDEX_TTL_SECS: u64 = 120;
 pub const MAX_INDEXED_FILES: usize = 200_000;
+pub const MAX_DIR_ENTRIES: usize = 5_000;
 pub const CLOUD_FILE_LIST_LIMIT: usize = 2_000;
 pub const CLOUD_MAX_ATTACHMENT_TOTAL_BYTES: usize = 18 * 1024 * 1024;
 pub const CLOUD_STREAM_IDLE_TIMEOUT_SECS: u64 = 60;

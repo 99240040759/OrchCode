@@ -58,7 +58,7 @@ export function GithubStatus() {
 
   return (
     <Button className="GithubStatus" title={error ?? undefined} disabled={pending} onClick={() => void connect()}>
-      <ConnectorIcon id={GITHUB_ID} size={16} />
+      <ConnectorIcon id={GITHUB_ID} />
       <span>{pending ? "Connecting…" : error ? "Retry connecting GitHub" : "Connect GitHub"}</span>
     </Button>
   );

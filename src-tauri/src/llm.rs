@@ -39,6 +39,7 @@ use crate::session;
 use crate::tools::{window_lines, ToolContext};
 use crate::util::{clip_middle, truncate_chars};
 use crate::wire;
+use crate::work::{WorkRun, WorkTracker};
 
 #[derive(Clone, Debug)]
 pub struct AuthMiddleware {
@@ -320,6 +321,7 @@ pub enum RunOutcome {
 
 pub struct RunResult {
     pub reasoning_durations: Vec<u64>,
+    pub work_runs: Vec<WorkRun>,
     pub outcome: RunOutcome,
     pub partial_text: String,
     pub final_messages: Option<Vec<Message>>,
@@ -356,6 +358,14 @@ impl SessionBackend {
         keys: Vec<(String, u64)>,
     ) -> AppResult<()> {
         self.memory.save_reasoning_durations(session_id, keys).await
+    }
+
+    pub async fn save_work_runs(
+        &self,
+        session_id: &str,
+        keys: Vec<(String, WorkRun)>,
+    ) -> AppResult<()> {
+        self.memory.save_work_runs(session_id, keys).await
     }
 }
 
@@ -617,6 +627,12 @@ impl ChatRun {
             session.first_new_id,
             result.reasoning_durations.clone(),
         );
+        let run_keys = session::work_run_keys(
+            &self.deps.session_id,
+            &session.conversation,
+            session.first_new_id,
+            result.work_runs.clone(),
+        );
         drop(session);
         if let Err(error) = self
             .deps
@@ -625,6 +641,15 @@ impl ChatRun {
             .await
         {
             tracing::error!(error = %error, "failed to persist reasoning durations");
+            sentry::capture_error(&error);
+        }
+        if let Err(error) = self
+            .deps
+            .backend
+            .save_work_runs(&self.deps.session_id, run_keys)
+            .await
+        {
+            tracing::error!(error = %error, "failed to persist work runs");
             sentry::capture_error(&error);
         }
         saved
@@ -823,15 +848,17 @@ struct StepStream {
     next_index: i64,
     open: Option<OpenStep>,
     durations: Vec<u64>,
+    work: WorkTracker,
 }
 
 impl StepStream {
     fn new(sink: Arc<dyn EventSink>) -> Self {
         Self {
-            sink,
             next_index: 0,
             open: None,
             durations: Vec::new(),
+            work: WorkTracker::new(sink.clone()),
+            sink,
         }
     }
 
@@ -847,6 +874,10 @@ impl StepStream {
         }
         if self.open.as_ref().map(|open| open.kind) != Some(kind) {
             self.close();
+            match kind {
+                StepKind::Thought => self.work.enter(),
+                StepKind::Text => self.work.leave(false),
+            }
             let index = self.take_index();
             let step = match kind {
                 StepKind::Thought => json!({ "type": "thought" }),
@@ -886,6 +917,7 @@ impl StepStream {
 
     fn whole(&mut self, step: Value) {
         self.close();
+        self.work.enter();
         let index = self.take_index();
         self.sink.send(ChatEvent::step_start(index, step));
         self.sink.send(ChatEvent::step_stop(index, json!({})));
@@ -924,8 +956,10 @@ pub async fn run_chat(
         ($outcome:expr) => {{
             let outcome = $outcome;
             steps.close();
+            steps.work.leave(!matches!(outcome, RunOutcome::Completed));
             return RunResult {
                 reasoning_durations: std::mem::take(&mut steps.durations),
+                work_runs: steps.work.take_runs(),
                 outcome,
                 partial_text: std::mem::take(&mut turn_text),
                 final_messages: final_messages.take(),

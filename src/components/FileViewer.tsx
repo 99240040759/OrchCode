@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useDebouncedCallback } from "use-debounce";
+import { useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { LuCheck, LuChevronRight, LuCode, LuCopy, LuEye, LuRotateCw } from "react-icons/lu";
 
@@ -77,8 +75,6 @@ function FileBreadcrumb({ path }: { path: string }) {
                 type="file"
                 name={part}
                 className="FileBreadcrumb-fileIcon"
-                width={17}
-                height={17}
               />
             )}
             <span className={isLast ? "FileBreadcrumb-file" : "FileBreadcrumb-folder"}>
@@ -87,105 +83,6 @@ function FileBreadcrumb({ path }: { path: string }) {
           </span>
         );
       })}
-    </div>
-  );
-}
-
-function FilePicker({ onPick }: { onPick: (path: string) => void }) {
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<api.FileEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  const search = useDebouncedCallback(async (text: string) => {
-    setLoading(true);
-    try {
-      setHits(await api.listWorkspaceFiles(text, 200));
-      setError(null);
-    } catch (e) {
-      setHits([]);
-      setError(api.errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, 120);
-
-  useEffect(() => {
-    if (query === "") {
-      search.cancel();
-      setLoading(true);
-      void api
-        .listWorkspaceFiles("", 200)
-        .then((res) => {
-          setHits(res);
-          setError(null);
-        })
-        .catch((e) => {
-          setHits([]);
-          setError(api.errorMessage(e));
-        })
-        .finally(() => setLoading(false));
-      return () => search.cancel();
-    }
-    void search(query);
-    return () => search.cancel();
-  }, [query, search]);
-
-  const virtualizer = useVirtualizer({
-    count: hits.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => 28,
-    overscan: 16,
-  });
-
-  return (
-    <div className="FilePicker">
-      <input
-        className="FilePicker-input"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search workspace files"
-        aria-label="Search workspace files"
-        spellCheck={false}
-        autoFocus
-      />
-      <div ref={listRef} className="FilePicker-list">
-        {error ? (
-          <p className="FilePicker-empty">{error}</p>
-        ) : loading ? (
-          <p className="FilePicker-empty">Searching…</p>
-        ) : hits.length === 0 ? (
-          <p className="FilePicker-empty">No files found</p>
-        ) : (
-          <div
-            className="FilePicker-virtual"
-            style={{ height: virtualizer.getTotalSize() }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const hit = hits[virtualRow.index];
-              const filename = utils.getBasename(hit.path) || hit.name;
-              const dir = utils.getDirname(hit.path);
-              return (
-                <button
-                  type="button"
-                  key={hit.path}
-                  className="FilePicker-item"
-                  style={{
-                    height: virtualRow.size,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                  onClick={() => onPick(hit.path)}
-                >
-                  <ExplorerIcon type="file" name={filename} className="FilePicker-icon" width={18} height={18} />
-                  <span className="FilePicker-name">{filename}</span>
-                  {dir && <span className="FilePicker-path">{dir}</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -229,7 +126,7 @@ function BinaryFileMessage({ path }: { path: string }) {
   return (
     <div className="FileContent-msg">
       <div className="BinaryFileMsg">
-        <ExplorerIcon type="file" name={name} width={48} height={48} className="BinaryFileMsg-icon" />
+        <ExplorerIcon type="file" name={name} className="BinaryFileMsg-icon" />
         <span className="BinaryFileMsg-name">{name}</span>
         <span className="BinaryFileMsg-hint">Binary file (.{utils.getExt(path)}) — cannot be displayed as text</span>
       </div>
@@ -251,11 +148,10 @@ async function loadFile(path: string): Promise<LoadedFile> {
   return { path, kind, content: file.content, truncated: file.truncated };
 }
 
-export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
-  const setTabPath = useArtifactsStore((s) => s.setTabPath);
-  const version = useArtifactsStore((s) => (path ? s.fileVersions[path] ?? 0 : 0));
+export function FileViewer({ path }: { path: string }) {
+  const version = useArtifactsStore((s) => s.fileVersions[path] ?? 0);
 
-  const isMd = Boolean(path && /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path));
+  const isMd = /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path);
   const [mode, setMode] = useState<"preview" | "code">("preview");
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -270,12 +166,6 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
   }, [path]);
 
   useEffect(() => {
-    if (!path) {
-      setFile(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -296,14 +186,6 @@ export function FileViewer({ tabId, path }: { tabId: string; path?: string }) {
       cancelled = true;
     };
   }, [path, version, reloadTick]);
-
-  if (!path) {
-    return (
-      <div className="FileViewerFull">
-        <FilePicker onPick={(picked) => setTabPath(tabId, picked)} />
-      </div>
-    );
-  }
 
   const kind = current?.kind;
 

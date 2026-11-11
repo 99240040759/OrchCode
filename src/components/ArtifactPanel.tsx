@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import {
-  LuFolderOpen,
+  LuFolderTree,
   LuMaximize2,
   LuMinimize2,
   LuPlus,
@@ -13,6 +13,7 @@ import { useWorkspaceStore } from "../lib/workspace";
 import { getBasename, isCloudWorkspace } from "../lib/utils";
 import { BrowserView } from "./BrowserView";
 import { ChromeIcon, ExplorerIcon } from "./ChatPrimitives";
+import { ExplorerPane } from "./ExplorerPane";
 import { TerminalView } from "./TerminalView";
 import { Button } from "./ui/Button";
 import { Tooltip } from "./ui/Tooltip";
@@ -37,21 +38,18 @@ const VIEWER_FALLBACK = (
 function ArtifactTabIcon({ tab, tabName }: { tab: ArtifactTab; tabName: string }) {
   if (tab.kind === "browser") return <ChromeIcon className="ArtifactTab-icon" />;
   if (tab.kind === "terminal") return <LuTerminal className="ArtifactTab-icon" />;
-  if (tab.kind === "file" && !tab.path) return <LuFolderOpen className="ArtifactTab-icon" />;
   const name = tab.path ? getBasename(tab.path) : `${tabName}.${tab.kind}`;
   return (
     <ExplorerIcon
       type="file"
       name={name}
       className="ArtifactTab-icon"
-      width={16}
-      height={16}
     />
   );
 }
 
 const EMPTY_CARDS = [
-  { kind: "file" as const, label: "Explorer", Icon: LuFolderOpen },
+  { kind: "explorer" as const, label: "Explorer", Icon: LuFolderTree },
   { kind: "browser" as const, label: "Browser", Icon: ChromeIcon },
   { kind: "terminal" as const, label: "Terminal", Icon: LuTerminal },
 ];
@@ -80,12 +78,14 @@ function ArtifactPanelHeader() {
   const tabs          = useArtifactsStore((s) => s.tabs);
   const active        = useArtifactsStore(activeTabId);
   const maximized     = useArtifactsStore((s) => s.maximized);
-  const openFile      = useArtifactsStore((s) => s.openFile);
+  const showExplorer  = useArtifactsStore((s) => s.showExplorer);
   const openBrowser   = useArtifactsStore((s) => s.openBrowser);
   const openTerminal  = useArtifactsStore((s) => s.openTerminal);
   const closeTab      = useArtifactsStore((s) => s.closeTab);
   const setActive     = useArtifactsStore((s) => s.setActive);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
+  const explorerOpen = useArtifactsStore((s) => s.explorerOpen);
+  const toggleExplorer = useArtifactsStore((s) => s.toggleExplorer);
   const cloudWorkspace = useWorkspaceStore((s) => isCloudWorkspace(s.current?.path));
 
   return (
@@ -94,7 +94,7 @@ function ArtifactPanelHeader() {
         {tabs.map((tab) => {
           const tabName =
             tab.kind === "file"
-              ? tab.path ? getBasename(tab.path) : "Explorer"
+              ? getBasename(tab.path ?? "")
               : tab.kind === "browser"
                 ? "Browser"
                 : tab.kind === "terminal"
@@ -150,8 +150,8 @@ function ArtifactPanelHeader() {
             </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent sideOffset={6} align="start">
-            <DropdownMenuItem onSelect={() => openFile()}>
-              <LuFolderOpen /> Explorer
+            <DropdownMenuItem onSelect={showExplorer}>
+              <LuFolderTree /> Explorer
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openBrowser()}>
               <ChromeIcon /> Browser
@@ -166,6 +166,17 @@ function ArtifactPanelHeader() {
       </div>
 
       <div className="ArtifactPanel-actions">
+        <Tooltip content={explorerOpen ? "Hide file explorer" : "Show file explorer"} side="bottom">
+          <Button
+            className="IconBtn"
+            aria-label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+            aria-pressed={explorerOpen}
+            data-active={explorerOpen}
+            onClick={toggleExplorer}
+          >
+            <LuFolderTree />
+          </Button>
+        </Tooltip>
         <Tooltip content={maximized ? "Restore panel size" : "Maximize panel"} side="bottom">
           <Button
             className="IconBtn"
@@ -206,11 +217,12 @@ function TabContent({ tab, active }: { tab: ArtifactTab; active: boolean }) {
       {tab.kind === "browser" && <BrowserView initialUrl={tab.url} active={active} />}
       {!stateful && (
         <Suspense fallback={VIEWER_FALLBACK}>
-          {tab.kind === "file" ? (
-            <FileViewer tabId={tab.id} path={tab.path} />
-          ) : (
-            tab.path && <DocumentViewer kind={tab.kind} path={tab.path} active={active} />
-          )}
+          {tab.path &&
+            (tab.kind === "file" ? (
+              <FileViewer path={tab.path} />
+            ) : (
+              <DocumentViewer kind={tab.kind} path={tab.path} active={active} />
+            ))}
         </Suspense>
       )}
     </div>
@@ -221,10 +233,12 @@ export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
   const tabs      = useArtifactsStore((s) => s.tabs);
   const active    = useArtifactsStore(activeTabId);
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
-  const openFile     = useArtifactsStore((s) => s.openFile);
+  const showExplorer = useArtifactsStore((s) => s.showExplorer);
   const openBrowser  = useArtifactsStore((s) => s.openBrowser);
   const openTerminal = useArtifactsStore((s) => s.openTerminal);
   const cloudWorkspace = useWorkspaceStore((s) => isCloudWorkspace(s.current?.path));
+  const workspaceId = useWorkspaceStore((s) => s.current?.id);
+  const explorerOpen = useArtifactsStore((s) => s.explorerOpen);
   const emptyCards = cloudWorkspace
     ? EMPTY_CARDS.filter((card) => card.kind !== "terminal")
     : EMPTY_CARDS;
@@ -236,40 +250,43 @@ export function ArtifactPanel({ visible = true }: { visible?: boolean }) {
   return (
     <aside className="ArtifactPanel">
       <ArtifactPanelHeader />
-      <div className="ArtifactPanel-body">
-        {tabs.length === 0 ? (
-          <div className="ArtifactEmpty">
-            <div className="ArtifactCards">
-              {emptyCards.map(({ kind, label, Icon }) => (
-                <Button
-                  key={kind}
-                  className="ArtifactCard"
-                  onClick={() => {
-                    if (kind === "file") openFile();
-                    else if (kind === "browser") openBrowser();
-                    else openTerminal();
-                  }}
-                >
-                  <Icon />
-                  <span className="ArtifactCard-label">{label}</span>
-                </Button>
-              ))}
+      <div className="ArtifactPanel-split">
+        <div className="ArtifactPanel-body">
+          {tabs.length === 0 ? (
+            <div className="ArtifactEmpty">
+              <div className="ArtifactCards">
+                {emptyCards.map(({ kind, label, Icon }) => (
+                  <Button
+                    key={kind}
+                    className="ArtifactCard"
+                    onClick={() => {
+                      if (kind === "explorer") showExplorer();
+                      else if (kind === "browser") openBrowser();
+                      else openTerminal();
+                    }}
+                  >
+                    <Icon />
+                    <span className="ArtifactCard-label">{label}</span>
+                  </Button>
+                ))}
+              </div>
+              <p className="ArtifactPanel-hint">
+                {cloudWorkspace
+                  ? "Open a file or browser. Files the agent edits show up here too."
+                  : "Open a file, browser, or terminal. Files the agent edits show up here too."}
+              </p>
             </div>
-            <p className="ArtifactPanel-hint">
-              {cloudWorkspace
-                ? "Open a file or browser. Files the agent edits show up here too."
-                : "Open a file, browser, or terminal. Files the agent edits show up here too."}
-            </p>
-          </div>
-        ) : (
-          tabs.map((tab) => (
-            <TabContent
-              key={tab.id}
-              tab={tab}
-              active={isPanelActive && tab.id === active}
-            />
-          ))
-        )}
+          ) : (
+            tabs.map((tab) => (
+              <TabContent
+                key={tab.id}
+                tab={tab}
+                active={isPanelActive && tab.id === active}
+              />
+            ))
+          )}
+        </div>
+        {explorerOpen && <ExplorerPane key={workspaceId} cloud={cloudWorkspace} />}
       </div>
     </aside>
   );

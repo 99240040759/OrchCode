@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { reportError } from "./lib/api";
+import "@fontsource-variable/outfit";
 import "./global.css";
 
 if (import.meta.env.PROD) {

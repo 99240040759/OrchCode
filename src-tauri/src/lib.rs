@@ -23,6 +23,7 @@ pub mod terminal;
 pub mod tools;
 pub mod util;
 pub mod wire;
+pub mod work;
 pub mod workspace;
 
 use state::AppState;
@@ -217,6 +218,7 @@ pub fn run() {
             browser::webview_history,
             browser::webview_close,
             fsapi::list_workspace_files,
+            fsapi::list_workspace_dir,
             fsapi::read_text_file,
             fsapi::read_image_data_url,
             fsapi::read_binary_file,

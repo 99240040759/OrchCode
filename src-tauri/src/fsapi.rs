@@ -27,6 +27,21 @@ fn compare_ascii_case_insensitive(left: &str, right: &str) -> std::cmp::Ordering
         .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirListing {
+    pub entries: Vec<TreeEntry>,
+    pub truncated: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct FileContent {
     pub path: String,
@@ -144,6 +159,56 @@ pub async fn list_workspace_files(
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_workspace_dir(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<DirListing, String> {
+    if state.active_cloud_workspace().is_some() {
+        return Err("Folder browsing is not available for cloud workspaces.".to_string());
+    }
+    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
+    let requested = path.unwrap_or_default();
+
+    tokio::task::spawn_blocking(move || {
+        let root = dunce::canonicalize(&workspace).map_err(|e| e.to_string())?;
+        let target = fs_util::resolve_in_workspace(&root, if requested.is_empty() { "." } else { &requested })
+            .map_err(|e| e.to_string())?;
+        if !target.is_dir() {
+            return Err(format!("not a folder: {requested}"));
+        }
+
+        let mut builder = fs_util::workspace_walker(&target);
+        builder.max_depth(Some(1));
+
+        let mut entries: Vec<TreeEntry> = Vec::new();
+        let mut truncated = false;
+        for entry in builder.build().flatten() {
+            if entry.depth() == 0 {
+                continue;
+            }
+            if entries.len() >= config::MAX_DIR_ENTRIES {
+                truncated = true;
+                break;
+            }
+            entries.push(TreeEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: fs_util::display_relative(&root, entry.path()),
+                is_dir: entry.file_type().map(|t| t.is_dir()).unwrap_or(false),
+            });
+        }
+
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| compare_ascii_case_insensitive(&a.name, &b.name))
+        });
+        Ok(DirListing { entries, truncated })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 async fn cloud_context(

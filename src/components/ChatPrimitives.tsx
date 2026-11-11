@@ -49,55 +49,33 @@ export const ExplorerIcon = React.memo(function ExplorerIcon({
   name,
   className,
   style,
-  width = 16,
-  height = 16,
   ...svgProps
 }: ExplorerIconProps) {
+  const cls = cn("ExplorerIcon", className);
+
   if (type === "folder") {
-    return <FolderIcon folderName={name} className={className} style={style} width={width} height={height} {...svgProps} />;
+    return <FolderIcon folderName={name} className={cls} style={style} {...svgProps} />;
   }
 
   const ext = getExt(name);
   if (ext === "pdf") {
-    return <BsFileEarmarkPdfFill className={className} style={{ color: "#e2574c", ...style }} width={width} height={height} {...svgProps} />;
+    return <BsFileEarmarkPdfFill className={cls} style={{ color: "#e2574c", ...style }} {...svgProps} />;
   }
   if (ext === "docx" || ext === "doc") {
-    return <BsFileEarmarkWordFill className={className} style={{ color: "#185abd", ...style }} width={width} height={height} {...svgProps} />;
+    return <BsFileEarmarkWordFill className={cls} style={{ color: "#185abd", ...style }} {...svgProps} />;
   }
   if (ext === "xlsx" || ext === "xls" || ext === "ods") {
-    return <BsFileEarmarkExcelFill className={className} style={{ color: "#107c41", ...style }} width={width} height={height} {...svgProps} />;
+    return <BsFileEarmarkExcelFill className={cls} style={{ color: "#107c41", ...style }} {...svgProps} />;
   }
   if (ext === "pptx" || ext === "ppt") {
-    return <BsFileEarmarkPptFill className={className} style={{ color: "#c43e1c", ...style }} width={width} height={height} {...svgProps} />;
+    return <BsFileEarmarkPptFill className={cls} style={{ color: "#c43e1c", ...style }} {...svgProps} />;
   }
 
-  return <FileIcon fileName={name} autoAssign className={className} style={style} width={width} height={height} {...svgProps} />;
+  return <FileIcon fileName={name} autoAssign className={cls} style={style} {...svgProps} />;
 });
 
-export const ChromeIcon = React.memo(function ChromeIcon({
-  className,
-  style,
-  width,
-  height,
-}: {
-  className?: string;
-  style?: React.CSSProperties;
-  width?: number | string;
-  height?: number | string;
-}) {
-  return (
-    <img
-      src="/chrome.svg"
-      alt=""
-      className={cn("ChromeIcon", className)}
-      style={{
-        ...(width !== undefined ? { width } : {}),
-        ...(height !== undefined ? { height } : {}),
-        flexShrink: 0,
-        ...style,
-      }}
-    />
-  );
+export const ChromeIcon = React.memo(function ChromeIcon({ className }: { className?: string }) {
+  return <img src="/chrome.svg" alt="" className={cn("ChromeIcon", className)} />;
 });
 
 interface AttachmentCardProps {
@@ -150,8 +128,6 @@ export const AttachmentCard = React.memo(function AttachmentCard({
           type="file"
           name={name}
           className="AttachmentCard-icon"
-          width={22}
-          height={22}
         />
       )}
       <span className="AttachmentCard-name">{name}</span>
@@ -220,8 +196,6 @@ export const FileTag = React.memo(function FileTag({
         type="file"
         name={filename}
         className="FileTag-icon"
-        width={16}
-        height={16}
       />
       <span className="FileTag-name">{filename}</span>
       {lineRange && <span className="FileTag-lineRange">{lineRange}</span>}
@@ -230,14 +204,5 @@ export const FileTag = React.memo(function FileTag({
         <span className="FileTag-removed">-{removed}</span>
       )}
     </span>
-  );
-});
-
-export const ThinkingIndicator = React.memo(function ThinkingIndicator() {
-  return (
-    <div className="ThinkingIndicator" role="status">
-      <span className="ThinkingIndicator-spinner" aria-hidden="true" />
-      <span className="ThinkingIndicator-text">Thinking…</span>
-    </div>
   );
 });

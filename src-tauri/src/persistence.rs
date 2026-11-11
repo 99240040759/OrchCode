@@ -9,6 +9,7 @@ use sqlx::{Executor, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::util::now_ms;
+use crate::work::WorkRun;
 
 const SCHEMA: &str = "
  CREATE TABLE IF NOT EXISTS sessions (
@@ -31,6 +32,14 @@ const SCHEMA: &str = "
      conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
      item_id          TEXT NOT NULL,
      duration_seconds INTEGER NOT NULL,
+     PRIMARY KEY (conversation_id, item_id)
+ );
+
+ CREATE TABLE IF NOT EXISTS work_runs (
+     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+     item_id          TEXT NOT NULL,
+     duration_seconds INTEGER NOT NULL,
+     stopped          INTEGER NOT NULL DEFAULT 0,
      PRIMARY KEY (conversation_id, item_id)
  );
 ";
@@ -302,6 +311,56 @@ impl SqliteMemory {
             out.insert(item_id, secs.max(0) as u64);
         }
         Ok(out)
+    }
+
+    pub async fn work_runs(&self, conversation_id: &str) -> AppResult<HashMap<String, WorkRun>> {
+        let rows = sqlx::query(
+            "SELECT item_id, duration_seconds, stopped FROM work_runs WHERE conversation_id = ?1",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(sql_err)?;
+
+        let mut out = HashMap::new();
+        for row in rows {
+            let item_id: String = row.get(0);
+            let seconds: i64 = row.get(1);
+            let stopped: i64 = row.get(2);
+            out.insert(
+                item_id,
+                WorkRun {
+                    seconds: seconds.max(0) as u64,
+                    stopped: stopped != 0,
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    pub async fn save_work_runs(
+        &self,
+        conversation_id: &str,
+        runs: Vec<(String, WorkRun)>,
+    ) -> AppResult<()> {
+        if runs.is_empty() {
+            return Ok(());
+        }
+        let mut builder: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+            "INSERT INTO work_runs (conversation_id, item_id, duration_seconds, stopped) ",
+        );
+        builder.push_values(runs, |mut b, (item_id, run)| {
+            b.push_bind(conversation_id)
+                .push_bind(item_id)
+                .push_bind(to_db_token(run.seconds))
+                .push_bind(i64::from(run.stopped));
+        });
+        builder.push(
+            " ON CONFLICT(conversation_id, item_id) DO UPDATE SET \
+             duration_seconds = excluded.duration_seconds, stopped = excluded.stopped",
+        );
+        builder.build().execute(&self.pool).await.map_err(sql_err)?;
+        Ok(())
     }
 
     pub async fn save_reasoning_durations(

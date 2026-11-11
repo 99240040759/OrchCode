@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fontsource-variable/outfit": "^5.3.0",
     "@radix-ui/react-dropdown-menu": "^2.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@react-symbols/icons": "^1.4.1",
@@ -26,10 +27,12 @@
     "@types/katex": "^0.16.8",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "chart.js": "^4.6.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "docx-preview": "^0.4.0",
     "immer": "^10.1.1",
+    "jszip": "^3.10.2",
     "katex": "^0.19.1",
     "pdfjs-dist": "^6.3.289",
     "pptxviewjs": "^1.1.9",

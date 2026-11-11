@@ -241,7 +241,12 @@ export function InputBar({ promptMode = false }: { promptMode?: boolean }) {
 
       <div className="Composer-box">
         {attachments.length > 0 && (
-          <div className="Composer-attachments">
+          <div
+            className="Composer-attachments"
+            onWheel={(event) => {
+              if (event.deltaX === 0) event.currentTarget.scrollLeft += event.deltaY;
+            }}
+          >
             {attachments.map((attachment) => (
               <AttachmentCard
                 key={attachment.path}

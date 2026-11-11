@@ -5,6 +5,7 @@ use serde_json::{json, Map, Value};
 #[serde(rename_all = "camelCase")]
 pub struct ToolDisplayInfo {
     pub label: String,
+    pub active_label: String,
     pub filename: Option<String>,
     pub full_path: Option<String>,
     pub line_range: Option<String>,

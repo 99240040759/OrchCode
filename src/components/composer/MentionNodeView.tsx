@@ -39,8 +39,6 @@ export function MentionNodeView(props: ReactNodeViewProps) {
         type="file"
         name={name}
         className="FileTag-icon"
-        width={16}
-        height={16}
         aria-hidden="true"
       />
       <span className="FileTag-name">{name}</span>

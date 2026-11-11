@@ -42,6 +42,7 @@ export type ToolIcon =  | "file"
 
 export interface ToolDisplayInfo {
   label: string;
+  activeLabel: string;
   filename?: string | null;
   fullPath?: string | null;
   lineRange?: string | null;
@@ -64,6 +65,17 @@ export interface UserDisplay {
 export interface FileEntry {
   path: string;
   name: string;
+}
+
+export interface TreeEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+}
+
+export interface DirListing {
+  entries: TreeEntry[];
+  truncated: boolean;
 }
 
 export interface FileContent {
@@ -114,6 +126,7 @@ export interface AgEvent {
   error?: { message?: string; code?: string };
   message?: string;
   duration_seconds?: number;
+  stopped?: boolean;
   original_message_count?: number;
   ts?: number;
   message_id?: string | null;
@@ -139,7 +152,7 @@ export type HistoryRecord =
       index: number;
       step: AgStep;
       deltas: AgDelta[];
-      stop?: { duration_seconds?: number } | null;
+      stop?: { duration_seconds?: number; stopped?: boolean } | null;
     }
   | { kind: "interaction"; event_type: string; data: Record<string, unknown> }
   | {
@@ -290,6 +303,10 @@ export function cancelChat(sessionId: string): Promise<void> {
 
 export function listWorkspaceFiles(query: string, limit = 100): Promise<FileEntry[]> {
   return invoke("list_workspace_files", { query, limit });
+}
+
+export function listWorkspaceDir(path = ""): Promise<DirListing> {
+  return invoke("list_workspace_dir", { path });
 }
 
 export function readTextFile(path: string): Promise<FileContent> {

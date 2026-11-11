@@ -44,7 +44,7 @@ export function ConnectorsMenu() {
               onCheckedChange={() => toggleConnector(connector.id)}
               onSelect={(event) => event.preventDefault()}
             >
-              <ConnectorIcon id={connector.id} size={16} />
+              <ConnectorIcon id={connector.id} />
               <span className="ModelItem-name">{connector.name}</span>
               {active.includes(connector.id) && <LuCheck className="DropdownMenuItem-check" aria-hidden="true" />}
             </DropdownMenuCheckboxItem>

@@ -49,6 +49,14 @@ export interface ToolCallItem {
   status: "running" | "done" | "error";
 }
 
+export interface WorkRunItem {
+  type: "work";
+  id: string;
+  active: boolean;
+  durationSeconds?: number;
+  stopped?: boolean;
+}
+
 export interface TextItem {
   type: "text";
   id: string;
@@ -62,7 +70,7 @@ export interface CompactionNoticeItem {
   ts: number;
 }
 
-export type MessageItem = ReasoningItem | ToolCallItem | TextItem | CompactionNoticeItem;
+export type MessageItem = ReasoningItem | ToolCallItem | WorkRunItem | TextItem | CompactionNoticeItem;
 
 interface TokenUsage {
   contextTokens: number;
@@ -596,6 +604,7 @@ async function streamRun(
         m.streaming = false;
         for (const item of m.items) {
           if (item.type === "toolCall" && item.status === "running") item.status = "error";
+          else if (item.type === "work" && item.active) item.active = false;
         }
       });
       set((s) => {
@@ -680,7 +689,7 @@ async function streamRun(
       reasoningBuffer = "";
     });
 
-    const stepKinds = new Map<number, "thought" | "text">();
+    const stepKinds = new Map<number, "thought" | "text" | "work">();
     const thoughtStarts = new Map<number, number>();
 
     const closeThought = (index: number, reportedSeconds?: number) => {
@@ -732,6 +741,14 @@ async function streamRun(
             stepKinds.set(index, "text");
             break;
           }
+          if (step.type === "work") {
+            stepKinds.set(index, "work");
+            syncFlush();
+            patch((m) => {
+              m.items.push({ type: "work", id: newId(), active: true });
+            });
+            break;
+          }
           const tool = toolItemFromStep(step);
           if (tool) {
             syncFlush();
@@ -770,6 +787,20 @@ async function streamRun(
           stepKinds.delete(index);
           if (kind === "thought") closeThought(index, event.duration_seconds);
           else if (kind === "text") syncFlush();
+          else if (kind === "work") {
+            syncFlush();
+            patch((m) => {
+              for (let i = m.items.length - 1; i >= 0; i--) {
+                const item = m.items[i];
+                if (item.type === "work" && item.active) {
+                  item.active = false;
+                  item.durationSeconds = event.duration_seconds;
+                  item.stopped = event.stopped;
+                  break;
+                }
+              }
+            });
+          }
           break;
         }
         case "orch.notice":

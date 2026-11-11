@@ -13,6 +13,7 @@ use crate::error::{AppError, AppResult};
 use crate::llm::{is_payload_part, payload_part_label};
 use crate::persistence::{SessionRecord, SessionRecordPage};
 use crate::wire;
+use crate::work::{WorkRun, WORK_STEP};
 
 pub const LOG: &str = "main";
 
@@ -78,6 +79,55 @@ fn stable_id(cid: &str, message: u64, item_idx: usize, kind: Option<&str>) -> St
 
 pub fn reasoning_item_id(cid: &str, id: MessageId, item_idx: usize) -> String {
     stable_id(cid, id.get(), item_idx, Some("reasoning"))
+}
+
+pub fn work_item_id(cid: &str, id: MessageId, item_idx: usize) -> String {
+    stable_id(cid, id.get(), item_idx, Some("work"))
+}
+
+fn work_run_starts<'a>(
+    messages: impl IntoIterator<Item = (MessageId, &'a Message)>,
+) -> Vec<(MessageId, usize)> {
+    let mut starts = Vec::new();
+    let mut in_run = false;
+    for (id, message) in messages {
+        match message {
+            Message::User { content } => {
+                let only_tool_results = content.iter().all(|part| matches!(part, UserContent::ToolResult(_)));
+                if !only_tool_results {
+                    in_run = false;
+                }
+            }
+            Message::Assistant(assistant) => {
+                let mut item_idx = 0usize;
+                for part in assistant.content.iter() {
+                    match part {
+                        AssistantContent::Reasoning(r) if !r.text.is_empty() => {
+                            if !in_run {
+                                starts.push((id, item_idx));
+                                in_run = true;
+                            }
+                            item_idx += 1;
+                        }
+                        AssistantContent::ToolCall(_) => {
+                            if !in_run {
+                                starts.push((id, item_idx));
+                                in_run = true;
+                            }
+                            item_idx += 1;
+                        }
+                        AssistantContent::Text(t) if !t.text.is_empty() => {
+                            in_run = false;
+                            item_idx += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    starts
 }
 
 pub fn compaction_message_id(cid: &str, summary: MessageId) -> String {
@@ -314,15 +364,33 @@ fn assistant_records(
     content: &[AssistantContent],
     outputs: &HashMap<String, (String, bool)>,
     durations: &HashMap<String, u64>,
+    run_starts: &HashSet<(u64, usize)>,
+    runs: &HashMap<String, WorkRun>,
 ) -> Vec<Value> {
     let mut records: Vec<Value> = Vec::new();
     let mut item_idx = 0usize;
+    let mark_run_start = |records: &mut Vec<Value>, item_idx: usize| {
+        if !run_starts.contains(&(id.get(), item_idx)) {
+            return;
+        }
+        let stop = match runs.get(&work_item_id(cid, id, item_idx)) {
+            Some(run) => json!({ "duration_seconds": run.seconds, "stopped": run.stopped }),
+            None => json!({}),
+        };
+        records.push(step_record(
+            records.len(),
+            json!({ "type": WORK_STEP }),
+            Vec::new(),
+            stop,
+        ));
+    };
     for part in content {
         match part {
             AssistantContent::Reasoning(r) => {
                 if r.text.is_empty() {
                     continue;
                 }
+                mark_run_start(&mut records, item_idx);
                 let duration = durations.get(&reasoning_item_id(cid, id, item_idx)).copied();
                 let stop = match duration {
                     Some(seconds) => json!({ "duration_seconds": seconds }),
@@ -337,6 +405,7 @@ fn assistant_records(
                 item_idx += 1;
             }
             AssistantContent::ToolCall(tc) => {
+                mark_run_start(&mut records, item_idx);
                 let call_id = tc.id.to_string();
                 let name = tc.function.name.to_string();
                 let arguments = Value::Object(tc.function.arguments.clone());
@@ -397,11 +466,19 @@ pub fn view_page_from_store<S: Store>(
     store: &S,
     cid: &str,
     durations: &HashMap<String, u64>,
+    runs: &HashMap<String, WorkRun>,
     limit: usize,
     before: Option<i64>,
 ) -> AppResult<SessionRecordPage> {
     let conversation = rig_memory::load(store, LOG).map_err(session_error)?;
     let items = shown(store, &conversation).map_err(session_error)?;
+    let run_starts: HashSet<(u64, usize)> = work_run_starts(items.iter().filter_map(|item| match item {
+        Shown::Message { id, message, author: None } => Some((*id, &**message)),
+        _ => None,
+    }))
+    .into_iter()
+    .map(|(id, idx)| (id.get(), idx))
+    .collect();
 
     let visible: Vec<ShownEntry> = items
         .iter()
@@ -456,7 +533,7 @@ pub fn view_page_from_store<S: Store>(
             Shown::Message { id, message, author: None } => match &**message {
                 Message::User { content } => user_records(content),
                 Message::Assistant(assistant) => {
-                    assistant_records(cid, *id, &assistant.content, &outputs, durations)
+                    assistant_records(cid, *id, &assistant.content, &outputs, durations, &run_starts, runs)
                 }
                 _ => Vec::new(),
             },
@@ -482,14 +559,36 @@ pub async fn view_page(
     data_dir: &Path,
     session_id: &str,
     durations: HashMap<String, u64>,
+    runs: HashMap<String, WorkRun>,
     limit: usize,
     before: Option<i64>,
 ) -> AppResult<SessionRecordPage> {
     let store = open_store(data_dir, session_id)?;
     let cid = session_id.to_string();
-    tokio::task::spawn_blocking(move || view_page_from_store(&store, &cid, &durations, limit, before))
+    tokio::task::spawn_blocking(move || {
+        view_page_from_store(&store, &cid, &durations, &runs, limit, before)
+    })
         .await
         .map_err(|e| AppError::other(format!("transcript task failed: {e}")))?
+}
+
+pub fn work_run_keys(
+    cid: &str,
+    conversation: &Conversation,
+    first_new_id: u64,
+    runs: Vec<WorkRun>,
+) -> Vec<(String, WorkRun)> {
+    let starts = work_run_starts(
+        conversation
+            .entries()
+            .filter(|entry| entry.id.get() >= first_new_id && entry.author.is_none())
+            .filter_map(|entry| Some((entry.id, &**conversation.messages().get(entry.index)?))),
+    );
+    starts
+        .into_iter()
+        .zip(runs)
+        .map(|((id, item_idx), run)| (work_item_id(cid, id, item_idx), run))
+        .collect()
 }
 
 pub fn reasoning_keys(

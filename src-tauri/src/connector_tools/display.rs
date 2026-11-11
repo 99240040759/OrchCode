@@ -8,12 +8,20 @@ const MAX_TARGET_CHARS: usize = 160;
 
 pub fn display_info(name: &str, args: &Value) -> Option<ToolDisplayInfo> {
     let def = connectors::def_for_slug(name)?;
-    let (label, target_text) = match def.actions.iter().find(|action| action.slug == name) {
-        Some(action) => (action.label.to_string(), target_text(action.target, args)),
-        None => (humanize(name.strip_prefix(def.slug_prefix).unwrap_or(name)), None),
+    let (label, active_label, target_text) = match def.actions.iter().find(|action| action.slug == name) {
+        Some(action) => (
+            action.label.to_string(),
+            action.active_label.to_string(),
+            target_text(action.target, args),
+        ),
+        None => {
+            let label = humanize(name.strip_prefix(def.slug_prefix).unwrap_or(name));
+            (label.clone(), label, None)
+        }
     };
     Some(ToolDisplayInfo {
         label,
+        active_label,
         target_text,
         icon: ToolIcon::Globe,
         connector: Some(def.id.to_string()),

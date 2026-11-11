@@ -35,9 +35,15 @@ function lineCount(value: unknown): number | undefined {
   return lines.length > 0 ? lines.length : undefined;
 }
 
-function fileInfo(label: string, path: string | undefined, extra: Partial<ToolDisplayInfo>): ToolDisplayInfo {
+function fileInfo(
+  label: string,
+  activeLabel: string,
+  path: string | undefined,
+  extra: Partial<ToolDisplayInfo>
+): ToolDisplayInfo {
   return {
     label,
+    activeLabel,
     filename: path ? getBasename(path) : null,
     fullPath: path ?? null,
     icon: "file",
@@ -53,26 +59,27 @@ export function toolDisplayInfo(name: string, args: Args, provided?: ToolDisplay
       const end = num(args.EndLine);
       const lineRange =
         start !== undefined && end !== undefined ? `#L${start}-${end}` : start !== undefined ? `#L${start}` : null;
-      return fileInfo("Read", str(args.AbsolutePath), { lineRange });
+      return fileInfo("Read", "Reading", str(args.AbsolutePath), { lineRange });
     }
     case "write_to_file":
-      return fileInfo("Wrote", str(args.TargetFile), { addedLines: lineCount(args.CodeContent) ?? null });
+      return fileInfo("Wrote", "Writing", str(args.TargetFile), { addedLines: lineCount(args.CodeContent) ?? null });
     case "replace_file_content":
-      return fileInfo("Edited", str(args.TargetFile), {
+      return fileInfo("Edited", "Editing", str(args.TargetFile), {
         addedLines: lineCount(args.ReplacementContent) ?? null,
         removedLines: lineCount(args.TargetContent) ?? null,
       });
     case EXECUTE_BASH:
-      return { label: "Ran", targetText: str(args.command) ?? null, icon: "terminal", opensArtifact: false };
+      return { label: "Ran", activeLabel: "Running", targetText: str(args.command) ?? null, icon: "terminal", opensArtifact: false };
     case "stop_command":
-      return { label: "Stopped Task", targetText: str(args.task_id) ?? null, icon: "zapOff", opensArtifact: false };
+      return { label: "Stopped Task", activeLabel: "Stopping Task", targetText: str(args.task_id) ?? null, icon: "zapOff", opensArtifact: false };
     case "get_command_status":
-      return { label: "Task Status", targetText: str(args.task_id) ?? null, icon: "cpu", opensArtifact: false };
+      return { label: "Task Status", activeLabel: "Checking Task", targetText: str(args.task_id) ?? null, icon: "cpu", opensArtifact: false };
     case "read_skill":
-      return { label: "Read Skill", targetText: str(args.name) ?? null, icon: "book", opensArtifact: false };
+      return { label: "Read Skill", activeLabel: "Reading Skill", targetText: str(args.name) ?? null, icon: "book", opensArtifact: false };
     case "search":
       return {
         label: "Searched Web",
+        activeLabel: "Searching Web",
         targetText: strList(args.queries).join(" · ") || null,
         icon: "globe",
         opensArtifact: false,
@@ -82,28 +89,33 @@ export function toolDisplayInfo(name: string, args: Args, provided?: ToolDisplay
       const first = urls[0];
       return {
         label: "Browsed",
+        activeLabel: "Browsing",
         targetText: first ? (urls.length > 1 ? `${first} +${urls.length - 1}` : first) : null,
         icon: "globe",
         opensArtifact: false,
       };
     }
     case "search_workspace":
-      return { label: "Searched Code", targetText: str(args.query) ?? null, icon: "search", opensArtifact: false };
-    case "find_by_name":
+      return { label: "Searched Code", activeLabel: "Searching Code", targetText: str(args.query) ?? null, icon: "search", opensArtifact: false };
+    case "find_by_name": {
+      const extensions = strList(args.Extensions).map((e) => `*.${e}`).join(", ");
       return {
         label: "Found Files",
-        targetText: str(args.Pattern) ?? (strList(args.Extensions).map((e) => `*.${e}`).join(", ") || null),
+        activeLabel: "Finding Files",
+        targetText: str(args.Pattern) ?? (extensions || str(args.SearchDirectory) || null),
         icon: "search",
         opensArtifact: false,
       };
+    }
     case "list_dir": {
       const path = str(args.DirectoryPath);
-      return { label: "Listed", targetText: path ?? null, fullPath: path ?? null, icon: "folder", opensArtifact: false };
+      return { label: "Listed", activeLabel: "Listing", targetText: path ?? null, fullPath: path ?? null, icon: "folder", opensArtifact: false };
     }
     default:
       return (
         provided ?? {
           label: name,
+          activeLabel: name,
           targetText: JSON.stringify(args).slice(0, 120),
           icon: "terminal",
           opensArtifact: false,
@@ -278,6 +290,16 @@ function applyStepRecord(
       const text = record.deltas.map(deltaText).join("");
       if (!text) return;
       items.push({ type: "text", id: itemId, text });
+      return;
+    }
+    case "work": {
+      items.push({
+        type: "work",
+        id: itemId,
+        active: false,
+        durationSeconds: record.stop?.duration_seconds,
+        stopped: record.stop?.stopped,
+      });
       return;
     }
     default: {

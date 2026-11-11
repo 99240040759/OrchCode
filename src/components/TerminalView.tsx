@@ -25,7 +25,7 @@ export function TerminalView({ id }: { id: string }) {
     const amber = token("--brand-amber");
 
     const term = new XTerm({
-      fontSize: parseInt(token("--fs-md"), 10),
+      fontSize: parseInt(token("--fs-code"), 10),
       fontFamily: token("--font-mono"),
       lineHeight: 1.2,
       cursorBlink: false,
