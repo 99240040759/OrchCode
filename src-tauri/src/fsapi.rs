@@ -4,7 +4,7 @@ use std::sync::Arc;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use orchharness::backend::local_fs::fs_util;
-use orchharness::util::{display_path, looks_binary, lowercase_extension};
+use orchharness::util::{display_path, looks_binary};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -341,106 +341,4 @@ pub async fn read_binary_file(state: State<'_, AppState>, path: String) -> Resul
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
-}
-
-fn document_type_info(file_type: &str) -> (Option<String>, String) {
-    let normalized = file_type.to_ascii_lowercase();
-    let artifact_kind = match normalized.as_str() {
-        "pdf" => Some("pdf"),
-        "docx" => Some("docx"),
-        "xlsx" | "xls" | "ods" => Some("xlsx"),
-        "pptx" => Some("pptx"),
-        _ => None,
-    }
-    .map(str::to_string);
-    let label = match normalized.as_str() {
-        "pdf" => "PDF",
-        "docx" => "Word",
-        "xlsx" | "xls" => "Excel",
-        "ods" => "Spreadsheet",
-        "pptx" => "PowerPoint",
-        "txt" | "text" => "Text",
-        "md" | "markdown" => "Markdown",
-        "csv" => "CSV",
-        "json" => "JSON",
-        "html" | "htm" => "HTML",
-        "xml" => "XML",
-        "rtf" => "RTF",
-        _ => return (artifact_kind, normalized.to_uppercase()),
-    };
-    (artifact_kind, label.to_string())
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentFileMeta {
-    pub name: String,
-    pub size_bytes: u64,
-    pub extension: String,
-    pub mime: String,
-    pub artifact_kind: Option<String>,
-    pub type_label: String,
-    pub modified: Option<u64>,
-}
-
-#[tauri::command]
-pub async fn read_document_metadata(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<DocumentFileMeta, String> {
-    if let Some(cloud) = cloud_context(&state).await? {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct CloudMeta {
-            name: String,
-            size_bytes: u64,
-            extension: String,
-            mime: String,
-        }
-        let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
-        let meta: CloudMeta = state
-            .gateway
-            .cloud_files_json("metadata", &cloud.workspace_uri, &[("path", absolute)])
-            .await
-            .map_err(|e| format!("metadata error: {e}"))?;
-        let (artifact_kind, type_label) = document_type_info(&meta.extension);
-        return Ok(DocumentFileMeta {
-            name: meta.name,
-            size_bytes: meta.size_bytes,
-            extension: meta.extension,
-            mime: meta.mime,
-            artifact_kind,
-            type_label,
-            modified: None,
-        });
-    }
-
-    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
-    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
-
-    let meta = tokio::fs::metadata(&resolved)
-        .await
-        .map_err(|e| format!("metadata error: {e}"))?;
-    let extension = lowercase_extension(&resolved);
-    let name = resolved
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&path)
-        .to_string();
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs());
-
-    let (artifact_kind, type_label) = document_type_info(&extension);
-    Ok(DocumentFileMeta {
-        name,
-        size_bytes: meta.len(),
-        extension,
-        mime: file_mime(&resolved),
-        artifact_kind,
-        type_label,
-        modified,
-    })
 }

@@ -11,7 +11,6 @@ pub use orchharness::persistence::{
     Budget, CloudAttachment, CloudChatStreamReq, CloudWorkspaceInfo, SessionRecordPage,
     SessionSummary,
 };
-use orchharness::tools::{REPLACE_FILE_CONTENT, WRITE_TO_FILE};
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -114,13 +113,6 @@ impl Gateway {
     pub async fn models(&self) -> AppResult<ModelCatalog> {
         let models: Vec<ModelInfo> =
             self.get(config::models_url(), Duration::from_secs(20)).await?;
-        Ok(ModelCatalog::from_list(models))
-    }
-
-    pub async fn cloud_models(&self) -> AppResult<ModelCatalog> {
-        let models: Vec<ModelInfo> = self
-            .get(&config::cloud_url("/models"), Duration::from_secs(20))
-            .await?;
         Ok(ModelCatalog::from_list(models))
     }
 
@@ -348,8 +340,8 @@ impl Gateway {
                     tokio::spawn(async move {
                         let _ = gw.cloud_cancel_chat(&sid).await;
                     });
-                    event_sink.send(ChatEvent::cancelled());
-                    event_sink.send(ChatEvent::done());
+                    event_sink.send(ChatEvent::Cancelled);
+                    event_sink.send(ChatEvent::Done);
                     return Ok(());
                 }
                 Pumped::Dropped => {}
@@ -361,7 +353,7 @@ impl Gateway {
                     event_sink.send(ChatEvent::error(
                         "The connection to the cloud agent was lost. The run keeps going in the cloud. Reopen this chat to follow it.",
                     ));
-                    event_sink.send(ChatEvent::done());
+                    event_sink.send(ChatEvent::Done);
                     return Ok(());
                 }
                 let delay = Duration::from_secs((1u64 << attempts.min(4)).min(15));
@@ -372,8 +364,8 @@ impl Gateway {
                         tokio::spawn(async move {
                             let _ = gw.cloud_cancel_chat(&sid).await;
                         });
-                        event_sink.send(ChatEvent::cancelled());
-                        event_sink.send(ChatEvent::done());
+                        event_sink.send(ChatEvent::Cancelled);
+                        event_sink.send(ChatEvent::Done);
                         return Ok(());
                     }
                     _ = tokio::time::sleep(delay) => {}
@@ -381,7 +373,7 @@ impl Gateway {
                 match self.open_resume(session_id, follower.last_id).await {
                     Ok(next) => {
                         if follower.last_id == 0 {
-                            event_sink.send(ChatEvent::resync());
+                            event_sink.send(ChatEvent::Resync);
                         }
                         response = next;
                         break;
@@ -392,7 +384,7 @@ impl Gateway {
                         event_sink.send(ChatEvent::error(format!(
                             "Could not resume the cloud run ({status}): {body}"
                         )));
-                        event_sink.send(ChatEvent::done());
+                        event_sink.send(ChatEvent::Done);
                         return Ok(());
                     }
                     Err(_) => {}
@@ -413,7 +405,6 @@ enum Pumped {
 #[derive(Default)]
 struct Follower {
     last_id: u64,
-    pending_writes: HashMap<String, String>,
 }
 
 impl Follower {
@@ -437,7 +428,7 @@ impl Follower {
                     while let Some(position) = buffer.windows(2).position(|pair| pair == b"\n\n") {
                         let raw: Vec<u8> = buffer.drain(..position + 2).collect();
                         let block = String::from_utf8_lossy(&raw[..position]).into_owned();
-                        if forward_block(&block, event_sink, &mut self.pending_writes, &mut self.last_id) {
+                        if forward_block(&block, event_sink, &mut self.last_id) {
                             return Pumped::Done;
                         }
                     }
@@ -450,7 +441,6 @@ impl Follower {
 fn forward_block(
     block: &str,
     event_sink: &Arc<dyn EventSink>,
-    pending_writes: &mut HashMap<String, String>,
     last_id: &mut u64,
 ) -> bool {
     let mut event: Option<&str> = None;
@@ -471,64 +461,14 @@ fn forward_block(
     let Some(chat_event) = ChatEvent::from_sse(event, &data.join("\n")) else {
         return false;
     };
-    note_file_writes(&chat_event, pending_writes, event_sink);
     let finished = chat_event.is_done();
-    if chat_event.event_type() == "orch.resync" {
+    if matches!(chat_event, ChatEvent::Resync) {
         *last_id = 0;
-        pending_writes.clear();
     } else if let Some(id) = id {
         *last_id = id;
     }
     event_sink.send(chat_event);
     finished
-}
-
-fn note_file_writes(
-    event: &ChatEvent,
-    pending_writes: &mut HashMap<String, String>,
-    event_sink: &Arc<dyn EventSink>,
-) {
-    if event.event_type() != "step.start" {
-        return;
-    }
-    let Some(step) = event.0.get("step") else {
-        return;
-    };
-    match step.get("type").and_then(serde_json::Value::as_str) {
-        Some("function_call") => {
-            let name = step
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if name != WRITE_TO_FILE && name != REPLACE_FILE_CONTENT {
-                return;
-            }
-            let id = step.get("id").and_then(serde_json::Value::as_str);
-            let target = step
-                .get("arguments")
-                .and_then(|arguments| arguments.get("TargetFile"))
-                .and_then(serde_json::Value::as_str);
-            if let (Some(id), Some(target)) = (id, target) {
-                pending_writes.insert(id.to_string(), target.to_string());
-            }
-        }
-        Some("function_result") => {
-            let call_id = step
-                .get("call_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let failed = step
-                .get("is_error")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            if let Some(path) = pending_writes.remove(call_id) {
-                if !failed {
-                    event_sink.emit_file_written(&path);
-                }
-            }
-        }
-        _ => {}
-    }
 }
 
 async fn check_status(resp: reqwest::Response) -> AppResult<reqwest::Response> {

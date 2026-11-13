@@ -213,7 +213,6 @@ pub fn run() {
             fsapi::read_text_file,
             fsapi::read_image_data_url,
             fsapi::read_binary_file,
-            fsapi::read_document_metadata,
             ipc::get_auth_user,
             ipc::get_oauth_url,
             ipc::sign_out_auth,

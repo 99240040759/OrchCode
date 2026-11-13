@@ -477,10 +477,6 @@ impl AppState {
         }
     }
 
-    pub fn has_run(&self, session_id: &str) -> bool {
-        self.runs.contains_key(session_id)
-    }
-
     pub fn run_owner(&self, session_id: &str) -> Option<String> {
         self.runs.get(session_id).map(|run| run.owner_id.clone())
     }

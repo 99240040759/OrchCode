@@ -1,10 +1,12 @@
-use std::collections::HashMap;
 use std::path::Path;
 
-pub use orchharness::persistence::{SessionRecord, SessionRecordPage, SessionSummary, TurnUsage};
+use async_trait::async_trait;
+use orchharness::backend::SessionStore;
 use orchharness::error::{AppError, AppResult};
+pub use orchharness::persistence::{
+    HistoryRecord, SessionRecord, SessionRecordPage, SessionSnapshot, SessionSummary, TurnUsage,
+};
 use orchharness::util::now_ms;
-use orchharness::work::WorkRun;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
@@ -12,35 +14,35 @@ use sqlx::{Executor, Row};
 
 const SCHEMA: &str = "
  CREATE TABLE IF NOT EXISTS sessions (
-     id                  TEXT PRIMARY KEY,
-     title               TEXT,
-     workspace_path      TEXT,
-     user_id             TEXT,
-     created_at          INTEGER NOT NULL,
-     updated_at          INTEGER NOT NULL,
-     last_context_tokens INTEGER NOT NULL DEFAULT 0,
-     last_input_tokens   INTEGER NOT NULL DEFAULT 0,
-     last_output_tokens  INTEGER NOT NULL DEFAULT 0,
-     last_cached_tokens  INTEGER NOT NULL DEFAULT 0,
+     id                    TEXT PRIMARY KEY,
+     title                 TEXT,
+     workspace_path        TEXT,
+     user_id               TEXT,
+     created_at            INTEGER NOT NULL,
+     updated_at            INTEGER NOT NULL,
+     last_context_tokens   INTEGER NOT NULL DEFAULT 0,
+     last_input_tokens     INTEGER NOT NULL DEFAULT 0,
+     last_output_tokens    INTEGER NOT NULL DEFAULT 0,
+     last_cached_tokens    INTEGER NOT NULL DEFAULT 0,
      last_reasoning_tokens INTEGER NOT NULL DEFAULT 0
  );
  CREATE INDEX IF NOT EXISTS idx_sessions_workspace_user
      ON sessions(workspace_path, user_id, updated_at DESC);
 
- CREATE TABLE IF NOT EXISTS reasoning_durations (
-     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-     item_id          TEXT NOT NULL,
-     duration_seconds INTEGER NOT NULL,
-     PRIMARY KEY (conversation_id, item_id)
+ CREATE TABLE IF NOT EXISTS session_state (
+     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+     snapshot   TEXT NOT NULL
  );
 
- CREATE TABLE IF NOT EXISTS work_runs (
-     conversation_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-     item_id          TEXT NOT NULL,
-     duration_seconds INTEGER NOT NULL,
-     stopped          INTEGER NOT NULL DEFAULT 0,
-     PRIMARY KEY (conversation_id, item_id)
+ CREATE TABLE IF NOT EXISTS session_entries (
+     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+     seq        INTEGER NOT NULL,
+     record     TEXT NOT NULL,
+     PRIMARY KEY (session_id, seq)
  );
+
+ DROP TABLE IF EXISTS reasoning_durations;
+ DROP TABLE IF EXISTS work_runs;
 ";
 
 const POOL_SIZE: u32 = 6;
@@ -113,42 +115,6 @@ impl SqliteMemory {
         .bind(session_id)
         .bind(workspace_path)
         .bind(user_id)
-        .bind(now)
-        .execute(&self.pool)
-        .await
-        .map_err(sql_err)?;
-
-        Ok(())
-    }
-
-    pub async fn record_usage(&self, session_id: &str, usage: &TurnUsage) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = ?3,
-             last_output_tokens = ?4, last_cached_tokens = ?5, last_reasoning_tokens = ?6,
-             updated_at = ?7 WHERE id = ?1",
-        )
-        .bind(session_id)
-        .bind(to_db_token(usage.context_tokens))
-        .bind(to_db_token(usage.input_tokens))
-        .bind(to_db_token(usage.output_tokens))
-        .bind(to_db_token(usage.cached_tokens))
-        .bind(to_db_token(usage.reasoning_tokens))
-        .bind(now_ms())
-        .execute(&self.pool)
-        .await
-        .map_err(sql_err)?;
-        Ok(())
-    }
-
-    pub async fn set_context_tokens(&self, session_id: &str, context_tokens: u64) -> AppResult<()> {
-        let now = now_ms();
-        sqlx::query(
-            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = 0,
-             last_output_tokens = 0, last_cached_tokens = 0, last_reasoning_tokens = 0,
-             updated_at = ?3 WHERE id = ?1",
-        )
-        .bind(session_id)
-        .bind(to_db_token(context_tokens))
         .bind(now)
         .execute(&self.pool)
         .await
@@ -241,103 +207,188 @@ impl SqliteMemory {
         Ok(opt_row.and_then(|row| row.get(0)))
     }
 
-    pub async fn session_context_tokens(&self, conversation_id: &str) -> AppResult<u64> {
-        let opt_row = sqlx::query("SELECT last_context_tokens FROM sessions WHERE id = ?1")
+    pub async fn session_meta(&self, conversation_id: &str) -> AppResult<Option<Option<String>>> {
+        let opt_row = sqlx::query("SELECT user_id FROM sessions WHERE id = ?1")
             .bind(conversation_id)
             .fetch_optional(&self.pool)
             .await
             .map_err(sql_err)?;
 
-        let value: Option<i64> = opt_row.and_then(|row| row.get(0));
-        Ok(value.unwrap_or(0).max(0) as u64)
+        Ok(opt_row.map(|row| row.get(0)))
+    }
+}
+
+#[async_trait]
+impl SessionStore for SqliteMemory {
+    async fn load_snapshot(&self, session_id: &str) -> AppResult<SessionSnapshot> {
+        let row = sqlx::query("SELECT snapshot FROM session_state WHERE session_id = ?1")
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(sql_err)?;
+
+        let Some(row) = row else {
+            return Ok(SessionSnapshot::default());
+        };
+        let raw: String = row.get(0);
+        serde_json::from_str(&raw)
+            .map_err(|e| AppError::other(format!("invalid session snapshot: {e}")))
     }
 
-    pub async fn reasoning_durations(&self, conversation_id: &str) -> AppResult<HashMap<String, u64>> {
-        let rows = sqlx::query(
-            "SELECT item_id, duration_seconds FROM reasoning_durations WHERE conversation_id = ?1",
+    async fn save_snapshot(&self, session_id: &str, snapshot: &SessionSnapshot) -> AppResult<()> {
+        let json = serde_json::to_string(snapshot)
+            .map_err(|e| AppError::other(format!("serialize session snapshot: {e}")))?;
+        let now = now_ms();
+        let mut tx = self.pool.begin().await.map_err(sql_err)?;
+        sqlx::query(
+            "INSERT INTO session_state (session_id, snapshot)
+             VALUES (?1, ?2)
+             ON CONFLICT(session_id) DO UPDATE SET snapshot = excluded.snapshot",
         )
-        .bind(conversation_id)
-        .fetch_all(&self.pool)
+        .bind(session_id)
+        .bind(json)
+        .execute(&mut *tx)
         .await
         .map_err(sql_err)?;
-
-        let mut out = HashMap::new();
-        for row in rows {
-            let item_id: String = row.get(0);
-            let secs: i64 = row.get(1);
-            out.insert(item_id, secs.max(0) as u64);
-        }
-        Ok(out)
-    }
-
-    pub async fn work_runs(&self, conversation_id: &str) -> AppResult<HashMap<String, WorkRun>> {
-        let rows = sqlx::query(
-            "SELECT item_id, duration_seconds, stopped FROM work_runs WHERE conversation_id = ?1",
-        )
-        .bind(conversation_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(sql_err)?;
-
-        let mut out = HashMap::new();
-        for row in rows {
-            let item_id: String = row.get(0);
-            let seconds: i64 = row.get(1);
-            let stopped: i64 = row.get(2);
-            out.insert(
-                item_id,
-                WorkRun {
-                    seconds: seconds.max(0) as u64,
-                    stopped: stopped != 0,
-                },
-            );
-        }
-        Ok(out)
-    }
-
-    pub async fn save_work_runs(
-        &self,
-        conversation_id: &str,
-        runs: Vec<(String, WorkRun)>,
-    ) -> AppResult<()> {
-        if runs.is_empty() {
-            return Ok(());
-        }
-        let mut builder: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-            "INSERT INTO work_runs (conversation_id, item_id, duration_seconds, stopped) ",
-        );
-        builder.push_values(runs, |mut b, (item_id, run)| {
-            b.push_bind(conversation_id)
-                .push_bind(item_id)
-                .push_bind(to_db_token(run.seconds))
-                .push_bind(i64::from(run.stopped));
-        });
-        builder.push(
-            " ON CONFLICT(conversation_id, item_id) DO UPDATE SET \
-             duration_seconds = excluded.duration_seconds, stopped = excluded.stopped",
-        );
-        builder.build().execute(&self.pool).await.map_err(sql_err)?;
+        sqlx::query("UPDATE sessions SET updated_at = ?2 WHERE id = ?1")
+            .bind(session_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(sql_err)?;
+        tx.commit().await.map_err(sql_err)?;
         Ok(())
     }
 
-    pub async fn save_reasoning_durations(
-        &self,
-        conversation_id: &str,
-        durations: Vec<(String, u64)>,
-    ) -> AppResult<()> {
-        if durations.is_empty() {
+    async fn append_history(&self, session_id: &str, records: &[HistoryRecord]) -> AppResult<()> {
+        if records.is_empty() {
             return Ok(());
         }
-        let mut builder: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-            "INSERT INTO reasoning_durations (conversation_id, item_id, duration_seconds) ",
-        );
-        builder.push_values(durations, |mut b, (item_id, secs)| {
-            b.push_bind(conversation_id)
-                .push_bind(item_id)
-                .push_bind(to_db_token(secs));
-        });
-        builder.push(" ON CONFLICT(conversation_id, item_id) DO UPDATE SET duration_seconds = excluded.duration_seconds");
-        builder.build().execute(&self.pool).await.map_err(sql_err)?;
+        let now = now_ms();
+        let mut tx = self.pool.begin().await.map_err(sql_err)?;
+        let row = sqlx::query(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM session_entries WHERE session_id = ?1",
+        )
+        .bind(session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(sql_err)?;
+        let start_seq: i64 = row.get(0);
+
+        for (offset, record) in records.iter().enumerate() {
+            let seq = start_seq + offset as i64;
+            let raw = serde_json::to_string(record)
+                .map_err(|e| AppError::other(format!("serialize history record: {e}")))?;
+            sqlx::query(
+                "INSERT INTO session_entries (session_id, seq, record) VALUES (?1, ?2, ?3)",
+            )
+            .bind(session_id)
+            .bind(seq)
+            .bind(raw)
+            .execute(&mut *tx)
+            .await
+            .map_err(sql_err)?;
+        }
+
+        sqlx::query("UPDATE sessions SET updated_at = ?2 WHERE id = ?1")
+            .bind(session_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(sql_err)?;
+        tx.commit().await.map_err(sql_err)?;
+        Ok(())
+    }
+
+    async fn get_history(
+        &self,
+        session_id: &str,
+        limit: usize,
+        before_seq: Option<i64>,
+    ) -> AppResult<SessionRecordPage> {
+        let capped = limit.clamp(1, 200);
+        let fetch_limit = (capped + 1) as i64;
+        let mut rows = if let Some(before) = before_seq {
+            sqlx::query(
+                "SELECT seq, record FROM session_entries
+                 WHERE session_id = ?1 AND seq < ?2
+                 ORDER BY seq DESC LIMIT ?3",
+            )
+            .bind(session_id)
+            .bind(before)
+            .bind(fetch_limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(sql_err)?
+        } else {
+            sqlx::query(
+                "SELECT seq, record FROM session_entries
+                 WHERE session_id = ?1
+                 ORDER BY seq DESC LIMIT ?2",
+            )
+            .bind(session_id)
+            .bind(fetch_limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(sql_err)?
+        };
+
+        let has_more = rows.len() > capped;
+        if has_more {
+            rows.truncate(capped);
+        }
+        rows.reverse();
+
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            let seq: i64 = row.get(0);
+            let raw: String = row.get(1);
+            let record: HistoryRecord = serde_json::from_str(&raw)
+                .map_err(|e| AppError::other(format!("invalid history record: {e}")))?;
+            records.push(SessionRecord { seq, record });
+        }
+        let earliest_seq = records.first().map(|entry| entry.seq);
+
+        Ok(SessionRecordPage {
+            records,
+            has_more,
+            earliest_seq,
+        })
+    }
+
+    async fn set_context_tokens(&self, session_id: &str, context_tokens: u64) -> AppResult<()> {
+        let now = now_ms();
+        sqlx::query(
+            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = 0,
+             last_output_tokens = 0, last_cached_tokens = 0, last_reasoning_tokens = 0,
+             updated_at = ?3 WHERE id = ?1",
+        )
+        .bind(session_id)
+        .bind(to_db_token(context_tokens))
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(sql_err)?;
+
+        Ok(())
+    }
+
+    async fn record_usage(&self, session_id: &str, usage: &TurnUsage) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE sessions SET last_context_tokens = ?2, last_input_tokens = ?3,
+             last_output_tokens = ?4, last_cached_tokens = ?5, last_reasoning_tokens = ?6,
+             updated_at = ?7 WHERE id = ?1",
+        )
+        .bind(session_id)
+        .bind(to_db_token(usage.context_tokens))
+        .bind(to_db_token(usage.input_tokens))
+        .bind(to_db_token(usage.output_tokens))
+        .bind(to_db_token(usage.cached_tokens))
+        .bind(to_db_token(usage.reasoning_tokens))
+        .bind(now_ms())
+        .execute(&self.pool)
+        .await
+        .map_err(sql_err)?;
         Ok(())
     }
 }

@@ -6,14 +6,7 @@ import { newId } from "./api";
 import { useWorkspaceStore } from "./workspace";
 import { useArtifactsStore } from "./artifacts";
 import { useConnectorsStore } from "./connectors";
-import {
-  applyResult,
-  deltaText,
-  recordsToMessages,
-  resultFromStep,
-  toolItemFromStep,
-  usageFromEvent,
-} from "./steps";
+import { recordsToMessages } from "./steps";
 import type {
   AttachmentRef,
   Budget,
@@ -601,6 +594,7 @@ async function streamRun(
         for (const item of m.items) {
           if (item.type === "toolCall" && item.status === "running") item.status = "error";
           else if (item.type === "work" && item.active) item.active = false;
+          else if (item.type === "reasoning" && item.active) item.active = false;
         }
       });
       set((s) => {
@@ -685,130 +679,112 @@ async function streamRun(
       reasoningBuffer = "";
     });
 
-    const stepKinds = new Map<number, "thought" | "text" | "work">();
-    const thoughtStarts = new Map<number, number>();
-
-    const closeThought = (index: number, reportedSeconds?: number) => {
-      const started = thoughtStarts.get(index);
-      thoughtStarts.delete(index);
-      const seconds =
-        reportedSeconds ?? Math.max(1, Math.round((Date.now() - (started ?? Date.now())) / 1000));
-      syncFlush();
-      patch((m) => {
-        for (let i = m.items.length - 1; i >= 0; i--) {
-          const item = m.items[i];
-          if (item.type === "reasoning" && item.active) {
-            item.active = false;
-            item.durationSeconds = seconds;
-            break;
-          }
-        }
-      });
-    };
-
     const handleEvent = (event: ChatStreamEvent) => {
       receivedEvents = true;
 
-      const usage = usageFromEvent(event);
-      if (usage) {
-        set((s) => {
-          if (s.currentSessionId !== sessionId) return;
-          s.sessionTokens = {
-            contextTokens: usage.contextTokens ?? s.sessionTokens.contextTokens,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cachedTokens: usage.cachedTokens,
-            reasoningTokens: usage.reasoningTokens,
-          };
-        });
-      }
-
-      switch (event.event_type) {
-        case "step.start": {
-          const step = event.step;
-          const index = event.index;
-          if (!step || index === undefined) break;
-          if (step.type === "thought") {
-            stepKinds.set(index, "thought");
-            thoughtStarts.set(index, Date.now());
-            break;
-          }
-          if (step.type === "model_output") {
-            stepKinds.set(index, "text");
-            break;
-          }
-          if (step.type === "work") {
-            stepKinds.set(index, "work");
-            syncFlush();
-            patch((m) => {
-              m.items.push({ type: "work", id: newId(), active: true });
-            });
-            break;
-          }
-          const tool = toolItemFromStep(step);
-          if (tool) {
-            syncFlush();
-            patch((m) => {
-              m.items.push(tool);
-            });
-            break;
-          }
-          const result = resultFromStep(step);
-          if (result) {
-            patch((m) => {
-              applyResult(m.items, result);
-            });
-          }
-          break;
-        }
-        case "step.delta": {
-          const index = event.index;
-          if (index === undefined) break;
-          const text = deltaText(event.delta);
-          if (!text) break;
-          const kind = stepKinds.get(index);
-          if (kind === "thought") {
-            reasoningBuffer += text;
-            scheduleFlush();
-          } else if (kind === "text") {
-            textBuffer += text;
-            scheduleFlush();
-          }
-          break;
-        }
-        case "step.stop": {
-          const index = event.index;
-          if (index === undefined) break;
-          const kind = stepKinds.get(index);
-          stepKinds.delete(index);
-          if (kind === "thought") closeThought(index, event.duration_seconds);
-          else if (kind === "text") syncFlush();
-          else if (kind === "work") {
-            syncFlush();
-            patch((m) => {
-              for (let i = m.items.length - 1; i >= 0; i--) {
-                const item = m.items[i];
-                if (item.type === "work" && item.active) {
-                  item.active = false;
-                  item.durationSeconds = event.duration_seconds;
-                  item.stopped = event.stopped;
-                  break;
-                }
-              }
-            });
-          }
-          break;
-        }
-        case "orch.notice":
+      switch (event.type) {
+        case "workStart":
+          syncFlush();
           patch((m) => {
-            m.notice = event.message;
+            m.items.push({ type: "work", id: newId(), active: true });
           });
           break;
-        case "orch.compacted": {
+        case "workStop":
+          syncFlush();
+          patch((m) => {
+            for (let i = m.items.length - 1; i >= 0; i--) {
+              const item = m.items[i];
+              if (item.type === "work" && item.active) {
+                item.active = false;
+                item.durationSeconds = event.durationSeconds;
+                item.stopped = event.stopped;
+                break;
+              }
+            }
+          });
+          break;
+        case "reasoningStart":
+          syncFlush();
+          patch((m) => {
+            m.items.push({ type: "reasoning", id: newId(), text: "", active: true, startTime: Date.now() });
+          });
+          break;
+        case "reasoningDelta":
+          reasoningBuffer += event.text;
+          scheduleFlush();
+          break;
+        case "reasoningStop":
+          syncFlush();
+          patch((m) => {
+            for (let i = m.items.length - 1; i >= 0; i--) {
+              const item = m.items[i];
+              if (item.type === "reasoning" && item.active) {
+                if (!item.text.trim()) {
+                  m.items.splice(i, 1);
+                } else {
+                  item.active = false;
+                  item.durationSeconds = event.durationSeconds;
+                }
+                break;
+              }
+            }
+          });
+          break;
+        case "textDelta":
+          textBuffer += event.text;
+          scheduleFlush();
+          break;
+        case "textStop":
+          syncFlush();
+          break;
+        case "toolStart":
+          syncFlush();
+          patch((m) => {
+            m.items.push({
+              type: "toolCall",
+              id: event.id || newId(),
+              name: event.name,
+              args: JSON.stringify(event.arguments ?? {}),
+              displayInfo: event.display,
+              status: "running",
+            });
+          });
+          break;
+        case "toolResult":
+          patch((m) => {
+            for (let i = m.items.length - 1; i >= 0; i--) {
+              const item = m.items[i];
+              if (item.type === "toolCall" && item.id === event.callId) {
+                item.output = event.output;
+                item.status = event.isError ? "error" : "done";
+                break;
+              }
+            }
+          });
+          break;
+        case "usage":
+          set((s) => {
+            if (s.currentSessionId !== sessionId) return;
+            s.sessionTokens = {
+              contextTokens: event.contextTokens,
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              cachedTokens: event.cachedTokens,
+              reasoningTokens: event.reasoningTokens,
+            };
+          });
+          break;
+        case "notice":
+          patch((m) => {
+            m.notice = event.message || undefined;
+          });
+          break;
+        case "compacted": {
           syncFlush();
           set((s) => {
             if (s.currentSessionId !== sessionId) return;
-            const noticeId = event.message_id || newId();
+            s.sessionTokens.contextTokens = event.contextTokens;
+            const noticeId = event.id || newId();
             if (s.messages.some((m) => m.id === noticeId)) return;
 
             const notice: ChatMessage = {
@@ -817,9 +793,9 @@ async function streamRun(
               items: [
                 {
                   type: "compactionNotice",
-                  id: event.item_id || newId(),
-                  originalMessageCount: event.original_message_count ?? 0,
-                  ts: event.ts ?? Date.now(),
+                  id: `${noticeId}-notice`,
+                  originalMessageCount: event.originalMessageCount,
+                  ts: event.ts,
                 },
               ],
               attachments: [],
@@ -846,25 +822,21 @@ async function streamRun(
           });
           break;
         }
-        case "interaction.status_update":
-          if (event.status === "cancelled") {
-            syncFlush();
-            settle();
-          }
+        case "cancelled":
+          syncFlush();
+          settle();
           break;
         case "error": {
           syncFlush();
-          const message = event.error?.message ?? event.message ?? "The agent stopped unexpectedly.";
+          const message = event.message || "The agent stopped unexpectedly.";
           patch((m) => {
             m.error = message;
           });
           settle();
           break;
         }
-        case "orch.resync":
+        case "resync":
           syncFlush();
-          stepKinds.clear();
-          thoughtStarts.clear();
           patch((m) => {
             m.items = [];
             m.error = undefined;

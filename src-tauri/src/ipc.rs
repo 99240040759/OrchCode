@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use orchharness::backend::local_fs::LocalWorkspaceOps;
-use orchharness::backend::{SessionMetaStore, SummarizerBackend, WebSearchBackend, WorkspaceOps};
+use orchharness::backend::{SessionStore, SummarizerBackend, WebSearchBackend, WorkspaceOps};
 use orchharness::connectors::CONNECTOR_DEFS;
 use orchharness::error::AppError;
 use orchharness::events::{ChatEvent, DictationEvent, EventSink, TerminalEvent};
@@ -23,7 +23,7 @@ use crate::dictation;
 use crate::gateway::{Budget, CloudAttachment, CloudChatStreamReq, ModelInfo};
 use crate::llm::{
     build_agent, build_user_message, parse_thinking_effort, run_chat, AgentInputs, AttachmentRef,
-    ChatRun, GatewaySummarizer, GatewayWebSearch, RunOutcome, RunParams, SqliteMetaStore,
+    ChatRun, GatewaySummarizer, GatewayWebSearch, RunOutcome, RunParams,
 };
 use crate::persistence::SessionRecordPage;
 use crate::state::AppState;
@@ -37,15 +37,14 @@ struct TauriEventSink {
 
 impl EventSink for TauriEventSink {
     fn send(&self, event: ChatEvent) {
+        if let ChatEvent::FileWritten { path } = &event {
+            let state = self.app.state::<AppState>();
+            state.invalidate_file_index();
+            let _ = self
+                .app
+                .emit("file-written", serde_json::json!({ "path": path }));
+        }
         let _ = self.channel.send(event);
-    }
-
-    fn emit_file_written(&self, path: &str) {
-        let state = self.app.state::<AppState>();
-        state.invalidate_file_index();
-        let _ = self
-            .app
-            .emit("file-written", serde_json::json!({ "path": path }));
     }
 }
 
@@ -327,10 +326,7 @@ pub async fn forget_workspace(
 
 #[tauri::command]
 pub async fn list_models(state: State<'_, AppState>, force_refresh: Option<bool>) -> Result<Vec<ModelDto>, String> {
-    let catalog = if state.active_cloud_workspace().is_some() {
-        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
-        std::sync::Arc::new(state.gateway.cloud_models().await.map_err(|e| e.to_string())?)
-    } else if force_refresh.unwrap_or(false) {
+    let catalog = if force_refresh.unwrap_or(false) {
         state.refresh_catalog().await.map_err(|e| e.to_string())?
     } else {
         state.catalog().await.map_err(|e| e.to_string())?
@@ -495,7 +491,7 @@ pub async fn start_chat(
                 let message = error.to_string();
                 sentry::capture_message(&format!("cloud chat run failed: {message}"), sentry::Level::Error);
                 let _ = on_event.send(ChatEvent::error(message));
-                let _ = on_event.send(ChatEvent::done());
+                let _ = on_event.send(ChatEvent::Done);
             }
             return Ok(());
         }
@@ -583,27 +579,15 @@ pub async fn start_chat(
         spawn_title_generation(&app, &state, &session_id, &prompt);
     }
 
-    let store = match orchharness::session::local_store::open_store(&state.data_dir, &session_id) {
-        Ok(store) => store,
-        Err(error) => {
-            state.finish_run(&session_id, &run_id);
-            sentry::capture_error(&error);
-            return Err(format!("failed to open the conversation: {error}"));
-        }
-    };
-
     let summarizer: Arc<dyn SummarizerBackend> = Arc::new(GatewaySummarizer {
         gateway: state.gateway.clone(),
     });
-    let meta_store: Arc<dyn SessionMetaStore> = Arc::new(SqliteMetaStore {
-        memory: state.memory.clone(),
-    });
+    let store: Arc<dyn SessionStore> = Arc::new(state.memory.clone());
 
     let chat = match ChatRun::begin(RunParams {
         session_id: &session_id,
         store,
         summarizer,
-        meta_store,
         event_sink: event_sink.clone(),
         model: &model_info,
         cancel: cancel.clone(),
@@ -641,33 +625,22 @@ pub async fn start_chat(
         skills,
     });
 
-    let result = run_chat(
-        agent,
-        &chat,
-        built.message.clone(),
-        cancel.clone(),
-        event_sink.clone(),
-    )
-    .await;
+    let result = run_chat(agent, &chat, built.message.clone()).await;
     ops.cleanup_foreground_commands(&run_id).await;
 
     if let Err(error) = chat.finish(&built.message, &result).await {
         tracing::error!(error = %error, "failed to save conversation");
         sentry::capture_error(&error);
     }
-    if result.overflowed {
-        let trigger = config::compaction_trigger_tokens(model_info.context_window);
-        let _ = state.memory.set_context_tokens(&session_id, trigger).await;
-    }
 
     state.finish_run(&session_id, &run_id);
     let _ = app.emit("sessions-updated", ());
     let closing = match result.outcome {
-        RunOutcome::Completed => vec![ChatEvent::done()],
-        RunOutcome::Cancelled => vec![ChatEvent::cancelled(), ChatEvent::done()],
+        RunOutcome::Completed => vec![ChatEvent::Done],
+        RunOutcome::Cancelled => vec![ChatEvent::Cancelled, ChatEvent::Done],
         RunOutcome::Failed(message) => {
             sentry::capture_message(&format!("chat run failed: {message}"), sentry::Level::Error);
-            vec![ChatEvent::error(message), ChatEvent::done()]
+            vec![ChatEvent::error(message), ChatEvent::Done]
         }
     };
     for event in closing {
@@ -717,7 +690,7 @@ pub async fn resume_chat(
     let _ = app.emit("sessions-updated", ());
     if let Err(error) = result {
         let _ = on_event.send(ChatEvent::error(error.to_string()));
-        let _ = on_event.send(ChatEvent::done());
+        let _ = on_event.send(ChatEvent::Done);
     }
     Ok(())
 }
@@ -770,19 +743,15 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
     let user_id = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    let local_owner = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())?;
+    let local_meta = state.memory.session_meta(&session_id).await.map_err(|e| e.to_string())?;
+    let local_exists = local_meta.is_some();
+    let local_owner = local_meta.flatten();
     ensure_owner(local_owner.as_deref(), &user_id)?;
     state.cancel_run(&session_id);
     state
         .wait_for_runs(std::slice::from_ref(&session_id), Duration::from_secs(10))
         .await;
-    if local_owner.is_some() {
-        orchharness::session::local_store::destroy(&state.data_dir, &session_id)
-            .await
-            .map_err(|e| {
-                sentry::capture_error(&e);
-                e.to_string()
-            })?;
+    if local_exists {
         state
             .memory
             .delete_session(&session_id)
@@ -792,9 +761,16 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
                 e.to_string()
             })?;
     }
-    if state.active_cloud_workspace().is_some() || local_owner.is_none() {
-        let _ = state.ensure_fresh_token().await;
-        let _ = state.gateway.cloud_delete_session(&session_id).await;
+    if state.active_cloud_workspace().is_some() || !local_exists {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        state
+            .gateway
+            .cloud_delete_session(&session_id)
+            .await
+            .map_err(|e| {
+                sentry::capture_error(&e);
+                e.to_string()
+            })?;
     }
     let _ = app.emit("sessions-updated", ());
     Ok(())
@@ -810,50 +786,41 @@ pub async fn get_session_records(
     let user_id = state
         .current_user_id()
         .ok_or_else(|| "authentication required".to_string())?;
-    let local_owner = state.memory.session_owner(&session_id).await.map_err(|e| e.to_string())?;
+    let local_meta = state.memory.session_meta(&session_id).await.map_err(|e| e.to_string())?;
+    let local_exists = local_meta.is_some();
+    let local_owner = local_meta.flatten();
     let is_cloud_active = state.active_cloud_workspace().is_some();
+    let capped_limit = limit.unwrap_or(50).clamp(1, 200);
 
-    if is_cloud_active || local_owner.is_none() {
+    if is_cloud_active {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        return state
+            .gateway
+            .cloud_session_history(&session_id, capped_limit, before_seq)
+            .await
+            .map_err(|e| e.to_string());
+    }
+
+    if !local_exists {
         state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
         if let Ok(page) = state
             .gateway
-            .cloud_session_history(
-                &session_id,
-                limit.unwrap_or(50).clamp(1, 200),
-                before_seq,
-            )
+            .cloud_session_history(&session_id, capped_limit, before_seq)
             .await
         {
-            if state.active_cloud_workspace().is_none() {
-                if let Ok(info) = state.gateway.cloud_session_workspace(&session_id).await {
-                    state.set_workspace(Some(Workspace::from_cloud_info(info)));
-                }
+            if let Ok(info) = state.gateway.cloud_session_workspace(&session_id).await {
+                state.set_workspace(Some(Workspace::from_cloud_info(info)));
             }
             return Ok(page);
         }
     }
 
     ensure_owner(local_owner.as_deref(), &user_id)?;
-    let durations = state
+    state
         .memory
-        .reasoning_durations(&session_id)
+        .get_history(&session_id, capped_limit, before_seq)
         .await
-        .map_err(|e| e.to_string())?;
-    let runs = state
-        .memory
-        .work_runs(&session_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    orchharness::session::local_store::view_page(
-        &state.data_dir,
-        &session_id,
-        durations,
-        runs,
-        limit.unwrap_or(50).clamp(1, 200),
-        before_seq,
-    )
-    .await
-    .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())
 }
 
 fn prefs_key(state: &AppState, key: &str, scoped: bool) -> Result<String, String> {

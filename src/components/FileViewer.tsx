@@ -6,7 +6,7 @@ import * as api from "../lib/api";
 import * as utils from "../lib/utils";
 import { useArtifactsStore } from "../lib/artifacts";
 import { useImageDataUrl } from "../lib/images";
-import { useWorkspaceStore } from "../lib/workspace";
+import { useWorkspaceStore, workspaceMode } from "../lib/workspace";
 import { Markdown } from "./Markdown";
 import { CodeViewer } from "./CodeViewer";
 import { ExplorerIcon } from "./ChatPrimitives";
@@ -52,6 +52,13 @@ const MEDIA_MIMES: Record<"video" | "audio", Record<string, string>> = {
 
 function mediaMime(kind: "video" | "audio", path: string): string {
   return MEDIA_MIMES[kind][utils.getExt(path)] ?? (kind === "video" ? "video/mp4" : "audio/mpeg");
+}
+
+function resolveLocalPath(wsPath: string | null, path: string): string {
+  if (!wsPath || path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")) {
+    return path;
+  }
+  return `${wsPath.replace(/[\\/]+$/, "")}/${path}`;
 }
 
 function FileBreadcrumb({ path }: { path: string }) {
@@ -104,16 +111,68 @@ function ImagePreview({ path, version }: { path: string; version: number }) {
 
 function MediaPreview({ path, kind }: { path: string; kind: "video" | "audio" }) {
   const mime = mediaMime(kind, path);
-  const src = convertFileSrc(path);
+  const wsPath = useWorkspaceStore((s) => s.current?.path ?? null);
+  const isCloud = useWorkspaceStore((s) =>
+    s.current ? workspaceMode(s.current) === "cloud" : s.mode === "cloud"
+  );
+  const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(isCloud);
+
+  useEffect(() => {
+    if (!isCloud) {
+      setBlobSrc(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setError(null);
+    setBlobSrc(null);
+    api.readBinaryFile(path).then(
+      (bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+        setBlobSrc(objectUrl);
+        setLoading(false);
+      },
+      (e) => {
+        if (cancelled) return;
+        setError(api.errorMessage(e));
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isCloud, path, mime]);
+
+  const src = isCloud ? blobSrc : convertFileSrc(resolveLocalPath(wsPath, path));
+  const viewerClass =
+    kind === "audio" ? "NativeMediaViewer NativeMediaViewer--audio" : "NativeMediaViewer";
+
+  if (error) {
+    return (
+      <div className={viewerClass}>
+        <div className="FileContent-msg">{error}</div>
+      </div>
+    );
+  }
+  if (loading || !src) {
+    return <div className={viewerClass}>{LOADING_SPINNER}</div>;
+  }
 
   return (
-    <div className={kind === "audio" ? "NativeMediaViewer NativeMediaViewer--audio" : "NativeMediaViewer"}>
+    <div className={viewerClass}>
       {kind === "video" ? (
-        <video controls className="NativeMediaViewer-video">
+        <video key={src} controls className="NativeMediaViewer-video">
           <source src={src} type={mime} />
         </video>
       ) : (
-        <audio controls className="NativeMediaViewer-audio">
+        <audio key={src} controls className="NativeMediaViewer-audio">
           <source src={src} type={mime} />
         </audio>
       )}

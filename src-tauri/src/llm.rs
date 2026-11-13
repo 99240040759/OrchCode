@@ -1,21 +1,17 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use orchharness::backend::{
-    SessionMetaStore, SummarizerBackend, TavilyRequest, TavilyResponse, WebSearchBackend,
-};
+use orchharness::backend::{SummarizerBackend, TavilyRequest, TavilyResponse, WebSearchBackend};
 use orchharness::error::AppResult;
 pub use orchharness::llm::{
     build_agent, build_client_with_middleware, build_user_message, parse_thinking_effort,
     run_chat, AgentInputs, ChatAgent, ChatClient, ChatRun, RunOutcome, RunParams,
 };
-pub use orchharness::persistence::{AttachmentRef, TurnUsage};
-use orchharness::work::WorkRun;
+pub use orchharness::persistence::AttachmentRef;
 use secrecy::ExposeSecret;
 
 use crate::config;
 use crate::gateway::{Gateway, TokenHandle};
-use crate::persistence::SqliteMemory;
 
 #[derive(Clone, Debug)]
 pub struct AuthMiddleware {
@@ -77,40 +73,5 @@ pub struct GatewaySummarizer {
 impl SummarizerBackend for GatewaySummarizer {
     async fn summarize(&self, system: &str, prompt: &str, max_tokens: u64) -> AppResult<String> {
         self.gateway.summarize(system, prompt, max_tokens).await
-    }
-}
-
-#[derive(Clone)]
-pub struct SqliteMetaStore {
-    pub memory: SqliteMemory,
-}
-
-#[async_trait]
-impl SessionMetaStore for SqliteMetaStore {
-    async fn session_context_tokens(&self, session_id: &str) -> u64 {
-        self.memory
-            .session_context_tokens(session_id)
-            .await
-            .unwrap_or(0)
-    }
-
-    async fn set_context_tokens(&self, session_id: &str, tokens: u64) -> AppResult<()> {
-        self.memory.set_context_tokens(session_id, tokens).await
-    }
-
-    async fn record_usage(&self, session_id: &str, usage: &TurnUsage) -> AppResult<()> {
-        self.memory.record_usage(session_id, usage).await
-    }
-
-    async fn save_reasoning_durations(
-        &self,
-        session_id: &str,
-        keys: Vec<(String, u64)>,
-    ) -> AppResult<()> {
-        self.memory.save_reasoning_durations(session_id, keys).await
-    }
-
-    async fn save_work_runs(&self, session_id: &str, keys: Vec<(String, WorkRun)>) -> AppResult<()> {
-        self.memory.save_work_runs(session_id, keys).await
     }
 }

@@ -14,7 +14,6 @@ export function TerminalView({ id }: { id: string }) {
     const sessionId = `${id}:${api.newId()}`;
     let disposed = false;
 
-    // All terminal styling comes from the design tokens in global.css.
     const styles = getComputedStyle(document.documentElement);
     const token = (name: string) => styles.getPropertyValue(name).trim();
     const ink = token("--brand-ink");

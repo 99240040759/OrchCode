@@ -31,7 +31,8 @@ export interface SessionSummary {
   running?: boolean;
 }
 
-export type ToolIcon =  | "file"
+export type ToolIcon =
+  | "file"
   | "folder"
   | "terminal"
   | "search"
@@ -90,84 +91,70 @@ export interface AttachmentRef {
   isImage: boolean;
 }
 
-export interface AgUsage {
-  total_input_tokens?: number;
-  total_output_tokens?: number;
-  total_cached_tokens?: number;
-  total_thought_tokens?: number;
+export interface TurnUsage {
+  contextTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
 }
 
-export interface AgStep {
-  type: string;
-  id?: string;
-  call_id?: string;
-  name?: string;
-  arguments?: Record<string, unknown>;
-  result?: unknown;
-  is_error?: boolean;
-  display?: ToolDisplayInfo;
-}
+export type ChatEvent =
+  | { type: "workStart" }
+  | { type: "workStop"; durationSeconds: number; stopped: boolean }
+  | { type: "reasoningStart" }
+  | { type: "reasoningDelta"; text: string }
+  | { type: "reasoningStop"; durationSeconds: number }
+  | { type: "textDelta"; text: string }
+  | { type: "textStop" }
+  | {
+      type: "toolStart";
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      display: ToolDisplayInfo;
+    }
+  | { type: "toolResult"; callId: string; isError: boolean; output: string }
+  | { type: "fileWritten"; path: string }
+  | ({ type: "usage" } & TurnUsage)
+  | { type: "notice"; message: string }
+  | {
+      type: "compacted";
+      id: string;
+      originalMessageCount: number;
+      ts: number;
+      contextTokens: number;
+    }
+  | { type: "resync" }
+  | { type: "cancelled" }
+  | { type: "error"; message: string; code?: string }
+  | { type: "done" };
 
-export interface AgDelta {
-  type?: string;
-  text?: string;
-  content?: { text?: string };
-}
+export type ChatStreamEvent = ChatEvent;
 
-export interface AgEvent {
-  event_type: string;
-  index?: number;
-  step?: AgStep;
-  delta?: AgDelta;
-  usage?: AgUsage;
-  step_usage?: AgUsage;
-  interaction?: { status?: string; usage?: AgUsage };
-  status?: string;
-  error?: { message?: string; code?: string };
-  message?: string;
-  duration_seconds?: number;
-  stopped?: boolean;
-  original_message_count?: number;
-  ts?: number;
-  message_id?: string | null;
-  item_id?: string | null;
-}
-
-export type ChatStreamEvent = AgEvent;
-
-export interface HistoryContentPart {
-  type: string;
-  text?: string;
-  data?: string;
-  mime_type?: string;
-  uri?: string;
-  name?: string;
-  path?: string;
-}
+export type HistoryUserPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mimeType: string; data?: string; uri?: string }
+  | { type: "document"; name: string; path?: string };
 
 export type HistoryRecord =
-  | { kind: "user_input"; content: HistoryContentPart[] }
+  | { kind: "user"; content: HistoryUserPart[] }
+  | { kind: "work"; durationSeconds: number; stopped?: boolean }
+  | { kind: "reasoning"; text: string; durationSeconds: number }
   | {
-      kind: "step";
-      index: number;
-      step: AgStep;
-      deltas: AgDelta[];
-      stop?: { duration_seconds?: number; stopped?: boolean } | null;
+      kind: "toolCall";
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      display: ToolDisplayInfo;
+      output?: string;
+      isError?: boolean;
     }
-  | { kind: "interaction"; event_type: string; data: Record<string, unknown> }
-  | {
-      kind: "orch.compaction";
-      original_message_count: number;
-      ts: number;
-      message_id: string;
-      item_id: string;
-    };
+  | { kind: "text"; text: string }
+  | { kind: "compaction"; id: string; originalMessageCount: number; ts: number }
+  | { kind: "error"; message: string };
 
-export interface SessionRecord {
-  seq: number;
-  turn: number;
-  record: HistoryRecord;
-}
+export type SessionRecord = { seq: number } & HistoryRecord;
 
 export interface SessionRecordPage {
   records: SessionRecord[];
