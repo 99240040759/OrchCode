@@ -2,13 +2,10 @@ pub mod auth;
 pub mod browser;
 pub mod cloud;
 pub mod config;
-pub mod connector_tools;
 pub mod connectors;
 pub mod credentials;
 pub mod dictation;
 pub mod document;
-pub mod error;
-pub mod events;
 pub mod fsapi;
 pub mod gateway;
 pub mod ipc;
@@ -16,16 +13,12 @@ pub mod llm;
 pub mod media;
 pub mod persistence;
 pub mod platform;
-pub mod session;
-pub mod skills;
 pub mod state;
 pub mod terminal;
-pub mod tools;
-pub mod util;
-pub mod wire;
-pub mod work;
 pub mod workspace;
 
+use orchharness::skills::seed_bundled_skills;
+use orchharness::util::{strip_prefix_ignore_ascii_case, warm_login_shell_path};
 use state::AppState;
 use tauri::{Emitter, Manager};
 
@@ -90,7 +83,7 @@ async fn handle_sign_in_callback(app: &tauri::AppHandle, raw_url: &str) {
 }
 
 async fn handle_deep_link_url(app: &tauri::AppHandle, raw_url: &str) {
-    if let Some(rest) = util::strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
+    if let Some(rest) = strip_prefix_ignore_ascii_case(raw_url, "orch://oauth/") {
         handle_connector_callback(app, rest).await;
     } else if is_sign_in_callback_url(raw_url) {
         handle_sign_in_callback(app, raw_url).await;
@@ -137,7 +130,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let mut handled = false;
                 for arg in args {
-                    if util::strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
+                    if strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
                         handled = true;
                         handle_deep_link_url(&app_handle, &arg).await;
                     }
@@ -169,10 +162,10 @@ pub fn run() {
                 level: sentry::Level::Info,
                 ..Default::default()
             });
-            util::warm_login_shell_path();
+            warm_login_shell_path();
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            skills::seed_bundled_skills(&data_dir);
+            seed_bundled_skills(&data_dir);
 
             let app_state = AppState::new(&data_dir)?;
             app.manage(app_state);
@@ -189,7 +182,7 @@ pub fn run() {
                     let args: Vec<String> = std::env::args().skip(1).collect();
                     tauri::async_runtime::spawn(async move {
                         for arg in args {
-                            if util::strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
+                            if strip_prefix_ignore_ascii_case(&arg, "orch://").is_some() {
                                 handle_deep_link_url(&handle, &arg).await;
                             }
                         }
@@ -234,7 +227,6 @@ pub fn run() {
             ipc::list_models,
             ipc::get_budget,
             ipc::get_session_records,
-            ipc::set_cloud_session,
             ipc::clear_session,
             ipc::get_user_pref,
             ipc::set_user_pref,

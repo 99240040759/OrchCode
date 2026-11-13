@@ -3,6 +3,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
+use orchharness::backend::local_fs::LocalWorkspaceOps;
+use orchharness::backend::{SessionMetaStore, SummarizerBackend, WebSearchBackend, WorkspaceOps};
+use orchharness::connectors::CONNECTOR_DEFS;
+use orchharness::error::AppError;
+use orchharness::events::{ChatEvent, DictationEvent, EventSink, TerminalEvent};
+use orchharness::skills::load_all_skills;
+use orchharness::tools::ToolContext;
+use orchharness::util::{http_client, truncate_chars};
 use secrecy::ExposeSecret;
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -12,18 +20,14 @@ use crate::auth::{self, UserDisplay};
 use crate::cloud::{self, CloudWorkspaceInfo};
 use crate::config;
 use crate::dictation;
-use crate::error::AppError;
-use crate::events::{ChatEvent, DictationEvent, EventSink, TerminalEvent};
 use crate::gateway::{Budget, CloudAttachment, CloudChatStreamReq, ModelInfo};
 use crate::llm::{
-    build_agent, build_user_message, run_chat, AgentInputs, AttachmentRef, ChatRun, RunOutcome,
-    RunParams, SessionBackend,
+    build_agent, build_user_message, parse_thinking_effort, run_chat, AgentInputs, AttachmentRef,
+    ChatRun, GatewaySummarizer, GatewayWebSearch, RunOutcome, RunParams, SqliteMetaStore,
 };
 use crate::persistence::SessionRecordPage;
-use crate::session;
 use crate::state::AppState;
 use crate::terminal;
-use crate::tools::ToolContext;
 use crate::workspace::Workspace;
 
 struct TauriEventSink {
@@ -117,7 +121,7 @@ pub async fn fetch_latest_release(app: tauri::AppHandle) -> Result<LatestRelease
         .unwrap_or(&manifest_url)
         .to_string();
 
-    let response = crate::util::http_client()
+    let response = http_client()
         .get(&manifest_url)
         .header("Cache-Control", "no-cache")
         .timeout(Duration::from_secs(20))
@@ -391,7 +395,7 @@ pub async fn start_chat(
     if session_id.trim().is_empty() {
         return Err("session id must not be empty".to_string());
     }
-    if !session::is_safe_session_id(&session_id) {
+    if !orchharness::session::is_safe_session_id(&session_id) {
         return Err("invalid session id".to_string());
     }
     if model.trim().is_empty() {
@@ -425,8 +429,6 @@ pub async fn start_chat(
                 channel: on_event.clone(),
                 app: app.clone(),
             });
-
-            state.set_cloud_session(Some(session_id.clone()));
 
             let mut cloud_attachments = Vec::with_capacity(attachments.len());
             let mut total_bytes = 0usize;
@@ -477,6 +479,8 @@ pub async fn start_chat(
                 workspace: workspace_string.clone(),
                 repo_url: Some(cloud_ws.repo_url.clone()),
                 attachments: cloud_attachments,
+                active_connectors,
+                thinking_effort,
             };
 
             let _ = app.emit("sessions-updated", ());
@@ -540,8 +544,14 @@ pub async fn start_chat(
         }
     };
 
+    let ops: Arc<dyn WorkspaceOps> = Arc::new(LocalWorkspaceOps {
+        workspace: Some(workspace.clone()),
+        data_dir: state.data_dir.clone(),
+        command_manager: (*state.command_manager).clone(),
+    });
+
     let built = match build_user_message(
-        Some(&workspace),
+        &*ops,
         &prompt,
         &attachments,
         model_info.supports_images(),
@@ -573,15 +583,27 @@ pub async fn start_chat(
         spawn_title_generation(&app, &state, &session_id, &prompt);
     }
 
-    let backend = SessionBackend {
-        data_dir: state.data_dir.clone(),
-        memory: state.memory.clone(),
+    let store = match orchharness::session::local_store::open_store(&state.data_dir, &session_id) {
+        Ok(store) => store,
+        Err(error) => {
+            state.finish_run(&session_id, &run_id);
+            sentry::capture_error(&error);
+            return Err(format!("failed to open the conversation: {error}"));
+        }
     };
 
-    let chat = match ChatRun::begin(RunParams {
-        backend,
-        session_id: &session_id,
+    let summarizer: Arc<dyn SummarizerBackend> = Arc::new(GatewaySummarizer {
         gateway: state.gateway.clone(),
+    });
+    let meta_store: Arc<dyn SessionMetaStore> = Arc::new(SqliteMetaStore {
+        memory: state.memory.clone(),
+    });
+
+    let chat = match ChatRun::begin(RunParams {
+        session_id: &session_id,
+        store,
+        summarizer,
+        meta_store,
         event_sink: event_sink.clone(),
         model: &model_info,
         cancel: cancel.clone(),
@@ -596,30 +618,27 @@ pub async fn start_chat(
         }
     };
 
-    let tool_context = ToolContext {
-        workspace: Some(workspace.clone()),
-        run_id: run_id.clone(),
+    let web_search: Arc<dyn WebSearchBackend> = Arc::new(GatewayWebSearch {
         gateway: state.gateway.clone(),
+    });
+    let tool_context = ToolContext {
+        ops: ops.clone(),
+        web_search,
         event_sink: event_sink.clone(),
-        command_manager: (*state.command_manager).clone(),
-        data_dir: state.data_dir.clone(),
+        run_id: run_id.clone(),
         supports_images: model_info.supports_images(),
     };
-    let skills = crate::skills::load_all_skills(state.data_dir.clone()).await;
+    let skills = load_all_skills(state.data_dir.clone()).await;
     let agent = build_agent(AgentInputs {
         client: &client,
         model: &model_info,
         tools: &tool_context,
-        skills,
-        data_dir: &state.data_dir,
-        workspace: Some(workspace.as_path()),
+        workspace: Some(workspace_string.as_str()),
+        environment_note: None,
         connectors: connector_defs,
         connector_tools,
-        thinking_effort: match thinking_effort.as_str() {
-            "medium" => rig::completion::Effort::Medium,
-            "high" => rig::completion::Effort::High,
-            _ => rig::completion::Effort::Low,
-        },
+        thinking_effort: parse_thinking_effort(&thinking_effort),
+        skills,
     });
 
     let result = run_chat(
@@ -630,7 +649,7 @@ pub async fn start_chat(
         event_sink.clone(),
     )
     .await;
-    state.command_manager.kill_foreground_for_run(&run_id);
+    ops.cleanup_foreground_commands(&run_id).await;
 
     if let Err(error) = chat.finish(&built.message, &result).await {
         tracing::error!(error = %error, "failed to save conversation");
@@ -664,7 +683,7 @@ pub async fn resume_chat(
     session_id: String,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
-    if !session::is_safe_session_id(&session_id) {
+    if !orchharness::session::is_safe_session_id(&session_id) {
         return Err("invalid session id".to_string());
     }
     let current = state
@@ -684,7 +703,6 @@ pub async fn resume_chat(
         state.finish_run(&session_id, &run_id);
         return Err(error.to_string());
     }
-    state.set_cloud_session(Some(session_id.clone()));
 
     let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink {
         channel: on_event.clone(),
@@ -719,7 +737,7 @@ fn spawn_title_generation(app: &tauri::AppHandle, state: &AppState, session_id: 
         if title.is_empty() {
             return;
         }
-        let title = crate::util::truncate_chars(title, 120).to_string();
+        let title = truncate_chars(title, 120).to_string();
         if let Ok(true) = memory.set_session_title(&session_id, &title).await {
             let _ = app.emit("sessions-updated", ());
         }
@@ -759,7 +777,7 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
         .wait_for_runs(std::slice::from_ref(&session_id), Duration::from_secs(10))
         .await;
     if local_owner.is_some() {
-        session::destroy(&state.data_dir, &session_id)
+        orchharness::session::local_store::destroy(&state.data_dir, &session_id)
             .await
             .map_err(|e| {
                 sentry::capture_error(&e);
@@ -777,9 +795,6 @@ pub async fn clear_session(app: tauri::AppHandle, state: State<'_, AppState>, se
     if state.active_cloud_workspace().is_some() || local_owner.is_none() {
         let _ = state.ensure_fresh_token().await;
         let _ = state.gateway.cloud_delete_session(&session_id).await;
-        if state.cloud_session().as_deref() == Some(session_id.as_str()) {
-            state.set_cloud_session(None);
-        }
     }
     let _ = app.emit("sessions-updated", ());
     Ok(())
@@ -814,9 +829,6 @@ pub async fn get_session_records(
                     state.set_workspace(Some(Workspace::from_cloud_info(info)));
                 }
             }
-            if state.active_cloud_workspace().is_some() {
-                state.set_cloud_session(Some(session_id.clone()));
-            }
             return Ok(page);
         }
     }
@@ -832,7 +844,7 @@ pub async fn get_session_records(
         .work_runs(&session_id)
         .await
         .map_err(|e| e.to_string())?;
-    session::view_page(
+    orchharness::session::local_store::view_page(
         &state.data_dir,
         &session_id,
         durations,
@@ -842,13 +854,6 @@ pub async fn get_session_records(
     )
     .await
     .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn set_cloud_session(state: State<'_, AppState>, session_id: Option<String>) {
-    if state.active_cloud_workspace().is_some() {
-        state.set_cloud_session(session_id.filter(|id| !id.trim().is_empty()));
-    }
 }
 
 fn prefs_key(state: &AppState, key: &str, scoped: bool) -> Result<String, String> {
@@ -939,10 +944,31 @@ pub async fn terminal_open(
     let id_cleanup = id.clone();
     let instance_id = uuid::Uuid::new_v4();
 
-    if state.active_cloud_workspace().is_some() {
-        return Err("Terminals are not available in cloud workspaces. The agent runs commands in its own sandbox.".to_string());
-    }
-    let session = {
+    let session = if let Some(cloud) = state.active_cloud_workspace() {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        let token = state.gateway.require_token().map_err(|e| e.to_string())?;
+        terminal::open_cloud(
+            &cloud.workspace_uri,
+            token,
+            cols.max(1),
+            rows.max(1),
+            on_event,
+            instance_id,
+            Box::new(move |exited_id| {
+                let mut guard = terminals.lock();
+                if let Some(entry) = guard.get(&id_cleanup) {
+                    if entry.instance_id() == exited_id {
+                        guard.remove(&id_cleanup);
+                    }
+                }
+            }),
+        )
+        .await
+        .map_err(|e| {
+            sentry::capture_error(&e);
+            e.to_string()
+        })?
+    } else {
         let workspace = state.workspace().unwrap_or_else(|| {
             std::env::var_os("HOME")
                 .or_else(|| std::env::var_os("USERPROFILE"))
@@ -1020,8 +1046,6 @@ pub async fn terminal_close(state: State<'_, AppState>, id: String) -> Result<()
     }
     Ok(())
 }
-
-use crate::connectors::CONNECTOR_DEFS;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1107,6 +1131,6 @@ pub async fn disconnect_connector(state: State<'_, AppState>, connector_id: Stri
 
 #[tauri::command]
 pub fn report_error(message: String) {
-    let truncated = crate::util::truncate_chars(&message, 2000);
+    let truncated = truncate_chars(&message, 2000);
     sentry::capture_message(truncated, sentry::Level::Error);
 }

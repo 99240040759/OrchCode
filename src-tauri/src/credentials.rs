@@ -1,6 +1,6 @@
 use keyring::Entry;
 
-use crate::error::{AppError, AppResult};
+use orchharness::error::{AppError, AppResult};
 
 const SERVICE: &str = "Orch";
 

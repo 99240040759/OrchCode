@@ -222,10 +222,6 @@ export function initCloudWorkspace(repoUrl: string): Promise<CloudWorkspaceInfo>
   return invoke("init_cloud_workspace", { repoUrl });
 }
 
-export function setCloudSession(sessionId: string | null): Promise<void> {
-  return invoke("set_cloud_session", { sessionId });
-}
-
 export function forgetWorkspace(workspacePath: string): Promise<void> {
   return invoke("forget_workspace", { workspacePath });
 }

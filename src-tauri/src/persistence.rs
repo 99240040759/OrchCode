@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+pub use orchharness::persistence::{SessionRecord, SessionRecordPage, SessionSummary, TurnUsage};
+use orchharness::error::{AppError, AppResult};
+use orchharness::util::now_ms;
+use orchharness::work::WorkRun;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 use sqlx::{Executor, Row};
-
-use crate::error::{AppError, AppResult};
-use crate::util::now_ms;
-use crate::work::WorkRun;
 
 const SCHEMA: &str = "
  CREATE TABLE IF NOT EXISTS sessions (
@@ -43,48 +42,6 @@ const SCHEMA: &str = "
      PRIMARY KEY (conversation_id, item_id)
  );
 ";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionRecord {
-    pub seq: i64,
-    #[serde(default)]
-    pub turn: i64,
-    pub record: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionRecordPage {
-    pub records: Vec<SessionRecord>,
-    pub has_more: bool,
-    pub earliest_seq: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionSummary {
-    pub id: String,
-    pub title: Option<String>,
-    pub workspace_path: Option<String>,
-    pub updated_at: i64,
-    pub context_tokens: i64,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cached_tokens: i64,
-    pub reasoning_tokens: i64,
-    #[serde(default)]
-    pub running: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct TurnUsage {
-    pub context_tokens: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cached_tokens: u64,
-    pub reasoning_tokens: u64,
-}
 
 const POOL_SIZE: u32 = 6;
 

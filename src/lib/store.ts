@@ -311,7 +311,6 @@ export const useChatStore = create(
         s.streamingSessionId = null;
         s.error = null;
       });
-      void api.setCloudSession(freshId).catch(() => undefined);
       await get().refreshModels();
     },
 
@@ -334,7 +333,6 @@ export const useChatStore = create(
       set((s) => {
         showSession(s, freshId, ZERO_USAGE);
       });
-      void api.setCloudSession(freshId).catch(() => undefined);
     },
 
     selectSession: async (id: string) => {
@@ -344,7 +342,6 @@ export const useChatStore = create(
       set((s) => {
         showSession(s, id, target ? usageFrom(target) : ZERO_USAGE);
       });
-      void api.setCloudSession(id).catch(() => undefined);
 
       try {
         const page = await api.getSessionRecords(id, 50);
@@ -414,7 +411,6 @@ export const useChatStore = create(
           s.error = null;
         }
       });
-      void api.setCloudSession(get().currentSessionId).catch(() => undefined);
     },
 
     send: async (prompt: string, attachments: AttachmentRef[]) => {

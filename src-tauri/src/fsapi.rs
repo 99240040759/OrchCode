@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
+use orchharness::backend::local_fs::fs_util;
+use orchharness::util::{display_path, looks_binary, lowercase_extension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::cloud::{absolute_cloud_path, relative_cloud_path, CloudWorkspace};
 use crate::config;
 use crate::state::AppState;
-use crate::tools::fs_util;
 
 const MAX_PREVIEW_BYTES: usize = 512 * 1024;
 
@@ -27,7 +28,7 @@ fn compare_ascii_case_insensitive(left: &str, right: &str) -> std::cmp::Ordering
         .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TreeEntry {
     pub name: String,
@@ -35,7 +36,7 @@ pub struct TreeEntry {
     pub is_dir: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirListing {
     pub entries: Vec<TreeEntry>,
@@ -48,8 +49,6 @@ pub struct FileContent {
     pub content: String,
     pub truncated: bool,
 }
-
-use crate::util::display_path;
 
 pub fn build_file_index(root: &Path) -> Vec<FileEntry> {
     let mut entries = Vec::new();
@@ -103,13 +102,13 @@ pub async fn list_workspace_files(
     let limit = limit.unwrap_or(100).clamp(1, 1000);
 
     if !query_str.is_empty() {
-        if let (Some(cloud), Some(session_id)) = (state.active_cloud_workspace(), state.cloud_session()) {
+        if let Some(cloud) = state.active_cloud_workspace() {
             state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
             let entries: Vec<FileEntry> = state
                 .gateway
                 .cloud_files_json(
                     "list",
-                    &session_id,
+                    &cloud.workspace_uri,
                     &[
                         ("query", query_str.clone()),
                         ("limit", limit.to_string()),
@@ -166,11 +165,16 @@ pub async fn list_workspace_dir(
     state: State<'_, AppState>,
     path: Option<String>,
 ) -> Result<DirListing, String> {
-    if state.active_cloud_workspace().is_some() {
-        return Err("Folder browsing is not available for cloud workspaces.".to_string());
+    let requested = path.unwrap_or_default();
+    if let Some(cloud) = state.active_cloud_workspace() {
+        state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+        return state
+            .gateway
+            .cloud_files_json("tree", &cloud.workspace_uri, &[("path", requested)])
+            .await
+            .map_err(|e| e.to_string());
     }
     let workspace = state.require_workspace().map_err(|e| e.to_string())?;
-    let requested = path.unwrap_or_default();
 
     tokio::task::spawn_blocking(move || {
         let root = dunce::canonicalize(&workspace).map_err(|e| e.to_string())?;
@@ -211,27 +215,21 @@ pub async fn list_workspace_dir(
     .map_err(|e| e.to_string())?
 }
 
-async fn cloud_context(
-    state: &AppState,
-) -> Result<Option<(String, Arc<CloudWorkspace>)>, String> {
+async fn cloud_context(state: &AppState) -> Result<Option<Arc<CloudWorkspace>>, String> {
     let Some(cloud) = state.active_cloud_workspace() else {
         return Ok(None);
     };
-    let session_id = state.cloud_session().ok_or_else(|| {
-        "The cloud workspace is created with your first message. Send a message to browse its files."
-            .to_string()
-    })?;
     state.ensure_fresh_token().await.map_err(|e| e.to_string())?;
-    Ok(Some((session_id, cloud)))
+    Ok(Some(cloud))
 }
 
 #[tauri::command]
 pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<FileContent, String> {
-    if let Some((session_id, cloud)) = cloud_context(&state).await? {
+    if let Some(cloud) = cloud_context(&state).await? {
         let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
         let mut content: FileContent = state
             .gateway
-            .cloud_files_json("text", &session_id, &[("path", absolute)])
+            .cloud_files_json("text", &cloud.workspace_uri, &[("path", absolute)])
             .await
             .map_err(|e| format!("cannot read {path}: {e}"))?;
         if let Some(relative) = relative_cloud_path(&cloud.repo_dir, &content.path) {
@@ -261,7 +259,7 @@ pub async fn read_text_file(state: State<'_, AppState>, path: String) -> Result<
         };
         buf.truncate(cut);
     }
-    if crate::util::looks_binary(&buf) {
+    if looks_binary(&buf) {
         return Err(format!("cannot read binary file as text: {path}"));
     }
 
@@ -281,7 +279,7 @@ fn file_mime(path: &Path) -> String {
 
 #[tauri::command]
 pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    if let Some((session_id, cloud)) = cloud_context(&state).await? {
+    if let Some(cloud) = cloud_context(&state).await? {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Resp {
@@ -290,7 +288,7 @@ pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Re
         let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
         let resp: Resp = state
             .gateway
-            .cloud_files_json("image", &session_id, &[("path", absolute)])
+            .cloud_files_json("image", &cloud.workspace_uri, &[("path", absolute)])
             .await
             .map_err(|e| format!("cannot read {path}: {e}"))?;
         return Ok(resp.data_url);
@@ -330,11 +328,11 @@ pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Re
 
 #[tauri::command]
 pub async fn read_binary_file(state: State<'_, AppState>, path: String) -> Result<tauri::ipc::Response, String> {
-    if let Some((session_id, cloud)) = cloud_context(&state).await? {
+    if let Some(cloud) = cloud_context(&state).await? {
         let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
         let bytes = state
             .gateway
-            .cloud_file_bytes(&session_id, &absolute)
+            .cloud_file_bytes(&cloud.workspace_uri, &absolute)
             .await
             .map_err(|e| format!("cannot read {path}: {e}"))?;
         return Ok(tauri::ipc::Response::new(bytes));
@@ -371,7 +369,7 @@ pub async fn read_document_metadata(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<DocumentFileMeta, String> {
-    if let Some((session_id, cloud)) = cloud_context(&state).await? {
+    if let Some(cloud) = cloud_context(&state).await? {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct CloudMeta {
@@ -383,7 +381,7 @@ pub async fn read_document_metadata(
         let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
         let meta: CloudMeta = state
             .gateway
-            .cloud_files_json("metadata", &session_id, &[("path", absolute)])
+            .cloud_files_json("metadata", &cloud.workspace_uri, &[("path", absolute)])
             .await
             .map_err(|e| format!("metadata error: {e}"))?;
         let (artifact_kind, type_label) = crate::document::document_type_info(&meta.extension);
@@ -404,7 +402,7 @@ pub async fn read_document_metadata(
     let meta = tokio::fs::metadata(&resolved)
         .await
         .map_err(|e| format!("metadata error: {e}"))?;
-    let extension = crate::util::lowercase_extension(&resolved);
+    let extension = lowercase_extension(&resolved);
     let name = resolved
         .file_name()
         .and_then(|s| s.to_str())
@@ -433,14 +431,14 @@ pub async fn read_spreadsheet(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Vec<crate::document::SpreadsheetSheet>, String> {
-    if let Some((session_id, cloud)) = cloud_context(&state).await? {
+    if let Some(cloud) = cloud_context(&state).await? {
         let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
         let bytes = state
             .gateway
-            .cloud_file_bytes(&session_id, &absolute)
+            .cloud_file_bytes(&cloud.workspace_uri, &absolute)
             .await
             .map_err(|e| format!("cannot read spreadsheet {path}: {e}"))?;
-        let ext = crate::util::lowercase_extension(Path::new(&path));
+        let ext = lowercase_extension(Path::new(&path));
         let tmp_path = std::env::temp_dir().join(format!(
             "orch-cloud-sheet-{}.{}",
             uuid::Uuid::new_v4(),

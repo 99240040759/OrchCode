@@ -84,29 +84,8 @@ export function toolDisplayInfo(name: string, args: Args, provided?: ToolDisplay
         icon: "globe",
         opensArtifact: false,
       };
-    case "browse": {
-      const urls = strList(args.urls);
-      const first = urls[0];
-      return {
-        label: "Browsed",
-        activeLabel: "Browsing",
-        targetText: first ? (urls.length > 1 ? `${first} +${urls.length - 1}` : first) : null,
-        icon: "globe",
-        opensArtifact: false,
-      };
-    }
     case "search_workspace":
       return { label: "Searched Code", activeLabel: "Searching Code", targetText: str(args.query) ?? null, icon: "search", opensArtifact: false };
-    case "find_by_name": {
-      const extensions = strList(args.Extensions).map((e) => `*.${e}`).join(", ");
-      return {
-        label: "Found Files",
-        activeLabel: "Finding Files",
-        targetText: str(args.Pattern) ?? (extensions || str(args.SearchDirectory) || null),
-        icon: "search",
-        opensArtifact: false,
-      };
-    }
     case "list_dir": {
       const path = str(args.DirectoryPath);
       return { label: "Listed", activeLabel: "Listing", targetText: path ?? null, fullPath: path ?? null, icon: "folder", opensArtifact: false };
@@ -141,8 +120,6 @@ function callFromStep(step: AgStep): CallInfo | null {
     }
     case "google_search_call":
       return { id, name: "search", args: step.arguments ?? {} };
-    case "url_context_call":
-      return { id, name: "browse", args: step.arguments ?? {} };
     default:
       return null;
   }
@@ -172,7 +149,6 @@ export function resultFromStep(step: AgStep): ResultInfo | null {
       return { id, output: resultText(step.result), isError };
     case "function_result":
     case "google_search_result":
-    case "url_context_result":
       return { id, isError };
     default:
       return null;

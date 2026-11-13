@@ -10,8 +10,8 @@ use ringbuf::HeapRb;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use tauri::ipc::Channel;
 
-use crate::error::{AppError, AppResult};
-use crate::events::DictationEvent;
+use orchharness::error::{AppError, AppResult};
+use orchharness::events::DictationEvent;
 use crate::gateway::Gateway;
 
 const MAX_SECONDS: u32 = 300;

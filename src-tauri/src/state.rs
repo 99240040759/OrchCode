@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwapOption;
 use dashmap::DashMap;
 use moka::future::Cache;
+use orchharness::backend::local_fs::CommandManager;
+use orchharness::connectors::ConnectorManager;
+use orchharness::error::{AppError, AppResult};
+use orchharness::util::{http_client, now_secs};
 use parking_lot::Mutex;
 use secrecy::{ExposeSecret, SecretString};
 use tauri::{Emitter, Manager};
@@ -14,14 +18,12 @@ use tokio_util::sync::CancellationToken;
 use crate::auth;
 use crate::cloud::CloudWorkspace;
 use crate::config;
-use crate::connectors::ConnectorManager;
+use crate::connectors::new_connector_manager;
 use crate::dictation::DictationHandle;
-use crate::error::{AppError, AppResult};
 use crate::fsapi::FileEntry;
 use crate::gateway::{Gateway, ModelCatalog, TokenHandle};
 use crate::llm::ChatClient;
 use crate::persistence::SqliteMemory;
-use crate::tools::CommandManager;
 use crate::workspace::Workspace;
 
 pub struct RunHandle {
@@ -39,7 +41,6 @@ struct SignInAttempt {
 pub struct AppState {
     pub token: TokenHandle,
     pub workspace: ArcSwapOption<Workspace>,
-    pub cloud_session: ArcSwapOption<String>,
     pub http: reqwest::Client,
     pub data_dir: PathBuf,
     pub gateway: Arc<Gateway>,
@@ -68,8 +69,8 @@ impl AppState {
         let token: TokenHandle = Arc::new(ArcSwapOption::empty());
         let gateway = Arc::new(Gateway::new(token.clone())?);
         let memory = SqliteMemory::open(&db_path)?;
-        let connector_manager = Arc::new(ConnectorManager::new(token.clone()));
-        let http = crate::util::http_client();
+        let connector_manager = Arc::new(new_connector_manager(token.clone()));
+        let http = http_client();
 
         let file_cache = Cache::builder()
             .time_to_live(Duration::from_secs(config::FILE_INDEX_TTL_SECS))
@@ -78,7 +79,6 @@ impl AppState {
         Ok(Self {
             token,
             workspace: ArcSwapOption::empty(),
-            cloud_session: ArcSwapOption::empty(),
             http,
             data_dir: data_dir.to_path_buf(),
             gateway,
@@ -229,7 +229,6 @@ impl AppState {
         let next = workspace.as_ref().map(Workspace::key);
         if previous != next {
             self.cancel_all_runs();
-            self.cloud_session.store(None);
         }
         sentry::configure_scope(|scope| match &next {
             Some(key) => scope.set_tag("workspace", key.clone()),
@@ -267,21 +266,6 @@ impl AppState {
         self.workspace().ok_or(AppError::NoWorkspace)
     }
 
-    pub fn set_cloud_session(&self, session_id: Option<String>) {
-        let changed = self.cloud_session.load().as_deref().map(|id| id.as_str())
-            != session_id.as_deref();
-        self.cloud_session.store(session_id.map(Arc::new));
-        if changed {
-            self.invalidate_file_index();
-        }
-    }
-
-    pub fn cloud_session(&self) -> Option<String> {
-        self.cloud_session
-            .load_full()
-            .map(|id| id.as_ref().clone())
-    }
-
     pub fn invalidate_file_index(&self) {
         self.file_cache.invalidate_all();
     }
@@ -293,7 +277,6 @@ impl AppState {
         if workspace.cloud().is_some() {
             self.ensure_fresh_token().await.map_err(|e| e.to_string())?;
         }
-        let cloud_session = self.cloud_session();
         let gateway = self.gateway.clone();
         self.file_cache
             .try_get_with(workspace.key(), async move {
@@ -306,13 +289,10 @@ impl AppState {
                             .map_err(|e| format!("file index task failed: {e}"))
                     }
                     Workspace::Cloud(cloud) => {
-                        let Some(session_id) = cloud_session else {
-                            return Ok(Arc::new(Vec::new()));
-                        };
                         let entries: Vec<FileEntry> = gateway
                             .cloud_files_json(
                                 "list",
-                                &session_id,
+                                &cloud.workspace_uri,
                                 &[("limit", config::CLOUD_FILE_LIST_LIMIT.to_string())],
                             )
                             .await
@@ -365,7 +345,7 @@ impl AppState {
 
     fn token_is_fresh(token: &str) -> bool {
         match auth::jwt_expiry(token) {
-            Some(exp) => exp.saturating_sub(crate::util::now_secs()) > config::TOKEN_REFRESH_SKEW_SECS,
+            Some(exp) => exp.saturating_sub(now_secs()) > config::TOKEN_REFRESH_SKEW_SECS,
             None => false,
         }
     }

@@ -1,17 +1,9 @@
-use serde::{Deserialize, Serialize};
+pub use orchharness::persistence::CloudWorkspaceInfo;
 
 pub const CLOUD_WORKSPACE_PREFIX: &str = "cloud://";
 
 pub fn is_cloud_workspace(workspace: &str) -> bool {
     workspace.trim().starts_with(CLOUD_WORKSPACE_PREFIX)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudWorkspaceInfo {
-    pub workspace: String,
-    pub repo_url: String,
-    pub repo_dir: String,
 }
 
 pub fn absolute_cloud_path(repo_dir: &str, path: &str) -> String {

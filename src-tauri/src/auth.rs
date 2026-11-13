@@ -6,7 +6,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
-use crate::error::{AppError, AppResult};
+use orchharness::error::{AppError, AppResult};
 
 const KEYRING_REFRESH_ACCOUNT: &str = "refresh_token";
 const CACHED_USER_FILE: &str = "user.json";
@@ -99,7 +99,7 @@ fn network_error(context: &str, error: reqwest::Error) -> AppError {
 impl FirebaseAuthClient {
     pub fn new() -> Self {
         Self {
-            client: crate::util::http_client(),
+            client: orchharness::util::http_client(),
         }
     }
 
@@ -410,7 +410,7 @@ fn assign_param(params: &mut AuthCallbackParams, key: &str, value: &str) {
 }
 
 fn parse_auth_callback(raw: &str) -> AuthCallbackParams {
-    let normalized = match crate::util::strip_prefix_ignore_ascii_case(raw, "orch://") {
+    let normalized = match orchharness::util::strip_prefix_ignore_ascii_case(raw, "orch://") {
         Some(rest) => format!("http://localhost/{rest}"),
         None => raw.to_string(),
     };

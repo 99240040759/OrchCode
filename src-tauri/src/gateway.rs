@@ -3,39 +3,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use orchharness::backend::{TavilyRequest, TavilyResponse};
+use orchharness::error::{AppError, AppResult};
+use orchharness::events::{ChatEvent, EventSink};
+pub use orchharness::models::ModelInfo;
+pub use orchharness::persistence::{
+    Budget, CloudAttachment, CloudChatStreamReq, CloudWorkspaceInfo, SessionRecordPage,
+    SessionSummary,
+};
+use orchharness::tools::{REPLACE_FILE_CONTENT, WRITE_TO_FILE};
+use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use secrecy::{ExposeSecret, SecretString};
 use tokio_util::sync::CancellationToken;
 
-use crate::cloud::CloudWorkspaceInfo;
 use crate::config;
-use crate::error::{AppError, AppResult};
-use crate::events::{ChatEvent, EventSink};
-use crate::persistence::{SessionRecordPage, SessionSummary};
-use crate::tools::{REPLACE_FILE_CONTENT, WRITE_TO_FILE};
 
 pub type TokenHandle = Arc<arc_swap::ArcSwapOption<SecretString>>;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub context_window: u64,
-    pub max_tokens: u64,
-    pub capabilities: Vec<String>,
-    #[serde(default)]
-    pub badge: Option<String>,
-}
-
-impl ModelInfo {
-    pub fn supports_images(&self) -> bool {
-        self.capabilities.iter().any(|c| c == "images")
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelCatalog {
@@ -72,34 +57,6 @@ impl ModelCatalog {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Budget {
-    pub cost_usd: f64,
-    pub limit_usd: f64,
-    pub remaining: f64,
-    pub period: String,
-    pub allowed: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudAttachment {
-    pub name: String,
-    pub data_base64: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudChatStreamReq {
-    pub session_id: String,
-    pub prompt: String,
-    pub model: String,
-    pub workspace: String,
-    pub repo_url: Option<String>,
-    pub attachments: Vec<CloudAttachment>,
-}
-
 #[derive(Clone)]
 pub struct Gateway {
     http: reqwest_middleware::ClientWithMiddleware,
@@ -110,13 +67,13 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(token: TokenHandle) -> AppResult<Self> {
         Ok(Self {
-            http: crate::util::retry_http_client(),
-            streaming_http: crate::util::streaming_http_client(),
+            http: orchharness::util::retry_http_client(),
+            streaming_http: orchharness::util::streaming_http_client(),
             token,
         })
     }
 
-    fn require_token(&self) -> AppResult<SecretString> {
+    pub fn require_token(&self) -> AppResult<SecretString> {
         self.token
             .load_full()
             .filter(|token| !token.expose_secret().is_empty())
@@ -222,13 +179,13 @@ impl Gateway {
 
     pub async fn cloud_init_workspace(&self, repo_url: &str) -> AppResult<CloudWorkspaceInfo> {
         let url = config::cloud_url("/workspace/init");
-        self.post(&url, &json!({ "repoUrl": repo_url }), Duration::from_secs(30))
+        self.post(&url, &json!({ "repoUrl": repo_url }), Duration::from_secs(60))
             .await
     }
 
-    fn cloud_files_url(sub: &str, session_id: &str, extra: &[(&str, String)]) -> String {
+    fn cloud_files_url(sub: &str, workspace: &str, extra: &[(&str, String)]) -> String {
         let base = config::cloud_url(&format!("/files/{sub}"));
-        let mut params: Vec<(&str, String)> = vec![("sessionId", session_id.to_string())];
+        let mut params: Vec<(&str, String)> = vec![("workspace", workspace.to_string())];
         params.extend(extra.iter().map(|(k, v)| (*k, v.clone())));
         reqwest::Url::parse_with_params(&base, &params)
             .map(|u| u.to_string())
@@ -238,16 +195,16 @@ impl Gateway {
     pub async fn cloud_files_json<T: DeserializeOwned>(
         &self,
         sub: &str,
-        session_id: &str,
+        workspace: &str,
         extra: &[(&str, String)],
     ) -> AppResult<T> {
-        let url = Self::cloud_files_url(sub, session_id, extra);
+        let url = Self::cloud_files_url(sub, workspace, extra);
         self.get(&url, Duration::from_secs(60)).await
     }
 
-    pub async fn cloud_file_bytes(&self, session_id: &str, path: &str) -> AppResult<Vec<u8>> {
+    pub async fn cloud_file_bytes(&self, workspace: &str, path: &str) -> AppResult<Vec<u8>> {
         let token = self.require_token()?;
-        let url = Self::cloud_files_url("binary", session_id, &[("path", path.to_string())]);
+        let url = Self::cloud_files_url("binary", workspace, &[("path", path.to_string())]);
         let resp = self
             .http
             .get(&url)
@@ -616,47 +573,4 @@ fn parse_server_error(raw: &str) -> (String, Option<String>) {
         Some(message) if !message.is_empty() => (message.to_string(), code),
         _ => (raw.to_string(), code),
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SearchTopic {
-    General,
-    News,
-    Finance,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SearchDepth {
-    Basic,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TavilyRequest {
-    pub query: String,
-    #[serde(rename = "maxResults", skip_serializing_if = "Option::is_none")]
-    pub max_results: Option<u32>,
-    #[serde(rename = "searchDepth", skip_serializing_if = "Option::is_none")]
-    pub search_depth: Option<SearchDepth>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic: Option<SearchTopic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub domain: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TavilyResponse {
-    #[serde(default)]
-    pub results: Vec<TavilyResult>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TavilyResult {
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub content: String,
 }

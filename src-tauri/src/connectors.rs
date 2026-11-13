@@ -1,266 +1,174 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use moka::future::Cache;
-use serde::Serialize;
+use async_trait::async_trait;
+use orchharness::connector_tools::client::{
+    AccountWire, ComposioError, ComposioTransport, ExecuteWire, ToolWire,
+};
+pub use orchharness::connectors::{ConnectorManager, RepoInfo, CONNECTOR_DEFS};
+use orchharness::util::truncate_chars;
+use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use serde_json::{json, Value};
-use rig::tool::DynamicTool;
 
-use crate::connector_tools::actions::{self, ActionDef};
-use crate::connector_tools::client::{AccountWire, ComposioClient};
-use crate::connector_tools::tool::ToolSpec;
-use crate::error::{AppError, AppResult};
+use crate::config;
 use crate::gateway::TokenHandle;
 
-const ACTIVE_STATUS: &str = "ACTIVE";
-const DEFINITIONS_TTL: Duration = Duration::from_secs(300);
+const ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const TOOLS_TIMEOUT: Duration = Duration::from_secs(45);
+const EXECUTE_TIMEOUT: Duration = Duration::from_secs(130);
 
-#[derive(Debug)]
-pub struct ConnectorDef {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
-    pub category: &'static str,
-    pub slug_prefix: &'static str,
-    pub actions: &'static [ActionDef],
+#[derive(Deserialize)]
+struct AccountsWire {
+    accounts: Vec<AccountWire>,
 }
 
-pub static CONNECTOR_DEFS: &[ConnectorDef] = &[
-    ConnectorDef {
-        id: "googledrive",
-        name: "Google Drive",
-        description: "Search, read, and organize files, folders, and spreadsheets in Google Drive.",
-        category: "Cloud Storage",
-        slug_prefix: "GOOGLEDRIVE_",
-        actions: actions::GOOGLEDRIVE,
-    },
-    ConnectorDef {
-        id: "gmail",
-        name: "Gmail",
-        description: "Search and read email, and create, send, and reply to messages in Gmail.",
-        category: "Communication",
-        slug_prefix: "GMAIL_",
-        actions: actions::GMAIL,
-    },
-    ConnectorDef {
-        id: "github",
-        name: "GitHub",
-        description: "Browse repositories and code, manage issues and pull requests, and commit changes.",
-        category: "Dev Tools",
-        slug_prefix: "GITHUB_",
-        actions: actions::GITHUB,
-    },
-    ConnectorDef {
-        id: "notion",
-        name: "Notion",
-        description: "Search, read, and edit pages and databases in Notion workspaces.",
-        category: "Productivity",
-        slug_prefix: "NOTION_",
-        actions: actions::NOTION,
-    },
-    ConnectorDef {
-        id: "slack",
-        name: "Slack",
-        description: "Search and read channel history, and send and schedule messages in Slack.",
-        category: "Communication",
-        slug_prefix: "SLACK_",
-        actions: actions::SLACK,
-    },
-    ConnectorDef {
-        id: "jira",
-        name: "Jira",
-        description: "Search, create, and update issues, comments, and workflow transitions in Jira Cloud.",
-        category: "Dev Tools",
-        slug_prefix: "JIRA_",
-        actions: actions::JIRA,
-    },
-];
-
-pub fn find_def(id: &str) -> Option<&'static ConnectorDef> {
-    CONNECTOR_DEFS.iter().find(|def| def.id == id)
-}
-
-pub fn resolve_defs(ids: &[String]) -> AppResult<Vec<&'static ConnectorDef>> {
-    ids.iter()
-        .map(|id| find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.clone())))
-        .collect()
-}
-
-pub fn def_for_slug(slug: &str) -> Option<&'static ConnectorDef> {
-    CONNECTOR_DEFS.iter().find(|def| slug.starts_with(def.slug_prefix))
-}
-
-pub struct PreparedConnectors {
-    pub tools: Vec<DynamicTool>,
-    pub defs: Vec<&'static ConnectorDef>,
-}
-
-pub struct ConnectorManager {
-    client: ComposioClient,
-    specs_cache: Cache<&'static str, Arc<Vec<ToolSpec>>>,
-    accounts_cache: Cache<(), Arc<Vec<AccountWire>>>,
-}
-
-impl ConnectorManager {
-    pub fn new(token: TokenHandle) -> Self {
-        let specs_cache = Cache::builder()
-            .time_to_live(DEFINITIONS_TTL)
-            .build();
-        let accounts_cache = Cache::builder()
-            .time_to_live(Duration::from_secs(30))
-            .build();
-        Self {
-            client: ComposioClient::new(token),
-            specs_cache,
-            accounts_cache,
-        }
-    }
-
-    async fn get_accounts(&self) -> AppResult<Arc<Vec<AccountWire>>> {
-        let client = self.client.clone();
-        self.accounts_cache
-            .try_get_with((), async move {
-                client.accounts().await.map(Arc::new).map_err(AppError::from)
-            })
-            .await
-            .map_err(|e| AppError::Connector(e.to_string()))
-    }
-
-    pub async fn connected_ids(&self) -> AppResult<Vec<&'static str>> {
-        let accounts = self.get_accounts().await?;
-        Ok(CONNECTOR_DEFS
-            .iter()
-            .filter(|def| is_connected(&accounts, def))
-            .map(|def| def.id)
-            .collect())
-    }
-
-    pub async fn github_repos(&self, query: &str) -> AppResult<Vec<RepoInfo>> {
-        let query = query.trim();
-        let (slug, args) = if query.is_empty() {
-            (
-                "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
-                json!({ "type": "public", "sort": "updated", "per_page": 50, "raw_response": true }),
-            )
-        } else {
-            ("GITHUB_FIND_REPOSITORIES", json!({ "query": query, "per_page": 30, "raw_response": true }))
-        };
-        let tool = self
-            .client
-            .tools(&[slug])
-            .await?
-            .into_iter()
-            .find(|tool| tool.slug == slug)
-            .ok_or_else(|| AppError::Connector(format!("{slug} is not available")))?;
-        let result = self.client.execute(slug, &tool.version, args).await?;
-        if !result.successful {
-            return Err(AppError::Connector(
-                result.error.unwrap_or_else(|| "GitHub request failed".to_string()),
-            ));
-        }
-        let mut repos = Vec::new();
-        collect_repos(&result.data, &mut repos);
-        Ok(repos)
-    }
-
-    pub async fn begin_connect(&self, id: &str) -> AppResult<String> {
-        let def = find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.to_string()))?;
-        self.accounts_cache.invalidate_all();
-        self.specs_cache.invalidate_all();
-        Ok(self.client.connect(def.id).await?)
-    }
-
-    pub async fn disconnect(&self, id: &str) -> AppResult<()> {
-        let def = find_def(id).ok_or_else(|| AppError::ConnectorNotFound(id.to_string()))?;
-        let accounts = self.client.accounts().await?;
-        let account = accounts
-            .iter()
-            .find(|account| account.toolkit == def.id && account.status == ACTIVE_STATUS)
-            .ok_or_else(|| AppError::ConnectorNotConnected(def.name.to_string()))?;
-        self.accounts_cache.invalidate_all();
-        self.specs_cache.invalidate_all();
-        Ok(self.client.disconnect(&account.id).await?)
-    }
-
-    pub async fn prepare(&self, ids: &[String]) -> AppResult<PreparedConnectors> {
-        let defs = resolve_defs(ids)?;
-        if defs.is_empty() {
-            return Ok(PreparedConnectors { tools: Vec::new(), defs });
-        }
-
-        let accounts = self.get_accounts().await?;
-        if let Some(missing) = defs.iter().find(|def| !is_connected(&accounts, def)) {
-            return Err(AppError::ConnectorNotConnected(missing.name.to_string()));
-        }
-
-        let sets = futures::future::try_join_all(defs.iter().map(|def| self.specs(def))).await?;
-        let mut tools = Vec::new();
-        for set in sets {
-            for spec in set.iter() {
-                tools.push(spec.clone().into_tool(self.client.clone())?);
-            }
-        }
-        Ok(PreparedConnectors { tools, defs })
-    }
-
-    async fn specs(&self, def: &'static ConnectorDef) -> AppResult<Arc<Vec<ToolSpec>>> {
-        let client = self.client.clone();
-        self.specs_cache
-            .try_get_with(def.id, async move {
-                let slugs: Vec<&str> = def.actions.iter().map(|action| action.slug).collect();
-                let wires = client.tools(&slugs).await?;
-                let mut specs = Vec::with_capacity(slugs.len());
-                for action in def.actions {
-                    let Some(wire) = wires.iter().find(|wire| wire.slug == action.slug) else {
-                        tracing::warn!(slug = %action.slug, "connector action is missing from the catalog and was skipped");
-                        continue;
-                    };
-                    if wire.is_deprecated {
-                        tracing::warn!(slug = %action.slug, "deprecated connector action was skipped");
-                        continue;
-                    }
-                    let spec = ToolSpec::from_wire(wire.clone())
-                        .map_err(|reason| AppError::Connector(format!("{}: {reason}", action.slug)))?;
-                    specs.push(spec);
-                }
-                if specs.is_empty() {
-                    let err = AppError::Connector(format!("No tools are available for {}", def.name));
-                    sentry::capture_error(&err);
-                    return Err(err);
-                }
-                Ok(Arc::new(specs))
-            })
-            .await
-            .map_err(|e| AppError::Connector(e.to_string()))
-    }
-}
-
-#[derive(Serialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RepoInfo {
-    pub full_name: String,
-    pub url: String,
-    pub description: String,
+struct ConnectWire {
+    redirect_url: String,
 }
 
-fn collect_repos(value: &Value, out: &mut Vec<RepoInfo>) {
-    match value {
-        Value::Array(items) => items.iter().for_each(|item| collect_repos(item, out)),
-        Value::Object(map) => match map.get("full_name").and_then(Value::as_str) {
-            Some(full_name) => out.push(RepoInfo {
-                full_name: full_name.to_string(),
-                url: format!("https://github.com/{full_name}"),
-                description: map.get("description").and_then(Value::as_str).unwrap_or_default().to_string(),
-            }),
-            None => map.values().for_each(|inner| collect_repos(inner, out)),
-        },
-        _ => {}
+#[derive(Deserialize)]
+struct ToolsWire {
+    tools: Vec<ToolWire>,
+}
+
+#[derive(Deserialize)]
+struct FailureWire {
+    error: Option<String>,
+    code: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct GatewayComposioTransport {
+    http: reqwest_middleware::ClientWithMiddleware,
+    http_without_retries: reqwest_middleware::ClientWithMiddleware,
+    token: TokenHandle,
+}
+
+impl GatewayComposioTransport {
+    pub fn new(token: TokenHandle) -> Self {
+        Self {
+            http: orchharness::util::retry_http_client(),
+            http_without_retries: reqwest_middleware::ClientBuilder::new(
+                orchharness::util::http_client(),
+            )
+            .build(),
+            token,
+        }
+    }
+
+    fn bearer(&self) -> Result<SecretString, ComposioError> {
+        self.token
+            .load_full()
+            .filter(|token| !token.expose_secret().is_empty())
+            .map(|token| token.as_ref().clone())
+            .ok_or(ComposioError::NoToken)
+    }
+
+    async fn send<T: for<'de> Deserialize<'de>>(
+        &self,
+        request: reqwest_middleware::RequestBuilder,
+        timeout: Duration,
+    ) -> Result<T, ComposioError> {
+        let response = request
+            .bearer_auth(self.bearer()?.expose_secret().to_string())
+            .timeout(timeout)
+            .send()
+            .await
+            .map_err(|e| ComposioError::Transport(e.to_string()))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ComposioError::Transport(e.to_string()))?;
+        if !status.is_success() {
+            let (code, message) = if let Ok(failure) = serde_json::from_str::<FailureWire>(&body) {
+                (
+                    failure.code,
+                    failure
+                        .error
+                        .unwrap_or_else(|| format!("The connector service failed ({})", status.as_u16())),
+                )
+            } else {
+                (
+                    None,
+                    format!("status {}: {}", status.as_u16(), truncate_chars(&body, 200)),
+                )
+            };
+            return Err(ComposioError::Rejected {
+                status: status.as_u16(),
+                code,
+                message,
+            });
+        }
+        serde_json::from_str(&body)
+            .map_err(|e| ComposioError::Malformed(format!("{e}: {}", truncate_chars(&body, 200))))
     }
 }
 
-fn is_connected(accounts: &[AccountWire], def: &ConnectorDef) -> bool {
-    accounts
-        .iter()
-        .any(|account| account.toolkit == def.id && account.status == ACTIVE_STATUS)
+#[async_trait]
+impl ComposioTransport for GatewayComposioTransport {
+    async fn accounts(&self) -> Result<Vec<AccountWire>, ComposioError> {
+        let wire: AccountsWire = self
+            .send(self.http.get(config::composio_url("/accounts")), ACCOUNTS_TIMEOUT)
+            .await?;
+        Ok(wire.accounts)
+    }
+
+    async fn connect(&self, toolkit: &str) -> Result<String, ComposioError> {
+        let wire: ConnectWire = self
+            .send(
+                self.http_without_retries
+                    .post(config::composio_url("/connect"))
+                    .json(&json!({ "toolkit": toolkit })),
+                CONNECT_TIMEOUT,
+            )
+            .await?;
+        Ok(wire.redirect_url)
+    }
+
+    async fn disconnect(&self, account_id: &str) -> Result<(), ComposioError> {
+        let account_param: String =
+            url::form_urlencoded::byte_serialize(account_id.as_bytes()).collect();
+        let path = format!("/accounts/{account_param}");
+        let _: Value = self
+            .send(
+                self.http_without_retries.delete(config::composio_url(&path)),
+                ACCOUNTS_TIMEOUT,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn tools(&self, slugs: &[&str]) -> Result<Vec<ToolWire>, ComposioError> {
+        let slugs_param: String =
+            url::form_urlencoded::byte_serialize(slugs.join(",").as_bytes()).collect();
+        let path = format!("/tools?slugs={slugs_param}");
+        let wire: ToolsWire = self
+            .send(self.http.get(config::composio_url(&path)), TOOLS_TIMEOUT)
+            .await?;
+        Ok(wire.tools)
+    }
+
+    async fn execute(
+        &self,
+        slug: &str,
+        version: &str,
+        arguments: Value,
+    ) -> Result<ExecuteWire, ComposioError> {
+        self.send(
+            self.http_without_retries
+                .post(config::composio_url("/execute"))
+                .json(&json!({ "slug": slug, "version": version, "arguments": arguments })),
+            EXECUTE_TIMEOUT,
+        )
+        .await
+    }
 }
 
+pub fn new_connector_manager(token: TokenHandle) -> ConnectorManager {
+    ConnectorManager::new(Arc::new(GatewayComposioTransport::new(token)))
+}

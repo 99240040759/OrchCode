@@ -32,7 +32,7 @@ function readPxToken(name: string): number {
   return parseInt(getComputedStyle(document.documentElement).getPropertyValue(name), 10);
 }
 
-function ExplorerTree({ cloud }: { cloud: boolean }) {
+function ExplorerTree() {
   const treeId = useId();
   const openFile = useArtifactsStore((s) => s.openFile);
   const treeVersion = useArtifactsStore((s) => s.treeVersion);
@@ -90,7 +90,6 @@ function ExplorerTree({ cloud }: { cloud: boolean }) {
   const refreshSoon = useDebouncedCallback(refresh, REFRESH_DELAY_MS);
 
   useEffect(() => {
-    if (cloud) return;
     if (firstRun.current) {
       firstRun.current = false;
       void refresh();
@@ -98,7 +97,7 @@ function ExplorerTree({ cloud }: { cloud: boolean }) {
     }
     refreshSoon();
     return () => refreshSoon.cancel();
-  }, [cloud, treeVersion, refresh, refreshSoon]);
+  }, [treeVersion, refresh, refreshSoon]);
 
   const runSearch = useDebouncedCallback(async (text: string) => {
     const id = ++requestRef.current;
@@ -186,7 +185,7 @@ function ExplorerTree({ cloud }: { cloud: boolean }) {
 
   const message = searchMode
     ? (searchError ?? (rows.length > 0 ? null : searching ? "Searching…" : "No files found"))
-    : (treeError ?? (cloud ? "Search to find files in this repository." : null));
+    : treeError;
 
   const focused = Math.min(focusIndex, Math.max(rows.length - 1, 0));
 
@@ -274,13 +273,11 @@ function ExplorerTree({ cloud }: { cloud: boolean }) {
     <>
       <div className="ExplorerPane-header">
         <span className="ExplorerPane-title">Files</span>
-        {!cloud && (
-          <Tooltip content="Refresh file tree" side="bottom">
-            <Button className="IconBtn" aria-label="Refresh file tree" onClick={() => void refresh()}>
-              <LuRefreshCw />
-            </Button>
-          </Tooltip>
-        )}
+        <Tooltip content="Refresh file tree" side="bottom">
+          <Button className="IconBtn" aria-label="Refresh file tree" onClick={() => void refresh()}>
+            <LuRefreshCw />
+          </Button>
+        </Tooltip>
       </div>
       <div className="ExplorerPane-search">
         <input
@@ -355,10 +352,10 @@ function ExplorerTree({ cloud }: { cloud: boolean }) {
   );
 }
 
-export function ExplorerPane({ cloud }: { cloud: boolean }) {
+export function ExplorerPane() {
   return (
     <aside className="ExplorerPane" aria-label="File explorer">
-      <ExplorerTree cloud={cloud} />
+      <ExplorerTree />
     </aside>
   );
 }
