@@ -55,16 +55,13 @@ tempfile = "3"
 portable-pty = "0.8"
 sentry = { version = "0.36", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 nucleo-matcher = "0.3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 
-calamine = { version = "0.26", features = ["dates"] }
 encoding_rs = "0.8"
 mime_guess = "2"
 dashmap = "6.2.1"
 moka = { version = "0.12.16", features = ["future", "sync"] }
 parking_lot = "0.13.0"
 arc-swap = "1.9.3"
-fast_image_resize = { version = "5.1.2", features = ["image"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 sentry-tracing = "0.36.0"

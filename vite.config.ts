@@ -60,6 +60,9 @@ export default defineConfig(({ mode }) => {
             if (pkgName === "pptxviewjs") {
               return "vendor-pptx";
             }
+            if (pkgName === "xlsx") {
+              return "vendor-xlsx";
+            }
             if (pkgName === "react-markdown" || pkgName === "remark-gfm") {
               return "vendor-markdown";
             }

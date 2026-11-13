@@ -1,9 +1,51 @@
 import { useEffect, useState, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { errorMessage, readSpreadsheet, type SpreadsheetSheet } from "../../lib/api";
+import * as XLSX from "xlsx";
+import { errorMessage, readBinaryFile } from "../../lib/api";
 import { getBasename } from "../../lib/utils";
 import { ExplorerIcon } from "../ChatPrimitives";
 import { ViewerError, ViewerLoading, useZoom, ZoomControls } from "./ViewerChrome";
+
+const MAX_SPREADSHEET_ROWS = 5_000;
+const MAX_SPREADSHEET_COLS = 200;
+
+interface SpreadsheetSheet {
+  name: string;
+  rows: string[][];
+  totalRows: number;
+  truncated: boolean;
+}
+
+function parseSpreadsheetBuffer(buffer: ArrayBuffer): SpreadsheetSheet[] {
+  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true });
+  return workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: "",
+      raw: false,
+    });
+    const rows: string[][] = [];
+    let totalRows = 0;
+    for (const rawRow of rawRows) {
+      if (!Array.isArray(rawRow)) continue;
+      const cells = rawRow
+        .slice(0, MAX_SPREADSHEET_COLS)
+        .map((cell) => (cell == null ? "" : String(cell)));
+      if (cells.every((c) => c.length === 0)) continue;
+      totalRows += 1;
+      if (rows.length < MAX_SPREADSHEET_ROWS) {
+        rows.push(cells);
+      }
+    }
+    return {
+      name,
+      rows,
+      totalRows,
+      truncated: totalRows > rows.length,
+    };
+  });
+}
 
 export function XlsxViewer({ path }: { path: string }) {
   const [sheets, setSheets] = useState<SpreadsheetSheet[] | null>(null);
@@ -19,11 +61,15 @@ export function XlsxViewer({ path }: { path: string }) {
     setSheets(null);
     setError(null);
 
-    readSpreadsheet(path).then(
-      (parsed) => {
+    readBinaryFile(path).then(
+      (buffer) => {
         if (cancelled) return;
-        setSheets(parsed);
-        setActiveSheet(0);
+        try {
+          setSheets(parseSpreadsheetBuffer(buffer));
+          setActiveSheet(0);
+        } catch (e) {
+          setError(errorMessage(e));
+        }
       },
       (e) => {
         if (!cancelled) setError(errorMessage(e));

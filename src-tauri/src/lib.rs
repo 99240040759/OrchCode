@@ -5,12 +5,10 @@ pub mod config;
 pub mod connectors;
 pub mod credentials;
 pub mod dictation;
-pub mod document;
 pub mod fsapi;
 pub mod gateway;
 pub mod ipc;
 pub mod llm;
-pub mod media;
 pub mod persistence;
 pub mod platform;
 pub mod state;
@@ -216,7 +214,6 @@ pub fn run() {
             fsapi::read_image_data_url,
             fsapi::read_binary_file,
             fsapi::read_document_metadata,
-            fsapi::read_spreadsheet,
             ipc::get_auth_user,
             ipc::get_oauth_url,
             ipc::sign_out_auth,

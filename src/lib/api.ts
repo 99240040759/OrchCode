@@ -317,17 +317,6 @@ export function readBinaryFile(path: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>("read_binary_file", { path });
 }
 
-export interface SpreadsheetSheet {
-  name: string;
-  rows: string[][];
-  totalRows: number;
-  truncated: boolean;
-}
-
-export function readSpreadsheet(path: string): Promise<SpreadsheetSheet[]> {
-  return invoke("read_spreadsheet", { path });
-}
-
 export function startDictation(onEvent: (evt: DictationEvent) => void): Promise<void> {
   const channel = new Channel<DictationEvent>();
   channel.onmessage = onEvent;

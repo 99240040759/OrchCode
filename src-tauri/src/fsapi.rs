@@ -312,18 +312,9 @@ pub async fn read_image_data_url(state: State<'_, AppState>, path: String) -> Re
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
 
-    if mime == "image/svg+xml" {
-        use base64::Engine;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        return Ok(format!("data:image/svg+xml;base64,{b64}"));
-    }
-
-    tokio::task::spawn_blocking(move || {
-        crate::media::preview_data_url(&bytes, &mime, config::MAX_PREVIEW_IMAGE_DIMENSION)
-            .map_err(|e| format!("cannot decode image {path}: {e}"))
-    })
-    .await
-    .map_err(|e| format!("image preview task failed: {e}"))?
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
 }
 
 #[tauri::command]
@@ -350,6 +341,34 @@ pub async fn read_binary_file(state: State<'_, AppState>, path: String) -> Resul
         .await
         .map_err(|e| format!("cannot read {path}: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn document_type_info(file_type: &str) -> (Option<String>, String) {
+    let normalized = file_type.to_ascii_lowercase();
+    let artifact_kind = match normalized.as_str() {
+        "pdf" => Some("pdf"),
+        "docx" => Some("docx"),
+        "xlsx" | "xls" | "ods" => Some("xlsx"),
+        "pptx" => Some("pptx"),
+        _ => None,
+    }
+    .map(str::to_string);
+    let label = match normalized.as_str() {
+        "pdf" => "PDF",
+        "docx" => "Word",
+        "xlsx" | "xls" => "Excel",
+        "ods" => "Spreadsheet",
+        "pptx" => "PowerPoint",
+        "txt" | "text" => "Text",
+        "md" | "markdown" => "Markdown",
+        "csv" => "CSV",
+        "json" => "JSON",
+        "html" | "htm" => "HTML",
+        "xml" => "XML",
+        "rtf" => "RTF",
+        _ => return (artifact_kind, normalized.to_uppercase()),
+    };
+    (artifact_kind, label.to_string())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -384,7 +403,7 @@ pub async fn read_document_metadata(
             .cloud_files_json("metadata", &cloud.workspace_uri, &[("path", absolute)])
             .await
             .map_err(|e| format!("metadata error: {e}"))?;
-        let (artifact_kind, type_label) = crate::document::document_type_info(&meta.extension);
+        let (artifact_kind, type_label) = document_type_info(&meta.extension);
         return Ok(DocumentFileMeta {
             name: meta.name,
             size_bytes: meta.size_bytes,
@@ -414,7 +433,7 @@ pub async fn read_document_metadata(
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs());
 
-    let (artifact_kind, type_label) = crate::document::document_type_info(&extension);
+    let (artifact_kind, type_label) = document_type_info(&extension);
     Ok(DocumentFileMeta {
         name,
         size_bytes: meta.len(),
@@ -424,52 +443,4 @@ pub async fn read_document_metadata(
         type_label,
         modified,
     })
-}
-
-#[tauri::command]
-pub async fn read_spreadsheet(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<Vec<crate::document::SpreadsheetSheet>, String> {
-    if let Some(cloud) = cloud_context(&state).await? {
-        let absolute = absolute_cloud_path(&cloud.repo_dir, &path);
-        let bytes = state
-            .gateway
-            .cloud_file_bytes(&cloud.workspace_uri, &absolute)
-            .await
-            .map_err(|e| format!("cannot read spreadsheet {path}: {e}"))?;
-        let ext = lowercase_extension(Path::new(&path));
-        let tmp_path = std::env::temp_dir().join(format!(
-            "orch-cloud-sheet-{}.{}",
-            uuid::Uuid::new_v4(),
-            if ext.is_empty() { "xlsx" } else { &ext }
-        ));
-        tokio::fs::write(&tmp_path, &bytes)
-            .await
-            .map_err(|e| format!("failed to write temp spreadsheet: {e}"))?;
-        let res = tokio::task::spawn_blocking({
-            let tmp_path = tmp_path.clone();
-            move || {
-                crate::document::read_spreadsheet(
-                    &tmp_path,
-                    config::MAX_SPREADSHEET_ROWS,
-                    config::MAX_SPREADSHEET_COLS,
-                )
-            }
-        })
-        .await
-        .map_err(|e| format!("spreadsheet task failed: {e}"))?
-        .map_err(|e| e.to_string());
-        let _ = tokio::fs::remove_file(&tmp_path).await;
-        return res;
-    }
-
-    let workspace = state.require_workspace().map_err(|e| e.to_string())?;
-    let resolved = fs_util::resolve_existing_file(&workspace, &path).map_err(|e| e.to_string())?;
-    tokio::task::spawn_blocking(move || {
-        crate::document::read_spreadsheet(&resolved, config::MAX_SPREADSHEET_ROWS, config::MAX_SPREADSHEET_COLS)
-    })
-    .await
-    .map_err(|e| format!("spreadsheet task failed: {e}"))?
-    .map_err(|e| e.to_string())
 }
