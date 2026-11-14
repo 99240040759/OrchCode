@@ -4,12 +4,12 @@ import type { Node as ProseNode } from "@tiptap/pm/model";
 import Mention from "@tiptap/extension-mention";
 import { getBasename } from "../../lib/utils";
 import { FileIcon } from "../common/FileIcon";
-import { openArtifact } from "../panel/actions";
+import { useArtifactsStore } from "../../lib/artifacts";
 
 function MentionView({ node }: ReactNodeViewProps) {
   const path = (node.attrs.id as string) || "";
   const name = (node.attrs.label as string) || getBasename(path) || path;
-  const open = () => path && openArtifact(path);
+  const open = () => path && useArtifactsStore.getState().openFile(path);
 
   return (
     <NodeViewWrapper

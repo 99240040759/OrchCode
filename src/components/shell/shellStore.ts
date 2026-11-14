@@ -1,18 +1,17 @@
 import { create } from "zustand";
-import { transition } from "../ui/transition";
 
 export type AppView = "chat" | "integrations";
 
-interface ShellState {
+interface ShellStore {
   sidebarOpen: boolean;
   view: AppView;
+  toggleSidebar: () => void;
+  setView: (view: AppView) => void;
 }
 
-export const useShell = create<ShellState>(() => ({ sidebarOpen: true, view: "chat" }));
-
-export const toggleSidebar = () => transition(() => useShell.setState((s) => ({ sidebarOpen: !s.sidebarOpen })));
-
-export function showView(view: AppView) {
-  if (useShell.getState().view === view) return;
-  transition(() => useShell.setState({ view }));
-}
+export const useShell = create<ShellStore>((set) => ({
+  sidebarOpen: true,
+  view: "chat",
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setView: (view) => set({ view }),
+}));

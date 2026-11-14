@@ -31,7 +31,7 @@ export function ModelMenu() {
         {models.map((model) => (
           <MenuSub key={model.key}>
             <MenuSubTrigger
-              data-selected={model.key === selected?.key || undefined}
+              selected={model.key === selected?.key}
               meta={model.badge ? <span className="badge">{model.badge}</span> : undefined}
               onClick={() => model.key !== selected?.key && setModel(model.key)}
             >
@@ -41,7 +41,7 @@ export function ModelMenu() {
               {EFFORTS.map((level) => (
                 <MenuItem
                   key={level.key}
-                  data-selected={(model.key === selected?.key && effort === level.key) || undefined}
+                  selected={model.key === selected?.key && effort === level.key}
                   onSelect={() => {
                     setModel(model.key);
                     setEffort(level.key);

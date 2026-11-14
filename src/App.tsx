@@ -19,7 +19,9 @@ function Shell() {
   const sidebarOpen = useShell((s) => s.sidebarOpen);
   return (
     <div className="app" data-sidebar={sidebarOpen ? "open" : "closed"}>
-      <Sidebar />
+      <div className="side-slot">
+        <Sidebar />
+      </div>
       <Workspace />
       <RepoDialog />
     </div>

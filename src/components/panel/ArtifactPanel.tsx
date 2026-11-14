@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { LuFolderTree, LuMaximize2, LuMinimize2, LuPlus, LuTerminal, LuX } from "react-icons/lu";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../../lib/artifacts";
 import { useWorkspaceStore } from "../../lib/workspace";
@@ -12,7 +12,6 @@ import { SidebarOpener } from "../shell/Bars";
 import { BrowserView } from "./BrowserView";
 import { Explorer } from "./Explorer";
 import { TerminalView } from "./TerminalView";
-import { closeTab, openBrowser, openTerminal, showExplorer, toggleExplorer, toggleMaximized, togglePanel } from "./actions";
 
 const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.FileViewer })));
 const PdfViewer = lazy(() => import("./viewers/PdfViewer").then((m) => ({ default: m.PdfViewer })));
@@ -38,10 +37,29 @@ function TabIcon({ tab }: { tab: ArtifactTab }) {
   return <FileIcon name={tab.path ? getBasename(tab.path) : `file.${tab.kind}`} />;
 }
 
+const EXPLORER_MOTION_MS = 280;
+
+function usePresence(open: boolean) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    const timer = setTimeout(() => setMounted(false), EXPLORER_MOTION_MS);
+    return () => clearTimeout(timer);
+  }, [open]);
+  return open || mounted;
+}
+
 function Tabs() {
   const tabs = useArtifactsStore((s) => s.tabs);
   const active = useArtifactsStore(activeTabId);
   const setActive = useArtifactsStore((s) => s.setActive);
+  const closeTab = useArtifactsStore((s) => s.closeTab);
+  const openBrowser = useArtifactsStore((s) => s.openBrowser);
+  const openTerminal = useArtifactsStore((s) => s.openTerminal);
+  const showExplorer = useArtifactsStore((s) => s.showExplorer);
 
   return (
     <div className="tabs" role="tablist" data-tauri-drag-region>
@@ -142,6 +160,9 @@ function TabBody({ tab, active }: { tab: ArtifactTab; active: boolean }) {
 }
 
 function Launcher() {
+  const openBrowser = useArtifactsStore((s) => s.openBrowser);
+  const openTerminal = useArtifactsStore((s) => s.openTerminal);
+  const showExplorer = useArtifactsStore((s) => s.showExplorer);
   return (
     <div className="launch">
       <div className="launch-grid">
@@ -169,6 +190,10 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
   const maximized = useArtifactsStore((s) => s.maximized);
   const explorerOpen = useArtifactsStore((s) => s.explorerOpen);
   const workspaceId = useWorkspaceStore((s) => s.current?.id);
+  const toggleExplorer = useArtifactsStore((s) => s.toggleExplorer);
+  const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
+  const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
+  const explorerMounted = usePresence(explorerOpen);
 
   return (
     <>
@@ -181,7 +206,7 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
         <IconButton label={maximized ? "Restore" : "Maximize"} onClick={toggleMaximized}>
           {maximized ? <LuMinimize2 /> : <LuMaximize2 />}
         </IconButton>
-        <IconButton label="Close panel" onClick={togglePanel}>
+        <IconButton label="Close panel" onClick={() => setPanelOpen(false)}>
           <LuX />
         </IconButton>
         <WindowControls />
@@ -194,7 +219,11 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
             tabs.map((tab) => <TabBody key={tab.id} tab={tab} active={visible && tab.id === active} />)
           )}
         </div>
-        {explorerOpen && <Explorer key={workspaceId} />}
+        {explorerMounted && (
+          <div className="explorer-slot" data-state={explorerOpen ? "open" : "closed"}>
+            <Explorer key={workspaceId} />
+          </div>
+        )}
       </div>
     </>
   );

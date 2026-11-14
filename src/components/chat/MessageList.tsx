@@ -18,6 +18,8 @@ export function MessageList() {
   const pinned = useRef(true);
   const lastCount = useRef(0);
   const prevHeight = useRef(0);
+  const initialIds = useRef<Set<string> | null>(null);
+  initialIds.current ??= new Set(streaming ? [] : messages.map((m) => m.id));
 
   const scrollToBottom = useCallback(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -75,8 +77,12 @@ export function MessageList() {
               </Button>
             </div>
           )}
-          {messages.map((message) => (
-            <Message key={message.id} message={message} />
+          {messages.map((message, index) => (
+            <Message
+              key={message.id}
+              message={message}
+              isNew={index >= messages.length - 2 && !initialIds.current?.has(message.id)}
+            />
           ))}
         </div>
       </div>

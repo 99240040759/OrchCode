@@ -1,17 +1,24 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from "react-resizable-panels";
 import { listen } from "@tauri-apps/api/event";
 import { useArtifactsStore } from "../../lib/artifacts";
 import { ChatView } from "../chat/ChatView";
 import { ArtifactPanel } from "../panel/ArtifactPanel";
-import { fileWritten } from "../panel/actions";
 import { Integrations } from "../screens/Integrations";
 import { MainBar } from "./Bars";
 import { useShell } from "./shellStore";
 
-const MIN_CHAT_PX = 360;
-const MIN_PANEL_PX = 340;
+const DEFAULT_PANEL = 50;
+const MOTION_MS = 320;
+
+function layoutFor(shown: boolean, maximized: boolean, panelSize: number): [number, number] {
+  if (!shown) return [100, 0];
+  if (maximized) return [0, 100];
+  return [100 - panelSize, panelSize];
+}
 
 function useFileWrittenEvents() {
+  const fileWritten = useArtifactsStore((s) => s.fileWritten);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -22,42 +29,7 @@ function useFileWrittenEvents() {
       disposed = true;
       unlisten?.();
     };
-  }, []);
-}
-
-function useResizer(mainRef: RefObject<HTMLDivElement | null>) {
-  const [ratio, setRatio] = useState(0.5);
-
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    const main = mainRef.current;
-    if (!main || event.button !== 0) return;
-    event.preventDefault();
-    const handle = event.currentTarget;
-    handle.setPointerCapture(event.pointerId);
-    handle.dataset.dragging = "";
-    main.dataset.resizing = "";
-    const rect = main.getBoundingClientRect();
-    let next = ratio;
-
-    const move = (e: globalThis.PointerEvent) => {
-      const panelPx = Math.min(rect.width - MIN_CHAT_PX, Math.max(MIN_PANEL_PX, rect.right - e.clientX));
-      next = panelPx / rect.width;
-      main.style.setProperty("--panel-ratio", String(next));
-    };
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-      delete handle.dataset.dragging;
-      delete main.dataset.resizing;
-      setRatio(next);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  };
-
-  return { ratio, onPointerDown };
+  }, [fileWritten]);
 }
 
 export function Workspace() {
@@ -65,34 +37,86 @@ export function Workspace() {
   const panelOpen = useArtifactsStore((s) => s.panelOpen);
   const maximized = useArtifactsStore((s) => s.maximized);
   const panelShown = view === "chat" && panelOpen;
-  const mainRef = useRef<HTMLDivElement>(null);
-  const { ratio, onPointerDown } = useResizer(mainRef);
+  const split = panelShown && !maximized;
+
+  const groupRef = useRef<ImperativePanelGroupHandle>(null);
+  const panelSize = useRef(DEFAULT_PANEL);
+  const initial = useRef(layoutFor(panelShown, maximized, DEFAULT_PANEL)).current;
+  const [moving, setMoving] = useState(false);
   useFileWrittenEvents();
 
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const next = layoutFor(panelShown, maximized, panelSize.current);
+    const [chat, panel] = group.getLayout();
+    if (Math.abs(chat - next[0]) < 0.1 && Math.abs(panel - next[1]) < 0.1) return;
+    setMoving(true);
+    group.setLayout(next);
+    const timer = setTimeout(() => setMoving(false), MOTION_MS);
+    return () => clearTimeout(timer);
+  }, [panelShown, maximized]);
+
+  const onPanelCollapse = () => {
+    const artifacts = useArtifactsStore.getState();
+    if (useShell.getState().view === "chat" && artifacts.panelOpen && !artifacts.maximized) artifacts.setPanelOpen(false);
+  };
+
+  const onChatCollapse = () => {
+    const artifacts = useArtifactsStore.getState();
+    if (artifacts.panelOpen && !artifacts.maximized) artifacts.toggleMaximized();
+  };
+
   return (
-    <div
-      ref={mainRef}
+    <PanelGroup
+      ref={groupRef}
+      direction="horizontal"
       className="main"
-      data-maximized={(panelShown && maximized) || undefined}
-      style={{ "--panel-ratio": ratio } as CSSProperties}
+      data-moving={moving || undefined}
+      data-split={split || undefined}
+      onLayout={([chat, panel]) => {
+        if (chat > 0 && panel > 0) panelSize.current = panel;
+      }}
     >
-      <section className="col col-chat">
-        <MainBar panelShown={panelShown} />
-        <div className="stage">
-          <div className="view" hidden={view !== "chat"}>
-            <ChatView />
-          </div>
-          {view === "integrations" && (
-            <div className="view">
-              <Integrations />
+      <Panel
+        id="chat"
+        order={1}
+        className="pane"
+        defaultSize={initial[0]}
+        minSize={30}
+        collapsible
+        collapsedSize={0}
+        onCollapse={onChatCollapse}
+      >
+        <section className="col col-chat">
+          <MainBar panelShown={panelShown} />
+          <div className="stage">
+            <div className="view" hidden={view !== "chat"}>
+              <ChatView />
             </div>
-          )}
-        </div>
-      </section>
-      <div className="resizer" hidden={!panelShown || maximized} onPointerDown={onPointerDown} role="separator" aria-orientation="vertical" />
-      <section className="col col-panel" hidden={!panelShown}>
-        <ArtifactPanel visible={panelShown} />
-      </section>
-    </div>
+            {view === "integrations" && (
+              <div className="view">
+                <Integrations />
+              </div>
+            )}
+          </div>
+        </section>
+      </Panel>
+      <PanelResizeHandle className="resizer" disabled={!split} />
+      <Panel
+        id="panel"
+        order={2}
+        className="pane"
+        defaultSize={initial[1]}
+        minSize={25}
+        collapsible
+        collapsedSize={0}
+        onCollapse={onPanelCollapse}
+      >
+        <section className="col col-panel" inert={!panelShown}>
+          <ArtifactPanel visible={panelShown} />
+        </section>
+      </Panel>
+    </PanelGroup>
   );
 }

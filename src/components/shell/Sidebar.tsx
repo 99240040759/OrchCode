@@ -11,7 +11,9 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "../ui/Menu";
 import { Tooltip } from "../ui/Tooltip";
 import { TrafficSpacer } from "../ui/WindowControls";
 import { OpenProjectItems, ProjectIcon } from "../projects/ProjectMenu";
-import { showView, toggleSidebar, useShell } from "./shellStore";
+import { useShell } from "./shellStore";
+
+const showChat = () => useShell.getState().setView("chat");
 
 function useMinuteTick() {
   const [, setTick] = useState(0);
@@ -46,7 +48,7 @@ const SessionRow = memo(function SessionRow({
           aria-current={active ? "page" : undefined}
           onClick={() => {
             void selectSession(session.id);
-            showView("chat");
+            showChat();
           }}
         >
           <span className="row-label">{title}</span>
@@ -87,7 +89,7 @@ function ProjectRow({ project, current, locked }: { project: WorkspaceMeta; curr
         disabled={locked && !current}
         onClick={() => {
           if (!current) void switchTo(project.id);
-          showView("chat");
+          showChat();
         }}
       >
         <ProjectIcon project={project} open={current} />
@@ -223,11 +225,14 @@ function Account() {
 
 export function Sidebar() {
   const view = useShell((s) => s.view);
+  const sidebarOpen = useShell((s) => s.sidebarOpen);
+  const setView = useShell((s) => s.setView);
+  const toggleSidebar = useShell((s) => s.toggleSidebar);
   const streaming = useChatStore((s) => s.streaming);
   const newChat = useChatStore((s) => s.newChat);
 
   return (
-    <aside className="side">
+    <aside className="side" inert={!sidebarOpen}>
       <div className="bar" data-tauri-drag-region>
         <TrafficSpacer />
         <IconButton label="Hide sidebar" onClick={toggleSidebar}>
@@ -243,7 +248,7 @@ export function Sidebar() {
           disabled={streaming}
           onClick={() => {
             newChat();
-            showView("chat");
+            setView("chat");
           }}
         >
           <LuPlus />
@@ -254,7 +259,7 @@ export function Sidebar() {
             type="button"
             className="row"
             data-active={view === "integrations"}
-            onClick={() => showView(view === "integrations" ? "chat" : "integrations")}
+            onClick={() => setView(view === "integrations" ? "chat" : "integrations")}
           >
             <LuBlocks />
             <span className="row-label">Integrations</span>

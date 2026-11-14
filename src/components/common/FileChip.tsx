@@ -1,6 +1,6 @@
 import { memo, type KeyboardEvent, type SyntheticEvent } from "react";
 import { getBasename } from "../../lib/utils";
-import { openArtifact } from "../panel/actions";
+import { useArtifactsStore } from "../../lib/artifacts";
 import { FileIcon } from "./FileIcon";
 
 interface FileChipProps {
@@ -25,7 +25,7 @@ export const FileChip = memo(function FileChip({
 
   const activate = (event: SyntheticEvent) => {
     event.stopPropagation();
-    openArtifact(path);
+    useArtifactsStore.getState().openFile(path);
   };
 
   return (

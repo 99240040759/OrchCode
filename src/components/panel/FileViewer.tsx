@@ -161,7 +161,7 @@ export function FileViewer({ path }: { path: string }) {
     <>
       <div className="toolbar">
         <Crumbs path={path} />
-        {current?.truncated && <span className="badge trunc">Truncated</span>}
+        {current?.truncated && <span className="badge">Truncated</span>}
         {isText && (
           <div className="toolbar-group">
             {isMarkdown && (

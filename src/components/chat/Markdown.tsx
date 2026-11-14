@@ -10,7 +10,7 @@ import { createMentionRegex, looksLikePath, useCopy } from "../../lib/utils";
 import { useImageDataUrl } from "../../lib/images";
 import { FileChip } from "../common/FileChip";
 import { Button, IconButton } from "../ui/Button";
-import { openArtifact } from "../panel/actions";
+import { useArtifactsStore } from "../../lib/artifacts";
 import { getGrammar, highlight } from "./highlight";
 
 export function renderTextWithMentions(text: string): ReactNode {
@@ -125,7 +125,7 @@ const COMPONENTS: Components = {
           tabIndex={0}
           onClick={(e) => {
             e.preventDefault();
-            openArtifact(path);
+            useArtifactsStore.getState().openFile(path);
           }}
         >
           {children}

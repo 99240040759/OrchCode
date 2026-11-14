@@ -11,7 +11,7 @@ import { Attachment } from "../common/Attachment";
 import { Button, IconButton } from "../ui/Button";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "../ui/Menu";
 import { Tooltip } from "../ui/Tooltip";
-import { openArtifact } from "../panel/actions";
+import { useArtifactsStore } from "../../lib/artifacts";
 import { ProjectMenu } from "../projects/ProjectMenu";
 import { ConnectorsMenu } from "./ConnectorsMenu";
 import { ContextRing } from "./ContextRing";
@@ -190,7 +190,7 @@ export function Composer({ home }: { home: boolean }) {
                 name={a.name}
                 isImage={a.isImage}
                 path={a.path}
-                onOpen={() => openArtifact(a.path)}
+                onOpen={() => useArtifactsStore.getState().openFile(a.path)}
                 onRemove={() => removeAttachment(a.path)}
               />
             ))}

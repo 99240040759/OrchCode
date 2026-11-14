@@ -31,8 +31,18 @@ export function MenuContent({
   );
 }
 
-export function MenuItem({ className, ...props }: ComponentProps<typeof Primitive.Item>) {
-  return <Primitive.Item className={cls("row", className)} {...props} />;
+export function MenuItem({
+  className,
+  selected,
+  children,
+  ...props
+}: ComponentProps<typeof Primitive.Item> & { selected?: boolean }) {
+  return (
+    <Primitive.Item className={cls("row", className)} data-selected={selected || undefined} {...props}>
+      {children}
+      {selected && <LuCheck className="row-end" aria-label="Selected" />}
+    </Primitive.Item>
+  );
 }
 
 export function MenuCheckboxItem({ className, children, ...props }: ComponentProps<typeof Primitive.CheckboxItem>) {
@@ -50,13 +60,15 @@ export function MenuSubTrigger({
   className,
   children,
   meta,
+  selected,
   ...props
-}: ComponentProps<typeof Primitive.SubTrigger> & { meta?: ReactNode }) {
+}: ComponentProps<typeof Primitive.SubTrigger> & { meta?: ReactNode; selected?: boolean }) {
   return (
-    <Primitive.SubTrigger className={cls("row", className)} {...props}>
+    <Primitive.SubTrigger className={cls("row", className)} data-selected={selected || undefined} {...props}>
       {children}
       <span className="row-end">
         {meta}
+        {selected && <LuCheck aria-label="Selected" />}
         <LuChevronRight />
       </span>
     </Primitive.SubTrigger>

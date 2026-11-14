@@ -36,7 +36,7 @@ export const Attachment = memo(function Attachment({ name, isImage, path, dataUr
       {onRemove && (
         <button
           type="button"
-          className="btn"
+          className="attach-remove"
           aria-label={`Remove ${name}`}
           onClick={(event) => {
             event.stopPropagation();

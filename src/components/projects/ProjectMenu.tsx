@@ -59,7 +59,7 @@ export function ProjectMenu() {
           <MenuItem
             key={project.id}
             disabled={locked}
-            data-selected={project.id === current?.id || undefined}
+            selected={project.id === current?.id}
             onSelect={() => project.id !== current?.id && void switchTo(project.id)}
           >
             <ProjectIcon project={project} />

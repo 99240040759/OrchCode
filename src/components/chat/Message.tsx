@@ -28,7 +28,7 @@ import { FileChip } from "../common/FileChip";
 import { FileIcon } from "../common/FileIcon";
 import { IconButton } from "../ui/Button";
 import { Tooltip } from "../ui/Tooltip";
-import { openArtifact } from "../panel/actions";
+import { useArtifactsStore } from "../../lib/artifacts";
 import { Markdown, renderTextWithMentions } from "./Markdown";
 
 const TOOL_ICONS: Record<Exclude<ToolIcon, "file" | "folder">, ComponentType> = {
@@ -192,7 +192,13 @@ const ThinkingStep = memo(function ThinkingStep({ item }: { item: ReasoningItem 
 
   return (
     <div className="step">
-      <button type="button" className="disclosure" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="disclosure"
+        data-live={item.active || undefined}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
         <span>{label}</span>
         <LuChevronRight />
       </button>
@@ -264,10 +270,10 @@ function CopyAction({ text }: { text: string }) {
   );
 }
 
-function UserMessage({ message }: { message: ChatMessage }) {
+function UserMessage({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
   const text = message.items.find((i): i is TextItem => i.type === "text")?.text ?? "";
   return (
-    <div className="msg-user">
+    <div className="msg-user" data-new={isNew || undefined}>
       {message.attachments.length > 0 && (
         <div className="msg-files">
           {message.attachments.map((a, i) => (
@@ -277,7 +283,7 @@ function UserMessage({ message }: { message: ChatMessage }) {
               isImage={a.isImage}
               path={a.path}
               dataUrl={a.dataUrl}
-              onOpen={a.path ? () => openArtifact(a.path!) : undefined}
+              onOpen={a.path ? () => useArtifactsStore.getState().openFile(a.path!) : undefined}
             />
           ))}
         </div>
@@ -287,7 +293,7 @@ function UserMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function AssistantMessage({ message }: { message: ChatMessage }) {
+function AssistantMessage({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
   const segments = useMemo(() => buildSegments(message.items), [message.items]);
   const fullText = useMemo(
     () =>
@@ -302,7 +308,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   const pending = !message.notice && streaming && !runActive && message.items[message.items.length - 1]?.type !== "text";
 
   return (
-    <div className="msg-bot">
+    <div className="msg-bot" data-new={isNew || undefined}>
       {segments.map((segment) =>
         segment.kind === "work" ? (
           <WorkRun key={`work-${segment.id}`} run={segment.run} items={segment.items} />
@@ -327,11 +333,11 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-export const Message = memo(function Message({ message }: { message: ChatMessage }) {
+export const Message = memo(function Message({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
   if (message.role === "system") {
     const notice = message.items.find((i): i is CompactionNoticeItem => i.type === "compactionNotice");
     return notice ? <Divider item={notice} /> : null;
   }
-  if (message.role === "user") return <UserMessage message={message} />;
-  return <AssistantMessage message={message} />;
+  if (message.role === "user") return <UserMessage message={message} isNew={isNew} />;
+  return <AssistantMessage message={message} isNew={isNew} />;
 });
