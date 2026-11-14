@@ -59,7 +59,7 @@ export function MessageList() {
   }, [messages, streaming]);
 
   return (
-    <>
+    <div className="chat-body">
       <div className="chat-scroll" ref={ref} onScroll={onScroll}>
         <div className="chat-inner">
           {hasMore && (
@@ -91,6 +91,6 @@ export function MessageList() {
           <LuArrowDown />
         </button>
       )}
-    </>
+    </div>
   );
 }

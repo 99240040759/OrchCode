@@ -9,20 +9,14 @@ import { useWorkspaceStore } from "./lib/workspace";
 import { Button } from "./components/ui/Button";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { RepoDialog } from "./components/projects/RepoDialog";
-import { Sidebar } from "./components/shell/Sidebar";
-import { Workspace } from "./components/shell/Workspace";
-import { useShell } from "./components/shell/shellStore";
+import { Frame } from "./components/shell/Frame";
 import { ProjectPicker } from "./components/screens/ProjectPicker";
 import { SignIn } from "./components/screens/SignIn";
 
 function Shell() {
-  const sidebarOpen = useShell((s) => s.sidebarOpen);
   return (
-    <div className="app" data-sidebar={sidebarOpen ? "open" : "closed"}>
-      <div className="side-slot">
-        <Sidebar />
-      </div>
-      <Workspace />
+    <div className="app">
+      <Frame />
       <RepoDialog />
     </div>
   );

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { LuFolderTree, LuMaximize2, LuMinimize2, LuPlus, LuTerminal, LuX } from "react-icons/lu";
 import { activeTabId, useArtifactsStore, type ArtifactTab } from "../../lib/artifacts";
 import { useWorkspaceStore } from "../../lib/workspace";
@@ -8,6 +9,7 @@ import { Button, IconButton } from "../ui/Button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../ui/Menu";
 import { Tooltip } from "../ui/Tooltip";
 import { WindowControls } from "../ui/WindowControls";
+import { usePanelMotion } from "../ui/motion";
 import { SidebarOpener } from "../shell/Bars";
 import { BrowserView } from "./BrowserView";
 import { Explorer } from "./Explorer";
@@ -37,19 +39,51 @@ function TabIcon({ tab }: { tab: ArtifactTab }) {
   return <FileIcon name={tab.path ? getBasename(tab.path) : `file.${tab.kind}`} />;
 }
 
-const EXPLORER_MOTION_MS = 280;
+const EXPLORER_PX = 240;
 
-function usePresence(open: boolean) {
+function ContentSplit({ children }: { children: ReactNode }) {
+  const open = useArtifactsStore((s) => s.explorerOpen);
+  const workspaceId = useWorkspaceStore((s) => s.current?.id);
+  const explorerRef = usePanelRef();
+  const width = useRef(EXPLORER_PX);
+  const initiallyOpen = useRef(open).current;
   const [mounted, setMounted] = useState(open);
+  const [splitRef, animate] = usePanelMotion();
+  if (open && !mounted) setMounted(true);
+
   useEffect(() => {
-    if (open) {
-      setMounted(true);
-      return;
-    }
-    const timer = setTimeout(() => setMounted(false), EXPLORER_MOTION_MS);
-    return () => clearTimeout(timer);
-  }, [open]);
-  return open || mounted;
+    const panel = explorerRef.current;
+    if (!panel || open !== panel.isCollapsed()) return;
+    animate(() => (open ? panel.resize(width.current) : panel.collapse()));
+  }, [open, explorerRef, animate]);
+
+  return (
+    <Group orientation="horizontal" elementRef={splitRef}>
+      <Panel id="view" className="pane" style={{ overflow: "hidden" }} minSize={260}>
+        {children}
+      </Panel>
+      <Separator className="divider" disabled={!open} />
+      <Panel
+        id="explorer"
+        panelRef={explorerRef}
+        className="pane"
+        style={{ overflow: "hidden" }}
+        defaultSize={initiallyOpen ? EXPLORER_PX : 0}
+        minSize={180}
+        maxSize="60%"
+        collapsible
+        collapsedSize={0}
+        groupResizeBehavior="preserve-pixel-size"
+        onResize={({ inPixels }) => {
+          if (inPixels > 0) width.current = inPixels;
+          const store = useArtifactsStore.getState();
+          if (inPixels > 0 !== store.explorerOpen) store.toggleExplorer();
+        }}
+      >
+        {mounted && <Explorer key={workspaceId} />}
+      </Panel>
+    </Group>
+  );
 }
 
 function Tabs() {
@@ -189,11 +223,9 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
   const active = useArtifactsStore(activeTabId);
   const maximized = useArtifactsStore((s) => s.maximized);
   const explorerOpen = useArtifactsStore((s) => s.explorerOpen);
-  const workspaceId = useWorkspaceStore((s) => s.current?.id);
   const toggleExplorer = useArtifactsStore((s) => s.toggleExplorer);
   const toggleMaximized = useArtifactsStore((s) => s.toggleMaximized);
   const setPanelOpen = useArtifactsStore((s) => s.setPanelOpen);
-  const explorerMounted = usePresence(explorerOpen);
 
   return (
     <>
@@ -211,19 +243,16 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
         </IconButton>
         <WindowControls />
       </div>
-      <div className="stage panel">
-        <div className="panel-body">
-          {tabs.length === 0 ? (
-            <Launcher />
-          ) : (
-            tabs.map((tab) => <TabBody key={tab.id} tab={tab} active={visible && tab.id === active} />)
-          )}
-        </div>
-        {explorerMounted && (
-          <div className="explorer-slot" data-state={explorerOpen ? "open" : "closed"}>
-            <Explorer key={workspaceId} />
+      <div className="stage">
+        <ContentSplit>
+          <div className="panel-body">
+            {tabs.length === 0 ? (
+              <Launcher />
+            ) : (
+              tabs.map((tab) => <TabBody key={tab.id} tab={tab} active={visible && tab.id === active} />)
+            )}
           </div>
-        )}
+        </ContentSplit>
       </div>
     </>
   );

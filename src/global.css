@@ -66,10 +66,8 @@
   --r-full: 999px;
 
   --bar-h: 36px;
-  --side-w: 260px;
   --chat-w: 760px;
   --chat-pad: 24px;
-  --explorer-w: 240px;
   --gap: 8px;
   --traffic-w: 76px;
 
@@ -136,8 +134,6 @@ h1, h2, h3 { font-weight: 600; }
 @keyframes drop-in { from { opacity: 0; transform: translate3d(0, -4px, 0); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.96); } }
 @keyframes pop-out { to { opacity: 0; transform: scale(0.97); } }
-@keyframes slot-in { from { width: 0; } }
-@keyframes slot-out { to { width: 0; } }
 @keyframes load-bar { 0% { transform: scaleX(0); opacity: 1; } 70% { transform: scaleX(0.85); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }
 
 .btn {
@@ -274,11 +270,20 @@ h1, h2, h3 { font-weight: 600; }
 
 .app { display: flex; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
 
-.side-slot { flex: none; width: var(--side-w); height: 100%; overflow: hidden; transition: width var(--t-slow) var(--ease-out); }
-.side { display: flex; flex-direction: column; width: var(--side-w); height: 100%; transform: translate3d(0, 0, 0); transition: transform var(--t-slow) var(--ease-out), visibility 0s; will-change: transform; }
-.app[data-sidebar="closed"] .side-slot { width: 0; }
-.app[data-sidebar="closed"] .side { transform: translate3d(-100%, 0, 0); visibility: hidden; transition: transform var(--t-slow) var(--ease-out), visibility 0s linear var(--t-slow); }
-.side-body { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 4px 8px 8px; }
+[data-moving] > [data-panel] { transition: flex-grow var(--t-slow) var(--ease-out); }
+.pane { display: flex; min-width: 0; min-height: 0; }
+.pane-end { justify-content: flex-end; }
+.gutter { position: relative; flex: none; width: var(--gap); outline: none; transition: width var(--t-slow) var(--ease-out); }
+.gutter::after { content: ""; position: absolute; top: calc(var(--bar-h) + 12px); bottom: 12px; left: 50%; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--line-3); opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.gutter:is([data-separator="hover"], [data-separator="active"], [data-separator="focus"])::after { opacity: 1; }
+.workspace[data-maximized] > .gutter { width: 0; }
+.divider { flex: none; width: 1px; background: var(--line); outline: none; transition: background-color var(--t-fast) var(--ease); }
+.divider:is([data-separator="hover"], [data-separator="active"], [data-separator="focus"]) { background: var(--line-3); }
+.divider[data-separator="disabled"] { background: transparent; }
+.gutter[data-separator="disabled"], .divider[data-separator="disabled"] { cursor: default !important; }
+
+.side { display: flex; flex-direction: column; flex: 1 0 200px; min-height: 0; }
+.side-body { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 4px 0 8px 8px; }
 .side-nav { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
 .side-section { display: flex; align-items: center; justify-content: space-between; height: var(--h-md); margin-top: 16px; padding: 0 2px 0 8px; font-size: var(--fs-sm); color: var(--fg-3); }
 .side-section + .alert { margin-bottom: 6px; }
@@ -305,26 +310,18 @@ h1, h2, h3 { font-weight: 600; }
 .account-name { font-weight: 500; }
 .account-mail { font-size: var(--fs-xs); color: var(--fg-3); }
 
-.main { flex: 1; min-width: 0; padding: 0 var(--gap) var(--gap) 0; transition: padding var(--t-slow) var(--ease-out); }
-.app[data-sidebar="closed"] .main { padding-left: var(--gap); }
-.main[data-moving] > .pane { transition: flex-grow var(--t-slow) var(--ease-out); }
-.pane { position: relative; }
-.col { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; }
-.col-chat { left: 0; width: 100%; min-width: 360px; }
-.col-panel { right: 0; width: 100%; min-width: 340px; }
+.col { display: flex; flex-direction: column; min-height: 0; padding-bottom: var(--gap); }
+.col-chat { flex: 1 0 360px; }
+.col-panel { flex: 1 0 340px; padding-right: var(--gap); }
 .stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .view { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; animation: fade-in var(--t-mid) var(--ease); }
 
-.resizer { position: relative; flex: none; width: 0; transition: width var(--t-slow) var(--ease-out); }
-.main[data-split] .resizer { width: var(--gap); }
-.resizer::after { content: ""; position: absolute; top: calc(var(--bar-h) + 12px); bottom: 12px; left: 50%; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--line-3); opacity: 0; transition: opacity var(--t-fast) var(--ease); }
-.resizer[data-resize-handle-state="hover"]::after, .resizer[data-resize-handle-state="drag"]::after { opacity: 1; }
-
 .chat { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .chat-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overflow-anchor: none; }
 .chat-inner { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: calc(var(--chat-w) + var(--chat-pad) * 2); margin: 0 auto; padding: 28px var(--chat-pad) 120px; }
 .chat-more { display: flex; justify-content: center; }
-.chat-jump { position: absolute; z-index: 5; left: 50%; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; width: var(--h-lg); height: var(--h-lg); margin-left: -16px; border-radius: 50%; background: var(--overlay); border: 1px solid var(--line-2); box-shadow: var(--shadow-pop); color: var(--fg-2); animation: pop-in var(--t-mid) var(--ease-out); transition: color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+.chat-jump { position: absolute; z-index: 5; left: 50%; bottom: 16px; display: inline-flex; align-items: center; justify-content: center; width: var(--h-lg); height: var(--h-lg); margin-left: -16px; border-radius: 50%; background: var(--overlay); border: 1px solid var(--line-2); box-shadow: var(--shadow-pop); color: var(--fg-2); animation: pop-in var(--t-mid) var(--ease-out); transition: color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
 .chat-jump:hover { color: var(--fg); transform: translate3d(0, -1px, 0); }
 .chat-jump svg { width: var(--icon); height: var(--icon); }
 .chat-home { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 20px; padding: 24px; text-align: center; }
@@ -467,7 +464,6 @@ button.disclosure:hover { color: var(--fg-2); }
 .tab > .btn[data-icon] svg { width: 12px; height: 12px; }
 .tab:hover > .btn, .tab[aria-selected="true"] > .btn, .tab > .btn:focus-visible { opacity: 1; }
 
-.panel { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .panel-body { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .panel-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; animation: fade-in var(--t-mid) var(--ease); }
 .launch { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 16px; padding: 24px; color: var(--fg-3); font-size: var(--fs-sm); text-align: center; }
@@ -530,9 +526,7 @@ input.toolbar-value { width: 44px; background: var(--sunken); border: 1px solid 
 .term .xterm { height: 100%; padding: 10px 4px 4px 12px; }
 .term .xterm-viewport { background-color: transparent !important; }
 
-.explorer-slot { position: relative; flex: none; width: var(--explorer-w); overflow: hidden; border-left: 1px solid var(--line); animation: slot-in var(--t-slow) var(--ease-out); }
-.explorer-slot[data-state="closed"] { animation: slot-out var(--t-slow) var(--ease-out) forwards; }
-.explorer { position: absolute; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: var(--explorer-w); }
+.explorer { display: flex; flex-direction: column; flex: 1 0 180px; min-height: 0; }
 .explorer-head { display: flex; align-items: center; justify-content: space-between; flex: none; height: var(--bar-h); padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: var(--fs-sm); font-weight: 500; }
 .explorer-search { flex: none; padding: 8px 8px 4px; }
 .tree { flex: 1; min-height: 0; padding-bottom: 8px; overflow: auto; outline: none; }
