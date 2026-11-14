@@ -13,20 +13,18 @@ const CONNECT_WAIT_MS = 120_000;
 
 function ConnectorCard({
   connector,
-  index,
   pending,
   onConnect,
   onDisconnect,
 }: {
   connector: ConnectorDto;
-  index: number;
   pending: Pending | null;
   onConnect: (id: string) => void;
   onDisconnect: (id: string) => void;
 }) {
   const own = pending?.id === connector.id ? pending.kind : null;
   return (
-    <article className="tile-card" style={{ animationDelay: `${Math.min(index, 12) * 24}ms` }}>
+    <article className="tile-card">
       <div className="tile-card-top">
         <span className="tile-card-icon">
           <ConnectorIcon id={connector.id} />
@@ -188,12 +186,11 @@ export function Integrations() {
             </IconButton>
           </div>
         )}
-        <div className="grid" key={filter}>
-          {visible.map((c, i) => (
+        <div className="grid">
+          {visible.map((c) => (
             <ConnectorCard
               key={c.id}
               connector={c}
-              index={i}
               pending={pending}
               onConnect={connect}
               onDisconnect={disconnect}

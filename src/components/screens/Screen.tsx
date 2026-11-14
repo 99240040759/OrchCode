@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TrafficSpacer, WindowControls } from "../ui/WindowControls";
+import { TrafficSpacer } from "../ui/TrafficSpacer";
 
 export function Screen({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
@@ -7,7 +7,6 @@ export function Screen({ title, subtitle, children }: { title: string; subtitle:
       <div className="bar" data-tauri-drag-region>
         <TrafficSpacer />
         <div className="bar-fill" data-tauri-drag-region />
-        <WindowControls />
       </div>
       <main className="screen-body">
         <img src="/icon.png" alt="" className="screen-logo" />

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
-import { usePanelMotion } from "../ui/motion";
 import { Sidebar } from "./Sidebar";
 import { Workspace } from "./Workspace";
 import { useShell } from "./shellStore";
@@ -12,16 +11,16 @@ export function Frame() {
   const sidebarRef = usePanelRef();
   const width = useRef(SIDEBAR_PX);
   const initiallyOpen = useRef(sidebarOpen).current;
-  const [frameRef, animate] = usePanelMotion();
 
   useEffect(() => {
     const panel = sidebarRef.current;
     if (!panel || sidebarOpen !== panel.isCollapsed()) return;
-    animate(() => (sidebarOpen ? panel.resize(width.current) : panel.collapse()));
-  }, [sidebarOpen, sidebarRef, animate]);
+    if (sidebarOpen) panel.resize(width.current);
+    else panel.collapse();
+  }, [sidebarOpen, sidebarRef]);
 
   return (
-    <Group orientation="horizontal" elementRef={frameRef}>
+    <Group orientation="horizontal">
       <Panel
         id="sidebar"
         panelRef={sidebarRef}

@@ -270,10 +270,10 @@ function CopyAction({ text }: { text: string }) {
   );
 }
 
-function UserMessage({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
+function UserMessage({ message }: { message: ChatMessage }) {
   const text = message.items.find((i): i is TextItem => i.type === "text")?.text ?? "";
   return (
-    <div className="msg-user" data-new={isNew || undefined}>
+    <div className="msg-user">
       {message.attachments.length > 0 && (
         <div className="msg-files">
           {message.attachments.map((a, i) => (
@@ -293,7 +293,7 @@ function UserMessage({ message, isNew }: { message: ChatMessage; isNew: boolean 
   );
 }
 
-function AssistantMessage({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
+function AssistantMessage({ message }: { message: ChatMessage }) {
   const segments = useMemo(() => buildSegments(message.items), [message.items]);
   const fullText = useMemo(
     () =>
@@ -308,7 +308,7 @@ function AssistantMessage({ message, isNew }: { message: ChatMessage; isNew: boo
   const pending = !message.notice && streaming && !runActive && message.items[message.items.length - 1]?.type !== "text";
 
   return (
-    <div className="msg-bot" data-new={isNew || undefined}>
+    <div className="msg-bot">
       {segments.map((segment) =>
         segment.kind === "work" ? (
           <WorkRun key={`work-${segment.id}`} run={segment.run} items={segment.items} />
@@ -333,11 +333,11 @@ function AssistantMessage({ message, isNew }: { message: ChatMessage; isNew: boo
   );
 }
 
-export const Message = memo(function Message({ message, isNew }: { message: ChatMessage; isNew: boolean }) {
+export const Message = memo(function Message({ message }: { message: ChatMessage }) {
   if (message.role === "system") {
     const notice = message.items.find((i): i is CompactionNoticeItem => i.type === "compactionNotice");
     return notice ? <Divider item={notice} /> : null;
   }
-  if (message.role === "user") return <UserMessage message={message} isNew={isNew} />;
-  return <AssistantMessage message={message} isNew={isNew} />;
+  if (message.role === "user") return <UserMessage message={message} />;
+  return <AssistantMessage message={message} />;
 });

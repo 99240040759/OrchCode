@@ -3,7 +3,7 @@ import { useArtifactsStore } from "../../lib/artifacts";
 import { useChatStore } from "../../lib/store";
 import { useWorkspaceStore } from "../../lib/workspace";
 import { IconButton } from "../ui/Button";
-import { TrafficSpacer, WindowControls } from "../ui/WindowControls";
+import { TrafficSpacer } from "../ui/TrafficSpacer";
 import { useShell } from "./shellStore";
 import { UpdateBadge } from "./UpdateBadge";
 
@@ -57,7 +57,6 @@ export function MainBar({ panelShown }: { panelShown: boolean }) {
           <LuPanelRight />
         </IconButton>
       )}
-      {!panelShown && <WindowControls />}
     </div>
   );
 }

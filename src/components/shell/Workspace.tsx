@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { Group, Panel, Separator, useGroupRef, type Layout } from "react-resizable-panels";
 import { listen } from "@tauri-apps/api/event";
 import { useArtifactsStore } from "../../lib/artifacts";
-import { usePanelMotion } from "../ui/motion";
 import { ChatView } from "../chat/ChatView";
 import { ArtifactPanel } from "../panel/ArtifactPanel";
 import { Integrations } from "../screens/Integrations";
@@ -46,7 +45,6 @@ export function Workspace() {
   const groupRef = useGroupRef();
   const panelPct = useRef(DEFAULT_PANEL_PCT);
   const initialLayout = useRef(layoutFor(panelShown, maximized, DEFAULT_PANEL_PCT)).current;
-  const [workspaceRef, animate] = usePanelMotion();
   useFileWrittenEvents();
 
   useEffect(() => {
@@ -54,15 +52,14 @@ export function Workspace() {
     if (!group) return;
     const next = layoutFor(panelShown, maximized, panelPct.current);
     if (sameLayout(group.getLayout(), next)) return;
-    animate(() => group.setLayout(next));
-  }, [panelShown, maximized, groupRef, animate]);
+    group.setLayout(next);
+  }, [panelShown, maximized, groupRef]);
 
   return (
     <Group
       orientation="horizontal"
       className="workspace"
       groupRef={groupRef}
-      elementRef={workspaceRef}
       defaultLayout={initialLayout}
       data-maximized={(panelShown && maximized) || undefined}
       onLayoutChanged={(layout, meta) => {

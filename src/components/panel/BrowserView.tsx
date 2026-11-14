@@ -214,7 +214,6 @@ export function BrowserView({ initialUrl, active }: { initialUrl?: string; activ
             autoComplete="off"
             autoCorrect="off"
           />
-          {loading && <span className="address-load" />}
         </div>
         <IconButton label="Open in system browser" size="sm" onClick={() => void openUrl(normalizeUrl(input))}>
           <LuExternalLink />

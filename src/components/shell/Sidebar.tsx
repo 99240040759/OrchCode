@@ -9,7 +9,7 @@ import { Avatar } from "../common/Avatar";
 import { Button, IconButton } from "../ui/Button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../ui/Menu";
 import { Tooltip } from "../ui/Tooltip";
-import { TrafficSpacer } from "../ui/WindowControls";
+import { TrafficSpacer } from "../ui/TrafficSpacer";
 import { OpenProjectItems, ProjectIcon } from "../projects/ProjectMenu";
 import { useShell } from "./shellStore";
 

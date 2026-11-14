@@ -8,8 +8,6 @@ import { ChromeIcon, FileIcon } from "../common/FileIcon";
 import { Button, IconButton } from "../ui/Button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../ui/Menu";
 import { Tooltip } from "../ui/Tooltip";
-import { WindowControls } from "../ui/WindowControls";
-import { usePanelMotion } from "../ui/motion";
 import { SidebarOpener } from "../shell/Bars";
 import { BrowserView } from "./BrowserView";
 import { Explorer } from "./Explorer";
@@ -48,17 +46,17 @@ function ContentSplit({ children }: { children: ReactNode }) {
   const width = useRef(EXPLORER_PX);
   const initiallyOpen = useRef(open).current;
   const [mounted, setMounted] = useState(open);
-  const [splitRef, animate] = usePanelMotion();
   if (open && !mounted) setMounted(true);
 
   useEffect(() => {
     const panel = explorerRef.current;
     if (!panel || open !== panel.isCollapsed()) return;
-    animate(() => (open ? panel.resize(width.current) : panel.collapse()));
-  }, [open, explorerRef, animate]);
+    if (open) panel.resize(width.current);
+    else panel.collapse();
+  }, [open, explorerRef]);
 
   return (
-    <Group orientation="horizontal" elementRef={splitRef}>
+    <Group orientation="horizontal">
       <Panel id="view" className="pane" style={{ overflow: "hidden" }} minSize={260}>
         {children}
       </Panel>
@@ -241,7 +239,6 @@ export function ArtifactPanel({ visible }: { visible: boolean }) {
         <IconButton label="Close panel" onClick={() => setPanelOpen(false)}>
           <LuX />
         </IconButton>
-        <WindowControls />
       </div>
       <div className="stage">
         <ContentSplit>
