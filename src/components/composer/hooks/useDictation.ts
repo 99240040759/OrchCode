@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import * as api from "../../../lib/api";
-import { extractPromptFromDoc } from "../MentionNodeView";
+import { extractPromptFromDoc } from "../MentionNode";
 
 export function useDictation({
   editorRef,

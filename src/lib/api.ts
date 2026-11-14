@@ -359,18 +359,16 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
-const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
 export function formatRelativeTime(ts?: number): string {
   if (!ts) return "now";
-  const diffSec = Math.round((ts - Date.now()) / 1000);
-  const absSec = Math.abs(diffSec);
-  if (absSec < 45) return "just now";
-  if (absSec < 3600) return rtf.format(Math.round(diffSec / 60), "minute");
-  if (absSec < 86400) return rtf.format(Math.round(diffSec / 3600), "hour");
-  if (absSec < 2592000) return rtf.format(Math.round(diffSec / 86400), "day");
-  if (absSec < 31536000) return rtf.format(Math.round(diffSec / 2592000), "month");
-  return rtf.format(Math.round(diffSec / 31536000), "year");
+  const sec = Math.abs(Math.round((Date.now() - ts) / 1000));
+  if (sec < 45) return "now";
+  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))}m`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h`;
+  if (sec < 604800) return `${Math.round(sec / 86400)}d`;
+  if (sec < 2592000) return `${Math.round(sec / 604800)}w`;
+  if (sec < 31536000) return `${Math.round(sec / 2592000)}mo`;
+  return `${Math.round(sec / 31536000)}y`;
 }
 
 export interface ConnectorDto {

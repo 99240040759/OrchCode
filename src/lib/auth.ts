@@ -18,7 +18,6 @@ interface AuthState {
   user: UserDisplay | null;
   signingIn: boolean;
   error: string | null;
-  justSignedIn: boolean;
   initialized: boolean;
 }
 
@@ -26,7 +25,6 @@ interface AuthActions {
   initialize: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
-  dismissGreeting: () => void;
   dismissError: () => void;
 }
 
@@ -48,7 +46,6 @@ function applySignedOut(s: AuthState, error: string | null) {
   s.status = "signedOut";
   s.user = null;
   s.signingIn = false;
-  s.justSignedIn = false;
   s.error = error;
 }
 
@@ -72,7 +69,6 @@ export const useAuthStore = create(
       user: null,
       signingIn: false,
       error: null,
-      justSignedIn: false,
       initialized: false,
 
       initialize: async () => {
@@ -100,7 +96,6 @@ export const useAuthStore = create(
                 s.status = "signedIn";
                 s.user = user;
                 s.error = null;
-                s.justSignedIn = true;
                 s.signingIn = false;
               });
               void useWorkspaceStore.getState().initialize();
@@ -198,12 +193,6 @@ export const useAuthStore = create(
         }
         clearWorkspaceState();
         set((s) => applySignedOut(s, null));
-      },
-
-      dismissGreeting: () => {
-        set((s) => {
-          s.justSignedIn = false;
-        });
       },
 
       dismissError: () => {

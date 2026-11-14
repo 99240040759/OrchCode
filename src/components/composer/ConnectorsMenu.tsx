@@ -1,56 +1,42 @@
 import { useMemo } from "react";
-import { LuCheck, LuChevronRight, LuPlug } from "react-icons/lu";
+import { LuPlug } from "react-icons/lu";
 import { selectActiveConnectors, useChatStore } from "../../lib/store";
 import { GITHUB_ID, useConnectorsStore } from "../../lib/connectors";
-import { ConnectorIcon } from "../icons/ConnectorIcon";
-import {
-  DropdownMenuItem,
-  DropdownMenuCheckboxItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "../ui/DropdownMenu";
+import { ConnectorIcon } from "../common/ConnectorIcon";
+import { MenuCheckboxItem, MenuItem, MenuSub, MenuSubContent, MenuSubTrigger } from "../ui/Menu";
 
 export function ConnectorsMenu() {
   const connectors = useConnectorsStore((s) => s.connectors);
   const loaded = useConnectorsStore((s) => s.loaded);
   const loadFailed = useConnectorsStore((s) => s.loadFailed);
   const active = useChatStore(selectActiveConnectors);
-  const toggleConnector = useChatStore((s) => s.toggleConnector);
-  const connected = useMemo(() => connectors.filter((connector) => connector.connected && connector.id !== GITHUB_ID), [connectors]);
-
-  let emptyLabel = "No connected apps";
-  if (loadFailed) emptyLabel = "Couldn't load connectors";
-  else if (!loaded) emptyLabel = "Loading…";
+  const toggle = useChatStore((s) => s.toggleConnector);
+  const available = useMemo(() => connectors.filter((c) => c.connected && c.id !== GITHUB_ID), [connectors]);
+  const empty = loadFailed ? "Couldn't load connectors" : loaded ? "No connected apps" : "Loading…";
 
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
+    <MenuSub>
+      <MenuSubTrigger meta={active.length > 0 ? <span className="badge">{active.length}</span> : undefined}>
         <LuPlug />
-        <span className="DropdownMenuSubTrigger-label">Connectors</span>
-        {active.length > 0 && <span className="DropdownMenuSubTrigger-count">{active.length}</span>}
-        <LuChevronRight className="DropdownMenuSubTrigger-chevron" />
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        {connected.length === 0 ? (
-          <DropdownMenuItem disabled>
-            <span>{emptyLabel}</span>
-          </DropdownMenuItem>
+        <span className="row-label">Connectors</span>
+      </MenuSubTrigger>
+      <MenuSubContent>
+        {available.length === 0 ? (
+          <MenuItem disabled>{empty}</MenuItem>
         ) : (
-          connected.map((connector) => (
-            <DropdownMenuCheckboxItem
-              key={connector.id}
-              checked={active.includes(connector.id)}
-              onCheckedChange={() => toggleConnector(connector.id)}
-              onSelect={(event) => event.preventDefault()}
+          available.map((c) => (
+            <MenuCheckboxItem
+              key={c.id}
+              checked={active.includes(c.id)}
+              onCheckedChange={() => toggle(c.id)}
+              onSelect={(e) => e.preventDefault()}
             >
-              <ConnectorIcon id={connector.id} />
-              <span className="ModelItem-name">{connector.name}</span>
-              {active.includes(connector.id) && <LuCheck className="DropdownMenuItem-check" aria-hidden="true" />}
-            </DropdownMenuCheckboxItem>
+              <ConnectorIcon id={c.id} />
+              <span className="row-label">{c.name}</span>
+            </MenuCheckboxItem>
           ))
         )}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+      </MenuSubContent>
+    </MenuSub>
   );
 }

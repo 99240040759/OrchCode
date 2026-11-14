@@ -1,70 +1,53 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ErrorBoundary } from "react-error-boundary";
+import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 import { reportError } from "./lib/api";
 import { useAuthStore } from "./lib/auth";
 import { useChatStore } from "./lib/store";
 import { useUpdaterStore } from "./lib/updater";
 import { useWorkspaceStore } from "./lib/workspace";
-import { ChatPanel } from "./components/ChatPanel";
-import { Greeting, Onboarding } from "./components/screens";
-import { WorkspacePicker } from "./components/WorkspacePicker";
-import { Sidebar } from "./components/Sidebar";
-import { ConnectorsView } from "./components/ConnectorsView";
 import { Button } from "./components/ui/Button";
-import { Titlebar } from "./components/ui/Titlebar";
 import { TooltipProvider } from "./components/ui/Tooltip";
+import { RepoDialog } from "./components/projects/RepoDialog";
+import { Sidebar } from "./components/shell/Sidebar";
+import { Workspace } from "./components/shell/Workspace";
+import { useShell } from "./components/shell/shellStore";
+import { ProjectPicker } from "./components/screens/ProjectPicker";
+import { SignIn } from "./components/screens/SignIn";
 
-export type AppView = "chat" | "connectors";
-
-function AppShell() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [view, setView] = useState<AppView>("chat");
-
+function Shell() {
+  const sidebarOpen = useShell((s) => s.sidebarOpen);
   return (
-    <div className="AppShell">
-      <Titlebar
-        title="Orch"
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((open) => !open)}
-        view={view}
-      />
-      <div className="AppShell-body">
-        <div className="Sidebar-slot" data-open={sidebarOpen}>
-          <Sidebar currentView={view} onViewChange={setView} />
-        </div>
-        <div className="Main">
-          <div className="Main-view" style={{ display: view === "chat" ? "contents" : "none" }}>
-            <ChatPanel visible={view === "chat"} />
-          </div>
-          {view === "connectors" && <ConnectorsView />}
-        </div>
-      </div>
+    <div className="app" data-sidebar={sidebarOpen ? "open" : "closed"}>
+      <Sidebar />
+      <Workspace />
+      <RepoDialog />
     </div>
   );
 }
 
-function AppError({
-  error,
-  resetErrorBoundary,
-}: {
-  error: Error;
-  resetErrorBoundary: () => void;
-}) {
+function Loading() {
+  return (
+    <div className="center" data-tauri-drag-region>
+      <span className="spinner" data-size="lg" role="status" aria-label="Loading" />
+    </div>
+  );
+}
+
+function Fatal({ error, resetErrorBoundary }: FallbackProps) {
+  const err = error instanceof Error ? error : new Error(String(error));
   useEffect(() => {
     void getCurrentWindow().show();
-    if (import.meta.env.PROD) {
-      void reportError(error.stack || error.message).catch(() => {});
-    }
-  }, [error]);
+    if (import.meta.env.PROD) void reportError(err.stack || err.message).catch(() => {});
+  }, [err]);
 
   return (
-    <div className="AuthLoading">
-      <div className="FatalError" role="alert">
-        <h2 className="FatalError-title">Something went wrong</h2>
-        <p className="FatalError-message">{error.message}</p>
-        <Button className="FatalError-retry" onClick={resetErrorBoundary}>
-          Retry
+    <div className="center">
+      <div className="fatal" role="alert">
+        <h2>Something went wrong</h2>
+        <p>{err.message}</p>
+        <Button variant="subtle" onClick={resetErrorBoundary}>
+          Try again
         </Button>
       </div>
     </div>
@@ -72,35 +55,11 @@ function AppError({
 }
 
 function Root() {
-  const authStatus      = useAuthStore((s) => s.status);
-  const user            = useAuthStore((s) => s.user);
-  const justSignedIn    = useAuthStore((s) => s.justSignedIn);
-  const dismissGreeting = useAuthStore((s) => s.dismissGreeting);
-  const initializeAuth  = useAuthStore((s) => s.initialize);
-  const initializeChat  = useChatStore((s) => s.initialize);
-  const startUpdater    = useUpdaterStore((s) => s.start);
-
+  const authStatus = useAuthStore((s) => s.status);
+  const initializeAuth = useAuthStore((s) => s.initialize);
+  const initializeChat = useChatStore((s) => s.initialize);
+  const startUpdater = useUpdaterStore((s) => s.start);
   const workspaceStatus = useWorkspaceStore((s) => s.status);
-
-  useEffect(() => {
-    const blockMiddleClick = (e: MouseEvent) => {
-      if (e.button === 1 && (e.target as HTMLElement).closest("a")) {
-        e.preventDefault();
-      }
-    };
-    const blockDragStart = (e: DragEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === "IMG" || target.tagName === "A") {
-        e.preventDefault();
-      }
-    };
-    document.addEventListener("mousedown", blockMiddleClick);
-    document.addEventListener("dragstart", blockDragStart);
-    return () => {
-      document.removeEventListener("mousedown", blockMiddleClick);
-      document.removeEventListener("dragstart", blockDragStart);
-    };
-  }, []);
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -109,42 +68,24 @@ function Root() {
   }, [initializeAuth]);
 
   useEffect(() => {
-    if (authStatus === "loading") return;
-    if (import.meta.env.PROD) {
-      void startUpdater();
-    }
+    if (authStatus !== "loading" && import.meta.env.PROD) void startUpdater();
   }, [authStatus, startUpdater]);
 
   useEffect(() => {
-    if (workspaceStatus !== "ready") return;
-    void initializeChat();
+    if (workspaceStatus === "ready") void initializeChat();
   }, [workspaceStatus, initializeChat]);
 
-  if (
-    authStatus === "loading" ||
-    (authStatus === "signedIn" && (workspaceStatus === "loading" || workspaceStatus === "idle"))
-  ) {
-    return (
-      <div className="AuthLoading">
-        <div className="Spinner" role="status" aria-label="Loading" />
-      </div>
-    );
-  }
-
-  if (authStatus === "signedOut") return <Onboarding />;
-  if (justSignedIn) return <Greeting user={user} onDone={dismissGreeting} />;
-
-  if (workspaceStatus === "needs_pick" || workspaceStatus === "error") {
-    return <WorkspacePicker />;
-  }
-
-  return <AppShell />;
+  if (authStatus === "loading") return <Loading />;
+  if (authStatus === "signedOut") return <SignIn />;
+  if (workspaceStatus === "loading" || workspaceStatus === "idle") return <Loading />;
+  if (workspaceStatus === "needs_pick" || workspaceStatus === "error") return <ProjectPicker />;
+  return <Shell />;
 }
 
 export default function App() {
   return (
-    <ErrorBoundary FallbackComponent={AppError}>
-      <TooltipProvider delayDuration={400} skipDelayDuration={0} disableHoverableContent>
+    <ErrorBoundary FallbackComponent={Fatal}>
+      <TooltipProvider delayDuration={400} skipDelayDuration={150} disableHoverableContent>
         <Root />
       </TooltipProvider>
     </ErrorBoundary>

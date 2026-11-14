@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -47,7 +46,6 @@ interface WorkspaceState {
 
 interface WorkspaceActions {
   initialize: () => Promise<void>;
-  setMode: (mode: WorkspaceMode) => Promise<void>;
   pickAndOpen: () => Promise<void>;
   openCloudRepo: (repoUrl: string, customName?: string) => Promise<void>;
   switchTo: (id: string) => Promise<void>;
@@ -239,26 +237,6 @@ export const useWorkspaceStore = create(
         }
       },
 
-      setMode: (mode) =>
-        exclusive(async () => {
-          if (get().mode === mode && get().status === "ready") return;
-          const target = get()
-            .all.filter((w) => workspaceMode(w) === mode)
-            .sort((a, b) => b.createdAt - a.createdAt)[0];
-          if (target) {
-            const active = await activateWorkspace(target);
-            await commit(active, upsert(get().all, active));
-            return;
-          }
-          set((s) => {
-            s.mode = mode;
-            s.current = null;
-            s.status = "ready";
-            s.error = null;
-          });
-          clearImageCache();
-        }),
-
       pickAndOpen: () =>
         exclusive(async () => {
           const selected = await open({ directory: true, multiple: false });
@@ -338,9 +316,3 @@ export const useWorkspaceStore = create(
     };
   })
 );
-
-export function useModeWorkspaces(): WorkspaceMeta[] {
-  const all = useWorkspaceStore((s) => s.all);
-  const mode = useWorkspaceStore((s) => s.mode);
-  return useMemo(() => all.filter((w) => workspaceMode(w) === mode), [all, mode]);
-}
