@@ -84,6 +84,7 @@
   -webkit-user-select: none;
   -webkit-user-drag: none;
   overscroll-behavior: none;
+  scrollbar-width: thin;
 }
 
 html, body, #root { height: 100%; }
